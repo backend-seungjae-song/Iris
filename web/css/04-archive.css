@@ -1,0 +1,54 @@
+/* 보관함(접어둔 세션) */
+/* 이 이름을 만드는 곳: devtool/archive.js */
+/* 보관함. 접어둔 세션. 판단에 필요한 것은 무엇을 하던 세션인지라서 마지막 화면을 크게 보여 준다. */
+.ar-search { position:sticky; top:0; z-index:2; display:flex; gap:8px; align-items:center;
+  padding:0 0 11px; background:var(--sidebar); }
+.ar-search input { flex:1 1 auto; min-width:0; padding:6px 10px; border-radius:var(--r-blk); font:inherit; font-size:var(--fs-sm);
+  background:var(--bg); color:var(--fg); border:1px solid var(--border);
+  transition:border-color var(--t-fade) var(--ease); }
+.ar-search input:focus { outline:none; border-color:var(--ai); }
+.ar-count { font-size:var(--fs-2xs); color:var(--muted-fg); flex:none; }
+/* 여러 개를 하나씩 복원하는 동안 화면이 멈춘 것처럼 보이지 않게 진행 상황을 표시한다. */
+.ar-busy { display:flex; align-items:center; gap:9px; margin:0 0 11px; padding:8px 11px; border-radius:var(--r-card);
+  background:color-mix(in srgb,var(--ai) 10%,var(--card)); border:1px solid color-mix(in srgb,var(--ai) 30%,var(--border));
+  font-size:var(--fs-xs); color:var(--fg); }
+.ar-busy-bar { margin-left:auto; flex:0 0 90px; height:4px; border-radius:var(--r-pill); background:var(--border); overflow:hidden; }
+.ar-busy-bar i { display:block; height:100%; background:var(--ai); transition:width var(--t-reg) var(--ease); }
+.ar-list { display:flex; flex-direction:column; gap:8px; }
+/* 묶음: 스페이스가 머리고 그 세션들이 몸이다. 들여쓰기와 왼쪽 선으로 소속을 표시한다. */
+.ar-group { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden; }
+.ar-group > .ar-kids { padding:0 0 4px 0; border-top:1px solid var(--border); }
+.ar-kids .ar-item { border:none; border-radius:0; background:none; margin-left:14px;
+  border-left:2px solid color-mix(in srgb,var(--ai) 28%,transparent); }
+.ar-item { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden; }
+.ar-h { display:flex; align-items:center; gap:8px; padding:8px 12px; }
+.ar-kids .ar-h { padding:7px 12px; }
+.ar-kind { font-size:var(--fs-2xs); font-weight:var(--fw-semi); letter-spacing:var(--ls-caps); padding:0 6px; border-radius:var(--r-ctl);
+  background:var(--sidebar-accent); color:var(--muted-fg); flex:none; }
+.ar-group > .ar-h .ar-kind { background:color-mix(in srgb,var(--ai) 20%,transparent); color:var(--ai); }
+.ar-group > .ar-h { cursor:pointer; }
+.ar-group > .ar-h:hover { background:var(--sidebar-accent); }
+.ar-caret { font-size:8px; color:var(--muted-fg); flex:none; transition:transform var(--t-fade) var(--ease); display:inline-block; }
+.ar-caret.open { transform:rotate(90deg); }
+.ar-name { font-weight:var(--fw-semi); color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ar-kids .ar-name { font-weight:var(--fw-med); }
+.ar-n { font-size:var(--fs-2xs); color:var(--muted-fg); flex:none; }
+.ar-when { margin-left:auto; font-size:var(--fs-2xs); color:var(--muted-fg); flex:none; }
+.ar-meta { padding:0 12px 8px; font-size:var(--fs-2xs); color:var(--muted-fg); word-break:break-all; }
+/* 미리보기는 기본 두 줄. 목록이 길어지는 주된 원인이라 펼칠 때만 전부 보인다. */
+.ar-tail { margin:0 12px 9px; padding:7px 9px; border-radius:var(--r-blk); background:var(--bg); border:1px solid var(--border);
+  font-family:var(--mono); font-size:var(--fs-2xs); line-height:1.55; color:var(--muted-fg);
+  white-space:pre-wrap; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.ar-tail.full { display:block; max-height:340px; overflow:auto; -webkit-line-clamp:unset; }
+.ar-tail mark { background:color-mix(in srgb,var(--ai) 34%,transparent); color:var(--fg); border-radius:var(--r-ctl); }
+.ar-acts { display:flex; gap:7px; padding:0 12px 10px; }
+.ar-acts button { padding:3px 10px; border-radius:var(--r-blk); font:inherit; font-size:var(--fs-xs); cursor:pointer;
+  background:var(--card); color:var(--muted-fg); border:1px solid var(--border);
+  transition:background var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.ar-acts button.primary { background:var(--ai); border-color:var(--ai); color:#fff; }
+.ar-acts button.danger:hover { border-color:var(--destructive); color:var(--destructive); }
+.ar-acts .sp { margin-left:auto; }
+.ar-empty { color:var(--muted-fg); font-size:var(--fs-sm); padding:14px 2px; line-height:var(--lh); }
+
+/* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
+.ar-panel { width:360px; }

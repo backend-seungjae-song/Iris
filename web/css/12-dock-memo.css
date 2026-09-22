@@ -1,0 +1,87 @@
+/* 스페이스 메모와 별도 메모 창 */
+/* 이 이름을 만드는 곳: panel/memo.js · panel/memo-window.js · panel/memo-boot.js */
+/* 스페이스 전용 임시 메모. 파일이 아니라 그 스페이스에 붙는 메모라 서로 섞이지 않는다. */
+/* 높이는 손잡이(--memo-h)만 정한다. 여기에 max-height:34vh 가 있으면 손잡이를 화면 70%까지
+   끌 수 있어(wireMemo) 34vh 를 넘기는 순간 이 칸이 스크롤되고, 편집기 스크롤바와 둘로 보이며
+   끌어도 더 커지지 않는다. 상한을 없애 손잡이 값이 실제 높이가 되게 한다.
+   max-height:none 은 .center-run 규칙(32vh)을 상속하지 않도록 명시하는 것이다.
+   내용이 명시 높이(슬롯+손잡이)뿐이라 넘칠 것이 없으므로 overflow 는 visible 로 둔다.
+   .panel-body 기본값 auto 를 그대로 두면 반올림 1px 에도 스크롤바가 생긴다. */
+.panel.memo .panel-body { max-height:none; overflow:visible; padding:0; }
+/* 메모 원문도 파일 쪽과 같은 편집기(Monaco·markdown)를 쓰므로 ## 같은 표시에 색이 붙는다. */
+.memo-slot { position:relative; height:var(--memo-h, 220px); border-top:1px solid var(--border); background:var(--bg); }
+/* 잡는 곳은 이 도크의 맨 위 모서리, 즉 머리 위쪽 끝이다. 도크는 위로 커지므로 커지는 쪽
+   모서리를 잡아야 끄는 방향과 커지는 방향이 같다. 공간을 차지하는 띠로 두면 그만큼 두꺼워
+   보이므로 머리 위에 겹치는 투명 판으로 둔다. 평소에는 두께가 0 이고, 잡을 수 있다는 표시는
+   hover 때 모서리에 2px 선으로만 낸다. 집는 범위는 5px 라 1px 테두리보다 잡기 쉽다. */
+.panel.memo { position:relative; }
+/* top:-1px 은 이 패널의 1px 테두리까지 덮기 위한 것이다. 절대배치 기준이 패딩 상자라 top:0 이면
+   그 선 바로 아래에서 시작해, 사람이 겨냥하는 모서리 선을 눌러도 잡히지 않는다. */
+.memo-resize { position:absolute; top:-1px; left:0; right:0; height:6px; z-index:5; cursor:ns-resize; }
+.memo-resize:hover { box-shadow:inset 0 2px 0 var(--ring); }
+/* 접혀 있으면 조절할 높이가 없다. panel-body 밖에 있으므로 따로 끈다. */
+.panel.memo.collapsed .memo-resize { display:none; }
+.panel.memo.collapsed .panel-body { display:none; }
+/* 메모도 md 라서 파일 쪽과 같은 원문/미리보기, 같은 처리기(mdToHtml)와 .md-body 스타일을 쓴다 */
+.memo-modes { margin-left:auto; display:flex; flex:none; }
+.memo-modes button { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs);
+  padding:2px 8px; cursor:pointer; border-bottom:2px solid transparent; border-radius:0;
+  transition:color var(--t-fade) var(--ease); }
+.memo-modes button:hover { color:var(--fg); }
+.memo-modes button.on { color:var(--fg); border-bottom-color:var(--ai); }
+.panel.memo.collapsed .memo-modes { display:none; }
+.memo-launches { margin-left:auto; display:flex; align-items:center; gap:5px; }
+.memo-launches button { border:1px solid var(--border); background:var(--card); color:var(--muted-fg); font:inherit;
+  font-size:var(--fs-2xs); padding:2px 8px; border-radius:var(--r-blk); cursor:pointer;
+  transition:color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
+.memo-launches button:hover { color:var(--fg); border-color:var(--ring); }
+.panel.memo.collapsed .memo-launches { display:none; }
+.panel.memo .memo-modes { margin-left:0; }
+#memo-preview { height:var(--memo-h, 220px); overflow:auto; border-top:1px solid var(--border); padding:10px 12px; }
+#panel-memo .panel-head .cdirty { flex:0 0 auto; width:7px; height:7px; border-radius:50%; background:var(--ai); margin-left:6px; }
+
+/* 별도 메모 창. 기존 앱 표면은 그대로 둔 채 이 mode에서만 한 장짜리 편집 표면을 올린다. */
+/* 글꼴은 body 에서 상속한다. `font:<크기> var(--sans)` 축약형은 그 이름이 정의되어 있지
+   않으면 축약형 전체가 무효가 되어 크기까지 적용되지 않는다. 크기만 적는다. */
+.memo-window { display:none; position:fixed; inset:0; padding-top:30px; background:var(--bg); color:var(--fg); }
+.mw-titlebar { position:absolute; inset:0 0 auto; height:30px; display:flex; align-items:center; justify-content:flex-end;
+  padding:0 10px 0 78px; -webkit-app-region:drag; user-select:none; pointer-events:none; }
+.mw-titlebar-space { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--muted-fg); font-size:var(--fs-2xs); }
+.mw-head { flex:none; display:flex; align-items:center; gap:8px; min-height:38px; padding:4px 10px;
+  border-bottom:1px solid var(--border); background:var(--sidebar); }
+.mw-name { min-width:80px; max-width:210px; flex:0 1 210px; border:1px solid transparent; background:transparent;
+  color:var(--fg); border-radius:var(--r-blk); padding:4px 6px; font-size:var(--fs-sm); font-weight:var(--fw-semi); text-overflow:ellipsis; }
+.mw-name:hover, .mw-name:focus { border-color:var(--border); background:var(--bg); outline:none; }
+.mw-name[readonly] { pointer-events:none; }
+.mw-state { width:7px; height:7px; border-radius:50%; background:transparent; flex:none; }
+.mw-state.dirty { background:var(--ai); }
+.mw-grow { flex:1; }
+.mw-action { border:1px solid var(--border); background:var(--card); color:var(--muted-fg); border-radius:var(--r-blk);
+  padding:3px 7px; font-size:var(--fs-2xs); cursor:pointer; white-space:nowrap;
+  transition:color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
+.mw-action:hover { color:var(--fg); border-color:var(--ring); }
+.mw-action.on { color:var(--fg); border-color:var(--primary); background:var(--accent); }
+.mw-action.danger:hover { color:var(--destructive); border-color:var(--destructive); }
+.mw-modes { display:flex; align-self:stretch; }
+.mw-modes button { border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted-fg);
+  padding:4px 7px 2px; font-size:var(--fs-2xs); cursor:pointer; }
+.mw-modes button.on { color:var(--fg); border-bottom-color:var(--ai); }
+.mw-alert { flex:none; display:flex; align-items:center; gap:7px; min-height:28px; padding:4px 10px;
+  border-bottom:1px solid var(--border); background:var(--accent); color:var(--fg); font-size:var(--fs-2xs); }
+.mw-alert[hidden] { display:none; }
+.mw-alert span { flex:1; }
+.mw-body { flex:1; min-height:0; position:relative; }
+.mw-editor { position:absolute; inset:0; }
+.mw-preview { position:absolute; inset:0; overflow:auto; padding:14px 16px; }
+.mw-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted-fg); font-size:var(--fs-xs); }
+@media (max-width:480px) {
+  .mw-head { flex-wrap:wrap; }
+  .mw-name { flex:1 1 130px; max-width:none; }
+  .mw-grow { display:none; }
+  .mw-modes { margin-left:auto; min-height:28px; }
+}
+
+/* 별도 메모 창 모드. 앱 셸이 나머지를 내리고(03-feature-modes.css), 이 창에서 메모가 어떻게
+   배치되는지는 이 CSS 가 정한다. */
+body.memo-mode .memo-window { display:flex; flex-direction:column; }

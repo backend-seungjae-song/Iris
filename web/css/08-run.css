@@ -1,0 +1,17 @@
+/* 실행 패널(npm 스크립트) */
+/* 이 이름을 만드는 곳: devtool/run.js */
+/* ── 실행 패널(npm 스크립트: dev/build/test) ── */
+.run-item { display:flex; align-items:center; gap:6px; padding:3px 8px; border-radius:var(--r-ctl); font-size:var(--fs-xs);
+  transition:background var(--t-fade) var(--ease); }
+.run-item:hover { background:var(--sidebar-accent); }
+.run-item .r-name { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.run-item.running .r-name { color:var(--ai); font-weight:var(--fw-semi); }
+.run-item .r-btn { border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-md); padding:0 4px; border-radius:var(--r-ctl); flex:none; }
+.run-item .r-btn:hover { background:var(--card); color:var(--fg); }
+.run-dot { width:7px; height:7px; border-radius:50%; flex:none; background:transparent; border:1px solid var(--sidebar-border); }
+.run-dot.on { background:var(--success); border-color:var(--success); animation:run-pulse 1.4s ease-in-out infinite; }
+@keyframes run-pulse { 50% { opacity:.35 } }
+.run-url-chip { display:flex; align-items:center; gap:5px; margin:5px 8px; padding:3px 9px; font-size:var(--fs-2xs); border-radius:var(--r-pill); cursor:pointer; background:color-mix(in srgb,var(--ai) 14%,transparent); color:var(--ai); border:1px solid color-mix(in srgb,var(--ai) 35%,transparent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  transition:background var(--t-fade) var(--ease); }
+.run-url-chip:hover { background:color-mix(in srgb,var(--ai) 22%,transparent); }
+.run-out { margin:4px 8px 6px; padding:6px 8px; background:var(--bg); border:1px solid var(--sidebar-border); border-radius:var(--r-blk); font:var(--fs-2xs)/1.5 var(--mono); white-space:pre-wrap; word-break:break-all; max-height:130px; overflow-y:auto; color:var(--muted-fg); }

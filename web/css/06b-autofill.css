@@ -1,0 +1,29 @@
+/* AI 자동완성 로그인 허용 목록 */
+/* 이 이름을 만드는 곳: browser/autofill-allowlist.js */
+.af-note-min { margin-top:8px; font-size:var(--fs-2xs); color:var(--muted-fg); line-height:var(--lh); }
+/* 사이트 한 장 = 카드 하나. 계정이 여럿이어도 사이트 이름은 한 번만 나온다. */
+.af-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px; align-items:start; }
+.af-site { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden;
+  transition:border-color var(--t-fade) var(--ease); }
+.af-site.open { border-color:color-mix(in srgb, var(--primary) 45%, var(--border)); }
+.af-site-h { display:flex; align-items:center; gap:7px; padding:9px 11px; border-bottom:1px solid var(--border); }
+.af-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--border); }
+.af-site.open .af-dot { background:var(--primary); }
+.af-site-n { flex:1; min-width:0; font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.af-site-c { flex:none; font-size:var(--fs-2xs); color:var(--muted-fg); font-variant-numeric:tabular-nums; }
+.af-row { display:flex; align-items:center; gap:10px; padding:7px 11px; }
+.af-row + .af-row { border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.af-u { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted-fg); }
+.af-site.open .af-u { color:var(--fg); }
+/* 켜짐/꺼짐은 글자보다 형태로 구분하는 편이 여러 줄을 훑을 때 읽기 쉽다. */
+.af-sw { flex:none; width:34px; height:19px; padding:0; border:1px solid var(--border); border-radius:var(--r-pill);
+  background:var(--bg); cursor:pointer; position:relative;
+  transition:background var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
+.af-sw i { position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%;
+  background:var(--muted-fg); transition:left var(--t-fade) var(--ease), background var(--t-fade) var(--ease); }
+.af-sw:hover { border-color:var(--ring); }
+.af-sw.on { background:var(--primary); border-color:var(--primary); }
+.af-sw.on i { left:16px; background:var(--primary-fg); }
+
+/* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
+.af-panel { width:360px; }

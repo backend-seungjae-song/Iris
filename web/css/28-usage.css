@@ -1,0 +1,113 @@
+/* 구독 사용량: 하단 상태바의 세그먼트와 그 위로 열리는 로스터 화면 */
+/* 영역(.statusbar)은 앱 셸이 만들고, 그 안의 요소는 전부 이 CSS 가 만든다 */
+
+/* ── 상태바 안 ───────────────────────────────────────────────────────────── */
+
+.usg-trigger { display:inline-flex; align-items:center; gap:12px; height:18px; padding:0 5px;
+  border:0; border-radius:var(--r-ctl); background:transparent; color:inherit; font:inherit; cursor:pointer;
+  transition:background var(--t-fade) var(--ease); }
+.usg-trigger:hover { background:var(--sidebar-accent); }
+.usg-trigger.on { background:var(--sidebar-accent); }
+
+.usg-seg { display:inline-flex; align-items:center; gap:6px; }
+/* 값을 받아 오는 동안 흐려진다. 공간은 유지하고 숫자만 잠시 흐려진다 */
+.usg-seg.loading { opacity:.55; }
+/* 이전 회차의 값을 그대로 표시한 것. 지우는 대신 흐리게 두고, 오래된 이유는 툴팁과 화면이 알린다 */
+.usg-seg.stale { opacity:.6; }
+.usg-row.stale .usg-pct, .usg-row.stale .usg-name { opacity:.72; }
+
+.usg-badge { flex:none; display:inline-flex; align-items:center; justify-content:center;
+  min-width:17px; height:16px; padding:0 3px; border-radius:var(--r-ctl);
+  background:var(--muted); color:var(--muted-fg);
+  font-size:var(--fs-2xs); font-weight:var(--fw-semi); letter-spacing:var(--ls); line-height:1; }
+
+.usg-bar { flex:none; width:44px; height:5px; border-radius:var(--r-pill); background:var(--muted); overflow:hidden; }
+.usg-fill { display:block; height:100%; border-radius:var(--r-pill);
+  background:color-mix(in srgb, var(--muted-fg) 55%, transparent); transition:width var(--t-reg) var(--ease); }
+.usg-fill.warn { background:var(--pal-yellow-pop); }
+.usg-fill.hot { background:var(--destructive); }
+
+.usg-win { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.usg-lbl { color:var(--muted-fg); font-size:var(--fs-2xs); }
+.usg-pct { font-variant-numeric:tabular-nums; font-size:var(--fs-2xs); color:var(--fg); }
+.usg-pct.warn { color:var(--pal-yellow-pop); }
+.usg-pct.hot { color:var(--destructive); }
+
+.usg-refresh { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px;
+  padding:0; border:0; border-radius:var(--r-ctl); background:transparent; color:var(--muted-fg); cursor:pointer;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.usg-refresh:hover { background:var(--sidebar-accent); color:var(--fg); }
+.usg-refresh svg { width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:1.5;
+  stroke-linecap:round; stroke-linejoin:round; }
+.usg-refresh.spin svg { animation:usg-spin 1s linear infinite; }
+@keyframes usg-spin { to { transform:rotate(360deg); } }
+
+.usg-empty { color:var(--muted-fg); }
+
+/* ── 로스터 화면 ─────────────────────────────────────────────────────────── */
+
+/* 상태바 위에 붙는다. 상태바를 가리지 않게 bottom 을 띠 높이보다 조금 위에 둔다 */
+.usg-panel { position:fixed; left:8px; bottom:30px; z-index:220; width:376px;
+  border:1px solid var(--border); border-radius:var(--r-panel); background:var(--card);
+  box-shadow:var(--sh-high); overflow:hidden; }
+.usg-panel[hidden] { display:none; }
+
+.usg-head { display:flex; align-items:center; gap:8px; padding:10px 12px 8px; }
+.usg-title { font-size:var(--fs-sm); font-weight:var(--fw-semi); color:var(--fg); }
+.usg-meta { margin-left:auto; color:var(--muted-fg); font-size:var(--fs-2xs); }
+
+.usg-switch { display:flex; gap:2px; margin:0 12px 8px; padding:2px;
+  border-radius:var(--r-blk); background:var(--bg); }
+.usg-switch-btn { flex:1 1 0; padding:3px 0; border:0; border-radius:var(--r-ctl);
+  background:transparent; color:var(--muted-fg); font:inherit; font-size:var(--fs-2xs); cursor:pointer;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.usg-switch-btn:hover { color:var(--fg); }
+.usg-switch-btn.on { background:var(--sidebar-accent); color:var(--fg); }
+
+.usg-sep { height:1px; background:var(--border); }
+
+.usg-row { display:flex; align-items:flex-start; gap:9px; width:100%; padding:8px 12px;
+  border:0; background:transparent; color:inherit; font:inherit; text-align:left; }
+.usg-row + .usg-row { border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.usg-row .usg-badge { min-width:19px; height:19px; margin-top:1px; border-radius:var(--r-ctl);
+  border:1px solid var(--border); background:var(--muted); font-size:var(--fs-2xs); }
+
+.usg-body { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.usg-line { display:flex; align-items:center; gap:7px; min-width:0; }
+.usg-name { font-size:var(--fs-xs); color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.usg-plan { color:var(--muted-fg); }
+.usg-state { color:var(--muted-fg); font-size:var(--fs-2xs); white-space:nowrap; }
+/* 창 하나가 언제 초기화되는지. 퍼센트 바로 뒤에 붙어 이 값이 언제 0 으로 돌아가는지 알린다. */
+.usg-until { color:var(--muted-fg); font-size:var(--fs-2xs); white-space:nowrap; }
+.usg-tight { margin-left:auto; }
+.usg-wins { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+/* 창마다 초기화 시각을 붙이면 한 줄에 둘이 들어가지 않는다. 무리해서 넣으면 5h 와 wk 가
+   서로 다른 위치에서 잘려 어느 값이 어느 창의 것인지 구분되지 않는다. */
+.usg-wins .usg-win { flex:0 0 100%; }
+.usg-wins .usg-lbl { min-width:22px; }
+.usg-wins .usg-pct { min-width:34px; text-align:right; }
+
+.usg-foot { display:flex; align-items:center; gap:8px; padding:8px 12px; }
+.usg-foot .usg-lbl { font-size:var(--fs-2xs); }
+.usg-foot .usg-switch { flex:1 1 auto; margin:0; }
+
+/* 상세 화면으로 가는 줄. 로스터 아래에 두어 누적 사용량과 계정 상태로 이동한다. */
+.usg-link { display:block; width:100%; padding:8px 12px; border:0; background:transparent;
+  color:var(--muted-fg); font:inherit; font-size:var(--fs-xs); text-align:left; cursor:pointer;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.usg-link:hover { background:var(--sidebar-accent); color:var(--fg); }
+
+/* Codex 초기화권. 잠긴 창을 즉시 푸는 권한이다. 보유 수와 사용 가능 수, 그리고 사용 버튼. */
+.usg-credit { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin-top:2px; }
+.usg-credit-t { font-size:var(--fs-2xs); color:var(--fg); }
+.usg-credit-n { font-size:var(--fs-2xs); color:var(--muted-fg); }
+.usg-credit-b { margin-left:auto; appearance:none; font:inherit; font-size:var(--fs-2xs); cursor:pointer;
+  padding:2px 8px; border-radius:var(--r-ctl); border:1px solid var(--border);
+  background:var(--sidebar-accent); color:var(--fg); white-space:nowrap;
+  transition:border-color var(--t-fade) var(--ease); }
+.usg-credit-b:hover:not(:disabled) { border-color:var(--ring); }
+/* 사용할 수 없거나 전송 중이면 눌리지 않는다. 옆 줄에 그 사실을 표시한다. */
+.usg-credit-b:disabled { opacity:.5; cursor:default; }
+/* 한 번 더 누르면 모달이 뜨는 버튼. 색으로 그 사실을 표시한다. */
+.usg-credit-b.armed { border-color:var(--destructive); color:var(--destructive); }
+.usg-credit-b.ghost { margin-left:0; background:transparent; color:var(--muted-fg); }

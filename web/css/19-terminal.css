@@ -1,0 +1,188 @@
+/* 우측 터미널 */
+/* 이 이름을 만드는 곳: main.js · explorer/context-menu.js · center/file-palette.js */
+/* ── 우측: 터미널 ── */
+/* 채팅 폭은 지정한 값을 유지한다. 여기가 남는 공간을 전부 차지하면 왼쪽 도구를 바꿀 때마다
+   그 폭 차이만큼 채팅 폭이 바뀐다. 남는 공간은 센터가 받는다. */
+.right { flex:0 0 420px; min-width:0; display:flex; flex-direction:column; min-height:0; background:var(--bg); position:relative; }
+.right.collapsed { flex:0 0 0; width:0 !important; overflow:hidden; }
+/* 터미널 접힘 시 복원 버튼. 접기 버튼이 .right 안에 있어 함께 숨겨지므로 별도 진입점을 둔다. */
+#right-restore { display:none; position:fixed; right:0; top:50%; transform:translateY(-50%); z-index:50;
+  background:var(--primary); color:var(--primary-fg); border:none; border-radius:var(--r-card) 0 0 var(--r-card);
+  padding:10px 8px; font-size:var(--fs-xs); font-weight:var(--fw-semi); cursor:pointer; writing-mode:vertical-rl; }
+body.right-collapsed #right-restore { display:block; }
+.h-resizer { flex:none; width:6px; cursor:col-resize; background:transparent; position:relative; z-index:2; }
+.h-resizer::after { content:""; position:absolute; top:0; bottom:0; left:2px; width:1px; background:var(--border); }
+.h-resizer:hover::after { left:1px; width:3px; background:var(--ring); }
+.h-resizer.hidden { display:none; }
+.right-head { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--border); flex:none; padding-top:max(10px,env(safe-area-inset-top)); }
+.t-name { font-weight:var(--fw-semi); font-size:var(--fs-sm); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.t-sub { color:var(--muted-fg); font-size:var(--fs-2xs); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  display:inline-flex; align-items:center; gap:4px; }
+.right-head .collapse-btn { margin-left:auto; border:none; background:none; color:var(--muted-fg); cursor:pointer; padding:3px; border-radius:var(--r-ctl); flex:none; display:inline-flex; align-items:center;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.right-head .collapse-btn:hover { background:var(--accent); color:var(--fg); }
+/* 위 여백을 두지 않는다. 그 2px 만큼 herdr 화면이 아래로 내려가 자기 탭 줄이 덜 가려진다.
+ 줄 높이 격자를 건드리지 않고 올릴 수 있는 유일한 값이다. */
+.terminal { flex:1 1 auto; min-height:0; overflow:hidden; padding:0 2px 0 8px; background:var(--bg); position:relative; }
+/* herdr 사이드바와 탭 줄을 콘솔에서만 가리는 crop: 위치와 크기는 panel/terminal.js 가 셀 단위로
+   정하고 .terminal 이 overflow 로 자른다. 흐름 밖에 두어 이 크기가 .terminal 크기를 바꾸지 않게 한다. */
+#terminal-inner { position:absolute; left:0; top:0; height:100%; width:100%; }
+.sidebar-toggle.on { color:var(--fg); }
+.terminal .xterm { height:100%; padding:0; }
+/* xterm 자기 지면(web/vendor/xterm.css)이 이 칸을 검정으로 칠한다. 글자가 앉는 판은 행 높이의
+   배수라 마지막 줄 아래에 늘 자투리가 남는데(실측 13px), 그 자투리에서 검정이 그대로 드러나
+   창 밑에 검은 띠가 선다. 자투리는 행 높이 나머지라 없앨 수
+   없으므로 색을 터미널과 같게 맞춘다. */
+.terminal .xterm-viewport { overflow-y:auto; background:var(--bg); }
+/* 터미널은 글자가 격자에 앉는 자리다. 몸이 본문에 거는 자간이 여기까지 상속되면 xterm 이
+   재는 셀 폭이 그만큼 줄고, 그 폭으로 계산하는 herdr 사이드바 crop 이 모자라 왼쪽 판이
+   다시 비어져 나온다. 여기서 끊는다. */
+.terminal .xterm, .terminal .xterm * { letter-spacing:normal; }
+/* 터미널 안 막대는 xterm 이 글자 배치 계산에 포함한다. 앱 크롬의 굵기를 그대로 두면
+   그만큼 글자 폭이 줄어들므로, 이 안에서만 기존 굵기를 쓴다. */
+.terminal ::-webkit-scrollbar { width:8px; height:8px; }
+.terminal ::-webkit-scrollbar-thumb { border-width:2px; }
+/* 뜨는 위치는 창 가운데가 아니라 채팅 칸 가운데, 즉 복사한 위치다.
+   1.6초 뒤 사라지므로 놓치면 다시 볼 수 없다. 그래서 배경색에 강조색을 섞어 눈에 띄게 한다. */
+.copied-toast { position:absolute; bottom:36px; left:50%; transform:translate(-50%, 6px);
+  background:color-mix(in srgb, var(--primary) 16%, var(--card));
+  border:1px solid color-mix(in srgb, var(--primary) 55%, var(--border));
+  box-shadow:var(--sh-high), 0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent);
+  color:var(--fg); font-size:var(--fs-sm); font-weight:var(--fw-semi); letter-spacing:.1px;
+  padding:7px 15px; border-radius:var(--r-blk); opacity:0; pointer-events:none; z-index:50;
+  transition:opacity var(--t-fade) var(--ease), transform var(--t-fade) var(--ease); }
+.copied-toast.show { opacity:1; transform:translate(-50%, 0); }
+/* 알림. 토스트는 1.6초 뒤 사라진다. 로그인처럼 반드시 확인해야 하는 것은 사람이 볼 때까지 남아야 하고,
+   그 위치로 이동하는 수단도 함께 있어야 한다. */
+/* 알림은 우측 상단. 창 위쪽 30px는 드래그용 타이틀바라 그 아래에 붙인다. */
+.noticestack { position:fixed; right:16px; top:38px; z-index:220; display:flex; flex-direction:column; gap:6px; max-width:340px; }
+.notice { background:var(--card); color:var(--fg); border:1px solid var(--border);
+  border-radius:var(--r-card); box-shadow:var(--sh-high); padding:9px 11px; font-size:var(--fs-sm);
+  animation:notice-in var(--t-reg) var(--ease); }
+@keyframes notice-in { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:none; } }
+/* 등급은 제목 앞 점으로 가른다. 왼쪽에 굵은 띠를 세우면 알림마다 두께가 달라 줄이 들쭉날쭉해진다. */
+.notice .nt { display:flex; align-items:center; gap:6px; font-weight:var(--fw-semi); margin-bottom:3px; }
+.notice .nt::before { content:""; flex:none; width:5px; height:5px; border-radius:var(--r-pill); background:var(--primary); }
+.notice.warn .nt::before { background:var(--destructive); }
+/* 사람이 직접 해야 진행되는 단계(결제·본인확인)는 다른 알림과 섞이면 안 되므로 점에 테두리를 둘러 구분한다. */
+.notice.call .nt::before { background:var(--warning, #e8a33d);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--warning, #e8a33d) 22%, transparent); }
+.notice .nb { color:var(--muted-fg); line-height:1.5; word-break:break-word; }
+.notice .na { display:flex; justify-content:flex-end; gap:6px; margin-top:9px; }
+.notice button { font:inherit; font-size:var(--fs-xs); padding:4px 10px; border:1px solid var(--border); border-radius:var(--r-ctl);
+  background:var(--bg); color:var(--muted-fg); cursor:pointer;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.notice button:hover { background:var(--accent); color:var(--fg); }
+.notice button.hot { background:var(--primary); color:var(--primary-fg); border-color:var(--primary); font-weight:var(--fw-semi); }
+.notice button.hot:hover { background:var(--primary); color:var(--primary-fg); }
+.ctxmenu { position:fixed; z-index:300; min-width:190px; background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); box-shadow:var(--sh-high); padding:4px; font-size:var(--fs-sm); user-select:none; }
+.ctxmenu .ci { display:flex; align-items:center; gap:8px; padding:5px 10px; border-radius:var(--r-ctl); cursor:pointer; color:var(--fg); white-space:nowrap;
+  transition:background var(--t-fade) var(--ease); }
+.ctxmenu .ci:hover { background:var(--sidebar-accent); }
+.ctxmenu .ci.danger:hover { background:color-mix(in srgb,var(--destructive) 18%,transparent); color:var(--destructive); }
+.ctxmenu .sep { height:1px; margin:4px 6px; background:var(--border); }
+.ctxmenu .ci.disabled { opacity:.4; pointer-events:none; }
+
+/* 입력 창. Electron 렌더러에는 window.prompt 가 없다("prompt() is not supported." 예외). 이름을
+   묻는 곳은 전부 이것을 쓴다. */
+.askwrap { position:fixed; inset:0; z-index:400; display:flex; align-items:center; justify-content:center;
+  background:rgb(var(--pal-shadow) / .45); animation:askwrap-in var(--t-fade) var(--ease); }
+@keyframes askwrap-in { from { opacity:0; } to { opacity:1; } }
+.askbox { width:min(400px,86vw); background:var(--card); border:1px solid var(--border); border-radius:var(--r-card);
+  box-shadow:var(--sh-high); padding:14px 14px 12px; font-size:var(--fs-sm); animation:askbox-in var(--t-reg) var(--ease); }
+@keyframes askbox-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+.askbox .asktitle { color:var(--fg); font-weight:var(--fw-semi); margin-bottom:4px; }
+.askbox .asknote { color:var(--muted-fg); font-size:var(--fs-xs); margin-bottom:10px; word-break:break-all; }
+.askbox input { width:100%; box-sizing:border-box; padding:7px 9px; border-radius:var(--r-ctl); font:inherit;
+  background:var(--bg); color:var(--fg); border:1px solid var(--border);
+  transition:border-color var(--t-fade) var(--ease); }
+.askbox input:focus { outline:none; border-color:var(--primary); }
+.askbox .askrow { display:flex; justify-content:flex-end; gap:6px; margin-top:12px; }
+/* 확인창의 단추는 알림과 같은 크기·모양이다. 같은 동작을 하는 요소는 같게 보여야 한다. */
+.askbox button { padding:4px 12px; border-radius:var(--r-ctl); font:inherit; font-size:var(--fs-xs); cursor:pointer;
+  background:var(--bg); color:var(--muted-fg); border:1px solid var(--border);
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.askbox button:hover { background:var(--accent); color:var(--fg); }
+.askbox button.primary { background:var(--primary); border-color:var(--primary); color:var(--primary-fg);
+  font-weight:var(--fw-semi); }
+
+.changebar { display:none; align-items:center; gap:8px; font-size:var(--fs-xs); background:color-mix(in srgb,var(--ai) 8%,var(--bg)); border-bottom:1px solid color-mix(in srgb,var(--ai) 22%,var(--border)); padding:7px 14px; }
+.changebar.show { display:flex; }
+.changebar button { margin-left:auto; border:1px solid var(--border); background:var(--card); color:var(--muted-fg); border-radius:var(--r-blk); padding:2px 9px; font:inherit; font-size:var(--fs-2xs); cursor:pointer; }
+
+/* 폰: 3열을 단일열로. 우측 터미널이 기본, 좌측 사이드바 토글. */
+@media (max-width:820px) {
+  .sidebar { position:absolute; inset:0 auto 0 0; width:84%; max-width:320px; z-index:10; box-shadow:var(--sh-high); transform:translateX(-100%); transition:transform var(--t-reg) var(--ease); }
+  .sidebar.mobile-open { transform:none; }
+  .sidebar.collapsed { display:flex; }
+  .center { display:none; }
+  .h-resizer { display:none; }
+  .center.mobile-show { display:flex; position:absolute; inset:0; z-index:5; }
+  .right { width:100%; }
+  .right.collapsed { width:100%; }
+}
+/* ⌘⇧P 파일 검색 팔레트 (VSCode Quick Open) */
+.palette-backdrop { position:fixed; inset:0; z-index:1000; background:rgb(var(--pal-shadow) / .4); display:flex; justify-content:center; align-items:flex-start; }
+.palette-backdrop[hidden] { display:none; }
+.palette { margin-top:11vh; width:min(660px,92vw); background:var(--sidebar); border:1px solid var(--border); border-radius:var(--r-panel); box-shadow:var(--sh-high); overflow:hidden; display:flex; flex-direction:column; max-height:66vh; }
+.pal-input { border:none; outline:none; background:var(--bg); color:var(--fg); font:var(--fs-md) var(--mono); padding:12px 14px; border-bottom:1px solid var(--border); }
+.pal-list { list-style:none; margin:0; padding:4px; overflow-y:auto; }
+.pal-item { display:flex; align-items:baseline; gap:8px; padding:5px 10px; border-radius:var(--r-blk); cursor:pointer; white-space:nowrap; overflow:hidden; }
+.pal-item.sel { background:var(--ai); color:var(--primary-fg); }
+.pal-item.sel .pal-dir { color:var(--primary-fg); opacity:.85; }
+.pal-name { font:var(--fs-sm) var(--mono); flex:none; }
+.pal-name b { color:var(--ai); font-weight:var(--fw-bold); }
+.pal-item.sel .pal-name b { color:var(--primary-fg); text-decoration:underline; }
+.pal-dir { font:var(--fs-2xs) var(--mono); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; }
+.pal-empty { padding:10px 12px; color:var(--muted-fg); font-size:var(--fs-xs); }
+.pal-hint { flex:none; padding:6px 12px; border-top:1px solid var(--border); color:var(--muted-fg); font-size:var(--fs-2xs); }
+
+/* ── 채팅 머리에 붙는 herdr 탭줄 ──
+   herdr 은 자기 탭 줄을 터미널 맨 윗줄에 글자로 그린다. 그 줄은 우리 화면 언어와 따로 놀아서
+   왼쪽 판과 같이 가리고(panel/terminal.js 의 세로 crop), 같은 탭을 여기 다시 세운다.
+   목록의 정본은 herdr 방송이고, 여기서 따로 보관하지 않는다. */
+.htabs { position:relative; flex:none; display:flex; align-items:stretch; gap:2px; padding:3px 6px 4px;
+  border-bottom:1px solid var(--border); background:var(--sidebar); min-width:0; }
+.htabs[hidden] { display:none; }
+.htab-scroll { display:flex; align-items:stretch; gap:2px; overflow-x:auto; min-width:0; flex:0 1 auto; }
+/* 기본 막대는 공간을 차지해 줄을 두껍게 만들므로, 없애고 탭 위에 얹는 막대를 따로 그린다. */
+.htab-scroll::-webkit-scrollbar { height:0; }
+/* 밀려 나간 쪽 끝에 그림자를 두어 그 방향에 더 있다는 것을 알린다. */
+.htabs::before, .htabs::after { content:""; position:absolute; top:0; bottom:0; width:14px; pointer-events:none;
+  opacity:0; transition:opacity var(--t-fade) var(--ease); z-index:1; }
+.htabs::before { left:var(--htab-l, 0px); background:linear-gradient(to right, var(--sidebar), transparent); }
+.htabs::after { right:var(--htab-r, 0px); background:linear-gradient(to left, var(--sidebar), transparent); }
+.htabs.more-l::before, .htabs.more-r::after { opacity:1; }
+/* 탭 아래에 겹치는 막대. 공간을 차지하지 않게 띄워 두고 폭·좌우·아래는 panel/herdr-tabs.js 가
+   지정한다. 탭의 아래 2px 을 덮게 배치한다. */
+.htab-bar { position:absolute; bottom:4px; height:2px; border-radius:var(--r-pill); pointer-events:none; z-index:2;
+  background:color-mix(in srgb, var(--muted-fg) 55%, transparent); }
+/* 탭 이름은 자르지 않는다. 이름이 "…" 로 줄어들면 탭을 고를 때 쓸 수 없다.
+   대신 줄이 넘치면 가로로 스크롤한다. 세로 휠도 가로로 받는다(onWheel). */
+.htab { position:relative; flex:0 0 auto; display:flex; align-items:center; gap:5px;
+  padding:3px 5px 3px 8px; border:none; border-radius:var(--r-ctl); background:none; cursor:pointer;
+  font:inherit; font-size:var(--fs-xs); color:var(--muted-fg); white-space:nowrap;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.htab:hover { background:var(--accent); color:var(--fg); }
+.htab.on { background:var(--sidebar-accent); color:var(--fg); font-weight:var(--fw-semi); }
+/* 사람이 지정한 색은 글자에 적용하지 않는다. 읽는 색과 표시하는 색이 섞이면 둘 다 구분되지 않는다.
+   아래에 띠로 둔다. */
+.htab[style*="--htab-tint"]::after { content:""; position:absolute; left:6px; right:6px; bottom:1px; height:2px;
+  border-radius:var(--r-pill); background:var(--htab-tint); }
+.htab-name { white-space:nowrap; }
+.htab-pin { flex:none; display:inline-flex; opacity:.7; }
+.htab-x { flex:none; display:inline-flex; align-items:center; padding:1px; border-radius:var(--r-ctl); opacity:0; }
+.htab:hover .htab-x, .htab.on .htab-x { opacity:.6; }
+.htab-x:hover { opacity:1; background:var(--card); color:var(--fg); }
+.htab-add { flex:none; border:none; background:none; color:var(--muted-fg); cursor:pointer; padding:0 6px;
+  border-radius:var(--r-ctl); display:inline-flex; align-items:center;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.htab-add:hover { background:var(--accent); color:var(--fg); }
+
+/* 메뉴 안의 색점 한 줄. 여섯 가지를 글자 여섯 줄로 늘어놓지 않는다. */
+.ci-sw { display:flex; align-items:center; gap:5px; padding:5px 10px; }
+.ci-sw-l { color:var(--muted-fg); margin-right:auto; }
+.ci-dot { width:14px; height:14px; padding:0; border-radius:var(--r-pill); cursor:pointer;
+  border:1px solid var(--border); background:var(--dot); }
+.ci-dot.on { border-color:var(--fg); box-shadow:0 0 0 1px var(--fg); }
+.ci-dot:hover { border-color:var(--ring); }

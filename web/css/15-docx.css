@@ -1,0 +1,38 @@
+/* docx 페이지 뷰 */
+/* 이 이름을 만드는 곳: sheet/render.js · docx/editor.js · sheet/events.js */
+/* .docx-view-root는 엔진(createDocxEditor)이 자기 페이지 픽셀 크기로 인라인 width/height를
+   직접 지정하는 요소다(virtualized scroll 계산용). 그 요소 자체를 늘리면 엔진 내부 좌표 계산과
+   충돌한다. 그래서 스크롤·가운데 정렬은 엔진이 건드리지 않는 바깥 래퍼(.docx-view-outer)가
+   맡고, .docx-view-root 는 엔진이 주는 크기 그대로 그 안에 배치된다. 그래야 원문이
+   왼쪽에 붙지 않고 가운데에 놓인다. */
+.docx-view-outer { flex:1; min-height:0; overflow:auto; display:flex; justify-content:center; background:#f8f9fa; }
+.docx-view-root { background:#f8f9fa; }
+/* 엔진 CSS(docx-editor-core.css)의 페이지 흰 배경·그림자 규칙은 전부 .docx-paginated-surface
+   조상 아래에서만 걸린다("engine-owned" 클래스지만 번들 안에서 --hf-editing/--viewing 같은
+   수식자만 toggle 될 뿐 이 기본 클래스 자체를 붙이는 코드는 없다. 호스트가 붙여야 하는
+   클래스다). 붙이지 않으면 페이지가 회색 캔버스에 경계 없이 표시된다. 페이지 사이 간격도 엔진 CSS엔 없어 우리가 더한다.
+*/
+.docx-paginated-surface .docx-page { margin-bottom:16px; }
+/* 그림자만으로는 인접 페이지 사이 경계가 흐려 보인다.
+   체크무늬나 격자 배경이 아니라 페이지 테두리 한 줄만 더한다. */
+.docx-paginated-surface .docx-page { outline:1px solid rgba(0,0,0,0.12); outline-offset:-1px; }
+.gs-pop .gs-submenu { color:#1f1f1f; font-size:13px; }
+.gs-pop .gs-submenu > summary { display:flex; justify-content:space-between; gap:20px; padding:6px 16px;
+  cursor:pointer; list-style:none; }
+.gs-pop .gs-submenu > summary::-webkit-details-marker { display:none; }
+.gs-pop .gs-submenu > summary:hover { background:#f1f3f4; }
+.gs-pop .gs-submenu-items { padding-left:10px; border-left:2px solid #e8eaed; }
+.gs-pop .gs-submenu-items > button { display:flex; justify-content:space-between; gap:20px; width:100%;
+  padding:6px 16px; border:0; background:none; color:#1f1f1f; font:inherit; font-size:13px; text-align:left; cursor:pointer; }
+.gs-pop .gs-submenu-items > button:hover { background:#f1f3f4; }
+.gs-bold { font-weight:700; } .gs-ital { font-style:italic; } .gs-strk { text-decoration:line-through; }
+.gs-unde { text-decoration:underline; }
+.gs-fx { flex:none; display:flex; align-items:stretch; height:28px; background:#fff;
+  border-top:1px solid #e1e3e1; border-bottom:1px solid #e1e3e1; }
+.gs-name { flex:none; width:60px; padding:0 8px; font:inherit; font-size:13px; color:#1f1f1f; border:none;
+  outline:none; background:#fff; text-align:center; }
+.gs-fxi { flex:none; padding:0 12px; font-size:13px; color:#5f6368; font-style:italic;
+  display:flex; align-items:center; border-left:1px solid #e1e3e1; border-right:1px solid #e1e3e1; }
+.gs-in { flex:1; min-width:0; padding:0 10px; font:inherit; font-size:12px; color:#1f1f1f; border:none;
+  outline:none; background:#fff; }
+.sv-grid { background:#f8fafd; }

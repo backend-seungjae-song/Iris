@@ -1,0 +1,13 @@
+/* 로그인 저장 기능의 CSS. 여기서 정의한 이름은 이 기능의 파일만 쓴다. */
+/* 이 이름을 만드는 곳: web/js/browser/save-login.js */
+/* Chrome 넘기기 막대와 값이 같지만 합치지 않는다. 합치면 한쪽 막대를 고칠 때 다른 기능이
+   함께 바뀐다. 모양이 같다는 것과 같은 요소라는 것은 다르다. */
+.slog-bar { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:9999;
+  display:flex; align-items:center; gap:14px; max-width:min(620px,92vw); padding:12px 14px;
+  background:#16181d; color:#e8e8ea; border:1px solid #343841; border-radius:var(--r-panel);
+  box-shadow:0 8px 28px rgba(0,0,0,.45); font-size:var(--fs-sm); line-height:1.5; }
+.slog-text { flex:1; min-width:0; }
+.slog-ok { flex:none; padding:7px 12px; border-radius:var(--r-blk); border:1px solid #4a90d9;
+  background:#2b5f96; color:#fff; font-size:var(--fs-sm); cursor:pointer; }
+.slog-no { flex:none; padding:7px 10px; border-radius:var(--r-blk); border:1px solid #3a3e47;
+  background:transparent; color:#a8adb8; font-size:var(--fs-sm); cursor:pointer; }

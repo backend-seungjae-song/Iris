@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Iris</title>
+<link rel="stylesheet" href="/vendor/xterm.css" />
+<link rel="stylesheet" href="/vendor/monaco/vs/editor/editor.main.css" />
+<link rel="stylesheet" href="/vendor/docx-editor-core.css" />
+<link rel="stylesheet" href="/css/00-tokens.css" />
+<link rel="stylesheet" href="/css/01-base.css" />
+<link rel="stylesheet" href="/css/01b-screen-chrome.css" />
+<link rel="stylesheet" href="/css/02-rail.css" />
+<link rel="stylesheet" href="/css/02b-localdev.css" />
+<link rel="stylesheet" href="/css/03-feature-modes.css" />
+<link rel="stylesheet" href="/css/04-archive.css" />
+<link rel="stylesheet" href="/css/05-memo-manage.css" />
+<link rel="stylesheet" href="/css/06-accounts.css" />
+<link rel="stylesheet" href="/css/06b-autofill.css" />
+<link rel="stylesheet" href="/css/07-git.css" />
+<link rel="stylesheet" href="/css/07b-diff.css" />
+<link rel="stylesheet" href="/css/08-run.css" />
+<link rel="stylesheet" href="/css/09-ai-tab.css" />
+<link rel="stylesheet" href="/css/10-sidebar.css" />
+<link rel="stylesheet" href="/css/11-center-tabs.css" />
+<link rel="stylesheet" href="/css/11b-center-dock.css" />
+<link rel="stylesheet" href="/css/11c-file-view.css" />
+<link rel="stylesheet" href="/css/12-dock-memo.css" />
+<link rel="stylesheet" href="/css/13-sheet-view.css" />
+<link rel="stylesheet" href="/css/14-sheet-edit.css" />
+<link rel="stylesheet" href="/css/15-docx.css" />
+<link rel="stylesheet" href="/css/16-sheet-overlay.css" />
+<link rel="stylesheet" href="/css/17-editor-bar.css" />
+<link rel="stylesheet" href="/css/18-browser.css" />
+<link rel="stylesheet" href="/css/19-terminal.css" />
+<link rel="stylesheet" href="/css/20-keymap.css" />
+<link rel="stylesheet" href="/css/21-chat-copy.css" />
+<link rel="stylesheet" href="/css/22-handoff.css" />
+<link rel="stylesheet" href="/css/23-save-login.css" />
+<link rel="stylesheet" href="/css/24-closed-tabs.css" />
+<link rel="stylesheet" href="/css/25-pick-record.css" />
+<link rel="stylesheet" href="/css/26-detach-tab.css" />
+<link rel="stylesheet" href="/css/27-chrome-mirror.css" />
+<link rel="stylesheet" href="/css/28-usage.css" />
+<link rel="stylesheet" href="/css/29-usage-stats.css" />
+<link rel="stylesheet" href="/css/30-memolab.css" />
+<link rel="stylesheet" href="/css/31-crop-tuner.css" />
+<link rel="stylesheet" href="/css/32-sketch.css" />
+</head>
+<body>
+<div class="titlebar"></div>
+<div class="app">
+  <nav class="actrail" id="actrail">
+    <button class="rail-ico active" data-rail="workspace" title="워크스페이스"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></span><span class="rl">작업</span></button>
+    <button class="rail-ico" data-rail="sourcecontrol" title="소스 제어 (Git)"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="17.5" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M17.5 8.5a6 6 0 0 1-6 6H8.5"/></svg></span><span class="rl">깃</span></button>
+    <button class="rail-ico" data-rail="accounts" title="구글 계정"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></span><span class="rl">계정</span></button>
+    <button class="rail-ico" data-rail="localdev" title="로컬 데브 (*.test 라우트·포트)"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01"/><path d="M7 16.5h.01"/></svg></span><span class="rl">서버</span></button>
+    <button class="rail-ico" data-rail="autofill" title="AI 자동완성 로그인 허용 목록"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15.5" cy="8.5" r="4.5"/><path d="M12.3 11.7 4 20"/><path d="M6.5 17.5 9 20"/></svg></span><span class="rl">로그인</span></button>
+    <button class="rail-ico" data-rail="memo" title="스페이스 메모 · 아카이브 (Ctrl/⌘⇧S로 오늘 자 보관)"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6.5"/><path d="m17.5 3.5 3 3L13 14l-3.5.5.5-3.5z"/></svg></span><span class="rl">메모</span></button>
+    <button class="rail-ico" data-rail="archive" title="보관한 세션을 복원합니다"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1"/><path d="M5 8.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V8.5"/><path d="M10 13h4"/></svg></span><span class="rl">보관</span></button>
+    <button class="rail-ico" data-rail="memolab" title="메모랩: 판·조각으로 적고 나누기"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5"/><rect x="13.5" y="3" width="7.5" height="7.5"/><rect x="3" y="13.5" width="7.5" height="7.5"/><path d="M14 17.5h7"/><path d="M17.5 14v7"/></svg></span><span class="rl">메모랩</span></button>
+    <button class="rail-ico" data-rail="usage" title="사용량 상세·이력: 여태 쓴 토큰과 계정 상태"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg></span><span class="rl">사용량</span></button>
+    <button class="rail-ico" data-rail="keymap" title="설정: 단축키, 보안"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9h6v6H9z"/><path d="M9 9V6a3 3 0 1 0-3 3h3z"/><path d="M15 9h3a3 3 0 1 0-3-3v3z"/><path d="M15 15v3a3 3 0 1 0 3-3h-3z"/><path d="M9 15H6a3 3 0 1 0 3 3v-3z"/></svg></span><span class="rl">설정</span></button>
+    <button class="rail-ico rail-toggle" id="rail-sidebar-toggle" title="사이드바 접기/펼치기"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 17-5-5 5-5"/><path d="M19 17V7"/></svg></span></button>
+  </nav>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <span class="brand">Iris</span>
+      <span class="conn" id="conn"></span>
+    </div>
+    <div class="panel explorer" id="panel-explorer">
+      <div class="panel-head" data-panel="panel-explorer">
+        <span class="caret open">▶</span><span class="panel-title">Explorer</span><span class="meta" id="explorer-space">스페이스 선택</span>
+        <span class="panel-actions">
+          <button class="explorer-action" id="file-add" title="새 파일" aria-label="새 파일" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5h6l3 3V14H3z"/><path d="M9 1.5v3h3M7.5 7v4M5.5 9h4"/></svg></button>
+          <button class="explorer-action" id="folder-add" title="새 폴더" aria-label="새 폴더" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4l1.3 1.4h7.7v8.6h-13z"/><path d="M8 7v4M6 9h4"/></svg></button>
+        </span>
+      </div>
+      <div class="panel-body" id="file-tree"><div class="fempty">스페이스를 선택하면 파일 트리가 열립니다.</div></div>
+    </div>
+    <div class="v-resizer" data-resize="file-tree" title="드래그해서 높이 조절"></div>
+    <div class="panel spaces" id="panel-spaces">
+      <div class="panel-head" data-panel="panel-spaces">
+        <span class="caret open">▶</span><span class="panel-title">Spaces</span><span class="hint-key">⌥⇧↑↓</span>
+        <button class="add" id="space-add" title="스페이스 추가" hidden>＋</button>
+      </div>
+      <div class="panel-body" id="space-list"></div>
+    </div>
+    <div class="v-resizer" data-resize="space-list" title="드래그해서 높이 조절"></div>
+    <div class="panel grow" id="panel-agents">
+      <div class="panel-head" data-panel="panel-agents">
+        <span class="caret open">▶</span><span class="panel-title">Agents</span><span class="hint-key">⌥↑↓</span>
+        <span class="meta" id="meta">연결 중…</span>
+      </div>
+      <div class="panel-body" id="agent-list"><div class="list-empty">…</div></div>
+    </div>
+  </aside>
+
+  <aside class="rail-panel km-panel" id="km-panel">
+    <div class="scr-bar"><span class="scr-bar-title">설정</span></div>
+    <div class="km-body" id="km-body"></div>
+  </aside>
+
+  
+  
+  
+  <div class="h-resizer" id="util-resizer" title="드래그해서 이 도구 폭 조절"></div>
+  <section class="center" id="center">
+    <div class="tabbar-row" id="tabbar-row">
+      <div class="tabstrip" id="tabstrip"></div>
+      <button class="ico" id="wv-pick" title="요소 선택 모드(⌘⇧E): 켜면 화면이 고정되고, 클릭한 요소가 상호작용 없이 터미널로 전달됩니다">◎</button>
+    </div>
+    <div class="center-body" id="center-body">
+      <div class="center-empty" id="center-empty">왼쪽에서 파일을 열거나 상단 🌐로 브라우저를 여세요.</div>
+      <div class="fileview" id="fileview" hidden></div>
+      <div class="browserview" id="browserview" hidden>
+        <div class="urlbar">
+          <div class="ub-nav">
+            <button class="ico" id="wv-back" title="뒤로">‹</button>
+            <button class="ico" id="wv-fwd" title="앞으로">›</button>
+            <button class="ico" id="wv-reload" title="새로고침">↻</button>
+          </div>
+          <div class="url-wrap">
+            <input id="url" type="text" placeholder="주소 검색 또는 입력" autocomplete="off" inputmode="url" />
+            <button class="ico in-url" id="wv-bookmark" title="이 페이지 북마크">☆</button>
+            <div id="url-sug" hidden></div>
+          </div>
+          <div class="ub-tools">
+            <button class="chip" id="wv-profile" title="이 탭의 구글 프로필(탭마다 다른 로그인)">👤 기본</button>
+            <button class="chip" id="wv-closed" title="최근 닫은 탭 (⌘⇧T 는 맨 위 하나)">↺ 닫은 탭</button>
+            <button class="ico" id="wv-sketch" title="이 페이지 전체를 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다">✏️</button>
+            <span class="ub-sep"></span>
+            <button class="ico" id="wv-detach" title="이 브라우저를 별도 창으로 분리(분리 창에서 ⌘⇧O로 다시 도킹)">⇱</button>
+            <button class="ico" id="wv-dock" title="이 브라우저를 콘솔에 도킹(⌘⇧O)">⇲</button>
+            <button class="chip" id="wv-size" title="이 탭의 화면 크기(반응형 확인)">🖥 크기</button>
+            <button class="ico mono" id="wv-devtools" title="개발자 도구">&lt;/&gt;</button>
+          </div>
+        </div>
+        <div class="bookmark-line">
+          <button class="bmk-add" id="bmk-add" title="현재 페이지를 북마크에 추가">＋</button>
+          <div class="bookmark-bar" id="bookmark-bar"></div>
+        </div>
+        <div class="wv-wrap" id="wv-stack"><div class="wv-dialog" id="wv-dialog" hidden></div>
+          <div class="wv-find" id="wv-find" hidden>
+            <input id="wv-find-q" type="text" placeholder="페이지에서 찾기" autocomplete="off" spellcheck="false" />
+            <span id="wv-find-count"></span>
+            <button class="ico" id="wv-find-prev" title="이전 (⇧Enter)">‹</button>
+            <button class="ico" id="wv-find-next" title="다음 (Enter)">›</button>
+            <button class="ico" id="wv-find-close" title="닫기 (Esc)">✕</button>
+          </div>
+          <div class="wv-handle" id="wvh-r" title="가로 조절" hidden></div>
+          <div class="wv-handle" id="wvh-b" title="세로 조절" hidden></div>
+          <div class="wv-handle" id="wvh-c" title="가로·세로 조절" hidden></div>
+          <div id="wv-sizebadge" hidden></div>
+        </div>
+        <div class="browser-note" id="browser-note">URL을 입력해 시작. 🌐를 다시 누르면 브라우저 탭이 하나 더 생깁니다. [◎ 요소]로 요소를 클릭하면 설명 없이 그 요소가 현재 터미널로 전달됩니다.</div>
+      </div>
+    </div>
+    <div class="panel memo center-dock collapsed" id="panel-memo">
+      <div class="memo-resize" id="memo-resize" title="드래그해서 높이 조절"></div>
+      <div class="panel-head" data-panel="panel-memo">
+        <span class="caret">▶</span><span class="panel-title">메모</span><span class="meta" id="memo-meta"></span>
+        <span class="memo-launches"><button id="memo-new-window" title="이 스페이스에 독립 메모 창 만들기">새 메모</button><button id="memo-shared-window" title="같은 공유 메모를 보는 새 창 만들기">공유 메모</button></span>
+        <span class="memo-modes"><button data-memo-md="raw" class="on">원문</button><button data-memo-md="preview">미리보기</button></span>
+      </div>
+      <div class="panel-body" id="memo-body">
+        <div class="memo-slot" id="memo-slot"></div>
+        <div class="md-body" id="memo-preview" hidden></div>
+      </div>
+    </div>
+    <div class="panel run center-dock collapsed" id="panel-run">
+      <div class="panel-head" data-panel="panel-run">
+        <span class="caret">▶</span><span class="panel-title">실행</span><span class="meta" id="run-meta"></span>
+      </div>
+      <div class="panel-body" id="run-body"><div class="fempty">스페이스를 선택하면 스크립트가 열립니다.</div></div>
+    </div>
+  </section>
+
+  <div class="h-resizer" id="h-resizer" title="드래그해서 폭 조절"></div>
+  <section class="right" id="right">
+    <div class="changebar" id="changebar"><span id="changebar-text"></span><button id="changebar-clear">지움</button></div>
+    <div class="right-head">
+      <button class="sidebar-toggle" id="browser-open" title="브라우저 열기"></button>
+      <button class="sidebar-toggle" id="shared-browser-open" title="공유 브라우저 창: 스페이스와 무관하게 유지됩니다"></button>
+      <button class="sidebar-toggle" id="crop-toggle" title="herdr 사이드바 가리기(콘솔에서만)"></button>
+      <span class="dot idle" id="t-dot"></span>
+      <span class="t-name" id="t-name">세션 미선택</span>
+      <span class="t-sub" id="t-sub"></span>
+      <button class="collapse-btn" id="right-collapse" title="접기"></button>
+    </div>
+    <div class="htabs" id="htabs" hidden></div>
+    <div class="terminal" id="terminal"><div id="terminal-inner"></div></div>
+    <div class="copied-toast" id="copied-toast">복사됨</div>
+  </section>
+  <button id="right-restore" title="터미널 펼치기">⟨ 터미널</button>
+</div>
+<div class="statusbar" id="statusbar"></div>
+<section class="memo-window" id="memo-window" aria-label="메모 창">
+  <div class="mw-titlebar"><span class="mw-titlebar-space" id="mw-titlebar-space"></span></div>
+  <header class="mw-head">
+    <input class="mw-name" id="mw-name" value="메모" maxlength="80" aria-label="메모 이름" />
+    <span class="mw-state" id="mw-state" title="저장 상태"></span>
+    <span class="mw-grow"></span>
+    <button class="mw-action" id="mw-always-on-top" type="button" aria-pressed="false" title="이 메모 창을 다른 창보다 항상 위에 표시">항상 위</button>
+    <button class="mw-action" id="mw-duplicate" title="같은 메모를 보는 창 하나 더 열기">새 창</button>
+    <button class="mw-action danger" id="mw-delete">삭제</button>
+    <span class="mw-modes"><button data-mw-view="raw" class="on">원문</button><button data-mw-view="preview">미리보기</button></span>
+  </header>
+  <div class="mw-alert" id="mw-alert" hidden><span id="mw-alert-text"></span><button class="mw-action" id="mw-keep-both" hidden>둘 다 보존</button><button class="mw-action" id="mw-use-server" hidden>최신본 적용</button></div>
+  <main class="mw-body"><div class="mw-editor" id="mw-editor"></div><div class="md-body mw-preview" id="mw-preview" hidden></div><div class="mw-empty" id="mw-empty">메모를 불러오는 중…</div></main>
+</section>
+<div class="noticestack" id="noticestack"></div>
+<div class="ctxmenu" id="ctxmenu" hidden></div>
+
+<script src="/vendor/jszip.min.js"></script>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script src="/scrollback-copy.js"></script>
+<script src="/memo-snapshot-state.js"></script>
+<script>
+window.__docxEditorCoreReady = import("/vendor/docx-editor-core.esm.js").then((DocxEditorCore) => {
+  window.__docxEditorCore = DocxEditorCore;
+  return DocxEditorCore;
+});
+</script>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

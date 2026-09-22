@@ -1,0 +1,111 @@
+{
+  "name": "iris",
+  "productName": "Iris",
+  "private": true,
+  "version": "0.1.0",
+  "description": "여러 코딩 에이전트와 브라우저와 문서를 한 화면에서 다루는 개인용 관제 콘솔 (macOS)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backend-seungjae-song/Iris.git"
+  },
+  "homepage": "https://github.com/backend-seungjae-song/Iris",
+  "bugs": "https://github.com/backend-seungjae-song/Iris/issues",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.12.2",
+  "type": "module",
+  "main": "native/electron/main.cjs",
+  "scripts": {
+    "agent:context": "node bin/agent-context.mjs",
+    "agent:run": "node bin/agent-run.mjs",
+    "start": "node server/index.js",
+    "app": "IRIS_PORT=4291 IRIS_STATE_DIR=$HOME/.iris-dev electron native/electron/main.cjs",
+    "build:docx-vendor": "esbuild scripts/docx-editor-core.entry.js --bundle --format=esm --platform=browser --external:module --minify --outfile=web/vendor/docx-editor-core.esm.js --metafile=web/vendor/docx-editor-core.meta.json",
+    "build:vendor": "node scripts/build-vendor.mjs",
+    "dev": "PORT=4291 IRIS_PORT=4291 IRIS_STATE_DIR=$HOME/.iris-dev node --watch server/index.js",
+    "dev:app": "IRIS_PORT=4291 IRIS_STATE_DIR=$HOME/.iris-dev electron native/electron/main.cjs",
+    "dev:seed": "IRIS_STATE_DIR=$HOME/.iris-dev node bin/dev-seed.mjs",
+    "dist": "electron-builder --mac --arm64",
+    "export:public": "node scripts/export-public.mjs",
+    "sync:public": "node scripts/sync-public.mjs",
+    "pull:public": "node scripts/pull-public.mjs",
+    "icons": "electron scripts/make-icons.cjs",
+    "install:app": "bash scripts/install-app.sh",
+    "prepare": "node scripts/build-vendor.mjs",
+    "selftest": "node server/selftest.js",
+    "smoke": "node bin/smoke.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "release-audit": "node scripts/release-audit.mjs"
+  },
+  "build": {
+    "appId": "app.iris.console",
+    "productName": "Iris",
+    "afterPack": "scripts/after-pack.cjs",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "bin/agent-context.mjs",
+      "bin/agent-run.mjs",
+      "native/**/*",
+      "server/**/*",
+      "web/**/*",
+      "package.json",
+      "!node_modules/monaco-editor/**"
+    ],
+    "asarUnpack": [
+      "bin/agent-context.mjs",
+      "bin/agent-run.mjs",
+      "package.json",
+      "server/**",
+      "web/**",
+      "node_modules/**"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "브라우저 탭과 창을 실제 클릭·입력으로 조작하기 위해 시스템 이벤트를 씁니다.",
+        "LSUIElement": false
+      }
+    }
+  },
+  "dependencies": {
+    "@docx-editor.dev/core": "2.4.1",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.1",
+    "monaco-editor": "^0.52.2",
+    "node-pty": "^1.1.0",
+    "puppeteer-core": "25.10.0",
+    "tldts": "7.4.11",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "docx": "^9.7.1",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "0.28.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "unzipper": "^0.12.3"
+    },
+    "patchedDependencies": {
+      "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
+    }
+  }
+}

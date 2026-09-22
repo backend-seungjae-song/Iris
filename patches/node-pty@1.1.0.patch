@@ -1,0 +1,42 @@
+diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
+index 1ec12f796a822c78fba9ad7f6448c3987e325c23..e0ca113576c2234e254f563cc526b2eb11e756ab 100644
+--- a/lib/unixTerminal.js
++++ b/lib/unixTerminal.js
+@@ -28,8 +28,14 @@ var native = utils_1.loadNativeModule('pty');
+ var pty = native.module;
+ var helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++// 이미 asar 밖(unpacked)에서 로드된 경우까지 치환하면 `app.asar.unpacked.unpacked`가 되어
++// 없는 경로가 된다 — electron-builder가 node_modules 전체를 unpack하는 앱에서 그렇다.
++if (helperPath.indexOf('app.asar.unpacked') === -1) {
++    helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
++}
++if (helperPath.indexOf('node_modules.asar.unpacked') === -1) {
++    helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++}
+ var DEFAULT_FILE = 'sh';
+ var DEFAULT_NAME = 'xterm';
+ var DESTROY_SOCKET_TIMEOUT_MS = 200;
+diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
+index 98733dc0cd752b554bd94e45904ca341ad141bba..02581faf8824b47c575c21cd42e6aec9ff164b62 100644
+--- a/src/unixTerminal.ts
++++ b/src/unixTerminal.ts
+@@ -16,8 +16,14 @@ const native = loadNativeModule('pty');
+ const pty: IUnixNative = native.module;
+ let helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++// 이미 asar 밖(unpacked)에서 로드된 경우까지 치환하면 `app.asar.unpacked.unpacked`가 되어
++// 없는 경로가 된다 — electron-builder가 node_modules 전체를 unpack하는 앱에서 그렇다.
++if (helperPath.indexOf('app.asar.unpacked') === -1) {
++  helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
++}
++if (helperPath.indexOf('node_modules.asar.unpacked') === -1) {
++  helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++}
+ 
+ const DEFAULT_FILE = 'sh';
+ const DEFAULT_NAME = 'xterm';

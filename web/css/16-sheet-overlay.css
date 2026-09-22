@@ -1,0 +1,84 @@
+/* 칸 위 입력칸·시트 탭바·선택 테두리·작은 목록 */
+/* 이 이름을 만드는 곳: sheet/render.js · sheet/edit.js · sheet/events.js */
+/* 칸 위에 겹쳐 뜨는 입력칸. #sv-grid(스크롤하지 않는 조상) 기준으로 떠 있어(svOverlayHost
+주석 참조) 고정 헤더(thead th z-index:3)·행머리(.sv-rh z-index:2)를 자기 스크롤 좌표로 가려
+넘지 못하는데, z-index 가 그보다 높으면 스크롤로 그 아래에 들어간 칸이어도 헤더 위에 그려진다.
+그러면 편집칸·선택 박스·채우기 손잡이·그림이 헤더보다 위에 보인다. 헤더·행머리
+보다 낮게 둬 그 뒤로 지나가게 한다. */
+.sv-ed { position:absolute; z-index:1; border:2px solid #3370eb; background:#fff; color:#000;
+  font:inherit; font-size:13.3px; letter-spacing:normal; padding:0 3px; outline:none; resize:none; overflow:hidden;
+  box-shadow:0 2px 8px rgba(0,0,0,.18); box-sizing:border-box; }
+/* 고를 값이 정해진 칸은 늘 화살표가 보인다(구글 시트: 누르지 않아도 모든 드롭다운 칸에 떠 있다). */
+.sv-t td.sv-dv { position:relative; padding-right:16px; }
+.sv-t td.sv-dv::after { content:""; position:absolute; right:5px; top:50%; margin-top:-2px;
+  border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #444746;
+  opacity:.75; pointer-events:none; }
+.sv-t td.sv-dv.sv-sel::after { opacity:1; }
+/* 뷰포트 기준 고정. pane(overflow:hidden) 안에 붙이면 칸이 아래쪽에 있을 때 목록이 그
+   경계에서 잘린다. body 에 붙이고 position:fixed 로 pane 클리핑을 벗어난다. */
+.sv-pick { position:fixed; z-index:30; background:#fff; border:1px solid #dadce0; border-radius:4px;
+  box-shadow:0 2px 10px rgba(0,0,0,.22); padding:4px 0; min-width:120px; overflow:auto; letter-spacing:normal; }
+.sv-pick button { display:block; width:100%; text-align:left; border:none; background:none; font:inherit;
+  font-size:13px; color:#1f1f1f; padding:6px 14px; cursor:pointer; }
+.sv-pick button:hover { background:#f1f3f4; }
+.sv-t td.sv-dirty { box-shadow:inset -4px 4px 0 -2px #f9ab00; }
+.gs-save { margin-left:auto; }
+.gs-save button { border:1px solid #dadce0; background:#fff; color:#1f1f1f; font:inherit; font-size:13px;
+  padding:3px 12px; border-radius:6px; cursor:pointer; margin-right:6px; }
+.gs-save button.hot { background:#0b57d0; border-color:#0b57d0; color:#fff; }
+.gs-note { font-size:13px; color:#5f6368; padding:0 8px; }
+.gs-pop { position:fixed; z-index:999; background:#fff; border:1px solid #dadce0; border-radius:6px;
+  box-shadow:0 4px 14px rgba(0,0,0,.24); padding:5px 0; min-width:150px; max-height:70vh; overflow:auto;
+  font-family:Roboto, RobotoDraft, Helvetica, Arial, sans-serif; letter-spacing:normal; }
+.gs-pop > button { display:flex; justify-content:space-between; gap:20px; width:100%; text-align:left;
+  border:none; background:none; font:inherit; font-size:13px; color:#1f1f1f; padding:6px 16px; cursor:pointer; }
+.gs-pop > button:hover { background:#f1f3f4; }
+.gs-pop > button:disabled, .gs-pop > button[aria-disabled="true"] { color:#bdc1c6; cursor:default;
+  pointer-events:none; background:none; }
+.gs-pop > button:disabled:hover, .gs-pop > button[aria-disabled="true"]:hover { background:none; }
+.gs-pop .gd-menu-sep { height:1px; border:0; background:#dadce0; margin:5px 0; }
+.gs-pop .gs-sc { color:#80868b; font-size:12px; }
+.gs-sw { display:grid; grid-template-columns:repeat(10, 18px); gap:3px; padding:6px 10px; }
+.gs-sw button { width:18px; height:18px; border:1px solid rgba(0,0,0,.16); border-radius:3px; cursor:pointer; padding:0; }
+.gs-pop .gs-none { border-top:1px solid #e3e3e3; margin-top:4px; }
+.gs-pick { max-width:130px; }
+.gs-fs { max-width:66px; }
+/* 아래 시트 탭 바. 높이 39, 활성 탭 #dde3ea */
+.gs .sv-foot { height:39px; background:#fff; border-top:1px solid #e1e3e1; }
+.gs .sv-tabs { background:none; border-top:none; padding:0 6px; align-items:center; }
+.gs .sv-tab { color:#1f2020; font-size:13px; padding:6px 14px; border-radius:0; }
+.gs .sv-tab:hover { background:#f1f3f4; }
+.gs .sv-tab.on { background:#dde3ea; color:#1f2020; font-weight:500; box-shadow:none; }
+.gs .sv-stat, .gs .sv-only { color:#5f6368; font-size:13px; }
+.gs .sv-findbar { background:#fff; border-bottom:1px solid #e1e3e1; }
+.gs .sv-findbar input { background:#fff; border:1px solid #dadce0; color:#1f1f1f; font-size:13px; }
+.gs .sv-findbar button { color:#5f6368; }
+.gs .sv-findbar button:hover { background:#f1f3f4; color:#1f1f1f; }
+.gs .sv-cut { background:#fef7e0; color:#7f5b00; border-bottom:1px solid #e1e3e1; }
+/* 고른 범위를 두르는 선과 연속 채우기 손잡이. 구글 시트에서 측정한 값 그대로다.
+   테두리 2px #3370eb, 손잡이는 사각형이 아니라 지름 8px 원 #0b57d0 에 흰 테두리. */
+.sv-rng { position:absolute; z-index:1; border:2px solid #3370eb; box-sizing:border-box;
+  pointer-events:none; }
+.sv-fill { position:absolute; z-index:1; width:8px; height:8px; background:#0b57d0;
+  border:1px solid #fff; border-radius:50%; box-sizing:content-box; cursor:crosshair; }
+.sv-img { position:absolute; z-index:1; pointer-events:none; object-fit:contain; }
+.sv-t td.sv-pre { background-image:linear-gradient(rgba(51,112,235,.108), rgba(51,112,235,.108)) !important;
+  outline:1px dashed #3370eb; outline-offset:-1px; }
+/* 도구 모음·메뉴가 여는 작은 목록(구글 시트의 ▾). */
+.gs-pop { position:fixed; z-index:999; background:#fff; border:1px solid #dadce0; border-radius:6px;
+  box-shadow:0 4px 14px rgba(0,0,0,.24); padding:5px 0; min-width:150px; max-height:70vh; overflow:auto;
+  font-family:var(--ui-font),-apple-system,sans-serif; letter-spacing:normal; }
+.gs-pop > button { display:flex; justify-content:space-between; gap:20px; width:100%; text-align:left;
+  border:none; background:none; font:inherit; font-size:12.5px; color:#1f1f1f; padding:6px 16px; cursor:pointer; }
+.gs-pop > button:hover { background:#f1f3f4; }
+.gs-pop .gs-sc { color:#80868b; font-size:11.5px; }
+.gs-sw { display:grid; grid-template-columns:repeat(10, 18px); gap:3px; padding:6px 10px; }
+.gs-sw button { width:18px; height:18px; border:1px solid rgba(0,0,0,.16); border-radius:3px; cursor:pointer; padding:0; }
+.gs-pop .gs-none { border-top:1px solid #e3e3e3; margin-top:4px; }
+.gs-pick { max-width:120px; }
+.gs-fs { max-width:62px; }
+/* 저장 버튼은 고칠 것이 있을 때만 나온다. 채운 블록이 아니라 테두리 한 겹이라 바 안에서
+   과하게 강조되지 않으면서 누를 수 있는 요소로 보인다. */
+.fv-bar button.hot { color:var(--fg); background:transparent; border:1px solid var(--ring);
+  margin:5px 0 5px 10px; border-radius:var(--r-blk); padding:2px 12px; font-size:var(--fs-xs); }
+.fv-bar button.hot:hover { background:var(--accent); border-color:var(--ai); color:var(--ai); }

@@ -1,0 +1,25 @@
+name: test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    # macOS 전용 프로젝트다. sqlite3·osascript 같은 시스템 도구에 기대는 검사가 있어
+    # 리눅스 러너에서는 의미 있는 결과가 나오지 않는다.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm 판은 package.json 의 packageManager 가 정한다 — 여기서 따로 적으면 둘이 갈린다.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # install의 prepare가 web/vendor를 의존성에서 만들어 낸다 — 그게 없으면 화면 자원이 없다.
+      - run: pnpm install --frozen-lockfile
+      # smoke가 herdr를 PATH에서 실제로 찾는지 검사한다(server/pty.js의 findHerdrBin) — 없으면 그 검사가 떨어진다.
+      - run: brew install herdr
+      - run: pnpm test

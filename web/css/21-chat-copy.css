@@ -1,0 +1,5 @@
+/* 채팅 복붙 기능의 CSS. 여기서 정의한 이름은 이 기능의 파일만 쓴다. */
+/* 이 이름을 만드는 곳: web/js/chatcopy/drop-path.js */
+/* 파일을 끌어 터미널 위로 왔을 때의 표시. 위치는 앱 셸(.terminal)이 갖고 표시만 여기 있다.
+   기능을 끄면 표시가 없어지고 놓아도 경로가 들어가지 않는다(창이 닫히는 것은 앱 셸이 막는다). */
+.terminal.drag-hot::after { content:"파일 경로 삽입"; position:absolute; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; font-size:var(--fs-sm); color:var(--ai); background:color-mix(in srgb,var(--ai) 10%,transparent); border:2px dashed var(--ai); border-radius:var(--r-blk); pointer-events:none; }

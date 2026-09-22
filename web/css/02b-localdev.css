@@ -1,0 +1,11 @@
+/* 로컬 서버 화면(rail 4번) 속살 */
+/* 이 이름을 만드는 곳: devtool/localdev.js */
+/* 자체 UI 를 만들지 않고 기존 localdev 대시보드를 그대로 임베드한다. */
+.ld-head { display:flex; align-items:center; gap:6px; padding:12px 12px 8px; }
+.ld-title { font-weight:var(--fw-semi); font-size:var(--fs-sm); flex:1; }
+.ld-frame { flex:1 1 auto; min-height:0; border:0; width:100%; background:#0b0d10; }
+.ld-err { padding:14px 12px; font-size:var(--fs-xs); color:var(--muted-fg); line-height:var(--lh); }
+.ld-err code { background:var(--card); border:1px solid var(--border); border-radius:var(--r-ctl); padding:1px 5px; }
+
+/* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
+.ld-panel { width:400px; }

@@ -1,0 +1,18 @@
+Iris
+Copyright 2026 Iris contributors
+
+This product includes software developed as part of the Iris project,
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Portions of this product were ported from other open source projects and
+remain under their original licenses. Attribution and license terms for every
+third-party component are recorded in THIRD-PARTY.md, which is part of this
+distribution.
+
+In particular, the following files were ported from Orca
+(https://github.com/stablyai/orca, MIT License) and modified for this project:
+
+  - native/electron/snapshot-engine.cjs   (from src/main/browser/snapshot-engine.ts)
+  - native/electron/cookie-import.cjs     (from src/main/browser/browser-cookie-import.ts)
+  - native/electron/browser-hardening.cjs (from src/main/browser/browser-session-ua.ts, anti-detection.ts)
+  - native/electron/cdp-control.cjs       (CDP control approach)

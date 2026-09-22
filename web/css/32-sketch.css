@@ -1,0 +1,140 @@
+/* 화면 스케치. 찍은 그림 위에 그리는 오버레이로 그 창 전체를 덮는다. */
+
+.sk-root {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  background: rgba(18, 18, 20, 0.92);
+}
+
+/* 머리 첫 줄. 창의 드래그 스트립과 같은 높이(01-base.css 의 30px)다. 맥 신호등이 이 위에
+   놓이므로 왼쪽은 그만큼 비우고, 여기에는 도구를 두지 않는다. */
+.sk-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px 0 78px;
+  background: var(--panel, #1e1e22);
+  -webkit-app-region: drag;
+}
+.sk-title { font-size: 12px; opacity: 0.7; }
+
+/* 머리 둘째 줄: 도구·굵기·색. */
+.sk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  background: var(--panel, #1e1e22);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line, #333);
+}
+
+.sk-tool {
+  width: 30px;
+  height: 28px;
+  border: 1px solid var(--line, #333);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sk-tool.on { background: var(--accent, #2f6fed); border-color: var(--accent, #2f6fed); color: #fff; }
+
+.sk-widths { display: flex; gap: 4px; margin-left: 6px; }
+.sk-width {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line, #333);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.sk-width i { display: block; border-radius: 50%; background: currentColor; }
+.sk-width.on { border-color: var(--accent, #2f6fed); }
+
+.sk-colors { display: flex; gap: 4px; margin-left: 6px; }
+.sk-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.sk-color.on { border-color: #fff; box-shadow: 0 0 0 1px var(--accent, #2f6fed); }
+
+.sk-act {
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--line, #333);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sk-act + .sk-act { margin-left: 6px; }
+.sk-send { background: var(--accent, #2f6fed); border-color: var(--accent, #2f6fed); color: #fff; }
+.sk-send:disabled { opacity: 0.6; cursor: default; }
+
+/* 찍은 그림은 배율에 따라 상자보다 커질 수 있고, 넘치면 스크롤한다. 가운데 정렬은 margin 으로
+   한다. justify-content: center 로 두면 그림이 상자보다 넓을 때 왼쪽이 잘려 스크롤로도 못 간다. */
+.sk-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex;
+  align-items: flex-start; padding: 16px; }
+
+/* 폭과 높이는 JS 가 배율 하나로 함께 준다. 여기서 폭·높이 상한을 따로 걸면 한쪽만 줄어 찌그러진다. */
+.sk-stage { position: relative; flex: none; margin: 0 auto; }
+.sk-bg { display: block; width: 100%; height: 100%; }
+/* 그리는 면은 배경과 정확히 겹친다. 어긋나면 그린 위치가 실제와 달라진다. */
+.sk-draw { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.sk-stage.sk-text-tool .sk-draw { cursor: text; }
+
+/* 글자 입력칸. 글꼴·크기·위치는 JS 가 캔버스에 그릴 값과 같게 준다. */
+.sk-text {
+  position: absolute;
+  min-width: 1em;
+  padding: 0;
+  margin: 0;
+  white-space: pre;
+  outline: 1px dashed rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
+  background: transparent;
+  cursor: text;
+}
+
+.sk-zoom { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
+.sk-zbtn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line, #333);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sk-zlabel { min-width: 40px; text-align: center; font-size: 12px; opacity: 0.8; font-variant-numeric: tabular-nums; }
+
+/* 도구 안내. 포인터를 올리면 이름이 뜬다. 브라우저 기본 title 은 이 오버레이 위에서 표시되지 않는다. */
+.sk-bar [data-tip] { position: relative; }
+.sk-bar [data-tip]::after {
+  content: attr(data-tip);
+  /* 왼쪽 끝 도구의 안내가 창 밖으로 나가지 않게 손잡이 왼쪽 모서리에 맞춘다. */
+  position: absolute; top: calc(100% + 7px); left: 0;
+  padding: 4px 8px; border: 1px solid var(--line, #333); border-radius: 6px;
+  background: var(--card, #26262b); color: var(--fg, #eee);
+  font-size: 11px; line-height: 1.25; white-space: pre; z-index: 40;
+  opacity: 0; transform: translateY(-3px); pointer-events: none;
+  transition: opacity .12s ease .18s, transform .12s ease .18s;
+}
+.sk-bar [data-tip]:hover::after, .sk-bar [data-tip]:focus-visible::after { opacity: 1; transform: translateY(0); }

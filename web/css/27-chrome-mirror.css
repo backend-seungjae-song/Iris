@@ -1,0 +1,7 @@
+/* claude.ai Chrome 백엔드 미러 표면. 위치 규칙은 같은 wv-wrap의 webview와 맞춘다. */
+.wv-mirror { position:absolute; inset:0; z-index:1; width:100%; height:100%; display:none; border:0;
+  padding:0; background:#fff; object-fit:contain; cursor:default; user-select:none; -webkit-user-drag:none;
+  caret-color:transparent; outline:none; }
+.wv-mirror.active { display:block; }
+.wv-wrap.sized .wv-mirror.active { inset:auto; left:var(--vleft); top:var(--vtop); width:var(--vw); height:var(--vh);
+  box-shadow:0 0 0 1px var(--border), var(--sh-mid); }

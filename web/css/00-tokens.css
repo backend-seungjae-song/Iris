@@ -1,0 +1,78 @@
+/* 글꼴과 색 토큰. 1층 팔레트(raw hex), 2층 시맨틱(역할)*/
+/* 특정 모듈에 속하지 않고 앱 전체가 쓴다*/
+@font-face { font-family:'Geist'; src:url('/fonts/Geist-Variable.woff2') format('woff2'); font-weight:100 900; font-style:normal; font-display:swap; }
+:root {
+  color-scheme: dark; /* 기본은 항상 다크. 메인 baby blue는 쿨한 블루-블랙 다크에 accent로 실현.*/
+  --radius:0.625rem;
+  /* 1층: 팔레트(raw hex, 지정값). 규칙: --pal-<계열>-<변형>. DESIGN.md 참조.
+ 모든 표면/텍스트 역할 토큰(2층)은 이 층만 참조한다. 2층에 raw hex 를 쓰지 않는다.*/
+  --pal-babyblue:#A6DAF4; --pal-skype:#00AFF0; --pal-sierra:#BFDAF7; --pal-blue:#00A6FB;
+  --pal-sky-pop:#85E8F6; --pal-cyan-pop:#74F3E5; --pal-mint-pop:#8BFBC2; --pal-green-pop:#BCFD97;
+  --pal-yellow-pop:#F9F871; --pal-pink:#F4A1A7; --pal-green:#7EC699;
+  --pal-tint-cool:#E6F4F1; --pal-tint-warm:#FCFCD4;
+  --pal-babyblue-rgb:166 218 244; /* babyblue rgb 트리플. 테두리·입력 알파용*/
+  /* soft black/white. raw #000·#fff 를 쓰지 않고 쿨 블루틴트로 둔다.*/
+  /* 다크 잉크 계조(어두움→밝음): bg → sidebar → card → muted → sidebar-accent → accent*/
+  --pal-ink:#0A1620; --pal-ink-1:#0C1D2A; --pal-ink-2:#0F1E2B; --pal-ink-3:#16293A; --pal-ink-4:#173142; --pal-ink-5:#1B3140;
+  --pal-mist:#8FB0C4;  /* 다크 보조 텍스트(쿨 그레이)*/
+  --pal-paper:#EAF3FA; /* 라이트 표면 / 다크 본문 near-white*/
+  /* 라이트 페이퍼 계조 + 라이트 보조 텍스트. opt-in 라이트 테마용*/
+  --pal-paper-hi:#EEF7FD; --pal-paper-2:#E1F0FA; --pal-paper-3:#D6EBF9; --pal-paper-4:#CFE7F8; --pal-paper-5:#E3F1FB;
+  --pal-paper-border:#CBE4F5; --pal-paper-input:#D8ECF8; --pal-mist-2:#3F5E6C;
+  /* 기능 상태색(팔레트 13 밖의 위험/성공 신호. 명명 토큰으로 정의)*/
+  --pal-danger:#FF7A72; --pal-danger-2:#E24A40; --pal-ok-2:#2FA36B; --pal-oncyan-2:#0B5E86;
+  --pal-shadow:6 14 20;
+  /* 2층: 시맨틱(역할). 값은 모두 --pal-* 참조. 기본=다크: 쿨 블루-블랙 + baby blue accent.*/
+  --bg:var(--pal-ink); --fg:var(--pal-paper); --card:var(--pal-ink-2); --muted:var(--pal-ink-3); --muted-fg:var(--pal-mist);
+  --accent:var(--pal-ink-5); --primary:var(--pal-skype); --primary-fg:var(--pal-ink); --on-accent:var(--pal-sky-pop);
+  --border:rgb(var(--pal-babyblue-rgb) / .12); --input:rgb(var(--pal-babyblue-rgb) / .16); --ring:var(--pal-sky-pop);
+  /* docx 엔진 자신도 --ring이라는 이름을 자기 테마 토큰으로 쓴다(raw HSL 성분,
+ hsl(var(--ring)) 합성 전제. web/vendor/docx-editor-core.css .docx-editor 안에서
+ 재정의됨). 같은 이름이라 .docx-editor-shell 안에서는 우리 --ring이 통째로 가려져
+ "outline:2px solid var(--ring)"이 파싱은 되지만 유효하지 않은 값이 되어
+ initial(윤곽선 없음)로 적용된다.
+ 엔진과 안 겹치는 별도 이름으로 별칭을 하나 더 둔다.*/
+  --pick-ring:var(--ring);
+  --sidebar:var(--pal-ink-1); --sidebar-accent:var(--pal-ink-4); --sidebar-border:rgb(var(--pal-babyblue-rgb) / .12);
+  /* 트리 안내선. 테두리보다 흐리다. 구조를 보여주되 내용보다 앞에 서면 안 된다.*/
+  --tree-line:rgb(var(--pal-babyblue-rgb) / .2);
+  --success:var(--pal-mint-pop); --destructive:var(--pal-danger); --ai:var(--pal-pink); /* --destructive=위험(기능), --ai=활동/AI 강조*/
+  --mono:'Berkeley Mono','SF Mono',SFMono-Regular,ui-monospace,Menlo,Consolas,monospace;
+
+  /* 3층: 형태(크기·모서리·굵기·움직임). 색이 아니다.
+ 값의 출처는 참조 제품의 실행 중인 화면에서 직접 읽은 스타일 시트다.
+ 화면은 이 이름만 쓴다. 개별 px 을 화면에 다시 적으면 그 부분만 어긋난다.*/
+
+  /* 글자 크기. 본문이 --fs-sm 이다. 참조 도구의 실제 사용 빈도를 집계해 옮겼다.
+ 12px 가 본문 · 11px 가 보조 · 10px 가 라벨 · 14px 가 읽는 글. 이 앱은 밀도가 높은 도구라
+ 제목 단계가 하나뿐이다. 쓰지 않는 단계를 척도에 남기지 않는다.*/
+  --fs-2xs:10px; --fs-xs:11px; --fs-sm:12px; --fs-md:14px; --fs-lg:16px; --fs-t3:20px;
+
+  /* 굵기. 기본이 500 이다. 흐린 등급을 바탕으로 깔고 굵기로 강조한다.*/
+  --fw:500; --fw-med:500; --fw-semi:600; --fw-bold:700;
+
+  /* 자간. 본문은 살짝 조이고, 큰 글자는 더 조이고, 대문자 라벨만 벌린다.*/
+  --ls:-.00666667em; --ls-title:-.018em; --ls-caps:.04em;
+  --lh:1.6;  /* 읽는 글의 줄 간격*/
+
+  /* 그림·아이콘. 목록 안은 14, 진입점인 rail 은 16.*/
+  --ic:14px; --ic-lg:16px;
+
+  /* 모서리. 네 단계와 알약. 작은 것 6 · 기본 8 · 카드 10 · 판 14.*/
+  --r-ctl:6px; --r-blk:8px; --r-card:10px; --r-panel:14px; --r-pill:9999px;
+  --radius:var(--r-card); /* 이전 이름. 카드 크기와 같은 값을 가리킨다*/
+
+  /* 움직임. 포인터가 올라가 색이 바뀌는 것은 전부 --t-fade 하나다. 위치가 움직이거나 뜨는
+ 것만 --t-reg 를 쓴다. --t-quick 은 구글 재현 화면이 자체 측정값으로 쓴다.*/
+  --t-quick:.1s; --t-reg:.25s; --t-fade:.15s;
+  --ease:cubic-bezier(.25,.46,.45,.94);
+  --ease-inout:cubic-bezier(.645,.045,.355,1);
+
+  /* 뜨는 요소의 그림자. 세 단계. 흐름 안에 있는 요소에는 쓰지 않는다.*/
+  --sh-low:0 1px 2px rgb(var(--pal-shadow) / .18);
+  --sh-mid:0 4px 16px rgb(var(--pal-shadow) / .32);
+  --sh-high:0 12px 32px rgb(var(--pal-shadow) / .46);
+
+  /* 포커스된 요소를 두르는 선. 두께 하나로 통일한다.*/
+  --ring-w:1px;
+}

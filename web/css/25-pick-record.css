@@ -1,0 +1,21 @@
+/* 요소 지목·녹화 기능의 CSS. */
+/* 이 이름을 만드는 곳: web/js/browser/pick.js · pick-host.js · record.js */
+/* 18-browser.css 안에 두면 지목 표시를 고치는 사람과 브라우저 스타일을 고치는 사람이
+   같은 파일을 수정하게 된다. */
+/* 녹화 중임을 창 전체 테두리로 계속 알린다. 모르고 켜 두는 것을 막는다. */
+body.recording::after { content:""; position:fixed; inset:0; border:2px solid #E5484D; pointer-events:none; z-index:400; }
+/* 픽 모드에서는 탭 자체도 지목 대상이므로, 요소 하이라이트와 같은 색으로 고를 수 있음을 알린다. */
+.picking-tabs .ctab, .picking-tabs .tgroup, .picking-tabs .bmk { cursor:crosshair; }
+.picking-tabs .ctab.pick-hover, .picking-tabs .tgroup.pick-hover, .picking-tabs .bmk.pick-hover { outline:2px solid var(--ring); outline-offset:-2px; background:var(--card); }
+/* AGENTS 목록의 세션 줄도 지목 대상이다. 사람이 특정 세션을 지정할 수 있는 유일한 수단이고,
+   지정할 수 없으면 같은 스페이스 전체에 물어 확인해야 한다. */
+.picking-tabs .srow { cursor:crosshair; }
+.picking-tabs .srow.pick-hover { outline:2px solid var(--ring); outline-offset:-2px; background:var(--card); }
+/* 문서 탭도 픽 모드 대상이고, 그 표시는 해당 CSS 가 갖는다(14-sheet-edit.css). */
+/* Sheet도 문서 탭과 같은 이유로 픽 모드 표시가 필요하다(요소 선택이
+   Sheet에서 docx처럼 동작하지 않았다, pickSheetAt 참조). */
+.picking-tabs .fileview, .picking-tabs .fileview * { cursor:crosshair !important; }
+/* 호버 미리보기. 클릭 전에 무엇이 선택될지 보여 준다. 색은 탭·그룹·북마크 픽
+   하이라이트와 같은 --ring 을 쓴다(고정 파랑이 아니라 기존 토큰). */
+.picking-tabs .fileview .pick-hover { outline:2px solid var(--pick-ring); outline-offset:-1px; background:color-mix(in srgb, var(--pick-ring) 14%, transparent); }
+#wv-pick.on { background:var(--ai); color:var(--primary-fg); }

@@ -1,0 +1,33 @@
+/* AI 가 쥔 탭 표시와 창 상단 드래그 스트립 */
+/* 이 이름을 만드는 곳: browser/tabs.js */
+/* ── AI가 쥔 탭: 탭 칩째로 감싸 빛낸다 ──
+   어느 탭이 조작 대상인지는 다른 탭·다른 스페이스에 있을 때도 보여야 한다. 그래서 칩 글로우는
+   조작 대상인 동안 계속 켜 둔다. 명령 순간에만 켜면 명령 사이마다 꺼져 깜빡인다.
+   명령이 실제로 흐르는 동안(.ai-busy)만 한 단계 세게. */
+.ctab.ai-held { border-color: color-mix(in srgb, var(--ai) 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ai) 55%, transparent),
+              0 0 6px color-mix(in srgb, var(--ai) 28%, transparent); }
+.ctab.ai-held .cname { color: var(--ai); }
+.ai-busy .ctab.ai-held { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ai) 90%, transparent),
+              0 0 12px color-mix(in srgb, var(--ai) 45%, transparent);
+  animation: ai-glow-chip 1.6s ease-in-out infinite; }
+@keyframes ai-glow-chip { 50% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ai) 60%, transparent),
+              0 0 6px color-mix(in srgb, var(--ai) 24%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .ai-busy .ctab.ai-held { animation:none } }
+
+/* ── 그 탭을 열어 보고 있을 때: 화면 이너 프레임도 함께 ──
+   (전체 창 외곽이 아니라 .wv-wrap 프레임에만 적용한다. 메인 콘솔 창 크롬은 빛나지 않는다) */
+.ai-controlling .wv-wrap {
+  border-color: color-mix(in srgb, var(--ai) 80%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ai) 85%, transparent),
+              inset 0 0 18px 2px color-mix(in srgb, var(--ai) 40%, transparent),
+              0 0 10px color-mix(in srgb, var(--ai) 30%, transparent);
+  animation: ai-glow 2.6s ease-in-out infinite; }
+@keyframes ai-glow { 0%,100% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ai) 55%, transparent), inset 0 0 12px 1px color-mix(in srgb, var(--ai) 22%, transparent), 0 0 6px color-mix(in srgb, var(--ai) 18%, transparent); }
+  50% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ai) 95%, transparent), inset 0 0 22px 3px color-mix(in srgb, var(--ai) 50%, transparent), 0 0 14px color-mix(in srgb, var(--ai) 38%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .ai-controlling .wv-wrap { animation:none } }
+button { font:inherit; letter-spacing:inherit; }
+/* 창 상단 드래그 스트립. 신호등 버튼이 여기 있고, 이 영역으로 창을 이동한다 */
+.titlebar { position:fixed; top:0; left:0; right:0; height:30px; z-index:200; -webkit-app-region:drag; background:var(--sidebar); border-bottom:1px solid var(--sidebar-border); }
+@media (prefers-color-scheme: dark) { .titlebar { background:var(--sidebar); } }
+

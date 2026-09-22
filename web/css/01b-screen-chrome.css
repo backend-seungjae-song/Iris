@@ -1,0 +1,52 @@
+/* 넓게 배치되는 도구 화면의 공용 셸. 앱 셸이 소유한다 */
+/* 이 이름을 쓰는 곳: browser/autofill-allowlist.js · panel/memo-admin.js */
+/* 머리(몇 개인가) · 단락(무엇의 묶음인가) · 칩(거르기) · 빈 영역. 세 화면이 같은 모양을 쓰는데
+   이름이 한 기능 것이면 그 기능을 수정하는 사람이 다른 화면까지 바꾸게 된다. 모양은 그대로
+   두고 이름만 중립으로 둔다.
+   아직 합치지 않은 것: 계정 화면(06-accounts.css)이 같은 모양을 acct- 로 따로 갖고 있다.
+   선언이 조금 달라서(단락 폭 88ch 대 640px) 합치면 화면이 바뀐다. */
+.scr-head { position:sticky; top:0; background:var(--sidebar); padding:10px 0 12px; margin-bottom:12px;
+  border-bottom:1px solid var(--border); z-index:2; }
+.scr-sum { font-size:var(--fs-sm); }
+.scr-sum b { font-size:var(--fs-t3); font-weight:var(--fw-semi); letter-spacing:var(--ls-title); margin-right:2px; }
+.scr-sum span { color:var(--muted-fg); }
+.scr-why { color:var(--muted-fg); font-size:var(--fs-2xs); line-height:var(--lh); margin-top:4px; max-width:640px; }
+.scr-why code { background:var(--card); border:1px solid var(--border); border-radius:var(--r-ctl); padding:0 4px; }
+.scr-warn { margin-top:8px; padding:8px 10px; border:1px solid var(--border); border-left:2px solid var(--destructive);
+  border-radius:var(--r-blk); font-size:var(--fs-xs); color:var(--muted-fg); display:flex; align-items:center; gap:10px; flex-wrap:wrap; max-width:720px; }
+/* 두 그룹으로 나눈다. 지금 수정할 것과 나중에 찾아볼 것은 쓰임이 다르다. */
+.scr-sec { margin-bottom:24px; }
+.scr-sec-h { display:flex; align-items:center; gap:8px; font-size:var(--fs-xs); font-weight:var(--fw-semi); color:var(--fg);
+  margin:0 0 8px; flex-wrap:wrap; }
+.scr-sec-c { font-size:var(--fs-2xs); font-weight:var(--fw-med); color:var(--muted-fg); background:var(--accent);
+  border-radius:var(--r-pill); padding:1px 7px; font-variant-numeric:tabular-nums; }
+.scr-tools { display:flex; align-items:center; gap:6px; margin-left:auto; flex-wrap:wrap; }
+.scr-search { flex:1 1 200px; max-width:280px; min-width:150px; font:inherit; font-size:var(--fs-sm); padding:5px 8px;
+  background:var(--input); color:var(--fg); border:1px solid var(--border); border-radius:var(--r-blk); outline:none;
+  transition:border-color var(--t-fade) var(--ease); }
+.scr-search:focus { border-color:var(--ring); }
+.scr-chip { font:inherit; font-size:var(--fs-xs); padding:5px 10px; border:1px solid var(--border); border-radius:var(--r-blk);
+  background:var(--bg); color:var(--muted-fg); cursor:pointer;
+  transition:background var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.scr-chip:hover { color:var(--fg); border-color:var(--ring); }
+.scr-chip.on { background:var(--accent); color:var(--fg); border-color:var(--ring); font-weight:var(--fw-med); }
+.scr-chip.danger { margin-left:auto; }
+.scr-chip.danger:hover { color:var(--destructive); border-color:var(--destructive); }
+.scr-empty { color:var(--muted-fg); padding:24px 2px; line-height:var(--lh); }
+
+/* 좁은 패널의 머리. 제목 한 줄과 오른쪽 끝 아이콘 버튼. 일곱 패널이 같은 모양을 쓰지만
+   이름이 계정·깃 전용이었다(.acct-head · .sc-ico). 깃 머리는 브랜치 칸이 더 붙어 자기 이름을
+   유지하고, 나머지는 이 이름을 쓴다. */
+.scr-bar { display:flex; align-items:center; gap:6px; padding:12px 12px 8px; }
+.scr-bar-title { font-weight:var(--fw-semi); font-size:var(--fs-sm); flex:1; }
+/* 머리 아래 스크롤 몸통. 세 패널이 함께 쓰지만 이름이 자동완성 전용이었고 규칙도
+   메모 화면에 있었다. */
+.scr-body { flex:1 1 auto; overflow-y:auto; padding:0 18px 20px; min-height:0; font-size:var(--fs-sm); }
+.scr-ico { border-radius:var(--r-ctl); transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.scr-ico:hover { background:var(--sidebar-accent); color:var(--fg); }
+
+/* 회전 표시. 보관함이 정의했지만 브라우저 인수인계 막대가 그 애니메이션 이름을 인라인으로
+   쓰고 있어, 보관함 쪽에서 이름을 지우면 다른 화면이 멈춘다. 이름을 중립으로 둔다. */
+.scr-spin { flex:none; width:11px; height:11px; border-radius:50%; border:2px solid color-mix(in srgb,var(--ai) 35%,transparent);
+  border-top-color:var(--ai); animation:scr-spin .7s linear infinite; }
+@keyframes scr-spin { to { transform:rotate(360deg); } }

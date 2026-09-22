@@ -1,0 +1,18 @@
+/* Chrome 넘기기 기능의 CSS. 여기서 정의한 이름은 이 기능의 파일만 쓴다. */
+/* 이 이름을 만드는 곳: web/js/browser/handoff.js */
+/* 이 값들을 JS 안의 style.cssText 로 두면 스타일 하나를 고치려고 넘기기 흐름이 든 파일을
+   열어야 하고, 어느 기능의 스타일인지도 검사가 확인할 수 없다. */
+/* 색은 이 막대가 직접 갖는다. 외부 페이지 위에 뜨는 요소라 앱 테마를 따르지 않는다.
+   모양(모서리·글자 크기·움직임)만 앱과 같은 이름을 쓴다. */
+.hoff-bar { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:9999;
+  display:flex; align-items:center; gap:14px; max-width:min(620px,92vw); padding:12px 14px;
+  background:#16181d; color:#e8e8ea; border:1px solid #343841; border-radius:var(--r-panel);
+  box-shadow:0 8px 28px rgba(0,0,0,.45); font-size:var(--fs-sm); line-height:1.5; }
+/* 회전 표시. 회전은 앱 셸의 scr-spin 을 그대로 쓴다. 같은 애니메이션을 두 번 정의하지 않는다. */
+.hoff-spin { flex:none; width:14px; height:14px; border-radius:50%; border:2px solid #3a3e47;
+  border-top-color:#7fb3ea; animation:scr-spin .8s linear infinite; }
+.hoff-text { flex:1; min-width:0; }
+.hoff-go { flex:none; padding:7px 12px; border-radius:var(--r-blk); border:1px solid #4a90d9;
+  background:#2b5f96; color:#fff; font-size:var(--fs-sm); cursor:pointer; }
+.hoff-close { flex:none; padding:7px 10px; border-radius:var(--r-blk); border:1px solid #3a3e47;
+  background:transparent; color:#a8adb8; font-size:var(--fs-sm); cursor:pointer; }

@@ -1,0 +1,18 @@
+/* 최근 닫은 탭 기능의 CSS. 여기서 정의한 이름은 이 기능의 파일만 쓴다. */
+/* 이 이름을 만드는 곳: web/js/browser/closed-tabs-menu.js */
+/* 예전에는 18-browser.css 에 있었다. 브라우저 지면 안에 있으면 이 목록의 모양을 손볼 때
+   브라우저 지면을 여는 사람과 같은 자리에서 만난다. */
+/* 최근 닫은 탭 목록. 브라우저에서 쓰는 규칙이므로 설정 화면에서 여기로 옮겼다. */
+.wvc-menu { position:fixed; z-index:9999; min-width:280px; max-width:320px; max-height:340px; overflow:auto;
+  background:var(--card); border:1px solid var(--border); border-radius:var(--r-panel); padding:5px;
+  box-shadow:var(--sh-high); }
+.wvc-h { display:flex; align-items:center; gap:8px; font-size:var(--fs-2xs); font-weight:var(--fw-semi); letter-spacing:var(--ls-caps);
+  text-transform:uppercase; color:var(--muted-fg); padding:5px 8px 6px; }
+.wvc-key { margin-left:auto; font-family:var(--mono); font-size:var(--fs-2xs); text-transform:none; letter-spacing:0; }
+.wvc-row { display:flex; align-items:center; gap:8px; width:100%; text-align:left; font:inherit; font-size:var(--fs-sm);
+  padding:6px 8px; border:none; border-radius:var(--r-blk); background:none; color:var(--fg); cursor:pointer;
+  transition:background var(--t-fade) var(--ease); }
+.wvc-row:hover { background:var(--accent); }
+.wvc-kind { flex:none; font-size:var(--fs-2xs); padding:1.5px 6px; border-radius:var(--r-ctl); background:var(--muted); color:var(--muted-fg); }
+.wvc-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wvc-empty { font-size:var(--fs-xs); color:var(--muted-fg); padding:12px 10px; }

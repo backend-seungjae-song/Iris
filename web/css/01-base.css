@@ -1,0 +1,62 @@
+/* 라이트 테마 opt-in, 스크롤바, 리셋, .app 뼈대 */
+/* 특정 모듈에 속하지 않고 앱 전체가 쓴다 */
+/* 라이트(Light Baby Blue) 팔레트는 opt-in(data-theme="light")으로 보존한다. 값은 모두 --pal-* 참조.
+   기본은 다크다. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg:var(--pal-paper-hi); --fg:var(--pal-ink-2); --card:var(--pal-paper); --muted:var(--pal-paper-2); --muted-fg:var(--pal-mist-2);
+  --accent:var(--pal-paper-3); --primary:var(--pal-skype); --primary-fg:var(--pal-ink); --on-accent:var(--pal-oncyan-2);
+  --border:var(--pal-paper-border); --input:var(--pal-paper-input); --ring:var(--pal-blue);
+  --pick-ring:var(--ring);
+  --sidebar:var(--pal-paper-5); --sidebar-accent:var(--pal-paper-4); --sidebar-border:var(--pal-sierra);
+  --success:var(--pal-ok-2); --destructive:var(--pal-danger-2); --ai:var(--pal-pink);
+}
+* { box-sizing:border-box; }
+/* 스크롤바. macOS 기본은 얇고 스크롤을 멈추면 사라져서 남은 양이 보이지 않는다.
+   항상 표시되고 눈에 띄되 내용을 밀어내지 않는 굵기로 통일한다(앱 전체 한 규칙).
+   표준 속성(scrollbar-width/color)은 쓰지 않는다. 두 방식을 함께 쓰면 Chromium 이 표준 쪽만
+   보고 아래 규칙을 무시한다. 색은 테마 토큰에서 섞어 다크·라이트 모두 자동으로 맞춘다. */
+::-webkit-scrollbar { width:12px; height:12px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb {
+  background:color-mix(in srgb, var(--muted-fg) 45%, transparent);
+  border-radius:var(--r-pill);
+  /* 투명 테두리 + padding-box = 손잡이가 트랙 가장자리에 붙어 뭉개지지 않게 여백을 둔다.
+     여백이 넓으면 트랙만 굵고 손잡이는 오히려 얇아진다. 12px 트랙에는 3px 가 상한이다(손잡이 6px). */
+  border:3px solid transparent; background-clip:padding-box;
+}
+/* 평소에는 배경에 가깝게 두고 포인터가 올라오면 또렷해진다. 있는 것은 보이되 시선을 끌지 않게 한다. */
+::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb, var(--muted-fg) 75%, transparent); background-clip:padding-box; }
+::-webkit-scrollbar-thumb:active { background:var(--ring); background-clip:padding-box; }
+::-webkit-scrollbar-corner { background:transparent; }
+/* 좁은 목록(탭줄·북마크줄)은 8px 도 내용 공간을 차지하므로 거기만 더 가늘게 한다(손잡이 4px). */
+.tabstrip::-webkit-scrollbar, .bookmark-bar::-webkit-scrollbar { width:8px; height:8px; }
+.tabstrip::-webkit-scrollbar-thumb, .bookmark-bar::-webkit-scrollbar-thumb { border-width:2px; }
+[hidden] { display:none !important; } /* 작성자 display:flex/block가 UA [hidden]을 덮는 문제 방지 */
+html,body { height:100%; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font:var(--fw) var(--fs-sm)/1.5 'Geist',-apple-system,system-ui,sans-serif; letter-spacing:var(--ls);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; overflow:hidden; }
+::placeholder { color:var(--muted-fg); opacity:1; }
+/* 포커스된 요소를 두르는 선. 앱 전체가 한 모양을 쓴다. 두 겹인 이유는 바탕이 어두울 때
+   선 하나만으로는 요소 자신의 테두리와 붙어 보이지 않기 때문이다. 안쪽 겹이 바탕색으로 경계를 만든다. */
+:focus-visible { outline:none; box-shadow:0 0 0 var(--ring-w) var(--bg), 0 0 0 3px color-mix(in srgb, var(--ring) 45%, transparent); }
+.app { display:flex; height:calc(100dvh - var(--statusbar-h, 0px)); padding-top:30px; } /* 상단: macOS 신호등 버튼 공간 확보 */
+/* 하단 상태바. 위 titlebar 와 같은 방식(창에 고정)이라 .app 은 높이만 줄이면 된다.
+   안을 채우는 것은 기능이고 이 영역은 앱 셸이 만든다. 기능을 끄면 안이 비고, 빈 영역은
+   높이를 되돌려 24px 빈 띠가 남지 않게 한다. */
+.statusbar { position:fixed; left:0; right:0; bottom:0; height:24px; z-index:150;
+  display:flex; align-items:center; gap:14px; padding:0 10px;
+  background:var(--sidebar); border-top:1px solid var(--sidebar-border);
+  font-size:var(--fs-2xs); color:var(--muted-fg); user-select:none; }
+.statusbar:empty { display:none; }
+/* 실제로 공간을 차지할 때만 위를 줄인다. 껐을 때 [hidden] 만 보고 높이를 되돌리지 않으면
+   아무것도 보이지 않는 24px 이 창 아래에 남는다. 켜기 전에는 비어 있어 드러나지 않고,
+   켰다 끈 경우에만 생긴다(모듈은 한 번 로드되면 언로드되지 않는다). */
+body:has(#statusbar:not(:empty):not([hidden])) { --statusbar-h:24px; }
+
+/* 끌기 덮개. 크기 조절을 끄는 동안에만 표시한다(web/js/core/drag-shield.js).
+   <iframe>·<webview> 가 마우스 이벤트를 가져가 끌기가 끊기는 영역을 이 덮개가 가린다.
+   z-index 는 이 문서에서 가장 높은 층(9999: 프로필·닫힌 탭 메뉴) 바로 아래다. 끄는 동안에만
+   서므로 평소의 층 순서는 그대로다. 파일 컨텍스트 메뉴(300)처럼 낮은 것은 덮개가 가린다. */
+.drag-shield { position:fixed; inset:0; z-index:9998; background:transparent; }

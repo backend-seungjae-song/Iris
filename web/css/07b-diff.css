@@ -1,0 +1,26 @@
+/* 변경 파일을 여는 diff 뷰(가운데 탭) */
+/* 이 이름을 만드는 곳: devtool/diff.js */
+/* 깃 화면이 여는 탭이지만 깃 기능의 규칙은 아니다. 가운데 탭이 kind 로 그리는 화면이라,
+   탭 쪽이 그리기를 넘겨받기 전까지는 앱 셸에 남는다. CSS 만 먼저 분리해 둔다. */
+
+/* ── diff 뷰(변경 파일 클릭 시 center 탭) ── */
+.diffview { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--bg); }
+.dv-bar { flex:none; display:flex; align-items:center; gap:8px; padding:7px 12px; border-bottom:1px solid var(--border); background:var(--sidebar); font-size:var(--fs-xs); }
+.dv-bar .dv-name { font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dv-bar .dv-where { font-size:var(--fs-2xs); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.dv-bar .dv-tag { font-size:var(--fs-2xs); color:var(--muted-fg); border:1px solid var(--sidebar-border); border-radius:var(--r-ctl); padding:0 5px; margin-left:auto; flex:none; }
+.dv-body { flex:1 1 auto; overflow:auto; margin:0; padding:8px 0; font:var(--fs-xs)/1.55 var(--mono); white-space:pre; tab-size:2; }
+/* 줄 번호는 한 칸이다. 그 줄이 실제로 있는 파일의 번호를 적는다. 지운 줄은 이전 파일,
+   나머지는 새 파일 기준이다. 두 칸을 두면 번호가 코드보다 먼저 눈에 들어온다.
+   자릿수가 흔들리면 눈이 미끄러지므로 tabular 로 세우고, 복사할 때 딸려오면 붙여넣은 코드가
+   못 쓰게 되므로 고르지 못하게 막는다. */
+.dv-body .dl { display:flex; align-items:baseline; padding:0 12px 0 0; }
+.dv-body .dn { flex:none; width:3.6em; padding-right:.9em; text-align:right; color:var(--muted-fg);
+  opacity:.55; font-variant-numeric:tabular-nums; user-select:none; -webkit-user-select:none; }
+.dv-body .dl.hunk .dn, .dv-body .dl.meta .dn { opacity:.28; }
+.dv-body .dt { flex:1 1 auto; min-width:0; white-space:pre; }
+.dv-body .dl.add { background:color-mix(in srgb,var(--success) 16%,transparent); }
+.dv-body .dl.del { background:color-mix(in srgb,var(--destructive) 15%,transparent); }
+.dv-body .dl.hunk { color:var(--ai); background:color-mix(in srgb,var(--ai) 8%,transparent); }
+.dv-body .dl.meta { color:var(--muted-fg); }
+.dv-empty { padding:20px; color:var(--muted-fg); font-size:var(--fs-xs); }

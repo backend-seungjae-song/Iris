@@ -1,0 +1,127 @@
+/* 표 뷰어(엑셀·CSV) 얼개와 격자*/
+/* 이 이름을 만드는 곳: sheet/render.js · sheet/edit.js · sheet/events.js*/
+/* 표 뷰어(엑셀·CSV). 구글 시트와 같은 구조. 머리글은 늘 붙어 있고, 원본에 걸린 고정도 따른다.*/
+/* 격자와 그 안의 값은 구글 시트를 픽셀로 재서 옮긴 것이라 앱의 형태 토큰을 쓰지 않는다.
+ 토큰을 쓰는 것은 이 표를 감싸는 앱 쪽 띠(찾기·도구·아래 줄)뿐이다.*/
+.sv-addr { margin-left:auto; padding:0 12px; align-self:center; font-size:var(--fs-xs); color:var(--muted-fg);
+           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:52%; font-variant-numeric:tabular-nums; }
+.sv-cut { flex:none; padding:5px 10px; font-size:var(--fs-xs); color:var(--muted-fg); background:var(--muted); border-bottom:1px solid var(--border); }
+.sv-msg { padding:20px; font-size:var(--fs-sm); color:var(--fg); }
+.sv-why { margin:8px 0 12px; font-size:var(--fs-xs); color:var(--muted-fg); word-break:break-all; }
+.sv-msg button { font:inherit; font-size:var(--fs-xs); padding:5px 12px; border:1px solid var(--ring); border-radius:var(--r-blk);
+                 background:var(--card); color:var(--fg); cursor:pointer; }
+.sv-msg button:hover { background:var(--input); }
+/* 표는 늘 흰 종이 위에 그린다. 엑셀·구글 시트가 그렇고, 무엇보다 원본이 칸에 지정한 배경색은
+ 흰 종이를 전제로 고른 색이다. 앱 테마(다크)를 그대로 쓰면 원본이 연회색을 칠한 칸에 밝은
+ 글자가 얹혀 읽을 수 없다(확인 결과: 교차 줄을 전혀 읽을 수 없었다).*/
+.sv-wrap { flex:1; min-height:0; overflow:auto; background:#fff; }
+/* 네 조각. 위 띠는 내용만큼, 나머지는 남는 자리를 다 쓴다. 왼쪽 조각만 자기 가로 스크롤을
+ 갖는다. 고정된 열이 화면보다 넓을 때 그 안을 보기 위해서다.*/
+/* overflow:hidden 이 필요한 이유다. 메뉴바(.gs-menu)·툴바(.gs-tb)는 position 을 주지 않은 보통
+요소라, #sv-grid 안의 오버레이(sv-ed·sv-rng·sv-fill·sv-img, 전부 position:absolute)는 z-index를
+아무리 낮춰도 그 위에 그려진다(위치를 잡지 않은 보통 요소는 위치를 잡고 z-index 를 붙인 요소보다
+항상 아래에 칠해져 숫자 비교가 적용되지 않는다. sv-t thead th 같은 위치 잡은 형제하고만 z-index가
+비교된다). 스크롤로 고른 칸·편집칸이 그리드 위쪽 경계를 넘어가면 그 오버레이가 메뉴바·툴바
+자리까지 그려져 헤더보다 위에 뜨고, z-index 정렬만으로는 막을 수 없다.
+#sv-grid 자체를 잘라내면 오버레이가 어떤 값을 계산하든 이 상자 밖으로 나가지 않는다.*/
+.sv-grid { flex:1; min-height:0; display:grid; grid-template-rows:auto 1fr; background:#fff; position:relative; overflow:hidden; }
+.sv-p { position:relative; overflow:hidden; }
+/* 고정 경계. 구글 시트에서 측정한 값(화면 픽셀을 직접 재고 P3→sRGB 로 되돌린 값):
+ 고정이 있으면 격자 끝에서 끝까지 4px #c7c7c7 띠, 없으면 격자선과 같은 1px #c4c7c5.*/
+.sv-pl, .sv-pc { border-right:1px solid #c4c7c5; }
+.sv-fzx .sv-pl, .sv-fzx .sv-pc { border-right:4px solid #c7c7c7; }
+/* 스크롤바는 격자 안이 아니라 바깥에 붙은 띠다(구글 시트에서 확인, 창 1000px):
+ 가로 = 높이 13, 행 머리 다음(x=46)부터 격자 오른쪽 끝까지, 격자 맨 아래.
+ 세로 = 폭 13, 격자 오른쪽 끝, 고정 행 아래(스크롤되는 띠)에서만.
+ 둘 다 안에 "채움 막대"만 있고, 그 크기가 곧 전체 내용 크기다.
+ 여백 띠(shim) = 12px, 배경 #f9f9f9, 테두리 1px #c4c7c5.*/
+/* 가로 띠는 세로 띠 자리까지 함께 덮는다(구글 시트: sx 폭 944 = 격자 오른쪽 끝까지).*/
+.sv-sbx { overflow-x:auto; overflow-y:hidden; grid-column:2 / 4; }
+.sv-sby { overflow-y:auto; overflow-x:hidden; }
+.sv-shim { background:#f9f9f9; }
+.sv-shim-b { border-top:1px solid #c4c7c5; }
+.sv-shim-e { border-left:1px solid #c4c7c5; }
+.sv-pc, .sv-pt { border-bottom:1px solid #c4c7c5; }
+.sv-fzy .sv-pc, .sv-fzy .sv-pt { border-bottom:4px solid #c7c7c7; }
+.sv-pb:focus, .sv-pl:focus { outline:none; }
+/* 열 폭·행 높이를 끌어서 바꾸는 손잡이(구글 시트와 같은 자리).*/
+.sv-cgrip { position:absolute; top:0; right:-3px; width:6px; height:100%; cursor:col-resize; z-index:6; }
+.sv-rgrip { position:absolute; left:0; bottom:-3px; width:100%; height:6px; cursor:row-resize; z-index:6; }
+/* 행 머리는 sticky 를 유지한다. 고정 열 안을 가로로 볼 때 번호가 따라와야 한다.
+ 붙임도 자리 잡힌 요소라 손잡이는 그대로 그 안에 붙는다.*/
+.sv-t th.sv-ch { position:relative; }
+/* 격자 색·크기는 구글 시트 화면을 픽셀로 재서 그대로 옮긴 값이다.
+ 화면 캡처는 Display P3 로 찍히므로 측정값을 sRGB 로 되돌려 적었다. 변환이 맞는지는
+ 이미 아는 색으로 확인했다(도구 모음 #f0f4f9 → 찍힌 값 #f1f4f9, 켜진 단추 #d3e3fd →
+ #d6e2fb, 시트 원본 남색 #1f3864 → #253762 로 전부 1 이내).
+ 머리 배경 #fff · 머리 글자 #444746 · 격자선 #c4c7c5 · 칸 글자 #000
+ 머리 강조 #d3e3fd / 글자 #041e49 · 고른 테두리 2px #3370eb · 고른 범위 #e9effd
+ 행 높이 21px(내용 20 + 선 1) · 열 머리 높이 24px(내용 23 + 선 1) · 행 머리 폭 45px*/
+/* 앱 셸은 크롬 UI 에서 드래그가 글자를 선택하지 않게 body 를 잠근다(10-sidebar.css). 표는 복사가
+ 필요하므로 다시 허용한다. 이 이름의 소유자가 여기라서 예외도 여기 둔다.*/
+.sv-t { user-select:text; -webkit-user-select:text; }
+.sv-t { border-collapse:separate; border-spacing:0; table-layout:fixed; font-size:13.3px;
+        background:#fff; color:#000; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; letter-spacing:normal; }
+.sv-t th, .sv-t td { border-right:1px solid #c4c7c5; border-bottom:1px solid #c4c7c5;
+                     padding:0 3px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+                     height:21px; box-sizing:border-box; vertical-align:middle; background:#fff; }
+/* 머리글. 열은 위에, 행은 왼쪽에, 모서리는 둘 다. 구글 시트의 머리는 회색이 아니라 흰 종이다.*/
+.sv-t thead th { position:sticky; top:0; z-index:3; background:#fff; color:#444746; height:24px;
+                 font-weight:400; font-size:11px; text-align:center; border-bottom:1px solid #c4c7c5;
+                 font-family:Roboto, RobotoDraft, Helvetica, Arial, sans-serif; }
+.sv-t .sv-corner { left:0; z-index:5; }
+.sv-t .sv-rh { position:sticky; left:0; z-index:2; width:44px; background:#fff; color:#444746;
+               font-weight:400; font-size:11px; text-align:center; border-right:1px solid #c4c7c5;
+               font-family:Roboto, RobotoDraft, Helvetica, Arial, sans-serif; }
+/* 고른 칸은 굵은 테두리, 고른 범위는 옅은 파랑. 머리글도 같이 밝아져 어디를 보는지 드러난다.
+ 구글 시트는 고른 범위 안의 격자선을 덮어 그려서 안쪽 선이 보이지 않는다.*/
+.sv-t td.sv-sel { outline:2px solid #3370eb; outline-offset:-2px; }
+/* 고른 범위의 파랑은 칸 색을 지우는 것이 아니라 그 위에 얇게 덮인다. 흰 칸에서 잰 #e9effd 를
+ 역산하면 #3370eb 을 10.8% 로 덮은 값과 일치한다(R·G·B 모두 ±1). 그래서 색이 칠해진
+ 칸 위에서는 그 색이 그대로 비친다. 격자선은 덮인 자리에서 사라지므로 투명으로 둔다.*/
+.sv-t td.sv-in { background-image:linear-gradient(rgba(51,112,235,.108), rgba(51,112,235,.108)) !important;
+                 border-right-color:transparent; border-bottom-color:transparent; }
+.sv-t th.sv-hl { background:#d3e3fd; color:#041e49; }
+.sv-wrap:focus { outline:none; }
+/* 고정 경계. 어디까지가 따라다니는 칸인지 선으로 표시한다(구글 시트와 같다).*/
+.sv-t td.sv-fc-last, .sv-t th.sv-fc-last { border-right:2px solid #9aa0a6; }
+/* 아래 띠도 표와 같은 흰 배경 위에 둔다. 여기만 어두우면 시트가 끝나는 부분이 잘려 보인다.*/
+.gs .sv-foot { background:#f8f9fa; border-top:1px solid #e3e3e3; }
+.gs .sv-tabs { background:none; border-top:none; }
+.gs .sv-tab { color:#5f6368; }
+.gs .sv-tab:hover { background:#e8eaed; color:#1f1f1f; }
+.gs .sv-tab.on { background:#fff; color:#0b57d0; font-weight:600; box-shadow:0 0 0 1px #dadce0; }
+.gs .sv-stat, .gs .sv-only { color:#5f6368; }
+.gs .sv-findbar { background:#fff; border-bottom:1px solid #e3e3e3; }
+.gs .sv-findbar input { background:#fff; border:1px solid #dadce0; color:#1f1f1f; }
+.gs .sv-findbar button { color:#5f6368; }
+.gs .sv-findbar button:hover { background:#e8eaed; color:#1f1f1f; }
+.gs .sv-cut { background:#fef7e0; color:#7f5b00; border-bottom:1px solid #e3e3e3; }
+/* 위 도구. 찾기·확대.*/
+.sv-tools { display:flex; align-items:center; gap:2px; padding-right:6px; }
+.sv-tools button { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs);
+                   padding:4px 8px; border-radius:var(--r-ctl); cursor:pointer;
+                   transition:background var(--t-quick) var(--ease), color var(--t-quick) var(--ease); }
+.sv-tools button:hover { background:var(--sidebar-accent); color:var(--fg); }
+.sv-findbar { flex:none; display:flex; align-items:center; gap:4px; padding:5px 8px;
+              background:var(--sidebar); border-bottom:1px solid var(--border); }
+.sv-findbar input { flex:0 1 240px; font:inherit; font-size:var(--fs-sm); padding:3px 8px; border-radius:var(--r-ctl);
+                    border:1px solid var(--border); background:var(--input); color:var(--fg); }
+.sv-findbar button { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs);
+                     padding:3px 8px; border-radius:var(--r-ctl); cursor:pointer; }
+.sv-findbar button:hover { background:var(--sidebar-accent); color:var(--fg); }
+.sv-fstat { font-size:var(--fs-2xs); color:var(--muted-fg); min-width:56px; }
+/* 아래 줄. 시트 탭과 고른 것 요약. 구글 시트처럼 파일 맨 밑에 붙는다.*/
+.sv-foot { flex:none; display:flex; align-items:center; gap:8px; background:var(--sidebar);
+           border-top:1px solid var(--border); }
+.sv-foot .sv-tabs { flex:1 1 auto; border-top:none; background:none; }
+.sv-only { padding:6px 10px; font-size:var(--fs-xs); color:var(--muted-fg); }
+.sv-stat { margin-left:auto; padding:0 12px; font-size:var(--fs-xs); color:var(--muted-fg); white-space:nowrap;
+           font-variant-numeric:tabular-nums; }
+.sv-tabs { flex:none; display:flex; gap:2px; padding:4px 6px; background:var(--sidebar);
+           border-top:1px solid var(--border); overflow-x:auto; }
+.sv-tab { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs); padding:4px 12px;
+          border-radius:var(--r-ctl); cursor:pointer; white-space:nowrap;
+          transition:background var(--t-quick) var(--ease), color var(--t-quick) var(--ease); }
+.sv-tab:hover { background:var(--sidebar-accent); color:var(--fg); }
+.sv-tab.on { background:var(--card); color:var(--fg); font-weight:var(--fw-semi); }

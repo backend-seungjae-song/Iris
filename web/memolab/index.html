@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>메모랩</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="shell">
+
+  <aside id="rail">
+    <div class="brand">
+      <span class="nm">메모랩</span>
+      <button id="fold-rail" class="fold" title="판 목록 접기">‹</button>
+    </div>
+    <button id="new-board" class="ghost wide"><span class="full">＋ 새 판</span><span class="short">＋</span></button>
+    <button id="btn-find" class="ghost wide" title="모든 판에서 찾기 (⌘K)"><span class="full">찾기</span><span class="short">찾</span></button>
+    <div id="board-list"></div>
+    <div class="rail-foot">
+      <button id="btn-export" class="ghost wide">내보내기</button>
+      <button id="btn-import" class="ghost wide">불러오기</button>
+      <input type="file" id="file-import" accept="application/json" hidden />
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="top">
+      <div class="titlerow">
+        <button id="open-rail" title="판 목록">☰</button>
+        <input id="board-title" type="text" placeholder="판 주제" />
+        <!-- 폴더는 글자로 안 만든다. 판을 판 위로 끌어 겹치거나 판 목록에서 우클릭한다-->
+      </div>
+      <nav id="frames"></nav>
+    </header>
+
+    <div id="work">
+      <aside id="pile">
+        <textarea id="piece-input" rows="2" placeholder="떠오르는 대로 한 줄씩. 의문은 ⌘⇧Enter"></textarea>
+        <div class="pile-head"><span id="pile-count">미분류 조각</span></div>
+        <div id="pile-list"></div>
+        <button id="from-inbox" class="ghost wide">보관함에서 가져오기</button>
+      </aside>
+
+      <section id="stage"></section>
+    </div>
+  </main>
+
+</div>
+
+<div id="dropbar">
+  <label for="drop-input">보관함</label>
+  <input type="text" id="drop-input" maxlength="140"
+         placeholder="지금 판과 관련 없는 조각을 보관함에 추가  ⌘." />
+  <button id="drop-q" class="ghost sm" title="입력한 조각을 지금 판의 의문 칸으로  ⌘⇧Enter">의문</button>
+  <span id="drop-echo"></span>
+</div>
+
+<!-- 모듈 하나만 로드한다. 로드 순서는 import 가 정하므로 여기 적는 순서가 계약이
+ 되지 않고, 전역 이름과 로드 순서를 직접 맞출 필요가 없다.-->
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1782 @@
+/* 메모랩 화면.
+
+ 면은 색이 아니라 밝기로 구분한다. 테두리는 가장 얇은 선이고, 영역 구분은 면의 밝기 차로 한다.
+ 색은 의미가 있는 곳에만 쓰되 면을 채우지 않는다. 머리글자와 점, 아주 옅은 배경까지다.
+ 고른 것을 통째로 칠하지 않는다. 밝기 한 단계와 글자 등급 하나면 선택된 것이 보인다.
+
+ 이전 디자인(각진 모서리 · 전면 시안 채움 · 상자마다 테두리)의 값은 사용하지 않는다.*/
+
+:root {
+  color-scheme: dark;
+
+  /* 색은 앱과 같은 체계를 쓴다. 값의 정본은 web/css/00-tokens.css 의 --pal-* 이고 여기에 같은
+ hex 를 그대로 적는다. 이 화면은 독립 화면이라 앱 CSS 를 가져오지 않는다. 가져오면 같은
+ 이름이 서로 다른 뜻이 된다(앱의 --muted 는 면, 이 화면의 --muted 는 글자 등급).
+
+ 넓은 면은 메인 계열만 쓰고, 쨍한 pop · pastel 은 점 · 딱지 · 테두리 같은 작은 요소에만
+ 얹는다(DESIGN.md 「포인트/상태 색은 작은 요소에만」).*/
+
+  /* 면: 쿨 블루-블랙 여섯 단계. --pal-ink 계조 그대로*/
+  --bg: #0A1620;
+  --surf: #0C1D2A;
+  --panel: #0F1E2B;
+  --card: #16293A;
+  --card-hi: #1B3140;
+  --raise: #24455A;   /* ink 계조 한 단계 위. 강도 변주*/
+
+  /* 선: 베이비블루 알파. 앱의 --border 와 같은 방식*/
+  --line: rgb(166 218 244 / .11);
+  --line2: rgb(166 218 244 / .18);
+  --line3: rgb(166 218 244 / .28);
+  --line-solid: #2C4759;
+
+  /* 손 얹힌 자리 · 눌린 자리*/
+  --hover: rgb(166 218 244 / .055);
+  --active: rgb(166 218 244 / .105);
+
+  /* 글자: 세 등급. paper · mist · mist 강도 변주*/
+  --fg: #EAF3FA;
+  --muted: #8FB0C4;
+  --label: #6E90A6;
+
+  /* 강조: skype 로 채우고 babyblue 로 글자를 표시한다*/
+  --primary: #00AFF0;
+  --primary-hi: #29BFF7;
+  --primary-text: #A6DAF4;
+  --primary-fg: #06202D;
+  --primary-soft: rgb(0 175 240 / .15);
+  --primary-line: rgb(0 175 240 / .45);
+
+  /* 상태: 작은 요소에만*/
+  --good: #7EC699;
+  --good-text: #8BFBC2;
+  --good-soft: rgb(126 198 153 / .15);
+  --amber: #E3B96A;
+  --amber-text: #F0D796;
+  --amber-soft: rgb(227 185 106 / .15);
+  --warn: #FF7A72;
+  --warn-text: #FFA39D;
+  --warn-soft: rgb(255 122 114 / .15);
+  --star: #F9F871;
+  --star-soft: rgb(249 248 113 / .22);
+
+  --r-xs: 4px;
+  --r: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+
+  --bar: 50px;
+  --ease: 120ms cubic-bezier(.4, 0, .2, 1);
+
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Pretendard",
+          "Apple SD Gothic Neo", "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font); font-size: 13.5px; line-height: 1.55;
+  letter-spacing: -.006em;
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+::placeholder { color: var(--label); opacity: 1; }
+::selection { background: rgb(0 175 240 / .32); }
+
+/* 막대는 가늘게. 굵은 막대가 화면 안에 서면 그것이 먼저 눈에 든다*/
+* { scrollbar-width: thin; scrollbar-color: rgb(166 218 244 / .16) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgb(166 218 244 / .14); border-radius: 99px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgb(166 218 244 / .26); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+#shell { display: flex; height: calc(100vh - var(--bar)); }
+
+/* ---------- 레일 ----------*/
+
+#rail {
+  width: 216px; flex: 0 0 216px; background: var(--surf);
+  border-right: 1px solid var(--line); padding: 12px 8px;
+  display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+}
+.brand {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; font-weight: 590; letter-spacing: -.01em;
+  color: var(--fg); padding: 2px 6px 10px;
+}
+.brand .nm { flex: 1; }
+.rail-foot { margin-top: auto; padding-top: 14px; display: grid; gap: 2px; }
+
+.board-item {
+  display: block; width: 100%; text-align: left; background: transparent;
+  border: 0; border-radius: var(--r); padding: 6px 8px;
+  color: var(--muted); cursor: pointer; font-family: inherit;
+  font-size: 13px; font-weight: 450; line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background var(--ease), color var(--ease);
+}
+.board-item:hover { background: var(--hover); color: var(--fg); }
+.board-item.on { background: var(--active); color: var(--fg); font-weight: 550; }
+.board-item .n {
+  color: var(--label); background: transparent; font-size: 11px; font-weight: 500;
+  border-radius: var(--r-xs); padding: 0 2px; margin-left: 6px;
+  float: right; font-variant-numeric: tabular-nums;
+}
+.board-item.on .n { color: var(--muted); }
+.board-item.inbox { margin-bottom: 8px; }
+
+/* ---------- 버튼 ----------*/
+
+button, .ghost {
+  font-family: inherit; font-size: 13px; font-weight: 450; letter-spacing: -.006em;
+  border-radius: var(--r); border: 1px solid var(--line);
+  background: var(--card); color: var(--fg);
+  padding: 5px 11px; cursor: pointer;
+  transition: background var(--ease), border-color var(--ease), color var(--ease);
+}
+button:hover { background: var(--card-hi); border-color: var(--line2); }
+button:active { background: var(--raise); }
+.ghost {
+  background: transparent; border-color: transparent; color: var(--muted);
+  text-decoration: none; display: inline-block;
+}
+.ghost:hover { color: var(--fg); background: var(--hover); border-color: transparent; }
+.wide { width: 100%; text-align: left; }
+#rail .wide { padding: 6px 8px; font-size: 13px; }
+.rail-foot .ghost { color: var(--label); font-size: 12.5px; }
+.rail-foot .ghost:hover { color: var(--fg); }
+button.primary {
+  background: var(--primary); border-color: var(--primary);
+  color: var(--primary-fg); font-weight: 510;
+}
+button.primary:hover { background: var(--primary-hi); border-color: var(--primary-hi); }
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--bg), 0 0 0 3px var(--primary-line);
+  border-radius: var(--r-xs);
+}
+
+/* ---------- 상단 ----------*/
+
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#top { padding: 14px 20px 0; border-bottom: 1px solid var(--line); background: var(--bg); }
+/* 아래 여백은 줄이 진다. 칸이 지면 글자가 칸 위쪽에 붙어 서고 폴더 칸과 밑선이 어긋난다*/
+.titlerow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.titlerow #board-title { flex: 1; min-width: 0; }
+#board-title {
+  width: 100%; background: transparent; border: 0; color: var(--fg);
+  font-family: inherit; font-size: 17px; font-weight: 590; letter-spacing: -.022em;
+  /* 칸 높이는 글자 높이만큼만. 기본 높이를 두면 32px 상자에 23px 글자가 떠서 위로 붙는다*/
+  line-height: 1.3; padding: 0; height: 23px;
+}
+#board-title:focus { outline: none; }
+#board-title::placeholder { color: var(--label); font-weight: 450; }
+
+
+/* 아래 여백은 줄 간격을 겸한다. 탭이 두 줄로 접힐 때 줄 사이도 벌어져야 한다*/
+#frames {
+  display: flex; gap: 3px 1px; align-items: center; flex-wrap: wrap;
+  position: relative; padding-bottom: 9px;
+}
+.frame-tab {
+  background: transparent; border: 1px solid transparent; border-radius: var(--r);
+  padding: 5px 10px; color: var(--muted);
+  font-size: 13px; font-weight: 450; cursor: pointer; position: relative;
+  display: flex; align-items: center; gap: 7px;
+  transition: background var(--ease), color var(--ease);
+}
+.frame-tab:hover { color: var(--fg); background: var(--hover); }
+.frame-tab.on { color: var(--fg); background: var(--active); font-weight: 550; }
+/* 접어 둔 분류를 여는 자리. 눌러도 골라지는 것이 아니라는 것이 흐린 등급으로 남는다*/
+.frame-tab.more { color: var(--label); }
+.frame-tab.more:hover { color: var(--muted); background: var(--hover); }
+.frame-tab.more.on { background: transparent; color: var(--label); font-weight: 450; }
+
+/* 이름만 넷 늘어놓으면 무엇을 고르는지 모른다. 그 보기의 모양을 그대로 작게 그린다*/
+.frame-tab .art { width: 19px; height: 15px; flex: 0 0 auto; opacity: .75; }
+.frame-tab .art rect { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.frame-tab .art .ar { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.frame-tab.on .art { opacity: 1; }
+
+/* 포인터를 올리면 그 보기가 무엇을 하는지 보여 준다. 설명 한 줄과 실제 예시 한 줄*/
+.frame-tab .tip {
+  display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  width: 340px; text-align: left; cursor: default;
+  border: 1px solid var(--line2); border-radius: var(--r-lg);
+  background: var(--panel); padding: 10px 12px;
+  box-shadow: 0 12px 32px rgb(3 9 13 / .6);
+}
+.frame-tab:hover .tip { display: block; }
+.frame-tab .tip b {
+  display: block; color: var(--fg); font-size: 12.5px; font-weight: 550; margin-bottom: 4px;
+}
+.frame-tab .tip .eg {
+  display: block; color: var(--muted); font-size: 12.5px; line-height: 1.6;
+  overflow-wrap: break-word; word-break: keep-all;
+}
+#frames .spacer { flex: 1; }
+#frames .tools { display: flex; gap: 4px; }
+
+/* 목적 여섯과 모양 셋 사이의 금. 한 줄 안에서 두 무리를 가르되 숨기지 않는다*/
+.tabsplit {
+  width: 1px; height: 16px; align-self: center; background: var(--line2);
+  margin: 0 8px; flex: 0 0 auto;
+}
+/* 모양 보기에 들어가 있어도 이 판이 무엇을 하는 자리인지는 남아 있어야 한다*/
+.frame-tab.cur { color: var(--fg); }
+.frame-tab.cur::after {
+  content: ''; position: absolute; left: 10px; right: 10px; bottom: -3px;
+  height: 1.5px; border-radius: 2px; background: var(--line3);
+}
+
+/* ---------- 작업 영역 ----------*/
+
+#work { flex: 1; display: flex; min-height: 0; }
+
+#pile {
+  width: 272px; flex: 0 0 272px; border-right: 1px solid var(--line);
+  padding: 12px; display: flex; flex-direction: column; gap: 9px; min-height: 0;
+  background: var(--surf);
+}
+#piece-input {
+  width: 100%; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r); color: var(--fg); font-family: inherit;
+  font-size: 13.5px; line-height: 1.6; padding: 9px 11px; resize: none;
+  transition: border-color var(--ease), background var(--ease);
+}
+#piece-input:hover { border-color: var(--line2); }
+#piece-input:focus {
+  outline: none; border-color: var(--primary-line); background: var(--card-hi);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+.pile-head {
+  font-size: 11px; color: var(--label); letter-spacing: .04em;
+  font-weight: 550; text-transform: uppercase;
+}
+#pile-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
+
+/* ---------- 조각 ----------*/
+
+.piece, .placed {
+  position: relative; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 8px 10px; font-size: 13.5px; line-height: 1.55;
+  cursor: grab; display: flex; flex-direction: column; gap: 6px; color: var(--fg);
+  transition: background var(--ease), border-color var(--ease);
+}
+.piece:hover, .placed:hover { background: var(--card-hi); border-color: var(--line2); }
+.piece .line, .placed .line { display: flex; gap: 8px; align-items: flex-start; }
+/* 카드 안에서 바로 고치는 칸. 보던 글자와 같은 자리 · 같은 크기라야 고치는 중인 것이 안 튄다*/
+.tedit {
+  flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--primary-line);
+  color: var(--fg); font-family: inherit; font-size: 13.5px; line-height: 1.55;
+  padding: 2px 6px; margin: -3px -6px; border-radius: var(--r-xs);
+  resize: none; overflow: hidden; white-space: pre-wrap;
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+.tedit:focus { outline: none; }
+/* 선택된 카드. 테두리 굵기를 바꾸지 않는다. 굵히면 글자가 1px 밀린다*/
+.piece.picked, .placed.picked {
+  border-color: var(--primary); background: color-mix(in srgb, var(--primary) 9%, var(--card));
+}
+/* 친 엔터는 화면에도 남는다. 기본값(normal)이면 줄바꿈이 공백 하나로 접혀서,
+ 여러 줄로 적어 넣은 조각이 한 줄로 붙어 나왔다*/
+.piece .t, .placed .t, .lnode .t {
+  flex: 1; min-width: 0; overflow-wrap: break-word; word-break: keep-all;
+  white-space: pre-wrap;
+}
+.piece .line > *, .placed .line > * { align-self: flex-start; }
+.piece.starred, .placed.starred {
+  border-color: color-mix(in srgb, var(--star) 34%, var(--line-solid));
+  background: color-mix(in srgb, var(--star) 6%, var(--card));
+}
+.placed.starred .t, .piece.starred .t { font-weight: 550; }
+/* 복사 단추는 평소에 숨긴다. 카드마다 항상 붙어 있으면 화면이 복잡해진다*/
+.piece .copy, .placed .copy { visibility: hidden; }
+.piece:hover .copy, .placed:hover .copy,
+.piece.picked .copy, .placed.picked .copy { visibility: visible; }
+.piece .star, .placed .star, .piece .x, .placed .back, .piece .copy, .placed .copy {
+  flex: 0 0 auto; width: 20px; height: 20px; border: 0; border-radius: var(--r-xs);
+  background: transparent; color: var(--label);
+  padding: 0; font-size: 13px; line-height: 20px; cursor: pointer; text-align: center;
+  transition: background var(--ease), color var(--ease);
+}
+.piece .star:hover, .placed .star:hover { color: var(--star); background: var(--active); }
+.piece.starred .star, .placed.starred .star { color: var(--star); }
+.piece .x:hover { color: var(--warn); background: var(--active); }
+.piece .copy:hover, .placed .copy:hover { color: var(--primary-text); background: var(--active); }
+.placed .back:hover { color: var(--fg); background: var(--active); }
+
+/* 칸 안 순서. 평소에는 공간만 차지하고 포인터가 올라왔을 때만 보인다.
+ 항상 보이면 카드마다 단추가 넷이 되어 글을 읽기 어렵다.
+ visibility 로 숨긴다. display 로 지우면 나타날 때 줄 위치가 흔들린다*/
+.placed .ord { flex: 0 0 auto; display: flex; gap: 2px; visibility: hidden; }
+.placed:hover .ord, .placed.picked .ord, .placed .ord:focus-within { visibility: visible; }
+.placed .ord .mini {
+  border: 1px solid var(--line); background: transparent; color: var(--label);
+  font-family: inherit; font-size: 11px; line-height: 1; padding: 3px 5px;
+  border-radius: var(--r-xs);
+}
+.placed .ord .mini:hover { color: var(--fg); border-color: var(--line2); background: var(--raise); }
+
+/* 왼쪽 띠: 색 둘. 기한 지남이 의문보다 우선한다*/
+.piece.f-late, .placed.f-late { box-shadow: inset 2px 0 0 var(--warn); }
+.piece.f-ask, .placed.f-ask { box-shadow: inset 2px 0 0 var(--amber); }
+
+/* ---------- 카드에 붙는 딱지 ----------
+
+ 적는 칸은 그 값의 집인 탭에만 있고, 다른 탭에서는 읽기만 하는 딱지로 뜬다.
+ 그래서 딱지는 눌러도 동작하지 않아야 하고 눌릴 것처럼 보이지도 않아야 한다.
+ 테두리를 없애고 면만 한 단계 올린다.*/
+.chips {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  padding-left: 28px; font-variant-numeric: tabular-nums;
+}
+.chips .chip {
+  font-size: 11px; line-height: 1.6; padding: 1px 7px; border-radius: var(--r-xs);
+  border: 1px solid transparent; color: var(--muted); background: var(--active);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chips .chip.who { color: var(--fg); }
+.chips .chip.mins { color: var(--primary-text); background: var(--primary-soft); }
+.chips .chip.late { color: var(--warn-text); background: var(--warn-soft); }
+.chips .chip.ask { color: var(--amber-text); background: var(--amber-soft); }
+.chips .chip.why { color: var(--label); background: transparent; border-color: var(--line); max-width: 240px; }
+/* 카드의 자리 딱지는 눌러서 고친다. 그래서 눌릴 것처럼 보여야 한다*/
+.chips .chip.at, .chips .chip.add {
+  cursor: pointer; font-family: inherit; color: var(--primary-text);
+  background: var(--primary-soft); border-color: transparent;
+  transition: background var(--ease), color var(--ease);
+}
+.chips .chip.add {
+  color: var(--label); background: transparent;
+  border: 1px dashed var(--line2);
+}
+.chips .chip.at:hover, .chips .chip.add:hover { color: var(--fg); background: var(--raise); }
+.chips .locin {
+  width: 112px; background: var(--bg); border: 1px solid var(--primary-line);
+  color: var(--fg); font-family: inherit; font-size: 11.5px;
+  padding: 2px 6px; border-radius: var(--r-xs);
+}
+.chips .locin:focus { outline: none; box-shadow: 0 0 0 3px var(--primary-soft); }
+.locin.wide { min-width: 220px; max-width: 100%; }
+
+/* ---------- 무대 ----------*/
+
+#stage { flex: 1; overflow: auto; padding: 18px 20px 40px; min-width: 0; }
+.hintline { font-size: 12.5px; color: var(--muted); margin: 0 0 14px; }
+.hintline b { color: var(--fg); font-weight: 550; }
+
+/* ---------- 칸 ----------
+
+ 칸의 의미는 색으로 나타낸다. 다만 면을 채우지 않고 머리글자와 그 앞의 점, 테두리에
+ 섞이는 정도까지만 쓴다. 면을 통째로 칠하면 카드가 그 위에서 구분되지 않는다.*/
+
+.slot {
+  --tone: var(--line-solid);
+  --tone-fg: var(--label);
+  border: 1px solid color-mix(in srgb, var(--tone) 42%, var(--panel));
+  border-radius: var(--r-lg);
+  padding: 10px; min-height: 104px; display: flex; flex-direction: column; gap: 6px;
+  background: color-mix(in srgb, var(--tone) 5%, var(--panel));
+  transition: border-color var(--ease), background var(--ease);
+}
+.slotbody { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.slot > .cap {
+  font-size: 11.5px; color: var(--tone-fg); letter-spacing: .01em;
+  display: flex; align-items: center; gap: 7px; font-weight: 550;
+}
+/* 점은 뜻을 지닌 칸에만 선다. 모든 칸에 세우면 그것은 뜻이 아니라 장식이다*/
+.slot > .cap::before {
+  content: ''; display: none; flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--tone);
+}
+.slot > .cap input {
+  background: transparent; border: 0; border-bottom: 1px solid transparent;
+  color: var(--muted); font-family: inherit; font-size: 12px; padding: 1px 0; width: 100%;
+  border-radius: 0;
+}
+.slot > .cap input:hover { border-bottom-color: var(--line); }
+.slot > .cap input:focus { outline: none; color: var(--fg); border-bottom-color: var(--primary-line); }
+.slot .empty { color: var(--label); font-size: 12.5px; }
+
+/* 뜻을 가진 칸. 이 표가 색을 정하는 유일한 곳이다*/
+.quad .slot[data-slot="hh"],
+.prep .slot[data-slot="result"],
+.meet .slot[data-slot="todo"],
+.todo .slot[data-slot="now"],
+.study .slot[data-slot="mine"],
+.slot.eg.prim { --tone: var(--primary); --tone-fg: var(--primary-text); }
+
+.prep .slot[data-slot="say"],
+.meet .slot[data-slot="decided"],
+.todo .slot[data-slot="done"],
+.study .slot[data-slot="use"],
+.slot.eg.good { --tone: var(--good); --tone-fg: var(--good-text); }
+
+.prep .slot[data-slot="ask"],
+.meet .slot[data-slot="open"],
+.todo .slot[data-slot="wait"],
+.study .slot[data-slot="ask"],
+.slot.eg.amber { --tone: var(--amber); --tone-fg: var(--amber-text); }
+
+.quad .slot[data-slot="hh"] > .cap::before,
+.prep .slot[data-slot="result"] > .cap::before,
+.prep .slot[data-slot="say"] > .cap::before,
+.prep .slot[data-slot="ask"] > .cap::before,
+.meet .slot[data-slot="decided"] > .cap::before,
+.meet .slot[data-slot="todo"] > .cap::before,
+.meet .slot[data-slot="open"] > .cap::before,
+.todo .slot[data-slot="now"] > .cap::before,
+.todo .slot[data-slot="wait"] > .cap::before,
+.todo .slot[data-slot="done"] > .cap::before,
+.study .slot[data-slot="mine"] > .cap::before,
+.study .slot[data-slot="ask"] > .cap::before,
+.study .slot[data-slot="use"] > .cap::before,
+.study .slot[data-slot="quote"] > .cap::before,
+.slot.eg.prim > .cap::before,
+.slot.eg.good > .cap::before,
+.slot.eg.amber > .cap::before { display: block; }
+
+/* 빼 두는 칸. 주의를 끌면 안 되므로 점도 없고 테두리는 점선이다*/
+.prep .slot[data-slot="park"],
+.todo .slot[data-slot="some"],
+.slot.eg.ghost {
+  border-style: dashed; border-color: var(--line); background: transparent;
+}
+.study .slot[data-slot="quote"] { background: var(--surf); }
+
+/* 완료는 기록일 뿐이므로 면을 채우지 않고 취소선만 긋는다*/
+.todo .slot[data-slot="done"] { background: transparent; }
+.todo .slot[data-slot="done"] .placed { opacity: .6; }
+.todo .slot[data-slot="done"] .placed .t { text-decoration: line-through; color: var(--muted); }
+
+/* 끌어다 놓기. 지금 포인터가 올라온 칸 하나만 채워서 보여 준다*/
+body.dragging, body.dragging .piece, body.dragging .placed { cursor: grabbing; }
+.slot.hot, body.dragging .slot {
+  border-color: var(--primary-line); border-style: dashed;
+  cursor: copy; background: var(--primary-soft);
+}
+.slot.over {
+  border-style: solid; border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 20%, var(--panel));
+}
+.placed.over { outline: 2px solid var(--primary); outline-offset: 1px; }
+#pile.over { outline: 2px dashed var(--primary-line); outline-offset: -5px; }
+body.dragging .tree { outline: 1px dashed var(--line2); outline-offset: 6px; border-radius: var(--r-lg); }
+.tree.over { outline: 2px dashed var(--primary); }
+
+/* 카드가 칸을 다 채우면 누를 빈자리가 사라진다. 놓을 수 있는 동안만 아래에 띠를 둔다.
+ 칸이 안에서 구르므로 띠는 칸 바닥에 붙여 둔다.
+ 띠는 항상 그려져 있고 여는 조건은 둘이다. 눌러서 골랐거나(.hot) 끄는 중(body.dragging).
+ 끄는 중에는 다시 그릴 수 없어서 JS로 붙이면 늦는다*/
+.slot .droprow {
+  display: none;
+  border: 1px dashed var(--primary-line); border-radius: var(--r);
+  color: var(--primary-text); background: var(--bg);
+  font-size: 12px; text-align: center; padding: 5px 0; cursor: copy;
+  position: sticky; bottom: -10px; z-index: 2; margin-bottom: -10px;
+}
+.slot.hot .droprow, body.dragging .slot .droprow { display: block; }
+/* 빈 칸에서는 안내문 자리를 띠가 대신한다*/
+.slot.hot .empty, body.dragging .slot .empty { display: none; }
+
+/* 묶음*/
+.groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px; align-items: start; }
+.groups .slot { min-height: 128px; }
+.addgroup {
+  border: 1px dashed var(--line2); border-radius: var(--r-lg); min-height: 128px;
+  color: var(--label); background: transparent; font-size: 13px;
+}
+.addgroup:hover { border-color: var(--primary-line); color: var(--primary-text); background: var(--primary-soft); }
+
+/* 나눔. 오른쪽 위 한 칸만 강조하고 나머지는 중성*/
+.quad-wrap {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-rows: auto auto; gap: 10px; max-width: 900px; overflow-x: auto;
+}
+.quad-y { display: flex; flex-direction: column; justify-content: space-between; padding: 4px 0; gap: 8px; }
+.quad-y > div { flex: 1; display: flex; align-items: center; justify-content: flex-end; }
+.quad-x { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.quad-y input, .quad-x input {
+  background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  color: var(--muted); font-family: inherit; font-size: 12.5px; padding: 2px;
+}
+.quad-y input { text-align: right; width: 92px; }
+.quad-x input { text-align: center; width: 150px; }
+.quad-y input:focus, .quad-x input:focus { outline: none; color: var(--fg); border-bottom-color: var(--primary-line); }
+.quad {
+  display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+  gap: 10px; min-width: 460px;
+}
+.quad .slot { min-height: 140px; }
+
+/* 흐름. 가로는 단계, 세로는 갈래*/
+.flow-wrap { overflow-x: auto; padding-bottom: 10px; }
+.flowgrid { display: grid; gap: 10px; align-items: stretch; }
+.flowgrid .st-head { display: flex; align-items: flex-end; }
+.flowgrid .st-head input {
+  width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line2);
+  color: var(--fg); font-family: inherit; font-size: 13px; font-weight: 550; padding: 2px 0 5px;
+}
+.flowgrid .corner, .flowgrid .lane-head {
+  /* 가로로 스크롤해도 갈래 이름은 왼쪽에 남는다. 이름이 사라지면 어느 줄인지 알 수 없다*/
+  position: sticky; left: 0; z-index: 2; background: var(--bg); padding-right: 4px;
+}
+.flowgrid .lane-head { display: flex; align-items: center; }
+.flowgrid .lane-head input {
+  width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  color: var(--muted); font-family: inherit; font-size: 12.5px; font-weight: 500;
+  padding: 2px 0; text-align: right;
+}
+.flowgrid input::placeholder { color: var(--label); }
+.flowgrid input:focus { outline: none; color: var(--fg); border-bottom-color: var(--primary-line); }
+.flowgrid .arrow {
+  display: grid; align-items: end; justify-items: center;
+  color: var(--label); font-size: 16px; padding-bottom: 3px;
+}
+.flowgrid .link { display: grid; place-items: center; }
+.flowgrid .link i { display: block; width: 100%; height: 1px; background: var(--line2); }
+.flow-ctl { display: flex; gap: 4px; margin-top: 14px; align-items: center; }
+.flow-ctl .sep { width: 1px; height: 16px; background: var(--line2); margin: 0 6px; }
+
+/* ---------- 준비 ----------*/
+
+.goalbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; }
+.goalbar .lbl { font-size: 12px; color: var(--label); font-weight: 550; margin-right: 6px; }
+.goalbar .sep { width: 1px; height: 16px; background: var(--line2); margin: 0 8px; }
+.goalbar .goal {
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  border-radius: var(--r); font-family: inherit; font-size: 13px; font-weight: 450;
+  padding: 5px 12px; cursor: pointer;
+}
+.goalbar .goal:hover { border-color: var(--line2); background: var(--hover); color: var(--fg); }
+.goalbar .goal.on {
+  background: var(--primary); border-color: var(--primary); color: var(--primary-fg); font-weight: 510;
+}
+.goalbar .mins {
+  width: 56px; background: var(--card); border: 1px solid var(--line); color: var(--fg);
+  border-radius: var(--r); font-family: inherit; font-size: 13px; font-weight: 500;
+  text-align: center; padding: 5px 4px; font-variant-numeric: tabular-nums;
+}
+.goalbar .mins:focus { outline: none; border-color: var(--primary-line); box-shadow: 0 0 0 3px var(--primary-soft); }
+.nudge {
+  font-size: 12.5px; color: var(--amber-text); margin: -6px 0 14px;
+  border-left: 2px solid var(--amber); padding-left: 10px;
+}
+/* 넷은 2×2 로 배치한다. 3+1 로 흐르면 마지막 칸이 혼자 떨어진다*/
+.prep { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 10px; align-items: start; max-width: 760px; }
+.prep .slot { min-height: 172px; }
+
+/* ---------- 회의 ----------*/
+
+.meet { display: grid; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr));
+        gap: 10px; align-items: start; max-width: 900px; }
+/* 회의록은 한 장이다. 칸이 길어지면 페이지가 늘어나는 것이 아니라 칸 안에서 굴러야
+ 아래의 들은 것 · 다음이 화면 밖으로 밀려나지 않는다*/
+.meet .slot {
+  /* 빼는 값 = 위(제목 · 탭 · 참석 · 알림) + 아래(들은 것 · 의문 두 줄 + 다음 + 보관함 바).
+ 부록 줄이 늘면 이 값도 같이 늘려야 한다. 늘리지 않으면 다음 바가 화면 밖으로 밀린다*/
+  min-height: 160px; max-height: calc(100vh - 480px); overflow-y: auto;
+}
+.meet .slot > .cap {
+  position: sticky; top: -10px; z-index: 2; margin: -10px -10px 0; padding: 10px;
+  background: inherit;
+}
+.meet .placed { flex-direction: column; }
+
+/* 들은 것. 본문 아래 한 줄로 접힌다. 재료라서 색을 쓰지 않는다*/
+.heardline {
+  display: flex; align-items: center; gap: 8px; margin: 14px 0 0; max-width: 900px;
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--panel); padding: 8px 12px;
+  transition: border-color var(--ease), background var(--ease);
+}
+/* 칸이 안에서 구르므로 이 줄은 늘 화면에 남는다. 붙잡아 둘 필요가 없다*/
+.heardline.hot, body.dragging .heardline {
+  border-color: var(--primary-line); border-style: dashed; cursor: copy; background: var(--primary-soft);
+}
+.heardline.over { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 20%, var(--panel)); }
+.heardline .lbl { font-size: 11.5px; font-weight: 550; color: var(--label); letter-spacing: .02em; }
+.heardline .n {
+  font-size: 11px; font-weight: 550; color: var(--muted); background: var(--active);
+  border-radius: var(--r-xs); padding: 1px 7px; font-variant-numeric: tabular-nums;
+}
+.heardline .drop { display: none; font-size: 12px; color: var(--primary-text); margin-left: auto; }
+.heardline.hot .drop, body.dragging .heardline .drop { display: inline; }
+/* 펼쳐 두면 아래 칸이 놓는 자리다. 줄에 또 적으면 자리가 둘로 읽힌다*/
+.heardline.open .drop { display: none; }
+.heardbox { max-width: 900px; margin-top: 8px; }
+.heardbox .slot { min-height: 90px; }
+
+.nextbar { margin-top: 14px; }
+.nextbar .due {
+  background: var(--card); border: 1px solid var(--line); color: var(--fg);
+  border-radius: var(--r); font-family: inherit; font-size: 12.5px; padding: 5px 9px;
+}
+.nextbar .due:focus { outline: none; border-color: var(--primary-line); box-shadow: 0 0 0 3px var(--primary-soft); }
+.meta input.why { flex: 1; min-width: 120px; }
+
+/* ---------- 갈래 ----------*/
+
+.tree { display: flex; flex-direction: column; gap: 10px; max-width: 780px; }
+.tree .placed { max-width: 580px; }
+.node { display: flex; flex-direction: column; gap: 8px; }
+.node .kids {
+  margin-left: 22px; padding-left: 18px; border-left: 1px solid var(--line2);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.here {
+  align-self: flex-start; border: 1px dashed var(--line2); border-radius: var(--r);
+  background: transparent; color: var(--label); font-size: 12px; padding: 4px 10px;
+}
+.here:hover { border-color: var(--primary-line); color: var(--primary-text); background: var(--primary-soft); }
+/* 맨 위 줄은 이름과 「무엇을 묻는지」 둘이다. 상황마다 다르게 선다*/
+.rootline { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.rootline b { font-size: 12px; color: var(--fg); font-weight: 550; letter-spacing: .01em; }
+.rootline span { font-size: 12px; color: var(--label); }
+
+/* ---------- 보관함 바 ----------*/
+
+#dropbar {
+  position: fixed; left: 0; right: 0; bottom: 0; height: var(--bar);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surf); border-top: 1px solid var(--line); padding: 0 20px;
+}
+#dropbar label { font-size: 11.5px; color: var(--label); flex: 0 0 auto; font-weight: 550; }
+#drop-input {
+  flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+  color: var(--fg); font-family: inherit; font-size: 13px; padding: 6px 11px;
+  transition: border-color var(--ease), background var(--ease);
+}
+#drop-input:hover { border-color: var(--line2); }
+#drop-input:focus {
+  outline: none; border-color: var(--primary-line); background: var(--card-hi);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+#drop-echo { font-size: 12.5px; color: var(--good-text); min-width: 96px; font-weight: 500; }
+
+/* 물음. 접혀 있는 것이 기본이다. 펼쳐 두면 회의 중에 그쪽으로 논의가 옮겨 간다*/
+#drop-q { flex: 0 0 auto; }
+#drop-q.on {
+  background: color-mix(in srgb, var(--amber) 18%, var(--card));
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--card));
+  color: var(--amber-text);
+}
+.ghost.sm { font-size: 12px; padding: 4px 9px; border-color: var(--line); }
+.ghost.sm:hover { border-color: var(--line2); }
+.ghost.sm.on {
+  background: var(--primary); border-color: var(--primary); color: var(--primary-fg); font-weight: 510;
+}
+
+/* ---------- 새 판 고르기 ----------*/
+
+.starter { max-width: 640px; }
+.starter h2 { font-size: 18px; font-weight: 590; letter-spacing: -.02em; margin: 0 0 4px; }
+.starter p.sub { color: var(--muted); margin: 0 0 20px; font-size: 13.5px; }
+.starter .opts { display: grid; gap: 6px; }
+.starter .opt {
+  border: 1px solid var(--line); border-radius: var(--r-lg); padding: 13px 15px;
+  background: var(--card); cursor: pointer; text-align: left; color: var(--fg);
+  transition: background var(--ease), border-color var(--ease);
+}
+.starter .opt:hover { border-color: var(--line2); background: var(--card-hi); }
+.starter .opt b { display: block; font-size: 14.5px; font-weight: 550; margin-bottom: 3px; }
+.starter .opt span { font-size: 13px; color: var(--muted); }
+
+.modal-back {
+  position: fixed; inset: 0; background: rgb(4 11 16 / .74);
+  backdrop-filter: blur(3px);
+  display: grid; place-items: center; z-index: 40; padding: 24px;
+}
+.modal {
+  background: var(--panel); border: 1px solid var(--line2); border-radius: var(--r-xl);
+  padding: 24px 26px; max-width: 560px; width: 100%; max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 24px 80px rgb(3 9 13 / .66);
+}
+/* 예시는 실제 화면을 그대로 그리므로 좁으면 잘린다. 스스로 폭과 여백을 정한다*/
+/* 상자 안에 또 스크롤을 만들면 겉과 속이 따로 굴러 어디를 굴리는지 헷갈린다.
+ 예시는 겉(가림막)이 굴러가고 속은 그냥 길게 둔다*/
+.modal:has(> .guide) { max-width: none; width: auto; max-height: none; padding: 0; overflow: visible; }
+.modal-back:has(.guide) { place-items: start center; overflow-y: auto; }
+
+/* ---------- 할 일 ----------*/
+
+/* 카드에 붙는 분류 · 날짜 · 시각. 이 틀에서만 나온다*/
+.meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding-left: 28px; }
+.meta select, .meta input {
+  background: var(--card); border: 1px solid var(--line); color: var(--muted);
+  font-family: inherit; font-size: 11.5px; padding: 2px 5px; border-radius: var(--r-xs);
+}
+.meta select { max-width: 88px; }
+.meta input.mins { width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+.meta .unit { font-size: 11.5px; color: var(--label); margin-left: -2px; }
+.meta input.late { color: var(--warn-text); border-color: rgb(255 122 114 / .45); }
+.meta select:focus, .meta input:focus { outline: none; border-color: var(--primary-line); color: var(--fg); }
+.meta .mini {
+  background: transparent; border: 1px solid var(--line); color: var(--label);
+  font-family: inherit; font-size: 11.5px; padding: 2px 7px; cursor: pointer; border-radius: var(--r-xs);
+}
+.meta .mini:hover { border-color: var(--line2); color: var(--fg); background: var(--hover); }
+
+/* 대분류. 전체가 기본이라 아무것도 숨기지 않는다*/
+.cats { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin-bottom: 14px; }
+.cats .sep { width: 1px; height: 16px; background: var(--line2); margin: 0 6px; }
+.cat-tab {
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  font-family: inherit; font-size: 12.5px; font-weight: 450; padding: 4px 11px;
+  cursor: pointer; border-radius: var(--r);
+}
+.cat-tab:hover { background: var(--hover); color: var(--fg); }
+.cat-tab.on { background: var(--active); color: var(--fg); font-weight: 550; }
+input.cat-tab.on { width: 108px; cursor: text; border-color: var(--line2); background: var(--card); }
+
+/* 지금. 이 한 줄이 「그래서 뭘 하지」의 답이다*/
+.nowline {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+  border: 1px solid var(--primary-line); border-radius: var(--r-lg);
+  background: var(--primary-soft); padding: 9px 12px;
+}
+.nowline .lbl {
+  flex: 0 0 auto; font-size: 11px; font-weight: 550; letter-spacing: .04em;
+  color: var(--primary-fg); background: var(--primary); border-radius: var(--r-xs); padding: 2px 8px;
+}
+.nowline .txt { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 550; word-break: keep-all; }
+.nowline .txt.dim { font-weight: 450; color: var(--muted); font-size: 13px; }
+.nowline .dur { flex: 0 0 auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.nowline .mini {
+  flex: 0 0 auto; background: transparent; border: 1px solid var(--primary-line);
+  color: var(--primary-text); font-family: inherit; font-size: 12px;
+  padding: 4px 10px; cursor: pointer; border-radius: var(--r);
+}
+.nowline .mini:hover { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
+
+/* 오늘 띠. 놓는 칸이 아니라 날짜 · 시각에서 자동으로 만들어지는 줄*/
+.daystrip {
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--panel); margin-bottom: 16px; overflow: hidden;
+}
+.daystrip .head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 7px 12px; border-bottom: 1px solid var(--line);
+  font-size: 11.5px; font-weight: 550; color: var(--label); letter-spacing: .02em;
+}
+.daystrip .head .lbl2 { margin-left: 6px; color: var(--label); }
+.daystrip .head .start {
+  background: var(--card); border: 1px solid var(--line); color: var(--fg);
+  font-family: inherit; font-size: 12px; font-weight: 500; padding: 2px 6px;
+  border-radius: var(--r-xs); font-variant-numeric: tabular-nums;
+}
+.daystrip .head .start:focus { outline: none; border-color: var(--primary-line); }
+/* 이 줄이 「쭉 하면 몇 시에 끝나나」의 답이다*/
+.daystrip .head .sum { margin-left: auto; color: var(--primary-text); font-variant-numeric: tabular-nums; }
+.daystrip .empty { padding: 14px 12px; font-size: 12.5px; color: var(--label); }
+.daystrip .row {
+  display: flex; align-items: stretch; gap: 10px; padding: 7px 12px;
+  border-bottom: 1px solid var(--line); cursor: pointer;
+  transition: background var(--ease);
+}
+.daystrip .row:last-child { border-bottom: 0; }
+.daystrip .row:hover { background: var(--hover); }
+.daystrip .row.on { background: var(--primary-soft); box-shadow: inset 2px 0 0 var(--primary); }
+.daystrip .row > .tm, .daystrip .row > .dur, .daystrip .row > .tag,
+.daystrip .row > .txt, .daystrip .row > .ord, .daystrip .row > .mini { align-self: center; }
+.daystrip .tm {
+  flex: 0 0 auto; min-width: 52px; font-size: 13px; font-weight: 550; color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.daystrip .dur {
+  flex: 0 0 auto; min-width: 64px; font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.daystrip .dur.none { color: var(--amber-text); }
+.daystrip .tag {
+  flex: 0 0 auto; font-size: 11px; font-weight: 500; color: var(--muted);
+  background: var(--active); border-radius: var(--r-xs); padding: 1px 7px;
+}
+.daystrip .txt { flex: 1; min-width: 0; font-size: 13.5px; word-break: keep-all; }
+.daystrip .ord { flex: 0 0 auto; display: flex; gap: 3px; }
+.daystrip .mini {
+  flex: 0 0 auto; background: transparent; border: 1px solid var(--line); color: var(--label);
+  font-family: inherit; font-size: 11.5px; padding: 2px 8px; cursor: pointer; border-radius: var(--r-xs);
+}
+.daystrip .mini:hover { border-color: var(--line2); color: var(--fg); background: var(--hover); }
+.daystrip .mini.ok:hover { border-color: var(--good); color: var(--good-text); background: var(--good-soft); }
+/* 오늘 띠의 막대. 길이가 걸리는 시간을 나타내고 숫자는 옆에 그대로 남는다*/
+.daystrip .bar {
+  flex: 0 0 3px; align-self: stretch; margin: 2px 0; border-radius: 99px;
+  background: var(--primary); opacity: .8;
+}
+.daystrip .bar.none {
+  background: repeating-linear-gradient(-45deg, var(--amber) 0 2px, transparent 2px 5px);
+  opacity: .8;
+}
+
+/* 전체. 넷은 2×2*/
+.todo { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 10px; align-items: start; max-width: 760px; }
+.todo .slot { min-height: 150px; }
+
+/* ---------- 공부 ----------*/
+
+/* 판 이름 위로 조각을 끌어다 놓으면 그 판으로 옮겨간다*/
+.board-item .mv {
+  flex: 0 0 auto; background: var(--primary); color: var(--primary-fg);
+  font-size: 11px; font-weight: 550; padding: 0 6px; border-radius: var(--r-xs);
+  line-height: 1.6; float: right;
+}
+.board-item.over { background: var(--primary-soft); color: var(--primary-text); }
+/* 끄는 중에도 판 이름이 옮기는 자리로 보여야 한다. 눌러서 골랐을 때의 → 와 같은 뜻이다.
+ 끄는 중에는 다시 그릴 수 없으므로 DOM 이 아니라 여기서 만든다*/
+body.dragging .board-item:not(.on) { box-shadow: inset 0 0 0 1px var(--primary-line); }
+body.dragging .board-item:not(.on) .n { display: none; }
+body.dragging .board-item:not(.on)::after {
+  content: '→'; float: right; background: var(--primary); color: var(--primary-fg);
+  font-size: 11px; font-weight: 550; padding: 0 6px; border-radius: var(--r-xs); line-height: 1.6;
+}
+
+.srcbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.srcbar .lbl {
+  flex: 0 0 auto; font-size: 11.5px; font-weight: 550; letter-spacing: .03em;
+  color: var(--label); min-width: 34px;
+}
+.srcbar .src {
+  flex: 1; min-width: 200px; background: var(--card); border: 1px solid var(--line);
+  color: var(--fg); font-family: inherit; font-size: 13px; padding: 6px 10px; border-radius: var(--r);
+}
+.srcbar .src:hover { border-color: var(--line2); }
+.srcbar .src:focus { outline: none; border-color: var(--primary-line); box-shadow: 0 0 0 3px var(--primary-soft); }
+.srcbar .src::placeholder { color: var(--label); }
+.srcbar .open {
+  flex: 0 0 auto; color: var(--primary-text); text-decoration: none;
+  font-size: 12.5px; font-weight: 500; border-radius: var(--r);
+  border: 1px solid var(--primary-line); padding: 5px 10px;
+}
+.srcbar .open:hover { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
+
+/* 지금 여기. 더미 위에 둔다. 한 번 적으면 그 뒤에 담는 조각에 자동으로 붙는다*/
+.nowloc { margin: 0 0 9px; display: grid; gap: 6px; }
+.nowloc .nowline2 { display: flex; align-items: center; gap: 7px; }
+.nowloc .lbl { font-size: 11.5px; font-weight: 550; color: var(--label); flex: 0 0 auto; }
+.nowloc input {
+  flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--line);
+  color: var(--fg); font-family: inherit; font-size: 12.5px; padding: 4px 8px; border-radius: var(--r);
+}
+.nowloc input:focus { outline: none; border-color: var(--primary-line); box-shadow: 0 0 0 3px var(--primary-soft); }
+
+/* 이 판에 실제로 있는 위치. 누르면 그 위치의 것만 남는다*/
+.nowchips { display: flex; flex-wrap: wrap; gap: 3px; }
+.nowchips .lc {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  font-family: inherit; font-size: 11.5px; padding: 2px 7px; cursor: pointer;
+  border-radius: var(--r-xs); font-variant-numeric: tabular-nums;
+  transition: background var(--ease), color var(--ease);
+}
+.nowchips .lc:hover { color: var(--fg); background: var(--hover); }
+.nowchips .lc.on { background: var(--primary); color: var(--primary-fg); font-weight: 510; }
+.nowchips .lc i { font-style: normal; font-size: 10.5px; opacity: .75; }
+
+.coverbar { margin: 4px 0 12px; }
+.study { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+         gap: 10px; align-items: start; max-width: 760px; }
+.study .slot { min-height: 170px; }
+.study .slot.covered {
+  border-style: dashed; border-color: var(--line2); background: transparent;
+  display: flex; flex-direction: column; gap: 8px; cursor: default;
+}
+.study .slot.covered .coverline { font-size: 13.5px; font-weight: 550; color: var(--label); }
+
+/* ---------- 공부: 위치별 한 줄 ----------
+
+ 파트를 지날 때마다 그 자리에서 한 줄로 요약한다. 다 보고 나서 쓰면 앞부분 기억이 흐려진다.
+ 요약한 줄만 이어 읽어도 전체가 파악되어야 하므로, 줄이 주된 정보이고 조각 수는 보조다.*/
+
+.locbar {
+  max-width: 900px; margin: 0 0 14px; border: 1px solid var(--line);
+  border-radius: var(--r-lg); overflow: hidden; background: var(--panel);
+}
+.locbar > .cap {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surf);
+}
+.locbar > .cap b { font-size: 11.5px; color: var(--label); letter-spacing: .02em; font-weight: 550; }
+.locbar > .cap span { font-size: 11.5px; color: var(--label); font-variant-numeric: tabular-nums; }
+.locbar > .cap button { margin-left: auto; }
+.locbar.shut > .cap { border-bottom: 0; }
+.locbar > .cap .twist {
+  flex: 0 0 auto; background: none; border: 0; color: var(--label);
+  font-family: inherit; font-size: 12px; cursor: pointer; padding: 0 2px;
+}
+.locbar > .cap .twist:hover { color: var(--fg); background: transparent; }
+
+.locrow { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 6px; }
+.locrow + .locrow { border-top: 1px solid var(--line); }
+.locrow.on { background: var(--primary-soft); }
+.locrow .at {
+  flex: 0 0 auto; min-width: 68px; text-align: center;
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  font-family: inherit; font-size: 11.5px; padding: 3px 8px; border-radius: var(--r-xs);
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.locrow .at:hover { color: var(--fg); border-color: var(--line2); background: var(--hover); }
+.locrow.on .at { border-color: var(--primary); color: var(--primary-fg); background: var(--primary); font-weight: 510; }
+.locrow .one {
+  flex: 1; min-width: 0; background: transparent; border: 0;
+  border-bottom: 1px solid transparent; color: var(--fg);
+  font-family: inherit; font-size: 13px; padding: 4px 2px;
+}
+.locrow .one:hover { border-bottom-color: var(--line); }
+.locrow .one:focus { outline: none; border-bottom-color: var(--primary-line); }
+.locrow .n {
+  flex: 0 0 auto; font-size: 11px; color: var(--muted); background: var(--active);
+  padding: 0 6px; border-radius: var(--r-xs); font-variant-numeric: tabular-nums; font-weight: 500;
+}
+.locrow .warn {
+  flex: 0 0 auto; font-size: 11px; color: var(--warn-text);
+  background: var(--warn-soft); border-radius: var(--r-xs); padding: 0 6px;
+}
+
+/* ---------- 칸 안의 자리 묶음 ----------
+
+ 머리줄은 놓는 영역이기도 하다. 카드를 여기 떨어뜨리면 그 칸으로 들어가면서 위치까지 바뀐다.
+ 그래서 집고 있거나 끄는 중일 때만 「여기에 놓기」가 나오고, 평소에는 구분선이다.*/
+.grp { display: flex; flex-direction: column; gap: 5px; }
+.grp + .grp { margin-top: 6px; }
+.grp .ghead {
+  display: flex; align-items: center; gap: 7px;
+  padding: 2px 0 3px; border-bottom: 1px solid var(--line);
+}
+.grp .ghead .at {
+  font-size: 11px; font-weight: 550; color: var(--muted);
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+}
+.grp .ghead .n { font-size: 11px; color: var(--label); }
+.grp .ghead .drop { display: none; margin-left: auto; font-size: 11px; color: var(--primary-text); }
+.grp .ghead.hot, body.dragging .grp .ghead {
+  border-bottom-color: var(--primary-line); border-bottom-style: dashed; cursor: pointer;
+}
+.grp .ghead.hot .drop, body.dragging .grp .ghead .drop { display: block; }
+.grp .ghead.over { background: var(--primary-soft); border-bottom-color: var(--primary); }
+/* 지나간 위치를 접는 손잡이. 접힌 묶음은 머리만 남아 목차처럼 보인다*/
+.grp .ghead .twist {
+  flex: 0 0 auto; background: none; border: 0; color: var(--label);
+  font-family: inherit; font-size: 11px; cursor: pointer; padding: 0 2px; line-height: 1;
+}
+.grp .ghead .twist:hover { color: var(--fg); background: transparent; }
+.grp.shut .ghead { border-bottom-style: dotted; border-bottom-color: var(--line2); }
+
+/* 판에서 판으로. 한 번 누르면 끝나는 동작이라 창을 띄우지 않는다*/
+.handoff { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; flex-wrap: wrap; }
+.handoff span { font-size: 11.5px; color: var(--label); }
+.gone { display: none !important; }
+
+/* ---------- 이음 ----------
+
+ 위치는 사람이 정하지 않는다. 층은 코드가 매기고 여기서는 층을 세로 줄로 배치만 한다.
+ 그림은 한 화면에 들어와야 하므로 화면을 넘지 않고, 넘으면 칸 안에서 스크롤한다.*/
+
+.linkhint { display: flex; gap: 12px; align-items: baseline; padding: 0 0 12px; margin: 0; }
+.linkhint b { color: var(--fg); font-weight: 550; font-size: 12.5px; white-space: nowrap; }
+.linkhint span { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.linkhint .keys { color: var(--label); font-size: 12px; margin-left: auto; }
+
+/* 이음 보기에서는 조각이 전부 그림 안에 있다. 더미 칸이 자리만 먹으므로 접는다*/
+body[data-view="link"] #pile { display: none; }
+.linkwrap { max-height: calc(100vh - 230px); overflow: auto; }
+.linkcanvas { position: relative; display: inline-block; min-width: 100%; padding: 4px 2px 30px; }
+.linksvg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.linkcols { display: flex; gap: 60px; align-items: flex-start; position: relative; z-index: 1; }
+.linkcol { display: flex; flex-direction: column; gap: 16px; }
+/* 아직 잇지 않은 줄. 그림의 일부가 아니라 대기 줄이라 강조하지 않는다. 이 줄이 짧아지는 것이 진행 상황이다*/
+.linkcol.free {
+  border-right: 1px solid var(--line); padding-right: 16px; margin-right: 4px;
+  max-height: calc(100vh - 260px); overflow-y: auto; gap: 6px;
+}
+.linkcol.free > .cap {
+  font-size: 11.5px; color: var(--label); font-weight: 550; letter-spacing: .02em;
+  position: sticky; top: 0; background: var(--bg); padding-bottom: 4px; z-index: 3;
+}
+.linkcol.free .lnode { background: var(--panel); width: 150px; font-size: 12.5px; padding: 6px 9px; }
+
+/* 아직 하나도 안 이었을 때. 무엇을 하라는 말 대신 무엇이 되는지를 보여 준다*/
+.linkdemo { padding: 26px 0 0 26px; opacity: .45; }
+.linkdemo .cap { font-size: 11.5px; color: var(--label); letter-spacing: .02em; margin-bottom: 9px; }
+.linkdemo .row { display: flex; align-items: center; gap: 10px; }
+.linkdemo .box {
+  border: 1px dashed var(--line2); border-radius: var(--r); padding: 8px 11px;
+  font-size: 12.5px; color: var(--muted);
+}
+.linkdemo .arw {
+  border: 1px dashed var(--line2); border-radius: var(--r-xs); padding: 1px 7px;
+  font-size: 11px; color: var(--label);
+}
+
+.lnode {
+  position: relative; width: 176px; background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; cursor: grab;
+  font-size: 13px; line-height: 1.5; color: var(--fg);
+  overflow-wrap: break-word; word-break: keep-all;
+  transition: background var(--ease), border-color var(--ease);
+}
+.lnode:hover { border-color: var(--line2); background: var(--card-hi); }
+.lnode.picked { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 9%, var(--card)); }
+.lnode.over { outline: 2px dashed var(--primary); outline-offset: 3px; }
+.lnode.starred {
+  border-color: color-mix(in srgb, var(--star) 34%, var(--line-solid));
+  background: color-mix(in srgb, var(--star) 6%, var(--card));
+}
+/* 선이 많이 붙은 것이 급소다. 세지 않아도 보이게 한다*/
+.lnode.mid { border-color: var(--line2); font-size: 13.5px; font-weight: 500; }
+.lnode.big {
+  border-color: var(--primary-line); padding: 11px 12px;
+  font-size: 15px; font-weight: 550; background: var(--primary-soft);
+}
+.lnode.loop { border-style: dashed; border-color: rgb(255 122 114 / .5); }
+.lnode .deg {
+  position: absolute; top: -8px; right: -8px; background: var(--raise); color: var(--muted);
+  border: 1px solid var(--line2); border-radius: 99px;
+  font-size: 10.5px; font-weight: 550; padding: 0 6px; font-variant-numeric: tabular-nums;
+}
+.lnode.big .deg { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
+
+.linksvg .ln { stroke-width: 1.4; }
+.linksvg .ln.cause { stroke: var(--primary); }
+.linksvg .ln.block { stroke: var(--warn); stroke-dasharray: 7 4; }
+.linksvg .ln.same { stroke: var(--line-solid); stroke-dasharray: 2 5; }
+.linksvg .head.cause { fill: var(--primary); }
+.linksvg .head.block { fill: var(--warn); }
+
+.llabel {
+  position: absolute; transform: translate(-50%, -50%); z-index: 2;
+  border: 1px solid var(--line2); background: var(--panel); color: var(--muted);
+  font-family: inherit; font-size: 11px; line-height: 1.5; padding: 1px 7px;
+  border-radius: var(--r-xs); cursor: pointer; white-space: nowrap;
+}
+.llabel:hover { color: var(--fg); border-color: var(--line3); background: var(--card-hi); }
+.llabel.cause { color: var(--primary-text); border-color: var(--primary-line); }
+.llabel.block { color: var(--warn-text); border-color: rgb(255 122 114 / .45); }
+
+/* ---------- 낱말 · 마인드맵 ----------
+
+ 가운데에 판, 그 둘레에 가지, 바깥에 조각. 위치와 선이 의미라 목록으로 대신할 수 없다.
+ 위치는 app.js 가 측정해 px 로 지정하고 여기서는 모양만 정한다.*/
+
+.wordhint { display: flex; gap: 10px; align-items: baseline; margin-bottom: 12px; flex-wrap: wrap; }
+.wordhint b { font-size: 12.5px; color: var(--fg); font-weight: 550; }
+.wordhint span { font-size: 12.5px; color: var(--label); }
+
+.mapwrap { overflow: auto; max-height: calc(100vh - 210px); cursor: grab; }
+/* 배율은 canvas 를 scale 로 줄인다. 줄인 만큼 스크롤 영역도 줄어야 해서 크기를 가진 바깥
+ 요소를 둔다. transform 만으로는 스크롤 영역이 줄이기 전 크기로 남는다*/
+.mapsizer { position: relative; }
+.mapcanvas { position: relative; transform-origin: 0 0; }
+
+/* 배율 단추. 지도 위에 띄우면 그 아래 조각을 가리므로 띄우지 않는다*/
+.mapzoom { margin-left: auto; display: flex; align-items: center; gap: 3px; }
+.mapzoom .zb {
+  font-family: inherit; font-size: 12.5px; line-height: 1; padding: 5px 9px;
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  border-radius: var(--r); cursor: pointer;
+}
+.mapzoom .zb:hover { background: var(--hover); border-color: var(--line2); color: var(--fg); }
+.mapzoom .zb.wide { font-size: 12px; }
+.mapzoom .zn {
+  min-width: 46px; text-align: center; font-size: 11.5px; color: var(--label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 잡고 끄는 영역. 빈 곳을 잡으면 지도가 이동하고, 조각을 잡으면 그 조각이 옮겨진다*/
+.mapwrap.panning { cursor: grabbing; }
+.mapwrap .mnode { cursor: grab; }
+.mapwrap .mnode.moving { cursor: grabbing; z-index: 6; opacity: .92; }
+/* 끄는 동안 글자가 잡히면 파랗게 긁힌 채로 끌린다*/
+.mapwrap.panning, .mapwrap .mnode.moving { user-select: none; }
+.mapsvg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+
+.mln { stroke: var(--line-solid); stroke-width: 1; }
+/* 가운데에서 가지로 가는 선은 굵게 그린다. 굵기가 같으면 가운데가 구분되지 않는다*/
+.mln.trunk { stroke: var(--primary); stroke-width: 1.6; opacity: .8; }
+/* 두 가지에 걸친 조각으로 가는 선. 이 선이 겹치는 곳이 주제가 겹치는 지점이다*/
+.mln.cross { stroke: var(--amber); opacity: .5; }
+
+.mnode { position: absolute; transform: translate(-50%, -50%); z-index: 1; }
+.mnode.core {
+  background: var(--primary); color: var(--primary-fg); border: 1px solid var(--primary);
+  border-radius: var(--r-lg); font-size: 13.5px; font-weight: 550; padding: 9px 14px;
+  max-width: 190px; text-align: center; word-break: keep-all; z-index: 3;
+  box-shadow: 0 6px 20px rgb(0 175 240 / .28);
+}
+.mnode.hub {
+  display: flex; align-items: baseline; gap: 7px;
+  background: var(--primary-soft); border: 1px solid var(--primary-line);
+  border-radius: var(--r); padding: 6px 11px;
+  color: var(--primary-text); font-family: inherit; cursor: pointer; z-index: 2; max-width: 176px;
+}
+.mnode.hub .w { font-size: 13.5px; font-weight: 550; word-break: keep-all; }
+.mnode.hub .n {
+  font-size: 10.5px; font-weight: 550; color: var(--primary-fg); background: var(--primary);
+  border-radius: var(--r-xs); padding: 0 6px;
+}
+.mnode.hub:hover { background: color-mix(in srgb, var(--primary) 26%, var(--panel)); }
+.mnode.hub.on { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+.mnode.hub.on .n { background: var(--primary-fg); color: var(--primary-text); }
+
+/* 카드 폭. 좁게 잡으면 별 · 지우기 단추가 공간을 차지해 글자 칸이 90px 만 남고
+ 한 단어가 한 줄씩 표시된다. 지도는 스크롤해서 보므로 폭을 아낄 이유가 없다*/
+.mnode.leaf { width: 224px; font-size: 13px; }
+.mnode.leaf .t { font-size: 13px; line-height: 1.45; }
+/* 두 가지 이상에 걸린 것*/
+.mnode.leaf.multi { border-color: color-mix(in srgb, var(--amber) 45%, var(--line-solid)); }
+.mnode.dim { opacity: .26; }
+.mnode .xn {
+  flex: 0 0 auto; align-self: flex-start; font-size: 10.5px; font-weight: 550;
+  color: var(--amber-text); background: var(--amber-soft);
+  border-radius: var(--r-xs); padding: 0 5px;
+}
+
+.wordfree { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 12px; }
+.wordfree > .cap {
+  font-size: 11.5px; font-weight: 550; color: var(--label); letter-spacing: .02em; margin-bottom: 8px;
+}
+.wordfree .leaves { display: grid; gap: 6px; }
+/* 묶이지 않은 줄의 카드. 지도 밖이라 폭을 정하지 않는다*/
+.wleaf { max-width: 560px; }
+
+/* ---------- 가지 고치기 ----------
+
+ 지도 위에 한 줄. 고른 가지가 있을 때만 첫 줄이 나오고, 고친 것이 있으면 둘째 줄이 나온다.
+ 되돌리는 수단을 항상 함께 두어 뺀 판단을 다시 확인할 수 있게 한다.*/
+.wordedit { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.werow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.werow .wcap { font-size: 11.5px; color: var(--label); }
+.werow .wname {
+  background: var(--card); border: 1px solid var(--line); color: var(--fg);
+  font-family: inherit; font-size: 12.5px; padding: 4px 9px; border-radius: var(--r); min-width: 160px;
+}
+.werow .wname:focus { outline: none; border-color: var(--primary-line); box-shadow: 0 0 0 3px var(--primary-soft); }
+.werow .wmerge {
+  background: var(--card); border: 1px solid var(--line); color: var(--muted);
+  font-family: inherit; font-size: 12px; padding: 4px 7px; border-radius: var(--r); max-width: 180px;
+}
+.werow .ghost { font-size: 12px; padding: 4px 9px; border-color: var(--line); }
+.wchip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  background: var(--card); border: 1px solid var(--line); color: var(--muted);
+  font-family: inherit; font-size: 11.5px; padding: 3px 8px; border-radius: var(--r-xs); cursor: pointer;
+}
+.wchip:hover { border-color: var(--line2); color: var(--fg); background: var(--card-hi); }
+.wchip b { color: var(--label); font-weight: 500; font-size: 10.5px; }
+.wchip .x { color: var(--label); }
+
+/* ---------- 판 묶어 보기 ----------
+
+ 접은 줄(두 글자)에서는 묶음 머리도 축 전환도 표시하지 않는다. 이름 두 글자 옆에 묶음
+ 이름을 둘 공간이 없고, 두면 판 이름이 밀린다. 접으면 목록은 평평해진다.*/
+
+.railby {
+  display: flex; gap: 2px; margin-bottom: 6px; padding: 2px;
+  background: var(--hover); border-radius: var(--r);
+}
+.railby .byb {
+  flex: 1 1 0; background: transparent; border: 0;
+  color: var(--label); font-family: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 3px 0; border-radius: var(--r-xs); cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.railby .byb:hover { color: var(--fg); background: transparent; }
+.railby .byb.on { background: var(--raise); color: var(--fg); }
+
+.railgrp {
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 10px; padding: 0 6px 4px;
+}
+.railgrp .twist {
+  flex: 0 0 auto; background: none; border: 0; color: var(--label);
+  font-family: inherit; font-size: 10px; line-height: 1; padding: 0 2px; cursor: pointer;
+}
+.railgrp .twist:hover { color: var(--fg); background: transparent; }
+.railgrp .gname {
+  flex: 1 1 auto; min-width: 0; font-size: 11px; font-weight: 550; color: var(--label);
+  letter-spacing: .04em; text-transform: uppercase; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color var(--ease);
+}
+.railgrp .gname:hover { color: var(--fg); }
+.railgrp .gn { flex: 0 0 auto; font-size: 10.5px; color: var(--label); }
+.railgrp.shut .gname { color: var(--muted); }
+
+.railhint {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 11px; color: var(--label); line-height: 1.5; padding: 10px 6px 0;
+}
+
+/* 접힌 묶음. 지금 보고 있는 판만 남긴다. 남기지 않으면 현재 위치가 목록에서 사라진다*/
+.railbody { display: flex; flex-direction: column; gap: 1px; }
+.railbody.shut { gap: 0; }
+.railbody.shut > .board-item { display: none; }
+.railbody.shut > .board-item.on { display: block; }
+
+/* ---------- 판 끌기와 차림표 ----------
+
+ 판을 판 위로 끌어 겹치면 폴더가 된다. 끄는 동안 받을 수 있는 영역이 보여야 하고,
+ 조각 끌기와 표시가 달라야 무엇을 끌고 있는지 화면에서 구분된다.
+ 조각은 점선 테두리, 판은 면이 밝아지고 왼쪽에 띠가 생긴다.*/
+
+body.moving-board .board-item { cursor: grabbing; }
+body.moving-board .board-item:not(.inbox):not(.board-over) { opacity: .75; }
+.board-item.board-over,
+.railgrp.board-over {
+  background: var(--primary-soft);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.railgrp.board-over .gname { color: var(--primary-text); }
+
+/* 폴더 이름을 그 자리에서 고친다. 위치와 크기가 같아야 편집 중에 화면이 흔들리지 않는다*/
+.railgrp .gname.edit {
+  flex: 1 1 auto; min-width: 0; background: var(--card);
+  border: 1px solid var(--primary-line); border-radius: var(--r-xs);
+  color: var(--fg); font-family: inherit; font-size: 11px; font-weight: 550;
+  letter-spacing: .04em; padding: 1px 5px; text-transform: none; cursor: text;
+}
+.railgrp .gname.edit:focus { outline: none; box-shadow: 0 0 0 3px var(--primary-soft); }
+
+/* 우클릭 차림표. 한 번에 하나만 뜨고, 바깥을 누르면 사라진다*/
+.railmenu {
+  position: fixed; z-index: 60; min-width: 148px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line2); border-radius: var(--r-lg);
+  box-shadow: 0 16px 44px rgb(3 9 13 / .6);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.railmenu .mi {
+  background: transparent; border: 0; border-radius: var(--r-xs);
+  color: var(--fg); font-family: inherit; font-size: 12.5px; text-align: left;
+  padding: 6px 10px; cursor: pointer;
+}
+.railmenu .mi:hover { background: var(--active); }
+/* 지우는 항목만 붉게 한다. 위치로 정하면 「폴더 풀기」처럼 지우지 않는 것도 붉어진다*/
+.railmenu .mi.danger { color: var(--warn-text); }
+.railmenu .mi.danger:hover { background: var(--warn-soft); }
+
+/* ---------- 레일 접기 ----------
+
+ 좁은 화면에서 216px 는 큰 공간이다. 판을 고르는 일은 가끔이고 조각을 놓는 일은 계속이다.
+ 접어도 어느 판인지는 남아야 하므로 이름을 지우지 않고 앞 두 글자만 남긴다.*/
+
+.brand .fold {
+  flex: 0 0 auto; border: 0; background: transparent; color: var(--label);
+  font-family: inherit; font-size: 13px; line-height: 1; padding: 4px 6px;
+  border-radius: var(--r-xs); cursor: pointer;
+}
+.brand .fold:hover { color: var(--fg); background: var(--hover); }
+
+/* 접었을 때만 두 글자가 선다.
+
+ 이 규칙이 `.board-item` 과 `#new-board` 를 이름으로 나열하면, 같은 모양으로 새로 들어온
+ 「찾기」 단추가 어느 쪽에도 걸리지 않아 펼친 줄에서 「찾기찾」으로 보인다. 이름을 나열하는
+ 방식은 단추가 늘 때마다 다시 빠지므로, 줄 안의 요소면 전부 걸리게 둔다.*/
+#rail .short { display: none; }
+
+#rail.folded { width: 56px; flex: 0 0 56px; padding: 12px 6px; }
+#rail.folded .brand { justify-content: center; padding: 0 0 10px; }
+#rail.folded .brand .nm { display: none; }
+#rail.folded .rail-foot { display: none; }
+#rail.folded .board-item,
+#rail.folded .wide { text-align: center; padding: 8px 4px; overflow: hidden; }
+#rail.folded .full { display: none; }
+#rail.folded .short { display: inline; }
+/* 접힌 상태에서는 개수와 → 를 이름 옆에 둘 수 없어 오른쪽 위에 겹쳐 둔다*/
+#rail.folded .board-item { position: relative; }
+#rail.folded .board-item .n,
+#rail.folded .board-item .mv {
+  position: absolute; top: 0; right: 0; margin: 0; float: none;
+  font-size: 9.5px; padding: 0 3px; line-height: 1.5;
+}
+/* 접은 줄에서는 이름이 두 글자라 묶음 머리도 축 전환도 둘 공간이 없어 표시하지 않는다.
+ 그러면 접은 묶음을 펼 수단도 사라지므로, 그 상태에서는 접힘을 무시하고 전부 표시한다.
+ 그러지 않으면 그 판에 접근할 수 없다.*/
+#rail.folded .railby,
+#rail.folded .railgrp,
+#rail.folded .railhint { display: none; }
+#rail.folded .railbody.shut { gap: 1px; }
+#rail.folded .railbody.shut > .board-item { display: block; }
+
+/* ---------- 찾기 ----------
+
+ 가림막 안에 목록 하나. 여기서 스크롤되는 것은 목록뿐이고 바깥은 움직이지 않는다.
+ 안팎이 함께 스크롤되면 어느 쪽이 움직이는지 구분되지 않는다.*/
+
+.modal:has(> .find) { max-width: 640px; padding: 16px; }
+.find { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.findbox {
+  background: var(--card); border: 1px solid var(--line2); color: var(--fg);
+  font-family: inherit; font-size: 14.5px; padding: 9px 12px; border-radius: var(--r); width: 100%;
+}
+.findbox:focus { outline: none; border-color: var(--primary-line); box-shadow: 0 0 0 3px var(--primary-soft); }
+.findcap { color: var(--label); font-size: 11.5px; }
+.findlist { display: flex; flex-direction: column; gap: 2px; max-height: 56vh; overflow-y: auto; }
+
+.findrow {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  background: transparent; border: 1px solid transparent; color: var(--fg);
+  font-family: inherit; font-size: 13px; padding: 7px 10px; border-radius: var(--r); cursor: pointer;
+  transition: background var(--ease);
+}
+.findrow:hover, .findrow:focus-visible { background: var(--active); border-color: transparent; box-shadow: none; }
+.findrow .fw { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--label); }
+.findrow .fw b { color: var(--muted); font-weight: 500; }
+.findrow .fs { background: var(--active); border-radius: var(--r-xs); padding: 0 5px; }
+.findrow .ft { display: block; line-height: 1.45; }
+.findrow .fl { font-size: 11px; color: var(--label); }
+.findrow mark { background: var(--star-soft); color: var(--fg); border-radius: 2px; padding: 0 2px; }
+
+/* 이동한 조각. 테두리는 잠깐만 표시된다*/
+.found { outline: 2px solid var(--star); outline-offset: 2px; }
+
+/* ---------- 저장 멈춤 ----------
+
+ 경고창은 닫으면 사라진다. 그 뒤에 적은 것이 새로고침에서 모두 없어지므로,
+ 멈춘 사실은 화면에 남아 있어야 하고 내용을 꺼내는 수단이 같은 자리에 있어야 한다.
+ 닫는 단추는 두지 않는다. 닫을 수 있으면 표시하지 않는 것과 같다.*/
+#stopbar {
+  position: fixed; left: 0; right: 0; top: 0; z-index: 200;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 14px; background: var(--warn); color: #3A0F0C;
+  font-size: 12.5px; font-weight: 500;
+}
+#stopbar b { font-weight: 600; }
+#stopbar .act { margin-left: auto; font-weight: 550; }
+#stopbar button { background: rgb(10 22 32 / .55); color: #EAF3FA; border-color: rgb(10 22 32 / .55); }
+#stopbar button:hover { background: rgb(10 22 32 / .75); border-color: rgb(10 22 32 / .75); }
+/* 띠가 뜬 동안에는 그 높이만큼 아래로*/
+body:has(#stopbar) #shell { padding-top: 38px; }
+
+/* ---------- 끄는 동안 서는 칸 ----------
+
+ 끄는 동안에만 판 위쪽이 갈라지고 지금 탭의 칸이 전부 표시된다. 옆으로 밀려 화면 밖에
+ 있던 칸도 여기서는 놓을 수 있다. 평소에는 공간을 차지하지 않는다. 항상 표시하면 판이
+ 그만큼 좁아지고 읽을 것이 늘어난다.
+
+ 덮지 않고 영역을 나눈다. 판 위에 띄우면 그 아래 보이는 칸을 가려서, 원래 되던 눈앞의
+ 칸에 놓기가 끄는 동안 막힌다.*/
+.sendtray { display: none; }
+body.dragging .sendtray {
+  display: block; flex: 0 0 auto; margin: 0 0 14px; padding: 10px 11px 11px;
+  border: 1px dashed var(--primary-line); border-radius: var(--r-lg);
+  background: var(--primary-soft); max-height: 38vh; overflow-y: auto;
+}
+.sendtray > .cap {
+  display: flex; gap: 6px; align-items: baseline; margin-bottom: 8px;
+  font-size: 11.5px; font-weight: 550; color: var(--primary-text); letter-spacing: .02em;
+}
+.sendtray > .cap span { color: var(--label); font-weight: 450; }
+.sendgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; }
+.sendcell {
+  border: 1px solid var(--line2); border-radius: var(--r); padding: 9px 10px; min-height: 52px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  background: var(--panel); transition: background var(--ease), border-color var(--ease);
+}
+.sendcell .sc { font-size: 12.5px; font-weight: 550; color: var(--fg); word-break: keep-all; }
+.sendcell.over { background: var(--primary); border-color: var(--primary); }
+.sendcell.over .sc { color: var(--primary-fg); }
+/* 끄는 동안에는 설명 풍선을 띄우지 않는다. 끄는 경로를 가리기 때문이다*/
+body.dragging .frame-tab .tip { display: none; }
+
+/* ---------- 예시 ----------
+
+ 이름 넷과 한 줄 설명으로는 무엇을 고르는지 알 수 없다. 그래서 실제 화면을 그대로
+ 작게 그린다. 실제 칸 클래스를 쓰고 크기만 줄인다. 따로 그린 그림은 화면이 바뀌면
+ 실제와 달라진다.*/
+
+.guide { width: min(920px, 94vw); padding: 22px 26px 28px; }
+.guide .ghead { display: flex; align-items: center; gap: 12px; }
+.guide .ghead .art { width: 24px; height: 18px; color: var(--primary-text); flex: 0 0 auto; }
+.guide .ghead .art rect, .guide .ghead .art .ar { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.guide .ghead .what { font-size: 13.5px; color: var(--muted); }
+.guide .ghead .ghost { margin-left: auto; border-color: var(--line); }
+.guide h2 { margin: 0; font-size: 18px; font-weight: 590; letter-spacing: -.02em; }
+.guide .sub { color: var(--muted); font-size: 13px; margin: 6px 0 12px; }
+
+.egsrc { display: flex; flex-wrap: wrap; gap: 5px; padding-bottom: 4px; }
+.egsrc span {
+  border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--card);
+  color: var(--muted); font-size: 12px; padding: 3px 9px;
+}
+
+.gsec { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; }
+.gsec .gh { display: flex; align-items: center; gap: 9px; }
+.gsec .gh .art { width: 22px; height: 17px; color: var(--primary-text); }
+.gsec .gh .art rect, .gsec .gh .art .ar { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.gsec .gh b { font-size: 15px; font-weight: 590; letter-spacing: -.015em; color: var(--fg); }
+.gsec .gh .what { font-size: 13.5px; color: var(--muted); }
+
+.gwhen { display: grid; grid-template-columns: 1fr; gap: 3px; margin: 9px 0 13px; }
+.gwhen div { display: flex; gap: 10px; align-items: baseline; }
+.gwhen i {
+  flex: 0 0 52px; font-style: normal; font-size: 11px; color: var(--label);
+  letter-spacing: .03em; font-weight: 550;
+}
+.gwhen span { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+.gtail { font-size: 11.5px; color: var(--label); margin: 18px 0 0; }
+
+.egnote { font-size: 11.5px; color: var(--label); margin: 10px 0 7px; }
+/* 쏟은 것 → 화면 사이의 안내. 정리되기 전과 후를 갈라 준다*/
+.egnote.step { color: var(--primary-text); font-size: 12px; margin: 14px 0 8px; }
+
+/* 진짜 칸 · 카드를 그대로 쓰되 크기만 줄인다*/
+.slot.eg { min-height: 0; padding: 8px; gap: 5px; }
+.slot.eg > .cap { font-size: 11px; }
+.slot.eg.ghost { min-height: 42px; }
+.placed.eg { padding: 5px 8px; font-size: 12px; gap: 4px; cursor: default; }
+.placed.eg:hover { border-color: var(--line); background: var(--card); }
+.placed.eg .meta { display: flex; gap: 5px; padding-left: 0; }
+
+.egchip {
+  border: 1px solid transparent; border-radius: var(--r-xs); background: var(--active);
+  color: var(--muted); font-size: 10.5px; padding: 1px 6px; white-space: nowrap;
+}
+.egchip.prim { color: var(--primary-text); background: var(--primary-soft); }
+.egchip.warn { color: var(--warn-text); background: var(--warn-soft); }
+
+.eggrid { display: grid; gap: 8px; align-items: start; }
+.eggrid.three { grid-template-columns: repeat(3, 1fr); }
+.eggrid.four { grid-template-columns: repeat(4, 1fr); }
+.egline {
+  display: flex; align-items: center; gap: 8px; margin-top: 7px;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 6px 10px;
+}
+.egline b { font-size: 11px; color: var(--label); letter-spacing: .02em; font-weight: 550; }
+.egline span { font-size: 11px; color: var(--label); margin-left: auto; }
+
+.egkinds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px 16px; }
+.egkinds div { display: flex; gap: 9px; align-items: baseline; font-size: 12px; }
+.egkinds b { flex: 0 0 46px; color: var(--fg); font-weight: 550; }
+.egkinds span { color: var(--label); }
+
+.egflow { display: grid; gap: 7px; }
+.egflow .lane { display: grid; grid-template-columns: 62px repeat(3, 1fr); gap: 7px; align-items: stretch; }
+.egflow .lb {
+  font-size: 11px; color: var(--label); font-weight: 550; align-self: center;
+  border-right: 1px solid var(--line); padding-right: 8px;
+}
+
+.egtree { display: grid; justify-items: center; gap: 0; }
+.egtree .row { display: flex; gap: 30px; position: relative; }
+.egtree .row.d1 { margin-top: 22px; }
+.egtree .row.d2 { margin-top: 22px; }
+.egtree .br { position: relative; }
+/* 세로 줄기 하나 + 가지를 잇는 가로 대. 가로 대가 없으면 토막 셋으로 읽힌다*/
+.egtree .row.d1::before, .egtree .row.d2::before {
+  content: ''; position: absolute; top: -22px; left: 50%; width: 1px; height: 12px;
+  background: var(--line2);
+}
+.egtree .row.d1::after {
+  content: ''; position: absolute; top: -10px; left: 74px; right: 74px; height: 1px;
+  background: var(--line2);
+}
+.egtree .br::before {
+  content: ''; position: absolute; top: -10px; left: 50%; width: 1px; height: 10px;
+  background: var(--line2);
+}
+.egtree .row.d2 .br::before { height: 22px; top: -22px; }
+.egtree .placed.eg { width: 148px; }
+
+.eglink { display: flex; gap: 14px; align-items: flex-start; }
+.eglink .col { display: flex; flex-direction: column; gap: 22px; }
+.eglink .col.free {
+  border-right: 1px solid var(--line); padding-right: 14px; margin-right: 4px; gap: 6px;
+}
+.eglink .col.free .cap { font-size: 11px; color: var(--label); font-weight: 550; }
+.eglink .col.free .placed.eg { background: var(--panel); }
+.eglink .mid { display: flex; flex-direction: column; gap: 22px; padding-top: 9px; }
+/* 뜻만 떠 있으면 무엇과 무엇이 이어졌는지 안 보인다. 양쪽으로 선을 낸다*/
+.eglink .mid .egchip { position: relative; }
+.eglink .mid .egchip::before, .eglink .mid .egchip::after {
+  content: ''; position: absolute; top: 50%; width: 14px; height: 1px; background: var(--primary);
+}
+.eglink .mid .egchip::before { right: 100%; }
+.eglink .mid .egchip::after { left: 100%; }
+.eglink .placed.eg { width: 152px; }
+
+.eglegend { display: grid; gap: 4px; margin-top: 9px; }
+.eglegend span { display: flex; gap: 9px; align-items: baseline; font-size: 12px; color: var(--muted); }
+.eglegend .muted { color: var(--label); font-size: 11.5px; padding-top: 3px; }
+
+/* 같은 보기가 상황마다 어떻게 갈리는지*/
+.egvary { border: 1px solid var(--line); border-radius: var(--r); margin-top: 12px; padding: 9px 12px; }
+.egvary .cap { font-size: 11px; color: var(--label); font-weight: 550; margin-bottom: 6px; }
+.egvary .row { display: flex; gap: 10px; align-items: baseline; font-size: 12px; padding: 2px 0; }
+.egvary .row b { flex: 0 0 62px; color: var(--fg); font-weight: 550; }
+.egvary .row span { flex: 0 0 190px; color: var(--primary-text); }
+.egvary .row i { font-style: normal; color: var(--label); font-size: 11.5px; }
+
+/* 나눔. 위치가 의미를 가지므로 축 이름을 함께 그린다*/
+.egquad { display: grid; gap: 5px; }
+.egquad .ytop, .egquad .xrow span {
+  font-size: 11px; color: var(--label); font-weight: 550; letter-spacing: .02em;
+}
+.egquad .cells { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.egquad .xrow { display: flex; justify-content: space-between; }
+
+/* 할 일. 지금 줄과 오늘 띠를 실제 화면과 같은 계산으로 그린다*/
+.egnow {
+  display: flex; align-items: center; gap: 10px; padding: 7px 11px;
+  border: 1px solid var(--primary-line); border-radius: var(--r);
+  background: var(--primary-soft); margin-bottom: 9px;
+}
+.egnow .lbl {
+  font-size: 11px; font-weight: 550; color: var(--primary-fg); background: var(--primary);
+  border-radius: var(--r-xs); padding: 2px 7px;
+}
+.egnow .txt { font-size: 13.5px; font-weight: 550; }
+.egnow .dur { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+.egstrip { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); overflow: hidden; }
+.egstrip .head {
+  display: flex; align-items: center; gap: 9px; padding: 6px 12px;
+  border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--label);
+}
+.egstrip .head .sum { margin-left: auto; color: var(--primary-text); }
+.egstrip .row {
+  display: flex; align-items: stretch; gap: 10px; padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.egstrip .row:last-child { border-bottom: 0; }
+.egstrip .row.on { background: var(--primary-soft); box-shadow: inset 2px 0 0 var(--primary); }
+.egstrip .tm, .egstrip .dur, .egstrip .txt { align-self: center; }
+.egstrip .tm {
+  flex: 0 0 46px; font-size: 12.5px; font-weight: 550; font-variant-numeric: tabular-nums;
+}
+.egstrip .bar {
+  flex: 0 0 3px; align-self: stretch; margin: 2px 0; border-radius: 99px;
+  background: var(--primary); opacity: .8;
+}
+.egstrip .bar.none {
+  background: repeating-linear-gradient(-45deg, var(--amber) 0 2px, transparent 2px 5px);
+  opacity: .8;
+}
+.egstrip .dur { flex: 0 0 58px; font-size: 11.5px; color: var(--muted); }
+.egstrip .dur.none { color: var(--amber-text); }
+.egstrip .txt { flex: 1; font-size: 12.5px; }
+
+/* 회의. 머리줄과 빈칸 알림*/
+.egbar {
+  display: flex; gap: 10px; align-items: baseline; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); margin-bottom: 8px;
+}
+.egbar b { font-size: 11px; color: var(--label); letter-spacing: .02em; font-weight: 550; }
+.egbar span { font-size: 12.5px; color: var(--fg); }
+.egwarn {
+  font-size: 12px; color: var(--amber-text); border-left: 2px solid var(--amber);
+  padding-left: 9px; margin-bottom: 9px;
+}
+
+/* 공부. 위치별 한 줄*/
+.eglocbar { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); overflow: hidden; }
+.eglocbar .cap {
+  display: flex; gap: 9px; align-items: baseline; padding: 6px 10px;
+  border-bottom: 1px solid var(--line); font-size: 11px; color: var(--label);
+}
+.eglocbar .cap b { color: var(--fg); letter-spacing: .02em; font-weight: 550; }
+.eglocbar .locrow {
+  display: flex; gap: 9px; align-items: center; padding: 6px 10px;
+  border-top: 0; border-bottom: 1px solid var(--line);
+}
+.eglocbar .locrow:last-child { border-bottom: 0; }
+.eglocbar .at {
+  flex: 0 0 auto; min-width: 0; font-size: 11.5px; font-weight: 550; color: var(--primary-text);
+  background: var(--primary-soft); border: 0; border-radius: var(--r-xs);
+  padding: 1px 7px; font-variant-numeric: tabular-nums;
+}
+.eglocbar .one { flex: 1; font-size: 12.5px; color: var(--fg); }
+.eglocbar .one.dim { color: var(--label); }
+/* .n 과 .warn 은 실제 화면의 .locrow 규칙을 그대로 쓴다.
+ 여기서 색을 다시 정하면 예시가 실제 화면과 달라진다*/
+
+/* 준비. 목적 고르는 줄*/
+.eggoal { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 10px; }
+.eggoal .lbl { font-size: 11px; color: var(--label); font-weight: 550; }
+.eggoal .g {
+  font-size: 12px; color: var(--muted); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 3px 9px;
+}
+.eggoal .g.on {
+  color: var(--primary-fg); background: var(--primary); border-color: var(--primary); font-weight: 510;
+}
+
+/* 읽는 법 · 막히면. 예시의 절반은 이 설명이다. 그림만으로는 무엇을 보라는 것인지 전달되지 않는다*/
+.egread { border: 1px solid var(--line); border-radius: var(--r-lg); margin-top: 14px; padding: 10px 12px; }
+.egread .cap {
+  font-size: 11px; color: var(--label); font-weight: 550; letter-spacing: .02em; margin-bottom: 7px;
+}
+.egread .row { display: flex; gap: 12px; align-items: baseline; padding: 3px 0; }
+.egread .row b { flex: 0 0 128px; font-size: 12px; color: var(--fg); font-weight: 550; }
+.egread .row span { flex: 1; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.egread.stuck { border-color: color-mix(in srgb, var(--amber) 34%, var(--line-solid)); }
+.egread.stuck .cap { color: var(--amber-text); }
+.egread.stuck .row b { color: var(--amber-text); }
+
+/* ---------- 말뜻 ----------
+
+ 같은 것을 두 이름으로 부르면 그때부터 다른 두 가지가 된다. 이 화면과 툴팁은 app.js 의
+ TERMS 한 표에서 가져온다. 두 곳에 각각 적으면 한쪽만 고쳐져 화면이 서로 다른 용어를
+ 쓰게 된다.*/
+.guide.terms .ghead { margin-bottom: 4px; }
+.termlist { display: grid; gap: 0; }
+.term {
+  display: grid; grid-template-columns: 108px 200px 1fr; gap: 14px; align-items: baseline;
+  padding: 9px 2px; border-bottom: 1px solid var(--line);
+}
+.term:last-child { border-bottom: 0; }
+.term b { font-size: 13px; color: var(--fg); font-weight: 550; }
+.term .d { font-size: 12.5px; color: var(--muted); }
+.term .more { font-size: 12px; color: var(--label); }
+
+/* ---------- 가로로 세운 판 ----------
+
+ 카드가 쌓이면 칸이 아래로 길어지고 판이 세로로 늘어난다. 적으면서 위아래를 오가야 하고
+ 칸에 무엇이 들었는지 한눈에 보이지 않는다. 칸을 화면 높이에 맞추고, 넘치면
+ 옆으로 접어 가로로 늘어나게 한다.
+
+ 무대는 세로 스크롤을 두지 않고 안쪽 띠가 가로 스크롤을 갖는다. 스크롤 영역이 하나여야
+ 끌면서 가장자리에 댔을 때 무엇이 스크롤되는지 일정하다.*/
+#stage.h { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 16px; }
+#stage.h > .board-h { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+
+.board-h {
+  display: flex; gap: 10px; align-items: stretch; max-width: none;
+  grid-template-columns: none; padding-bottom: 8px;
+}
+.board-h .slot { flex: 0 0 auto; min-height: 0; }
+/* 세로로 채우다 꽉 차면 옆 줄로 접힌다. 칸이 그만큼 넓어지고 판이 옆으로 길어진다*/
+/* 옆으로 접힌 줄만큼 칸도 넓어져야 한다. 그러지 않으면 접힌 줄이 칸 밖으로 나가
+ 옆 칸을 덮는다(확인 결과: 칸 282 인데 안쪽이 1600 까지 늘어났다).*/
+.board-h .slotbody {
+  flex: 1; min-height: 0; width: max-content;
+  flex-flow: column wrap; align-content: flex-start; gap: 6px 10px;
+}
+.board-h .slotbody > * { width: 258px; }
+/* 한 위치에 카드가 아주 많으면 그 묶음 하나가 칸 높이를 넘는다. 묶음은 나눠서 옆 줄로
+ 보낼 수 없으므로 그 묶음만 안에서 스크롤한다. 넘친 채 잘리면 그 카드를 볼 수 없다
+ (확인 결과: 묶음 하나 832 · 칸 565 · 잘린 250).*/
+.board-h .grp { width: 258px; max-height: 100%; overflow-y: auto; }
+/* 묶음 머리는 스크롤해도 제자리에 남는다. 어느 위치의 것인지 사라지면 묶음이 성립하지 않는다*/
+.board-h .grp .ghead { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.board-h .grp > * { width: auto; }
+.board-h .droprow { flex: 0 0 auto; }
+
+/* ---------- 좁은 창 ----------
+
+ 영상을 틀어 두고 옆에 이 판을 작게 띄우는 경우를 위한 것이다. 그 창은 400~600px 이고,
+ 그 폭에서는 가로로 늘어선 셋(레일 · 더미 · 칸)이 공간을 나눠 가져 칸에 96px 만 남는다
+ (확인 결과: 창 420 · 칸 96). 폭을 나누는 대신 세로로 쌓는다.
+
+ 쌓는 순서가 우선순위다. 적는 칸이 맨 위, 그다음이 판, 더미는 접어 둔다.*/
+
+/* 레일을 여는 단추. 넓은 창에서는 레일이 항상 보이므로 두지 않는다*/
+#open-rail {
+  display: none; align-items: center; justify-content: center;
+  flex: 0 0 auto; width: 28px; height: 28px; margin-right: 6px;
+  background: transparent; border: 1px solid var(--line); border-radius: var(--r);
+  color: var(--muted); font-family: inherit; font-size: 14px; cursor: pointer;
+}
+#open-rail:hover { border-color: var(--line2); color: var(--fg); background: var(--hover); }
+
+@media (max-width: 860px) {
+  .eggrid.three, .eggrid.four { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 760px) {
+  #rail { display: none; }
+  #rail.open {
+    display: flex; position: fixed; left: 0; top: 0; bottom: var(--bar); z-index: 40;
+    width: 240px; flex: 0 0 240px; box-shadow: 0 0 0 100vw rgb(4 11 16 / .6);
+  }
+  #top #open-rail { display: inline-flex; }
+
+  #top { padding: 10px 12px 0; }
+  #board-title { font-size: 16px; }
+
+  /* 탭은 한 줄로 두고 옆으로 스크롤한다. 접히게 두면 열 개가 세 줄이 되어 110px 을
+ 차지하는데, 그 공간은 적는 칸이 써야 한다(확인 결과: 420px 에서 탭 110 → 40).*/
+  #frames {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; gap: 1px;
+    scrollbar-width: none; padding-bottom: 6px;
+  }
+  #frames::-webkit-scrollbar { display: none; }
+  #frames > * { flex: 0 0 auto; }
+  #frames .spacer { display: none; }
+  .frame-tab { padding: 5px 9px; }
+
+  /* 보관함에서 가져오는 동작은 적는 중에 쓰지 않는다. 넓은 창에는 그대로 있다*/
+  #from-inbox { display: none; }
+
+  /* 옆으로 나누던 것을 세로로 쌓는다*/
+  #work { flex-direction: column; }
+  #pile {
+    width: auto; flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--line);
+    padding: 10px 12px; gap: 7px; max-height: 46vh;
+  }
+  #pile-list { max-height: 30vh; }
+  #stage { padding: 12px 12px 28px; }
+
+  /* 칸은 한 줄로. 두 줄로 벌리면 각 칸이 다시 좁아진다*/
+  .study, .prep { grid-template-columns: 1fr; max-width: none; }
+  .study .slot { min-height: 96px; }
+  .slot { min-height: 76px; }
+
+  /* 나눔만 예외다. 네 칸의 위치가 곧 의미라 한 줄로 세우면 축이 사라진다.
+ 옆으로 스크롤하게 두지도 않는다. 밀려난 칸은 보이지 않아 사용할 수 없다.*/
+  .quad-wrap { grid-template-columns: 56px minmax(0, 1fr); gap: 6px; }
+  .quad { min-width: 0; gap: 6px; }
+  .quad .slot { min-height: 104px; padding: 8px; }
+  .quad-y input { width: 52px; font-size: 12px; }
+  .quad-x input { width: 100%; font-size: 12px; }
+
+  /* 출처 딱지가 길면 셋이 두 줄이 된다. 값은 줄여 보여 주고 고칠 때 전부 나온다*/
+  .srcbar { gap: 6px; margin-bottom: 8px; }
+  .srcbar .chip { max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 이음은 그림이라 옆으로 미는 것이 맞다. 다만 머리줄은 밀리면 안 읽히므로 접히게 둔다*/
+  .linkhint { flex-wrap: wrap; gap: 6px 12px; }
+  .linkhint b, .linkhint span { white-space: normal; }
+  .linkhint .keys { margin-left: 0; }
+  /* 칸이 줄어들지 않게 고정한다. 그냥 두면 flex 가 칸을 카드보다 좁게 만들어
+ 카드 오른쪽이 잘린다(확인 결과: 칸 104 · 카드 132). 그림 전체는 스크롤하면 된다*/
+  .linkcols { gap: 28px; }
+  .linkcol { flex: 0 0 auto; }
+  /* 좁아지면 단어 단위로만 줄바꿈하던 규칙을 푼다. 그러지 않으면 글자가 칸 밖으로 잘린다*/
+  .linkcol.free .lnode { width: 132px; word-break: break-word; overflow-wrap: anywhere; }
+
+  #dropbar { padding: 0 12px; gap: 8px; }
+  #dropbar label { display: none; }
+  #drop-echo { min-width: 0; }
+
+  .term { grid-template-columns: 1fr; gap: 3px; }
+
+  /* 좁은 창에서는 가로로 배치하지 않는다. 폭이 부족해 한 칸도 다 보여 줄 수 없다*/
+  #stage.h { display: block; overflow: auto; }
+  #stage.h > .board-h { display: grid; grid-template-columns: 1fr; overflow: visible; }
+  .board-h .slotbody { flex-flow: column nowrap; width: auto; }
+  .board-h .slotbody > *, .board-h .grp { width: auto; }
+  .board-h .slot { flex: none; }
+}
+
+@media (max-width: 640px) {
+  .egread .row { flex-direction: column; gap: 2px; }
+  .egread .row b { flex: none; }
+}
+
+/* 아주 좁을 때. 반쪽 창보다도 작게 줄인 경우*/
+@media (max-width: 460px) {
+  #pile { max-height: 40vh; }
+  #pile-list { max-height: 24vh; }
+  .srcbar { gap: 6px; }
+  .locbar > .cap { padding: 6px 9px; }
+  .locrow .at { min-width: 52px; }
+}

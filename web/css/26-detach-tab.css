@@ -1,0 +1,19 @@
+/* 탭 분리. 탭 하나만 담는 창의 스타일.
+   이 CSS 는 이 기능이 직접 만드는 이름만 정의한다. 탭 띠의 이름(.ctab·.ctab-add·#tabstrip)은
+   브라우저 코어의 것이라 여기서 정의하지 않는다. 정의하면 그 이름의 소유자가 둘이 된다. */
+
+/* 되돌리기 칩. 새 탭(+) 자리에 대신 놓이므로 코어의 칩 모양을 그대로 쓰고(마크업에서
+   ctab-add 를 함께 단다), 동작이 추가가 아니라 되돌리기이므로 색만 다르게 둔다. */
+.dtab-back {
+  width: auto;
+  padding: 0 10px;
+  font-size: var(--fs-2xs);
+  letter-spacing: var(--ls);
+  color: #9fd0e8;
+  border-color: #24435a;
+}
+.dtab-back:hover {
+  color: #d6ecf8;
+  border-color: #3a6b8c;
+  background: #12293a;
+}

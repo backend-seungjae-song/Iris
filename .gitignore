@@ -1,0 +1,26 @@
+node_modules/
+snapshots/
+server.log
+.DS_Store
+*.tgz
+*.bak-*
+.working/
+web/vendor/*
+!web/vendor/docx-editor-core.esm.js
+!web/vendor/docx-editor-core.css
+!web/vendor/docx-editor-core.NOTICE.md
+!web/vendor/docx-editor-core.meta.json
+!web/vendor/*.wasm
+app.log
+dist/
+assets/icon.iconset/
+# 작업 문서는 개인 맥락(계정·프로필·회사·경로)이 섞여 있어 원격에 올리지 않는다. 로컬에만 둔다.
+Task.md
+req/
+deep/
+validate/
+spec/
+routing/
+design/
+# 공개 위생 검사의 아는 낱말 목록. 찾는 낱말을 그대로 담고 있어 git 밖에 둔다.
+scripts/private-traces.local.mjs

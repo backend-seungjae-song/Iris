@@ -1,0 +1,97 @@
+/* 표를 고칠 때: 툴바·메뉴·a11y 토글*/
+/* 이 이름을 만드는 곳: sheet/render.js · docx/editor.js · main.js*/
+/* ── 표를 고칠 때 ───────────────────────────────────────────────────────────
+ 구글 시트를 그대로 옮긴다. 위에서부터 메뉴 → 도구 → 수식 입력줄 → 격자 → 시트 탭.
+ 이 띠들도 표와 같은 흰 배경 위에 둔다. 위가 어둡고 아래가 흰 화면은 표가 문서의 일부가
+ 아니라 앱에 끼워 넣은 그림처럼 보인다.*/
+/* 구글 시트에서 잰 값 그대로 (실행 중인 시트의 computed style):
+ 본문 #fff · Roboto,RobotoDraft,Helvetica,Arial · 13px · #1f1f1f
+ 메뉴 바 33px · 글자 14px · 항목 padding 2px 7px · radius 4px
+ 도구 모음 40px · 배경 #f0f4f9 · radius 24px · margin 6px 16px 8px · padding 0 8px
+ 수식 입력줄 글자 12px · 이름칸 폭 60px · 13px
+ 격자 배경 #f8fafd · 시트 탭 바 39px · 활성 탭 #dde3ea / #1f2020 / 13px / 500*/
+/* 자간은 여기서 되돌린다. 앱 body 가 본문에 적용한 자간이 상속되면 측정해 옮긴 글자 폭이 어긋난다.*/
+.gs { display:flex; flex-direction:column; flex:1; min-height:0; background:#fff; color:#1f1f1f;
+  font-family:Roboto, RobotoDraft, Helvetica, Arial, sans-serif; font-size:13px; letter-spacing:normal; }
+.gs-menu { flex:none; display:flex; align-items:center; height:33px; padding:0 12px; background:#fff; }
+.gs-menu button { border:none; background:none; color:#1f1f1f; font:inherit; font-size:14px;
+  padding:2px 7px; border-radius:4px; cursor:pointer; }
+.gs-menu button:hover { background:#e8eaed; }
+.gs-tb { flex:none; display:flex; align-items:center; gap:1px; height:40px; margin:6px 16px 8px;
+  padding:0 8px; background:#f0f4f9; overflow-x:auto; } /* 상단 도구 바 자체의 라운드는 제거,
+ 버튼 각각의 라운드(.gs-tb button)는 유지한다.*/
+.gs-tb button { border:none; background:none; color:#1f1f1f; font:inherit; font-size:13px;
+  min-width:28px; height:28px; padding:0 6px; border-radius:14px; cursor:pointer; line-height:1; flex:none; }
+.gs-tb button:hover:not(:disabled) { background:#dde3ea; }
+.gs-tb button:disabled { color:#bdc1c6; cursor:default; }
+.gs-tb button.on { background:#d3e3fd; color:#0b57d0; }
+.gs-tb .gs-sep { width:1px; height:20px; background:#c7c7c7; margin:0 6px; flex:none; }
+.gs-tb select { font:inherit; font-size:13px; height:28px; border:none; background:none; color:#1f1f1f;
+  border-radius:14px; cursor:pointer; padding:0 6px; flex:none; }
+.gs-tb select:hover { background:#dde3ea; }
+/* rtl-sheet(시트 전체 방향)·hide-menu·a11y(고대비) 툴바 토글, filter-view 강조. 감사*/
+.gs.gs-rtl .sv-p, .gs.gs-rtl .gs-fx { direction:rtl; }
+.gs.gs-hide-menu .gs-menu { display:none; }
+.gs.gs-a11y .sv-c { border-color:#000; }
+.gs.gs-a11y .sv-rh, .gs.gs-a11y .sv-ch { border-color:#000; font-weight:700; }
+.sv-filter-dim .sv-c { opacity:.32; }
+.sv-filter-hit .sv-c { background-color:#fff8c4; }
+.gs.gs-no-grid .sv-c { border-color:transparent; }
+.sv-t td.sv-note { position:relative; }
+.sv-t td.sv-note::before { content:""; position:absolute; top:0; right:0; border-width:0 6px 6px 0;
+  border-style:solid; border-color:transparent #d93025 transparent transparent; }
+.gd-menu { flex:none; display:flex; align-items:center; height:33px; padding:0 12px; background:#fff;
+  color:#1f1f1f; font-family:Roboto, RobotoDraft, Helvetica, Arial, sans-serif; font-size:14px; letter-spacing:normal; }
+.gd-menu button { border:none; background:none; color:#1f1f1f; font:inherit; font-size:14px;
+  padding:2px 7px; border-radius:4px; cursor:pointer; }
+.gd-menu button:hover:not(:disabled):not([aria-disabled="true"]) { background:#e8eaed; }
+.gd-menu button:disabled, .gd-menu button[aria-disabled="true"] { color:#bdc1c6; cursor:default;
+  pointer-events:none; background:none; }
+.gd-menu button:focus-visible, .gd-tb button:focus-visible { outline:2px solid #0b57d0; outline-offset:1px; }
+.gd-tb { flex:none; display:flex; align-items:center; gap:1px; height:40px; margin:6px 16px 8px;
+  padding:0 8px; background:#f0f4f9; color:#1f1f1f; overflow-x:auto;
+  font-family:Roboto, RobotoDraft, Helvetica, Arial, sans-serif; font-size:13px; letter-spacing:normal; } /* 상단 도구
+ 바 자체의 라운드는 제거, 버튼 각각의 라운드(.gd-tb button)는 유지한다.*/
+.gd-tb button { border:none; background:none; color:#1f1f1f; font:inherit; font-size:13px;
+  min-width:28px; height:28px; padding:0 6px; border-radius:14px; cursor:pointer; line-height:1; flex:none; }
+.gd-tb button:hover:not(:disabled):not([aria-disabled="true"]) { background:#dde3ea; }
+.gd-tb button:disabled, .gd-tb button[aria-disabled="true"] { color:#bdc1c6; cursor:default;
+  pointer-events:none; background:none; }
+.gd-tb .gd-sep { width:1px; height:20px; background:#c7c7c7; margin:0 6px; flex:none; }
+.docx-editor-shell { display:flex; flex:1; min-height:0; flex-direction:column; background:#f8f9fa;
+  color:#1f1f1f; font-family:Roboto, RobotoDraft, Helvetica, Arial, sans-serif; letter-spacing:normal;
+  /* browserview 의 padding 처럼 앱 배경과의 틈을 둬 경계를 만든다. 확인 결과:
+ docx 뷰어가 fileview 가장자리까지 채워져 좌우 경계가 없었다. radius는 넣지
+ 않는다(버튼 외에는 라운드 없음).*/
+  margin:8px; border:1px solid #dadce0; }
+.docx-editor-shell .gd-menu { border-bottom:1px solid #e3e3e3; }
+.docx-editor-shell .gd-tb { margin-bottom:6px; }
+.gd-tb .docx-group { display:flex; align-items:center; gap:1px; flex:none; }
+.gd-tb .docx-group + .docx-group::before { content:""; width:1px; height:20px; margin:0 6px;
+  background:#c7c7c7; }
+.gd-tb button.on, .gd-tb button[aria-pressed="true"] { background:#d3e3fd; color:#0b57d0; }
+.gd-tb button.docx-dropdown { min-width:54px; justify-content:center; gap:5px; }
+.gd-tb button, .docx-inline-bar button { display:inline-flex; align-items:center; justify-content:center; }
+.docx-control-icon { width:17px; height:17px; fill:currentColor; flex:none; }
+.docx-control-label { max-width:112px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.docx-swatch { width:12px; height:3px; border:1px solid rgba(0,0,0,.2); border-radius:2px; }
+.docx-inline-bar { flex:none; display:flex; align-items:center; gap:5px; min-height:34px; padding:4px 12px;
+  border-bottom:1px solid #e3e3e3; background:#fff; color:#1f1f1f; }
+.docx-inline-bar[hidden] { display:none; }
+.docx-inline-bar input[type="text"] { min-width:0; width:min(220px,28vw); height:26px; box-sizing:border-box;
+  padding:3px 8px; border:1px solid #dadce0; border-radius:5px; background:#fff; color:#1f1f1f; font:inherit; }
+.docx-inline-bar label { display:flex; align-items:center; gap:3px; font-size:12px; white-space:nowrap; }
+.docx-inline-bar button { min-height:26px; padding:3px 9px; border:0; border-radius:5px; background:none;
+  color:#5f6368; font:inherit; font-size:12px; cursor:pointer; }
+.docx-inline-bar button:hover { background:#e8eaed; color:#1f1f1f; }
+.docx-find-status { min-width:54px; color:#5f6368; font-size:11.5px; font-variant-numeric:tabular-nums; }
+.docx-mode-switch { margin-left:auto; display:flex; gap:2px; }
+.docx-mode-switch button.on { background:#d3e3fd; color:#0b57d0; }
+
+/* 픽 모드에서 이 문서 화면이 어떻게 보이는가. 이름이 이 기능의 것이라 규칙도 여기 둔다.
+ 앱 셸은 body 에 .picking-tabs 만 달고, 무엇이 어떻게 보일지는 각 화면이 정한다.*/
+/* 엔진이 .docx-pages에 caret-color 등 인라인/자체 스타일을 걸어두므로 커서 규칙은 이겨야 해서
+ 명시도를 높여 둔다(내부 요소를 눌러도 여전히 crosshair로 보이게).*/
+.picking-tabs .docx-editor-shell, .picking-tabs .docx-editor-shell * { cursor:crosshair !important; }
+/* 호버 미리보기 색은 탭·그룹·북마크 픽 하이라이트와 같은 --pick-ring.*/
+.picking-tabs .docx-editor-shell .pick-hover { outline:2px solid var(--pick-ring); outline-offset:-1px; background:color-mix(in srgb, var(--pick-ring) 14%, transparent); }

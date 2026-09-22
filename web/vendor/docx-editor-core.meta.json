@@ -1,0 +1,1601 @@
+{
+  "inputs": {
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/util.js": {
+      "bytes": 1644,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/validator.js": {
+      "bytes": 14483,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/util.js",
+          "kind": "import-statement",
+          "original": "./util.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/entities.js": {
+      "bytes": 18791,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/EntityDecoder.js": {
+      "bytes": 25816,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/entities.js",
+          "kind": "import-statement",
+          "original": "./entities.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/all-entities.js": {
+      "bytes": 1497,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/entities.js",
+          "kind": "import-statement",
+          "original": "./entities.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/entityTries.js": {
+      "bytes": 2359,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/EntityEncoder.js": {
+      "bytes": 8479,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/entityTries.js",
+          "kind": "import-statement",
+          "original": "./entityTries.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/index.js": {
+      "bytes": 515,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/EntityDecoder.js",
+          "kind": "import-statement",
+          "original": "./EntityDecoder.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/entities.js",
+          "kind": "import-statement",
+          "original": "./entities.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/all-entities.js",
+          "kind": "import-statement",
+          "original": "./all-entities.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/EntityEncoder.js",
+          "kind": "import-statement",
+          "original": "./EntityEncoder.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js": {
+      "bytes": 5422,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/util.js",
+          "kind": "import-statement",
+          "original": "../util.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/index.js",
+          "kind": "import-statement",
+          "original": "@nodable/entities"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/xmlNode.js": {
+      "bytes": 1304,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/xml-naming@0.3.0/node_modules/xml-naming/src/index.js": {
+      "bytes": 15370,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js": {
+      "bytes": 14832,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/xml-naming@0.3.0/node_modules/xml-naming/src/index.js",
+          "kind": "import-statement",
+          "original": "xml-naming"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/digitTable.js": {
+      "bytes": 5126,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/anynum.js": {
+      "bytes": 4309,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/digitTable.js",
+          "kind": "import-statement",
+          "original": "./digitTable.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/strnum@2.4.1/node_modules/strnum/strnum.js": {
+      "bytes": 6615,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/anynum.js",
+          "kind": "import-statement",
+          "original": "anynum"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/ignoreAttributes.js": {
+      "bytes": 586,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/Expression.js": {
+      "bytes": 6795,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/ExpressionSet.js": {
+      "bytes": 7310,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/Matcher.js": {
+      "bytes": 18459,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/ExpressionSet.js",
+          "kind": "import-statement",
+          "original": "./ExpressionSet.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/index.js": {
+      "bytes": 919,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/Expression.js",
+          "kind": "import-statement",
+          "original": "./Expression.js"
+        },
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/Matcher.js",
+          "kind": "import-statement",
+          "original": "./Matcher.js"
+        },
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/Matcher.js",
+          "kind": "import-statement",
+          "original": "./Matcher.js"
+        },
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/ExpressionSet.js",
+          "kind": "import-statement",
+          "original": "./ExpressionSet.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/html.js": {
+      "bytes": 3327,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/xml.js": {
+      "bytes": 2486,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/svg.js": {
+      "bytes": 3053,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql.js": {
+      "bytes": 3063,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/shell.js": {
+      "bytes": 2981,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/redos.js": {
+      "bytes": 2262,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/nosql.js": {
+      "bytes": 4255,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/log.js": {
+      "bytes": 4234,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql-strict.js": {
+      "bytes": 1742,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql.js",
+          "kind": "import-statement",
+          "original": "./sql.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/index.js": {
+      "bytes": 8730,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/html.js",
+          "kind": "import-statement",
+          "original": "./contexts/html.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/xml.js",
+          "kind": "import-statement",
+          "original": "./contexts/xml.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/svg.js",
+          "kind": "import-statement",
+          "original": "./contexts/svg.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql.js",
+          "kind": "import-statement",
+          "original": "./contexts/sql.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/shell.js",
+          "kind": "import-statement",
+          "original": "./contexts/shell.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/redos.js",
+          "kind": "import-statement",
+          "original": "./contexts/redos.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/nosql.js",
+          "kind": "import-statement",
+          "original": "./contexts/nosql.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/log.js",
+          "kind": "import-statement",
+          "original": "./contexts/log.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql-strict.js",
+          "kind": "import-statement",
+          "original": "./contexts/sql-strict.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/html.js",
+          "kind": "import-statement",
+          "original": "./contexts/html.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/xml.js",
+          "kind": "import-statement",
+          "original": "./contexts/xml.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/svg.js",
+          "kind": "import-statement",
+          "original": "./contexts/svg.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql.js",
+          "kind": "import-statement",
+          "original": "./contexts/sql.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/shell.js",
+          "kind": "import-statement",
+          "original": "./contexts/shell.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/redos.js",
+          "kind": "import-statement",
+          "original": "./contexts/redos.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/nosql.js",
+          "kind": "import-statement",
+          "original": "./contexts/nosql.js"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/log.js",
+          "kind": "import-statement",
+          "original": "./contexts/log.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js": {
+      "bytes": 30128,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/util.js",
+          "kind": "import-statement",
+          "original": "../util.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/xmlNode.js",
+          "kind": "import-statement",
+          "original": "./xmlNode.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js",
+          "kind": "import-statement",
+          "original": "./DocTypeReader.js"
+        },
+        {
+          "path": "node_modules/.pnpm/strnum@2.4.1/node_modules/strnum/strnum.js",
+          "kind": "import-statement",
+          "original": "strnum"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/ignoreAttributes.js",
+          "kind": "import-statement",
+          "original": "../ignoreAttributes.js"
+        },
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/index.js",
+          "kind": "import-statement",
+          "original": "path-expression-matcher"
+        },
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/index.js",
+          "kind": "import-statement",
+          "original": "path-expression-matcher"
+        },
+        {
+          "path": "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/index.js",
+          "kind": "import-statement",
+          "original": "@nodable/entities"
+        },
+        {
+          "path": "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/index.js",
+          "kind": "import-statement",
+          "original": "is-unsafe"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/node2json.js": {
+      "bytes": 5647,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/xmlNode.js",
+          "kind": "import-statement",
+          "original": "./xmlNode.js"
+        },
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/index.js",
+          "kind": "import-statement",
+          "original": "path-expression-matcher"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/XMLParser.js": {
+      "bytes": 2688,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js",
+          "kind": "import-statement",
+          "original": "./OptionsBuilder.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js",
+          "kind": "import-statement",
+          "original": "./OrderedObjParser.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/node2json.js",
+          "kind": "import-statement",
+          "original": "./node2json.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/validator.js",
+          "kind": "import-statement",
+          "original": "../validator.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/xmlNode.js",
+          "kind": "import-statement",
+          "original": "./xmlNode.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/util.js": {
+      "bytes": 504,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/orderedJs2Xml.js": {
+      "bytes": 13539,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/index.js",
+          "kind": "import-statement",
+          "original": "path-expression-matcher"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/util.js",
+          "kind": "import-statement",
+          "original": "./util.js"
+        },
+        {
+          "path": "node_modules/.pnpm/xml-naming@0.3.0/node_modules/xml-naming/src/index.js",
+          "kind": "import-statement",
+          "original": "xml-naming"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/ignoreAttributes.js": {
+      "bytes": 586,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/fxb.js": {
+      "bytes": 23096,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/orderedJs2Xml.js",
+          "kind": "import-statement",
+          "original": "./orderedJs2Xml.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/ignoreAttributes.js",
+          "kind": "import-statement",
+          "original": "./ignoreAttributes.js"
+        },
+        {
+          "path": "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/index.js",
+          "kind": "import-statement",
+          "original": "path-expression-matcher"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/util.js",
+          "kind": "import-statement",
+          "original": "./util.js"
+        },
+        {
+          "path": "node_modules/.pnpm/xml-naming@0.3.0/node_modules/xml-naming/src/index.js",
+          "kind": "import-statement",
+          "original": "xml-naming"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlbuilder/json2xml.js": {
+      "bytes": 228,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/fxb.js",
+          "kind": "import-statement",
+          "original": "fast-xml-builder"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-builder@1.3.0/node_modules/fast-xml-builder/src/fxb.js",
+          "kind": "import-statement",
+          "original": "fast-xml-builder"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/fxp.js": {
+      "bytes": 259,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/validator.js",
+          "kind": "import-statement",
+          "original": "./validator.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/XMLParser.js",
+          "kind": "import-statement",
+          "original": "./xmlparser/XMLParser.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlbuilder/json2xml.js",
+          "kind": "import-statement",
+          "original": "./xmlbuilder/json2xml.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/browser.js": {
+      "bytes": 90922,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js": {
+      "bytes": 513630,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/fxp.js",
+          "kind": "import-statement",
+          "original": "fast-xml-parser"
+        },
+        {
+          "path": "node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/browser.js",
+          "kind": "import-statement",
+          "original": "fflate"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-33F6TRXO.js": {
+      "bytes": 35310,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js",
+          "kind": "import-statement",
+          "original": "./chunk-TCX3PVWR.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/browser.js",
+          "kind": "import-statement",
+          "original": "fflate"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/harfbuzzjs@1.4.0/node_modules/harfbuzzjs/dist/harfbuzz.js": {
+      "bytes": 26687,
+      "imports": [
+        {
+          "path": "module",
+          "kind": "dynamic-import",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/harfbuzzjs@1.4.0/node_modules/harfbuzzjs/dist/index.mjs": {
+      "bytes": 57714,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/harfbuzzjs@1.4.0/node_modules/harfbuzzjs/dist/harfbuzz.js",
+          "kind": "import-statement",
+          "original": "./harfbuzz.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-SG7OH2EK.js": {
+      "bytes": 298534,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-33F6TRXO.js",
+          "kind": "import-statement",
+          "original": "./chunk-33F6TRXO.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js",
+          "kind": "import-statement",
+          "original": "./chunk-TCX3PVWR.js"
+        },
+        {
+          "path": "node_modules/.pnpm/harfbuzzjs@1.4.0/node_modules/harfbuzzjs/dist/index.mjs",
+          "kind": "dynamic-import",
+          "original": "harfbuzzjs"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-F6WNPYOM.js": {
+      "bytes": 47263,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-SG7OH2EK.js",
+          "kind": "import-statement",
+          "original": "./chunk-SG7OH2EK.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-ZACHY6OS.js": {
+      "bytes": 75588,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js",
+          "kind": "import-statement",
+          "original": "./chunk-TCX3PVWR.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-4WWEDTTE.js": {
+      "bytes": 2511,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/orderedmap@2.1.1/node_modules/orderedmap/dist/index.js": {
+      "bytes": 4433,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/prosemirror-model@1.25.11/node_modules/prosemirror-model/dist/index.js": {
+      "bytes": 124915,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/orderedmap@2.1.1/node_modules/orderedmap/dist/index.js",
+          "kind": "import-statement",
+          "original": "orderedmap"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/prosemirror-transform@1.12.0/node_modules/prosemirror-transform/dist/index.js": {
+      "bytes": 84414,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/prosemirror-model@1.25.11/node_modules/prosemirror-model/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-model"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/prosemirror-state@1.4.4/node_modules/prosemirror-state/dist/index.js": {
+      "bytes": 36285,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/prosemirror-model@1.25.11/node_modules/prosemirror-model/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-model"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-transform@1.12.0/node_modules/prosemirror-transform/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-transform"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/prosemirror-view@1.42.2/node_modules/prosemirror-view/dist/index.js": {
+      "bytes": 247836,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/prosemirror-state@1.4.4/node_modules/prosemirror-state/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-state"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-model@1.25.11/node_modules/prosemirror-model/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-model"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-transform@1.12.0/node_modules/prosemirror-transform/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-transform"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/w3c-keyname@2.2.8/node_modules/w3c-keyname/index.js": {
+      "bytes": 2630,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/prosemirror-keymap@1.2.3/node_modules/prosemirror-keymap/dist/index.js": {
+      "bytes": 4909,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/w3c-keyname@2.2.8/node_modules/w3c-keyname/index.js",
+          "kind": "import-statement",
+          "original": "w3c-keyname"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-state@1.4.4/node_modules/prosemirror-state/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-state"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/prosemirror-commands@1.7.2/node_modules/prosemirror-commands/dist/index.js": {
+      "bytes": 34656,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/prosemirror-transform@1.12.0/node_modules/prosemirror-transform/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-transform"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-model@1.25.11/node_modules/prosemirror-model/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-model"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-state@1.4.4/node_modules/prosemirror-state/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-state"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-LIJPSHRA.js": {
+      "bytes": 36840,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-4WWEDTTE.js",
+          "kind": "import-statement",
+          "original": "./chunk-4WWEDTTE.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-33F6TRXO.js",
+          "kind": "import-statement",
+          "original": "./chunk-33F6TRXO.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js",
+          "kind": "import-statement",
+          "original": "./chunk-TCX3PVWR.js"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-model@1.25.11/node_modules/prosemirror-model/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-model"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-state@1.4.4/node_modules/prosemirror-state/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-state"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-view@1.42.2/node_modules/prosemirror-view/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-view"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-keymap@1.2.3/node_modules/prosemirror-keymap/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-keymap"
+        },
+        {
+          "path": "node_modules/.pnpm/prosemirror-commands@1.7.2/node_modules/prosemirror-commands/dist/index.js",
+          "kind": "import-statement",
+          "original": "prosemirror-commands"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GOEBQ26R.js": {
+      "bytes": 202,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GQQOL4PV.js": {
+      "bytes": 531,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+i18n@2.4.1/node_modules/@docx-editor.dev/i18n/dist/index.mjs": {
+      "bytes": 222265,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/emf-converter@2.0.2/node_modules/emf-converter/dist/index.mjs": {
+      "bytes": 162347,
+      "imports": [],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js": {
+      "bytes": 2444,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/trees.js": {
+      "bytes": 39879,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "../utils/common"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/adler32.js": {
+      "bytes": 1656,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/crc32.js": {
+      "bytes": 1750,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/messages.js": {
+      "bytes": 1538,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/deflate.js": {
+      "bytes": 61184,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "../utils/common"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/trees.js",
+          "kind": "require-call",
+          "original": "./trees"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/adler32.js",
+          "kind": "require-call",
+          "original": "./adler32"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/crc32.js",
+          "kind": "require-call",
+          "original": "./crc32"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/messages.js",
+          "kind": "require-call",
+          "original": "./messages"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/strings.js": {
+      "bytes": 5293,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "./common"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/zstream.js": {
+      "bytes": 1811,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/deflate.js": {
+      "bytes": 11074,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/deflate.js",
+          "kind": "require-call",
+          "original": "./zlib/deflate"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "./utils/common"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/strings.js",
+          "kind": "require-call",
+          "original": "./utils/strings"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/messages.js",
+          "kind": "require-call",
+          "original": "./zlib/messages"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/zstream.js",
+          "kind": "require-call",
+          "original": "./zlib/zstream"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inffast.js": {
+      "bytes": 12668,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inftrees.js": {
+      "bytes": 12500,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "../utils/common"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inflate.js": {
+      "bytes": 50284,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "../utils/common"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/adler32.js",
+          "kind": "require-call",
+          "original": "./adler32"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/crc32.js",
+          "kind": "require-call",
+          "original": "./crc32"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inffast.js",
+          "kind": "require-call",
+          "original": "./inffast"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inftrees.js",
+          "kind": "require-call",
+          "original": "./inftrees"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/constants.js": {
+      "bytes": 2312,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/gzheader.js": {
+      "bytes": 2240,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/inflate.js": {
+      "bytes": 12412,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inflate.js",
+          "kind": "require-call",
+          "original": "./zlib/inflate"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "./utils/common"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/strings.js",
+          "kind": "require-call",
+          "original": "./utils/strings"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/constants.js",
+          "kind": "require-call",
+          "original": "./zlib/constants"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/messages.js",
+          "kind": "require-call",
+          "original": "./zlib/messages"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/zstream.js",
+          "kind": "require-call",
+          "original": "./zlib/zstream"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/gzheader.js",
+          "kind": "require-call",
+          "original": "./zlib/gzheader"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/pako@1.0.11/node_modules/pako/index.js": {
+      "bytes": 347,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js",
+          "kind": "require-call",
+          "original": "./lib/utils/common"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/deflate.js",
+          "kind": "require-call",
+          "original": "./lib/deflate"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/inflate.js",
+          "kind": "require-call",
+          "original": "./lib/inflate"
+        },
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/constants.js",
+          "kind": "require-call",
+          "original": "./lib/zlib/constants"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/utif2@4.1.0/node_modules/utif2/UTIF.js": {
+      "bytes": 95737,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/pako@1.0.11/node_modules/pako/index.js",
+          "kind": "require-call",
+          "original": "pako"
+        },
+        {
+          "path": "<runtime>",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-FL4GWK76.js": {
+      "bytes": 315194,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-F6WNPYOM.js",
+          "kind": "import-statement",
+          "original": "./chunk-F6WNPYOM.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-SG7OH2EK.js",
+          "kind": "import-statement",
+          "original": "./chunk-SG7OH2EK.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-ZACHY6OS.js",
+          "kind": "import-statement",
+          "original": "./chunk-ZACHY6OS.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-LIJPSHRA.js",
+          "kind": "import-statement",
+          "original": "./chunk-LIJPSHRA.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-4WWEDTTE.js",
+          "kind": "import-statement",
+          "original": "./chunk-4WWEDTTE.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-33F6TRXO.js",
+          "kind": "import-statement",
+          "original": "./chunk-33F6TRXO.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js",
+          "kind": "import-statement",
+          "original": "./chunk-TCX3PVWR.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GOEBQ26R.js",
+          "kind": "import-statement",
+          "original": "./chunk-GOEBQ26R.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GQQOL4PV.js",
+          "kind": "import-statement",
+          "original": "./chunk-GQQOL4PV.js"
+        },
+        {
+          "path": "node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/browser.js",
+          "kind": "import-statement",
+          "original": "fflate"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+i18n@2.4.1/node_modules/@docx-editor.dev/i18n/dist/index.mjs",
+          "kind": "import-statement",
+          "original": "@docx-editor.dev/i18n"
+        },
+        {
+          "path": "node_modules/.pnpm/emf-converter@2.0.2/node_modules/emf-converter/dist/index.mjs",
+          "kind": "dynamic-import",
+          "original": "emf-converter"
+        },
+        {
+          "path": "node_modules/.pnpm/utif2@4.1.0/node_modules/utif2/UTIF.js",
+          "kind": "dynamic-import",
+          "original": "utif2"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/editor.js": {
+      "bytes": 3271,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-FL4GWK76.js",
+          "kind": "import-statement",
+          "original": "./chunk-FL4GWK76.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-F6WNPYOM.js",
+          "kind": "import-statement",
+          "original": "./chunk-F6WNPYOM.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-SG7OH2EK.js",
+          "kind": "import-statement",
+          "original": "./chunk-SG7OH2EK.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-ZACHY6OS.js",
+          "kind": "import-statement",
+          "original": "./chunk-ZACHY6OS.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-LIJPSHRA.js",
+          "kind": "import-statement",
+          "original": "./chunk-LIJPSHRA.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-4WWEDTTE.js",
+          "kind": "import-statement",
+          "original": "./chunk-4WWEDTTE.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-33F6TRXO.js",
+          "kind": "import-statement",
+          "original": "./chunk-33F6TRXO.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js",
+          "kind": "import-statement",
+          "original": "./chunk-TCX3PVWR.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GOEBQ26R.js",
+          "kind": "import-statement",
+          "original": "./chunk-GOEBQ26R.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GQQOL4PV.js",
+          "kind": "import-statement",
+          "original": "./chunk-GQQOL4PV.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/index.js": {
+      "bytes": 580,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-FL4GWK76.js",
+          "kind": "import-statement",
+          "original": "./chunk-FL4GWK76.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-F6WNPYOM.js",
+          "kind": "import-statement",
+          "original": "./chunk-F6WNPYOM.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-SG7OH2EK.js",
+          "kind": "import-statement",
+          "original": "./chunk-SG7OH2EK.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-ZACHY6OS.js",
+          "kind": "import-statement",
+          "original": "./chunk-ZACHY6OS.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-LIJPSHRA.js",
+          "kind": "import-statement",
+          "original": "./chunk-LIJPSHRA.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-4WWEDTTE.js",
+          "kind": "import-statement",
+          "original": "./chunk-4WWEDTTE.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-33F6TRXO.js",
+          "kind": "import-statement",
+          "original": "./chunk-33F6TRXO.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js",
+          "kind": "import-statement",
+          "original": "./chunk-TCX3PVWR.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GOEBQ26R.js",
+          "kind": "import-statement",
+          "original": "./chunk-GOEBQ26R.js"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GQQOL4PV.js",
+          "kind": "import-statement",
+          "original": "./chunk-GQQOL4PV.js"
+        }
+      ],
+      "format": "esm"
+    },
+    "scripts/docx-editor-core.entry.js": {
+      "bytes": 85,
+      "imports": [
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/editor.js",
+          "kind": "import-statement",
+          "original": "@docx-editor.dev/core/editor"
+        },
+        {
+          "path": "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/index.js",
+          "kind": "import-statement",
+          "original": "@docx-editor.dev/core"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "web/vendor/docx-editor-core.esm.js": {
+      "imports": [
+        {
+          "path": "module",
+          "kind": "dynamic-import",
+          "external": true
+        }
+      ],
+      "exports": [
+        "AUTO_ZOOM_MODE",
+        "BROWSER_AUTOMATION_CAPABILITIES",
+        "CHROME_GROUPS",
+        "CHROME_MENUS",
+        "CHROME_UNAVAILABLE_KEY",
+        "DEFAULT_IMAGE_RESOURCE_LIMITS",
+        "DEFAULT_TABLE_CHROME_DRAFT",
+        "DRAWING_REL_FROM_H",
+        "DRAWING_REL_FROM_V",
+        "EMU_PER_POINT",
+        "FIT_WIDTH_ZOOM_MODE",
+        "IMAGE_OVERLAY_NUDGE_PT",
+        "IMAGE_OVERLAY_NUDGE_SHIFT_PT",
+        "IMAGE_WRAP_TARGETS",
+        "MAX_RESOLVER_FAMILIES",
+        "PX_PER_CM",
+        "PX_PER_INCH",
+        "SNAP_TWIPS_CM",
+        "SNAP_TWIPS_INCH",
+        "TABLE_BORDER_STYLE_OPTIONS",
+        "TABLE_BORDER_TARGET_OPTIONS",
+        "TABLE_BORDER_WIDTH_OPTIONS",
+        "TABLE_CHROME_SLOT_IDS",
+        "TWIPS_PER_CM",
+        "TWIPS_PER_INCH",
+        "WORD_DEFAULT_FONT",
+        "ZOOM_MAX",
+        "ZOOM_MIN",
+        "applyTableChromePick",
+        "applyThemeShade",
+        "applyThemeTint",
+        "blankDocumentBytes",
+        "canExecuteImageCommand",
+        "captureImageMutationPreconditions",
+        "chromeControlCount",
+        "chromeMenuSlots",
+        "chromeProbeForSlot",
+        "chromeSlotId",
+        "commandForSlot",
+        "commandForSlotValue",
+        "commandForTableChromeSlotValue",
+        "composeFontConfiguration",
+        "computeImageResizeResult",
+        "computeMovedImagePosition",
+        "computeResizedImageExtentEmu",
+        "createBrowserAutomationHost",
+        "createDocxEditor",
+        "createFontSource",
+        "createImageOverlayScrollPort",
+        "createLayoutShaping",
+        "cropPercentFromCropPermille",
+        "cropPercentFromPermille",
+        "cropPercentFromSourceCrop",
+        "cropPermilleFromCropPercent",
+        "cropPermilleFromPercent",
+        "cssPixelsToLayoutPoints",
+        "defaultChromeGroups",
+        "defaultTableLabel",
+        "disposeLayoutShaping",
+        "dragIndent",
+        "emuToOverlayPoints",
+        "executeImageCommand",
+        "finalizeImageOverlayInteraction",
+        "formattingBarChromeGroups",
+        "generateRulerTicks",
+        "handlePosition",
+        "isStaleImageInteractionCommit",
+        "isTableChromeSlot",
+        "layoutPointsToCssPixels",
+        "loadFonts",
+        "lowerColorValueForBorder",
+        "lowerColorValueForFill",
+        "mountPaginatedSurface",
+        "overlayFrameToSheetCssPixels",
+        "pointsToEmu",
+        "positionInputFromPropertiesCommand",
+        "probeTableChromeCommand",
+        "propertiesCommandHasPositionFields",
+        "resizePreservesAspect",
+        "resolveColorValueToCss",
+        "resolveEditorModules",
+        "resolveImageResourceLimits",
+        "resolveSvgIntrinsicSize",
+        "resolveThemeColorHex",
+        "resolveZoomMode",
+        "rulerPageBox",
+        "runSave",
+        "runTableChromeCommand",
+        "runTableCommand",
+        "runToolbarCommand",
+        "sameZoomMode",
+        "selectedDrawingOverlayTargetOf",
+        "selectedImageStateOf",
+        "snapTwips",
+        "sniffImageMime",
+        "sourceCropFromCropPercent",
+        "surfaceExtent",
+        "surfacePaintScale",
+        "tableChromeIconPaths",
+        "tableChromeLabelKeyForTarget",
+        "tableChromeToolbarState",
+        "tableChromeVisible",
+        "tableCommandState",
+        "tableCommandToolbarState",
+        "toEditorFontError",
+        "toolbarCommandState",
+        "toolbarCommandStates",
+        "validateDrawingPositionInput",
+        "validateImageCropPercent",
+        "validateRasterHeader",
+        "validateSetImagePositionCommand",
+        "validateThemeModifier"
+      ],
+      "entryPoint": "scripts/docx-editor-core.entry.js",
+      "inputs": {
+        "node_modules/.pnpm/harfbuzzjs@1.4.0/node_modules/harfbuzzjs/dist/harfbuzz.js": {
+          "bytesInOutput": 13629
+        },
+        "node_modules/.pnpm/harfbuzzjs@1.4.0/node_modules/harfbuzzjs/dist/index.mjs": {
+          "bytesInOutput": 19833
+        },
+        "node_modules/.pnpm/emf-converter@2.0.2/node_modules/emf-converter/dist/index.mjs": {
+          "bytesInOutput": 70070
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/common.js": {
+          "bytesInOutput": 1112
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/trees.js": {
+          "bytesInOutput": 6925
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/adler32.js": {
+          "bytesInOutput": 211
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/crc32.js": {
+          "bytesInOutput": 279
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/messages.js": {
+          "bytesInOutput": 220
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/deflate.js": {
+          "bytesInOutput": 14747
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/utils/strings.js": {
+          "bytesInOutput": 1741
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/zstream.js": {
+          "bytesInOutput": 254
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/deflate.js": {
+          "bytesInOutput": 2264
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inffast.js": {
+          "bytesInOutput": 1862
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inftrees.js": {
+          "bytesInOutput": 1678
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/inflate.js": {
+          "bytesInOutput": 11670
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/constants.js": {
+          "bytesInOutput": 431
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/zlib/gzheader.js": {
+          "bytesInOutput": 201
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/lib/inflate.js": {
+          "bytesInOutput": 2756
+        },
+        "node_modules/.pnpm/pako@1.0.11/node_modules/pako/index.js": {
+          "bytesInOutput": 123
+        },
+        "node_modules/.pnpm/utif2@4.1.0/node_modules/utif2/UTIF.js": {
+          "bytesInOutput": 62443
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/util.js": {
+          "bytesInOutput": 727
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/validator.js": {
+          "bytesInOutput": 4875
+        },
+        "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/entities.js": {
+          "bytesInOutput": 535
+        },
+        "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/EntityDecoder.js": {
+          "bytesInOutput": 5312
+        },
+        "node_modules/.pnpm/@nodable+entities@3.0.0/node_modules/@nodable/entities/src/index.js": {
+          "bytesInOutput": 0
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js": {
+          "bytesInOutput": 2413
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/xmlNode.js": {
+          "bytesInOutput": 537
+        },
+        "node_modules/.pnpm/xml-naming@0.3.0/node_modules/xml-naming/src/index.js": {
+          "bytesInOutput": 893
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js": {
+          "bytesInOutput": 5075
+        },
+        "node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/digitTable.js": {
+          "bytesInOutput": 515
+        },
+        "node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/anynum.js": {
+          "bytesInOutput": 973
+        },
+        "node_modules/.pnpm/strnum@2.4.1/node_modules/strnum/strnum.js": {
+          "bytesInOutput": 2036
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/ignoreAttributes.js": {
+          "bytesInOutput": 159
+        },
+        "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/Expression.js": {
+          "bytesInOutput": 1741
+        },
+        "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/ExpressionSet.js": {
+          "bytesInOutput": 1674
+        },
+        "node_modules/.pnpm/path-expression-matcher@1.6.2/node_modules/path-expression-matcher/src/Matcher.js": {
+          "bytesInOutput": 5147
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/html.js": {
+          "bytesInOutput": 2306
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/index.js": {
+          "bytesInOutput": 1286
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/xml.js": {
+          "bytesInOutput": 1573
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/svg.js": {
+          "bytesInOutput": 2148
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql.js": {
+          "bytesInOutput": 1911
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/shell.js": {
+          "bytesInOutput": 2029
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/redos.js": {
+          "bytesInOutput": 1296
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/nosql.js": {
+          "bytesInOutput": 2339
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/log.js": {
+          "bytesInOutput": 1786
+        },
+        "node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/contexts/sql-strict.js": {
+          "bytesInOutput": 454
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js": {
+          "bytesInOutput": 10310
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/node2json.js": {
+          "bytesInOutput": 1656
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/xmlparser/XMLParser.js": {
+          "bytesInOutput": 861
+        },
+        "node_modules/.pnpm/fast-xml-parser@5.10.1/node_modules/fast-xml-parser/src/fxp.js": {
+          "bytesInOutput": 21
+        },
+        "node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/browser.js": {
+          "bytesInOutput": 12700
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-TCX3PVWR.js": {
+          "bytesInOutput": 495987
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-33F6TRXO.js": {
+          "bytesInOutput": 13782
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-SG7OH2EK.js": {
+          "bytesInOutput": 283394
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-F6WNPYOM.js": {
+          "bytesInOutput": 47172
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-ZACHY6OS.js": {
+          "bytesInOutput": 74260
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-4WWEDTTE.js": {
+          "bytesInOutput": 2260
+        },
+        "node_modules/.pnpm/orderedmap@2.1.1/node_modules/orderedmap/dist/index.js": {
+          "bytesInOutput": 1456
+        },
+        "node_modules/.pnpm/prosemirror-model@1.25.11/node_modules/prosemirror-model/dist/index.js": {
+          "bytesInOutput": 30786
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-LIJPSHRA.js": {
+          "bytesInOutput": 32814
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GOEBQ26R.js": {
+          "bytesInOutput": 187
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-GQQOL4PV.js": {
+          "bytesInOutput": 524
+        },
+        "node_modules/.pnpm/@docx-editor.dev+i18n@2.4.1/node_modules/@docx-editor.dev/i18n/dist/index.mjs": {
+          "bytesInOutput": 229082
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/chunk-FL4GWK76.js": {
+          "bytesInOutput": 309322
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/editor.js": {
+          "bytesInOutput": 0
+        },
+        "scripts/docx-editor-core.entry.js": {
+          "bytesInOutput": 0
+        },
+        "node_modules/.pnpm/@docx-editor.dev+core@2.4.1/node_modules/@docx-editor.dev/core/dist/index.js": {
+          "bytesInOutput": 0
+        }
+      },
+      "bytes": 1812812
+    }
+  }
+}

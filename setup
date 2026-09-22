@@ -1,0 +1,4 @@
+#!/bin/bash
+# 처음 켜는 사람이 실행하는 명령. 찾지 않아도 보이도록 저장소 맨 위에 둔다.
+# 실제 내용은 scripts/setup.sh 에 있다.
+exec bash "$(dirname "$0")/scripts/setup.sh" "$@"

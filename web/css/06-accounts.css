@@ -1,0 +1,68 @@
+/* 계정·사이트 카드 */
+/* 이 이름을 만드는 곳: browser/accounts-screen.js · browser/profiles.js */
+/* 이 화면은 항상 뷰어를 덮은 넓은 폭으로 표시된다(rail 의 RAIL_FULL). 280px 패널용 한 줄
+   배치를 그대로 늘이면 이름은 왼쪽 끝, 조작은 오른쪽 끝에 붙어 가운데가 비게 된다.
+   그래서 읽는 단위를 줄에서 카드로 바꾼다. 한 프로필이 무엇을 갖고 어디에 쓰이는지가
+   카드 한 장에서 끝난다. */
+.acct-body { flex:1 1 auto; overflow-y:auto; padding:4px 18px 28px; min-height:0; font-size:var(--fs-sm); }
+body.util-full .acct-body { padding:4px 22px 32px; }
+
+.acct-hero { position:sticky; top:0; background:var(--sidebar); padding:10px 0 12px; margin-bottom:14px;
+  border-bottom:1px solid var(--border); z-index:2; }
+.acct-sum { font-size:var(--fs-sm); }
+.acct-sum b { font-size:var(--fs-t3); font-weight:var(--fw-semi); letter-spacing:var(--ls-title); margin-right:2px; }
+.acct-sum span { color:var(--muted-fg); }
+.acct-why { color:var(--muted-fg); font-size:var(--fs-2xs); line-height:var(--lh); margin-top:4px; max-width:88ch; }
+
+.acct-sec { margin-bottom:24px; }
+.acct-sec-h { display:flex; align-items:center; gap:8px; font-size:var(--fs-xs); font-weight:var(--fw-semi); color:var(--fg);
+  margin:0 0 8px; flex-wrap:wrap; }
+.acct-sec-c { font-size:var(--fs-2xs); font-weight:var(--fw-med); color:var(--muted-fg); background:var(--accent);
+  border-radius:var(--r-pill); padding:1px 7px; font-variant-numeric:tabular-nums; }
+.acct-tools { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.acct-tools input[type="text"], .acct-tools input:not([type]) { font:inherit; font-size:var(--fs-sm); padding:4px 8px;
+  background:var(--input); color:var(--fg); border:1px solid var(--border); border-radius:var(--r-blk); outline:none; width:190px;
+  transition:border-color var(--t-fade) var(--ease); }
+.acct-tools input:focus { border-color:var(--ring); }
+.acct-pw { font-size:var(--fs-xs); color:var(--muted-fg); cursor:pointer; }
+
+/* 같은 줄의 카드는 높이를 맞춘다. 각자 높이가 다르면 줄이 고르지 않게 보이고, 어느 카드가
+   더 많은 내용을 담았는지도 높이로 잘못 읽힌다. */
+.acct-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:10px; align-items:stretch; }
+.acct-grid-sm { grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); }
+
+.acct-card { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden;
+  display:flex; flex-direction:column; }
+.acct-card-h { display:flex; align-items:center; gap:7px; padding:9px 11px; border-bottom:1px solid var(--border); }
+.acct-card-h .an { flex:1; min-width:0; font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acct-count { flex:none; font-size:var(--fs-2xs); color:var(--muted-fg); font-variant-numeric:tabular-nums;
+  background:var(--accent); border-radius:var(--r-pill); padding:1px 7px; }
+.acct-card-b { padding:8px 11px; display:flex; flex-direction:column; gap:5px; }
+.acct-card-b .asub { font-size:var(--fs-2xs); color:var(--muted-fg); }
+.acct-accs { font-size:var(--fs-2xs); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acct-used { display:flex; flex-wrap:wrap; gap:4px; }
+.acct-used.none { font-size:var(--fs-2xs); color:var(--muted-fg); }
+.acct-chip { font-size:var(--fs-2xs); color:var(--fg); background:var(--accent); border-radius:var(--r-ctl); padding:1px 6px; }
+.acct-card-f { margin-top:auto; display:flex; gap:6px; padding:8px 11px 10px; border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.acct-locked { font-size:var(--fs-2xs); color:var(--muted-fg); }
+/* 가져오기 카드는 이름과 버튼 하나뿐이라 몸통을 비운 채 두면 빈 공간만 커지므로 한 줄로 둔다. */
+.acct-imp { flex-direction:row; align-items:center; gap:8px; padding:0 11px; }
+.acct-imp .acct-card-h { flex:1; min-width:0; border-bottom:none; padding:11px 0; }
+.acct-imp .acct-card-f { border-top:none; padding:0; margin:0; }
+
+/* 스페이스 기본 계정은 고르는 동작 하나뿐이라 카드가 아니라 한 줄로 둔다. 다만 화면 폭만큼
+   늘어나지 않게 격자에 담는다. */
+.acct-row { display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--border);
+  border-radius:var(--r-blk); background:var(--card); }
+.acct-row .an { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acct-row .asub { font-size:var(--fs-2xs); color:var(--muted-fg); }
+.acct-row select { max-width:130px; font:inherit; font-size:var(--fs-xs); background:var(--input); color:var(--fg); border:1px solid var(--border); border-radius:var(--r-ctl); padding:2px 4px; }
+.acct-rename-in { width:100%; font:inherit; font-size:var(--fs-sm); background:var(--input); color:var(--fg); border:1px solid var(--ring); border-radius:var(--r-ctl); padding:2px 5px; outline:none; }
+.acct-btn { flex:none; border:1px solid var(--border); background:var(--bg); color:var(--muted-fg); border-radius:var(--r-blk); cursor:pointer; padding:4px 10px; font-size:var(--fs-xs);
+  transition:border-color var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.acct-btn:hover { border-color:var(--ring); color:var(--fg); }
+.acct-btn.danger:hover { border-color:var(--destructive); color:var(--destructive); }
+.acct-note { font-size:var(--fs-2xs); color:var(--muted-fg); margin-top:8px; line-height:var(--lh); max-width:88ch; }
+
+/* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
+.acct-panel { width:300px; }

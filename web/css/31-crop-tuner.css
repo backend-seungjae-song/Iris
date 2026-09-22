@@ -1,0 +1,26 @@
+/* herdr 자리 맞춤판 */
+/* 이 이름을 만드는 곳: panel/crop-tuner.js */
+.crop-tune { position:fixed; right:16px; bottom:calc(36px + var(--statusbar-h, 0px)); z-index:320;
+  width:230px; background:var(--card); border:1px solid var(--border); border-radius:var(--r-card);
+  box-shadow:var(--sh-high); padding:8px; font-size:var(--fs-xs); color:var(--fg); outline:none; }
+.crop-tune .ct-head { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+.crop-tune .ct-title { font-weight:var(--fw-semi); }
+.crop-tune .ct-x { margin-left:auto; border:none; background:none; color:var(--muted-fg); cursor:pointer;
+  padding:1px 4px; border-radius:var(--r-ctl); font:inherit; }
+.crop-tune .ct-x:hover { background:var(--accent); color:var(--fg); }
+.crop-tune .ct-row { display:flex; align-items:center; gap:3px; padding:2px 0; color:var(--muted-fg); }
+.crop-tune .ct-row.on { color:var(--fg); }
+.crop-tune .ct-l { width:42px; flex:none; }
+.crop-tune .ct-v { flex:1 1 auto; text-align:center; font-family:var(--mono); font-size:var(--fs-2xs); }
+.crop-tune .ct-b { border:1px solid var(--border); background:var(--bg); color:var(--muted-fg); cursor:pointer;
+  border-radius:var(--r-ctl); padding:1px 5px; font:inherit; font-size:var(--fs-2xs); line-height:1.5;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.crop-tune .ct-b:hover { background:var(--accent); color:var(--fg); }
+.crop-tune .ct-foot { display:flex; align-items:center; gap:6px; margin-top:6px; padding-top:6px;
+  border-top:1px solid var(--border); }
+.crop-tune .ct-note { color:var(--muted-fg); font-size:var(--fs-2xs); flex:1 1 auto; }
+.crop-tune .ct-reset { flex:none; }
+/* 가리기와 여백은 다른 축이므로 라벨로 구분한다. */
+.crop-tune .ct-g { margin:7px 0 2px; color:var(--muted-fg); font-size:var(--fs-2xs); font-weight:var(--fw-semi);
+  text-transform:uppercase; letter-spacing:var(--ls-caps); }
+.crop-tune .ct-g:first-of-type { margin-top:0; }

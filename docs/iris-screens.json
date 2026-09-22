@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "screens": [
+    {
+      "name": "작업",
+      "kind": "rail",
+      "entry": "workspace",
+      "rootIds": [
+        "sidebar",
+        "center",
+        "right"
+      ],
+      "surfaceIds": [
+        "panel-explorer",
+        "panel-spaces",
+        "panel-agents",
+        "center-empty",
+        "fileview",
+        "browserview",
+        "panel-memo",
+        "panel-run",
+        "terminal"
+      ]
+    },
+    {
+      "name": "소스 제어",
+      "kind": "rail",
+      "entry": "sourcecontrol",
+      "rootIds": [
+        "sc-panel",
+        "center",
+        "right"
+      ],
+      "surfaceIds": [
+        "sc-body",
+        "diffview",
+        "tabstrip",
+        "terminal"
+      ]
+    },
+    {
+      "name": "계정",
+      "kind": "rail",
+      "entry": "accounts",
+      "rootIds": [
+        "acct-panel"
+      ],
+      "surfaceIds": [
+        "acct-body"
+      ]
+    },
+    {
+      "name": "로컬 서버",
+      "kind": "rail",
+      "entry": "localdev",
+      "rootIds": [
+        "ld-panel"
+      ],
+      "surfaceIds": [
+        "ld-err"
+      ]
+    },
+    {
+      "name": "로그인 허용",
+      "kind": "rail",
+      "entry": "autofill",
+      "rootIds": [
+        "af-panel"
+      ],
+      "surfaceIds": [
+        "af-body"
+      ]
+    },
+    {
+      "name": "메모",
+      "kind": "rail",
+      "entry": "memo",
+      "rootIds": [
+        "mm-panel"
+      ],
+      "surfaceIds": [
+        "mm-body"
+      ]
+    },
+    {
+      "name": "보관",
+      "kind": "rail",
+      "entry": "archive",
+      "rootIds": [
+        "ar-panel"
+      ],
+      "surfaceIds": [
+        "ar-body"
+      ]
+    },
+    {
+      "name": "스페이스 브라우저 창",
+      "kind": "browser-window",
+      "entry": "space-browser",
+      "query": "?mode=browser",
+      "rootIds": [
+        "center",
+        "browserview"
+      ],
+      "surfaceIds": [
+        "tabstrip",
+        "url",
+        "wv-stack",
+        "wv-dialog"
+      ]
+    },
+    {
+      "name": "공유 브라우저 창",
+      "kind": "browser-window",
+      "entry": "shared-browser",
+      "query": "?mode=browser&space=__shared__",
+      "rootIds": [
+        "center",
+        "browserview"
+      ],
+      "surfaceIds": [
+        "tabstrip",
+        "url",
+        "wv-stack",
+        "wv-dialog"
+      ]
+    },
+    {
+      "name": "스페이스 메모 창",
+      "kind": "memo-window",
+      "entry": "space-memo",
+      "query": "?mode=memo&kind=local&space=:space&note=:note",
+      "rootIds": [
+        "memo-window"
+      ],
+      "surfaceIds": [
+        "mw-name",
+        "mw-titlebar-space",
+        "mw-editor",
+        "mw-preview",
+        "mw-alert"
+      ]
+    },
+    {
+      "name": "공유 메모 창",
+      "kind": "memo-window",
+      "entry": "shared-memo",
+      "query": "?mode=memo&kind=shared",
+      "rootIds": [
+        "memo-window"
+      ],
+      "surfaceIds": [
+        "mw-name",
+        "mw-editor",
+        "mw-preview",
+        "mw-alert"
+      ]
+    },
+    {
+      "name": "메모랩",
+      "kind": "rail",
+      "entry": "memolab",
+      "rootIds": [
+        "ml-panel"
+      ],
+      "surfaceIds": []
+    },
+    {
+      "name": "사용량",
+      "kind": "rail",
+      "entry": "usage",
+      "rootIds": [
+        "usage-panel"
+      ],
+      "surfaceIds": []
+    },
+    {
+      "name": "설정",
+      "kind": "rail",
+      "entry": "keymap",
+      "rootIds": [
+        "km-panel"
+      ],
+      "surfaceIds": [
+        "km-body"
+      ]
+    }
+  ]
+}

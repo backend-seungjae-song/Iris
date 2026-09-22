@@ -1,0 +1,111 @@
+/* 사용량 상세·이력 화면. rail 화면 하나이고 이름은 전부 ust- 로 시작한다.
+   띠(28-usage.css, usg-)와 같은 기능이지만 위치가 다르므로 이름도 나눈다. */
+
+/* 폭은 이 화면의 값이라 여기서 갖는다(전체형이라 열리면 늘어난다). */
+.usage-panel { width:100%; }
+
+.ust-page { flex:1 1 auto; overflow:auto; padding:18px 22px 40px; }
+.ust-boot { color:var(--muted-fg); padding:20px 2px; }
+
+.ust-head { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+.ust-h { margin:0; font-size:var(--fs-md); font-weight:var(--fw-semi); letter-spacing:var(--ls-title); color:var(--fg); }
+
+.ust-tabs { display:flex; gap:2px; background:var(--bg); border:1px solid var(--border); border-radius:var(--r-card); padding:2px; }
+.ust-tab { appearance:none; border:0; background:transparent; color:var(--muted-fg);
+  font:inherit; font-size:var(--fs-xs); padding:4px 12px; border-radius:var(--r-blk); cursor:pointer;
+  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
+.ust-tab:hover { color:var(--fg); }
+.ust-tab.on { background:var(--sidebar-accent); color:var(--fg); }
+
+/* 수집 상태. 처음 여는 사람은 이 줄만 보고 몇 분을 기다리므로 무엇을 하는 중인지 적는다. */
+.ust-scan-wrap { display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+.ust-scan { display:flex; align-items:center; gap:12px; margin-bottom:16px;
+  padding:9px 12px; background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); }
+.ust-scan-wrap .ust-scan { margin-bottom:0; }
+.ust-scan-l { display:flex; flex-direction:column; gap:2px; flex:1 1 auto; min-width:0; }
+.ust-scan-t { font-size:var(--fs-xs); color:var(--fg); }
+.ust-scan-n { font-size:var(--fs-2xs); color:var(--muted-fg); }
+.ust-err { font-size:var(--fs-2xs); color:var(--destructive); padding:0 2px; }
+
+.ust-btn { appearance:none; font:inherit; font-size:var(--fs-xs); cursor:pointer;
+  padding:5px 12px; border-radius:var(--r-blk); border:1px solid var(--border);
+  background:var(--sidebar-accent); color:var(--fg);
+  transition:border-color var(--t-fade) var(--ease); }
+.ust-btn:hover:not(:disabled) { border-color:var(--ring); }
+.ust-btn:disabled { opacity:.5; cursor:default; }
+.ust-btn.ghost { background:transparent; color:var(--muted-fg); }
+
+.ust-pane { display:flex; flex-direction:column; }
+
+.ust-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:6px; }
+.ust-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); padding:10px 12px; min-width:0; }
+.ust-card-l { font-size:var(--fs-2xs); color:var(--muted-fg); }
+.ust-card-v { font-size:var(--fs-t3); font-weight:var(--fw-semi); letter-spacing:var(--ls-title); color:var(--fg); line-height:1.3; font-variant-numeric:tabular-nums; }
+.ust-card-n { font-size:var(--fs-2xs); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.ust-sec { display:flex; align-items:baseline; gap:8px; margin:20px 0 8px; }
+.ust-sec-t { font-size:var(--fs-xs); font-weight:var(--fw-semi); color:var(--fg); }
+.ust-sec-n { font-size:var(--fs-2xs); color:var(--muted-fg); }
+
+.ust-legend { display:flex; gap:14px; margin-bottom:6px; }
+.ust-leg { display:inline-flex; align-items:center; gap:5px; font-size:var(--fs-2xs); color:var(--muted-fg); }
+.ust-dot { width:8px; height:8px; border-radius:var(--r-ctl); display:inline-block; }
+
+/* 막대는 날마다 한 칸이다. 칸을 고정 폭으로 두면 기간이 늘어날 때 넘치므로 균등 분배한다. */
+.ust-chart { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); padding:10px 12px 8px; }
+.ust-bars { display:flex; align-items:flex-end; gap:2px; height:132px; }
+.ust-bar { flex:1 1 0; height:100%; display:flex; align-items:flex-end; min-width:0; }
+.ust-stack { width:100%; display:flex; flex-direction:column-reverse; border-radius:var(--r-ctl); overflow:hidden; min-height:1px; }
+.ust-seg { width:100%; flex-basis:0; min-height:1px; }
+.ust-axis { display:flex; justify-content:space-between; margin-top:6px; font-size:var(--fs-2xs); color:var(--muted-fg); }
+
+.ust-two { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px; }
+.ust-rank { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); padding:10px 12px; min-width:0; }
+.ust-rank-t { font-size:var(--fs-2xs); color:var(--muted-fg); margin-bottom:6px; }
+.ust-rank-r { display:flex; align-items:center; gap:8px; padding:3px 0; font-size:var(--fs-xs); }
+.ust-rank-n { flex:0 0 40%; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ust-rank-bar { flex:1 1 auto; height:6px; background:var(--muted); border-radius:var(--r-pill); overflow:hidden; }
+.ust-rank-fill { display:block; height:100%; background:var(--primary); }
+.ust-rank-v { flex:0 0 54px; text-align:right; color:var(--muted-fg); font-variant-numeric:tabular-nums; }
+
+.ust-table { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); overflow:hidden; }
+.ust-tr { display:flex; align-items:center; gap:10px; padding:6px 12px; font-size:var(--fs-xs); border-top:1px solid var(--border); }
+.ust-tr:first-child { border-top:0; }
+.ust-tr.ust-th { color:var(--muted-fg); font-size:var(--fs-2xs); background:var(--muted); }
+.ust-td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ust-td.w-time { flex:0 0 118px; color:var(--muted-fg); font-variant-numeric:tabular-nums; }
+.ust-td.w-proj { flex:1 1 auto; min-width:0; }
+.ust-td.w-model { flex:0 0 150px; color:var(--muted-fg); }
+.ust-td.w-num { flex:0 0 66px; text-align:right; font-variant-numeric:tabular-nums; }
+
+.ust-empty { padding:14px 2px; font-size:var(--fs-xs); color:var(--muted-fg); }
+.ust-note { font-size:var(--fs-2xs); color:var(--muted-fg); margin-bottom:8px; }
+.ust-foot { margin-top:22px; font-size:var(--fs-2xs); color:var(--muted-fg); }
+
+/* 계정 */
+.ust-accounts { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); overflow:hidden; }
+.ust-acct { display:flex; align-items:center; gap:10px; padding:7px 12px; font-size:var(--fs-xs); border-top:1px solid var(--border); }
+.ust-acct:first-child { border-top:0; }
+.ust-acct-n { flex:0 0 120px; color:var(--fg); }
+.ust-acct-s { flex:0 0 150px; color:var(--muted-fg); }
+.ust-acct-s.ok { color:var(--success); }
+.ust-acct-s.warn { color:var(--pal-yellow-pop); }
+.ust-acct-s.bad { color:var(--destructive); }
+.ust-acct-p { flex:1 1 auto; min-width:0; color:var(--muted-fg); font-size:var(--fs-2xs);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.ust-secrets { display:flex; flex-direction:column; gap:8px; }
+.ust-secret { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ust-secret-l { display:flex; align-items:baseline; gap:6px; flex:0 0 190px; }
+.ust-secret-n { font-size:var(--fs-xs); color:var(--fg); }
+.ust-secret-f { font-size:var(--fs-2xs); color:var(--muted-fg); }
+.ust-secret-f.on { color:var(--success); }
+.ust-input { flex:1 1 220px; min-width:0; font:inherit; font-size:var(--fs-sm);
+  padding:5px 9px; border-radius:var(--r-blk); border:1px solid var(--border);
+  background:var(--input); color:var(--fg);
+  transition:border-color var(--t-fade) var(--ease); }
+.ust-input:focus { outline:none; border-color:var(--ring); }
+
+/* 기준보다 높은 날. 꼭대기에 선을 그어 잘렸음을 표시한다. 그러지 않으면 기준을
+   넘긴 날과 기준에 딱 맞은 날이 화면에서 같아 보인다. */
+.ust-bar.clip .ust-stack { box-shadow:inset 0 2px 0 0 var(--fg); }

@@ -1,0 +1,26 @@
+/* 편의 기능 화면의 배치. 앱 셸이 갖는다*/
+/* 이 이름을 만드는 곳: devtool/rail.js(is-open·screen-open 을 단다) · main.js*/
+/* 어느 화면을 켜면 어느 화면이 내려가는가는 기능 하나의 문제가 아니라 기능 사이의 계약이다.
+ 화면마다 나머지 여덟을 이름으로 열거하면 아홉 번째를 추가할 때 앞의 여덟 줄을 전부
+ 고쳐야 한다. 그래서 규칙을 한 줄로 두어 켠 화면만 표시하고 나머지는 표시하지 않는다.
+ 여기에는 화면 이름이 없다. 폭은 배치 규칙이 아니라 그 화면의 값이라 각 화면의 CSS 가 갖는다.
+ 설정 화면 몫도 20-keymap.css 에서 여기로 옮겼다. 배치를 정하는 규칙은 이 파일에만 있다.*/
+
+.rail-panel { flex:none; background:var(--sidebar); border-right:1px solid var(--sidebar-border);
+  display:none; flex-direction:column; min-height:0; }
+.rail-panel.is-open { display:flex; }
+/* 화면이 열리면 파일 섹션은 그 자리를 내준다.*/
+body.screen-open .sidebar { display:none; }
+/* 전체형: 파일 섹션까지 덮는다(계정·서버·로그인처럼 볼 파일이 없는 화면. 300px 로는 좁다).
+ 패널형은 파일 섹션을 남긴다(깃처럼 파일을 봐야 하는 도구).*/
+body.util-full .rail-panel.is-open { width:auto; flex:1 1 auto; }
+body.util-full .center { display:none !important; }
+/* rail ⇤ 접기와 분리 브라우저 창에서는 좌측이 통째로 내려간다.*/
+body.sidebar-collapsed .sidebar { display:none !important; }
+body.browser-mode .rail-panel, body.sidebar-collapsed .rail-panel { display:none !important; }
+body.sidebar-collapsed #util-resizer, body.util-full #util-resizer, body.browser-mode #util-resizer { display:none !important; }
+
+/* ── 별도 메모 창 모드: 창 전체가 메모다. 무엇을 내리고 무엇을 올릴지는 기능이 아니라
+ 앱 셸이 정하고, main 이 이 클래스를 단다.*/
+body.memo-mode .app, body.memo-mode .copied-toast, body.memo-mode .noticestack, body.memo-mode .ctxmenu { display:none !important; }
+/* 메모가 그 창에서 어떻게 배치되는지는 그 기능의 CSS 가 정한다(12-dock-memo.css).*/
