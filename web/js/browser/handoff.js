@@ -210,10 +210,11 @@ export function handoffToChrome(rec, reason, auto, now) {
   if (auto || now) run();
 }
 
-// 왜 이 창에서 안 되는지만 알린다. 창을 여는 것은 사용자가 🪟 로 한다. 감지가 스스로 창을 열고
-// 닫으면서 쿠키까지 가져가지 않도록 자동 실행은 두지 않는다.
+// 왜 이 창에서 안 되는지 알리고, 넘길 수 있는 탭이면 같은 막대에 "Chrome에서 열기"를 붙인다. 감지가
+// 스스로 창을 열고 닫으면서 쿠키까지 가져가지 않도록 여는 것은 사람이 누를 때만 한다.
 function handoffHint(rec, text) {
   if (!rec || !rec.el || !rec.el.classList.contains("active")) return;  // 보이지 않는 탭에서는 알리지 않는다
+  if (handoffCheck(rec).ok) { handoffToChrome(rec, text + " Chrome에서 이어서 진행하세요."); return; }
   if (handoffBarEl) handoffBarEl.remove();
   const bar = document.createElement("div");
   handoffBarEl = bar;
@@ -251,11 +252,9 @@ export function webauthnNotice(m, tabUrl, partition, wv, rec) {
     document.body.appendChild(bar);
     return;
   }
-  // 자동으로 창을 열지 않는다. 창이 저절로 열리고 닫히면
-  // 사용자가 무슨 일이 일어났는지 모른 채 세션만 바뀐다. 왜 막혔는지만 알리고, 여는 것은 사용자가
-  // 도구 줄의 🪟 로 정한다.
-  handoffHint(rec, (m.host || "이 페이지") + " 이(가) 패스키를 요구합니다. 이 창은 지문을 띄울 수 없습니다. "
-    + "주소줄 오른쪽 🪟로 임시 창을 열어 진행하세요.");
+  // 자동으로 창을 열지 않는다. 창이 저절로 열리고 닫히면 사용자가 무슨 일이 일어났는지 모른 채
+  // 세션만 바뀐다. 왜 막혔는지 알리고, 여는 것은 사용자가 막대의 "Chrome에서 열기"로 정한다.
+  handoffHint(rec, (m.host || "이 페이지") + " 이(가) 패스키를 요구합니다. 이 창은 지문을 띄울 수 없습니다.");
 }
 
 // 사람 확인(Cloudflare Turnstile) 실패. 패스키와 같은 알림 지점이지만 이유가 다르다.
@@ -268,8 +267,7 @@ export function botCheckNotice(m, rec) {
   if (!m.top) return;
   try { blog("[browser] botcheck " + JSON.stringify(m).slice(0, 180)); } catch (e) {}
   // 여기서도 자동으로 열지 않는다(위와 같은 이유).
-  handoffHint(rec, (m.host || "이 페이지") + " 의 사람 확인이 이 창에서는 통과되지 않습니다. "
-    + "주소줄 오른쪽 🪟로 임시 창을 열어 진행하세요.");
+  handoffHint(rec, (m.host || "이 페이지") + " 의 사람 확인이 이 창에서는 통과되지 않습니다.");
 }
 
 // 이 기능의 연결. 표에는 선언만 두고 연결 방법은 각 기능이 가진다.

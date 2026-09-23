@@ -313,18 +313,29 @@ check("안 저장된 탭은 앞에 동그라미", () =>
   && /\.ctab \.cdirty \{[^}]*border-radius:50%/.test(css("17-editor-bar"))
   && /if \(at\.id === getActiveTabId\(getCenterSpace\(\)\)\) markFileDirty\(at\)/.test(mainJs));
 // 채팅이 남는 폭을 모두 차지하면, 왼쪽 도구를 바꿀 때마다 그 폭 차이가 채팅에 반영된다.
-// 고정 폭은 채팅이 갖고, 남는 폭은 센터가 받는다.
-check("채팅 폭은 도구를 바꿔도 그대로", () =>
-  /\.right \{ flex:0 0 420px/.test(css("19-terminal"))
-  && /\.center \{ flex:1 1 auto/.test(css("11-center-tabs"))
-  && /\.center \{ flex:1 1 auto/.test(css("18-browser"))
-  && /localStorage\.setItem\("ac\.rightW", rightPanel\.style\.flexBasis\)/.test(web)
-  && /startW - dx/.test(web));   // 오른쪽으로 끌면 채팅이 좁아진다(느낌은 그대로)
-check("왼쪽 도구는 도구별로 폭을 기억한다", () =>
-  /id="util-resizer"/.test(web)
-  && /localStorage\.setItem\("ac\.utilW\." \+ panel\.id, panel\.style\.width\)/.test(web)
-  && /ac\.utilW\." \+ el\.id/.test(web)
-  && /body\.util-full #util-resizer[^{]*\{ display:none/.test(css("03-feature-modes")));
+// 고정 폭은 채팅이 갖고, 남는 폭은 센터가 받는다. 배치 엔진의 계산을 실제로 돌려 본다.
+const layoutTree = await import(new URL("../../../web/js/core/layout-tree.js", import.meta.url).href);
+const layoutEngine = read("web/js/core/layout-engine.js");
+const LAY_BOX = { x: 52, y: 30, w: 1600, h: 900 };
+const layOf = (tree, hidden, toolKey = null) => layoutTree.computeLayout(tree, LAY_BOX, { visible: (id) => !hidden.includes(id), collapsedPx: () => null, toolKey }).rects;
+check("채팅 폭은 도구를 바꿔도 그대로", () => {
+  const tree = layoutTree.defaultTree({ toolW: { "sc-panel": 380 } });
+  const plain = layOf(tree, ["tools"]), git = layOf(tree, [], "tools:sc-panel"), full = layOf(tree, ["center"], "tools:ml-panel");
+  return plain.chat.w === 420 && git.chat.w === 420 && full.chat.w === 420 && git.center.w === plain.center.w - 100;
+});
+// 끌어 맞춘 폭은 인라인으로 들어간다. 접힘 규칙이 그보다 약하면 접기를 눌러도 폭이 남는다
+// (확인 결과: 477px 로 끈 뒤 접기 → 클래스는 붙고 폭은 477 그대로). 엔진은 접힌 채팅을 자리에서 뺀다.
+check("폭을 맞춘 뒤에도 채팅이 접힌다", () =>
+  /case "chat": return \{ els: \(\) => \[\$\("#right"\)\], visible: \(\) => !\$\("#right"\)\.classList\.contains\("collapsed"\)/.test(layoutEngine)
+  && /\.right\.collapsed \{ flex:0 0 0 !important; width:0 !important;/.test(css("19-terminal"))
+  && layOf(layoutTree.defaultTree(), ["tools", "chat"]).chat === undefined);
+check("왼쪽 도구는 도구별로 폭을 기억한다", () => {
+  const tree = layoutTree.defaultTree({ sidebarW: 300, toolW: { "sc-panel": 380, "ld-panel": 440 } });
+  return layOf(tree, [], "tools:sc-panel").tools.w === 380 && layOf(tree, [], "tools:ld-panel").tools.w === 440
+    && layOf(tree, ["tools"]).explorer.w === 300
+    && /toolKey: tool && realVisible\("tools"\) \? "tools:" \+ tool\.id : null/.test(layoutEngine)
+    && /\/\^ac\\\.utilW\\\.\(\.\+\)\$\//.test(layoutEngine);   // 옛 도구별 폭을 첫 배치로 옮긴다
+});
 // 이름은 사용자가 붙인 것만. 페이지 제목은 계속 바뀌므로 이름이 아니다.
 check("그룹 지목 목록은 사용자가 붙인 이름만 보여준다", () => {
   const si = read("server/browser-message-handlers.js");

@@ -148,6 +148,17 @@ function screensPane(screens, presets) {
     </div>`).join("");
 }
 
+// 기본 꺼짐 기능을 켜기 전에 보여 주는 확인 창. 문구는 기능 표(capabilities.js 의 optIn)에 코드로 적힌 것뿐이다.
+export function optInConfirmMarkup(optIn) {
+  const esc = escapeHtml;
+  return `<div class="askbox" role="dialog" aria-modal="true">
+      <div class="asktitle">${esc(optIn.title)}</div>
+      ${(optIn.items || []).map((item) => `<div class="asknote">· ${esc(item)}</div>`).join("")}
+      ${optIn.after ? `<div class="asknote">${esc(optIn.after)}</div>` : ""}
+      <div class="askrow"><button data-a="cancel">취소</button><button class="primary" data-a="ok">켜기</button></div>
+    </div>`;
+}
+
 // 창 제목은 다른 앱이 만든 문자열이다. 화면에 넣는 모든 값은 이 순수 함수 안에서 반드시
 // escapeHtml 을 거친다.
 function switcherPane(model) {

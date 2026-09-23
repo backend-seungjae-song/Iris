@@ -52,8 +52,8 @@ export function railButtonsMarkup(items, activeId) {
 }
 // 설정 화면이 그릴 목록. 표를 그대로 읽는다. DOM 에서 읽으면 rail 이 그려지기 전에는 비어 있다.
 export function railScreens() { return featureList(); }
-export async function setRailScreen(id) {
-  if (!await toggleFeature(id)) return false;
+export async function setRailScreen(id, options) {
+  if (!await toggleFeature(id, options)) return false;
   applyRailVisibility();
   return true;
 }
@@ -97,7 +97,8 @@ export function registerPanel(railId, html) {
   const item = railItemById(railId);
   if (!item || !item.panel) return false;
   if (document.getElementById(item.panel)) return true;   // 이미 있다(다시 켠 경우)
-  const host = document.getElementById("util-resizer");
+  // 가운데 영역 바로 앞, 사이드바 뒤에 둔다. 배치 엔진이 꺼진 좁은 창에서는 이 순서가 곧 가로 배치다.
+  const host = document.getElementById("center");
   if (!host || !host.parentNode) return false;
   const el = document.createElement("aside");
   el.className = "rail-panel " + item.panel;

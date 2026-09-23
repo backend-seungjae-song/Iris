@@ -16,3 +16,5 @@ In particular, the following files were ported from Orca
   - native/electron/cookie-import.cjs     (from src/main/browser/browser-cookie-import.ts)
   - native/electron/browser-hardening.cjs (from src/main/browser/browser-session-ua.ts, anti-detection.ts)
   - native/electron/cdp-control.cjs       (CDP control approach)
+  - native/electron/emulator/orca-emulator.cjs (bundled unmodified from src/main/emulator and related files)
+  - web/vendor/orca-emulator-pane.esm.js, web/js/emulator/ (from src/renderer/src/components/emulator-pane)

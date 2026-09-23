@@ -5,8 +5,9 @@
 //   그리고 "그린 결과를 한 장의 PNG 로 합치는 일".
 //
 // 제공 API
-//   openSketchCanvas({ png, width, height, onDeliver, onCancel }). 오버레이를 띄우고, 사용자가
+//   openSketchCanvas({ png, width, height, onDeliver, onCancel, initialFit }). 오버레이를 띄우고, 사용자가
 //   전달을 누르면 합친 PNG 바이트를 onDeliver 에 넘긴다. 이미 열려 있으면 아무 일도 하지 않는다.
+//   처음에는 폭에 맞춰 열고, initialFit 이 "all" 이면 전체가 보이게 연다.
 //
 // 의존 대상
 //   document 와 canvas 뿐이다. 서버도 네이티브도 모르며, 캡처와 전송은 부르는 쪽이 담당한다.
@@ -95,7 +96,7 @@ function button(cls, text, tip) {
   return b;
 }
 
-export function openSketchCanvas({ png, width, height, onDeliver, onCancel }) {
+export function openSketchCanvas({ png, width, height, onDeliver, onCancel, initialFit }) {
   if (openEl) return false;
 
   const root = document.createElement("div");
@@ -374,7 +375,7 @@ export function openSketchCanvas({ png, width, height, onDeliver, onCancel }) {
   openEl = root;
   document.body.appendChild(root);
   // 크기는 상자가 붙은 뒤에야 잴 수 있다. 포커스를 오버레이로 옮겨야 웹뷰가 확대 키를 가져가지 않는다.
-  fitTo("width");
+  fitTo(initialFit === "all" ? "all" : "width");
   scroll.scrollTop = 0;
   root.focus();
   return true;

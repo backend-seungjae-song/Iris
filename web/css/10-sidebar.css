@@ -13,10 +13,6 @@
 #file-tree { flex:0 0 auto; height:200px; } /* 드래그로 조절 */
 #space-list { flex:0 0 auto; height:150px; } /* 드래그로 조절 */
 .panel.explorer.collapsed #file-tree, .panel.spaces.collapsed #space-list { height:auto; }
-.v-resizer { flex:none; height:6px; cursor:row-resize; background:transparent; position:relative; }
-.v-resizer::after { content:""; position:absolute; left:0; right:0; top:2px; height:1px; background:var(--sidebar-border); }
-.v-resizer:hover::after { top:1px; height:3px; background:var(--ring); }
-.v-resizer.hidden { display:none; }
 /* 크롬 UI(사이드바·탭바·툴바)에서는 드래그가 텍스트를 선택하지 않게 한다. 탭·라벨을 끌다가 선택되는 것을 막는다.
    실제로 복사가 필요한 곳(터미널·파일 뷰·입력·이름 편집)만 다시 켠다. */
 #url-sug { position:absolute; z-index:60; top:100%; left:0; right:0; margin-top:4px; max-height:260px; overflow:auto;

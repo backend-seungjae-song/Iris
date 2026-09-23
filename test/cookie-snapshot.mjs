@@ -5,11 +5,13 @@ const require=createRequire(import.meta.url);
 const {replaceCookieSnapshot}=require('../native/electron/cookie-snapshot.cjs');
 const {cookieKey}=require('../native/electron/cookie-sync-policy.cjs');
 const c=(name,value,domain='.example.com')=>({name,value,domain,path:'/',secure:true,httpOnly:true,sameSite:"unspecified"});
-function fixture(before,{failName,readFail=false,rollbackFail=false}={}) {
+function fixture(before,{failName,readFail=false,rollbackFail=false,overwriteSecure=false}={}) {
   const jar=new Map(before.map(c=>[cookieKey(c),c]));let writes=0,failed=false;const scopes=[],predicates=[];
   const session={cookies:{
     get:async()=>{if(readFail)throw Error('unavailable');return [...jar.values()];},
-    set:async d=>{writes++; if((d.name===failName&&!failed)||(failed&&rollbackFail)) {failed=true;throw Error('rejected');} const cookie={...d,domain:d.domain||new URL(d.url).hostname};delete cookie.url;jar.set(cookieKey(cookie),cookie);},
+    set:async d=>{writes++; if((d.name===failName&&!failed)||(failed&&rollbackFail)) {failed=true;throw Error('rejected');}
+      // Chromium 은 Secure 가 아닌 쿠키로 같은 이름의 Secure 쿠키를 덮지 못하게 한다(EXCLUDE_OVERWRITE_SECURE).
+      if(overwriteSecure&&!d.secure&&[...jar.values()].some(c=>c.secure&&c.name===d.name&&c.domain.replace(/^\./,'')===new URL(d.url).hostname)) throw Error('EXCLUDE_OVERWRITE_SECURE'); const cookie={...d,domain:d.domain||new URL(d.url).hostname};delete cookie.url;jar.set(cookieKey(cookie),cookie);},
     remove:async(url,name)=>{for(const [k,c] of jar) if(c.name===name&&c.domain.replace(/^\./,'')===new URL(url).hostname)jar.delete(k);},
     flushStore:async()=>{},
   }};
@@ -53,7 +55,7 @@ test('클라이언트가 받은 보안 쿠키는 source에서 제외되어도 �
   const f=fixture([c('SID','old'),c('SIDCC','local'),c('cf_clearance','local')]);
   const result=await f.run([c('SID','new')],{preserveCookie:c=>['SIDCC','cf_clearance'].includes(c.name)});
   assert.equal(result.changed,1);
-  assert.deepEqual([...f.jar.values()].map(c=>[c.name,c.value]),[['SID','new'],['SIDCC','local'],['cf_clearance','local']]);
+  assert.deepEqual([...f.jar.values()].map(c=>[c.name,c.value]).sort(),[['SID','new'],['SIDCC','local'],['cf_clearance','local']]);
 });
 
 test('source에만 있는 target-bound 쿠키는 desired/readback에 넣지 않는다',async()=>{
@@ -83,4 +85,12 @@ test('같은 snapshot scope는 transfer request predicate도 재사용한다',as
   await f.run([c('SID','two')]);
   assert.equal(f.predicates.length,2);
   assert.equal(f.predicates[0],f.predicates[1]);
+});
+
+test('target 의 Secure 쿠키를 source 의 Secure 아닌 같은 쿠키로 바꿀 수 있다',async()=>{
+  // Chrome 에는 Secure 없이, Iris 에는 Secure 로 저장된 같은 쿠키 하나 때문에 교체 전체가 되돌려졌다.
+  const f=fixture([c('regStatus','old'),c('SID','old')],{overwriteSecure:true});
+  const result=await f.run([{...c('regStatus','new'),secure:false},c('SID','new')]);
+  assert.equal(result.changed,1);
+  assert.deepEqual([...f.jar.values()].map(c=>[c.name,c.value,c.secure]).sort(),[['SID','new',true],['regStatus','new',false]]);
 });

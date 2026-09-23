@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { noteEmulatorReply } from "./emulator-bridge.js";
 
 import {
   answerUserAsk,
@@ -140,11 +141,18 @@ export function handleBrowserMessage(ws, msg) {
   }
   // 앱 대상 호출의 이동 처리. 시뮬레이터를 앞으로 가져오는 것까지가 가능한
   // 범위다. simctl에는 특정 기기 창만 띄우는 명령이 없고, 부팅된 기기가 그 창에 있다.
+  // Android 기기(adb 시리얼, UUID 모양이 아니다)는 가져올 창이 없어 Simulator 를 열지 않고 안내만 한다.
   else if (msg.type === "focus-app") {
-    if (ws._local) {
+    if (ws._local && msg.device && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(msg.device))) {
+      try { ws.send(JSON.stringify({ type: "toast", text: `Android 기기(${String(msg.device).slice(0, 40)}) 화면에서 진행하세요. 창을 앞으로 가져오지 못합니다.` })); } catch {}
+    }
+    else if (ws._local) {
       try { execFileSync("open", ["-a", "Simulator"], { timeout: 4000 }); }
       catch (e) { try { ws.send(JSON.stringify({ type: "toast", text: "시뮬레이터를 앞으로 못 가져왔습니다: " + String(e.message || e) })); } catch {} }
     }
+  }
+  else if (msg.type === "emulator-reply") {
+    if (ws._local) noteEmulatorReply(msg);
   }
   else if (msg.type === "ai-ask-answer") {
     if (ws._local && msg.id) answerUserAsk(msg.id, msg.answer);

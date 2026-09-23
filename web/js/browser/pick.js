@@ -154,6 +154,7 @@ function wirePickCursor() {
       const overBmk = under?.closest?.(".bmk") || null;      // 북마크는 "여기로 가라"는 지목이다
       // AGENTS 목록의 세션 한 줄. 여기서 고른 것은 화면이 아니라 "저 세션"이다.
       const overAgent = under?.closest?.(".srow") || null;
+      const overFile = under?.closest?.(".fitem.file, .fitem.dir") || null; // Explorer 파일·폴더
       const overDocx = docxPickElementAt(under); // docx 본문·헤더·툴바도 같은 좌표 기반 호버를 탄다
       const overCell = callHook("viewer.sheetCellAt", under) || null;   // Sheet 칸
       const overSheet = pickSheetElementAt(under); // Sheet 메뉴바·도구모음·수식입력줄도 같은 좌표 기반 호버
@@ -161,9 +162,10 @@ function wirePickCursor() {
         : (overGroup && overGroup.dataset.group ? overGroup
         : (overBmk && overBmk.dataset.url ? overBmk
         : (overAgent && overAgent.dataset.target ? overAgent
+        : (overFile && (overFile.dataset.file || overFile.dataset.dir) ? overFile
         : (overDocx ? overDocx.el
         : (overCell ? overCell
-        : (overSheet ? overSheet.el : null))))));
+        : (overSheet ? overSheet.el : null)))))));
       if (want !== hoverTabEl) {
         hoverTabEl?.classList.remove("pick-hover");
         hoverTabEl = want;

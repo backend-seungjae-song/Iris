@@ -337,6 +337,17 @@ check("AGENTS 세션 줄도 지목 대상이다", () =>
   && /!pickAgentAt\(e\.target\)/.test(pickHost)
   && /\.picking-tabs \.srow\.pick-hover/.test(css("25-pick-record")));
 
+// ── Explorer 파일·폴더 지목 ──
+check("Explorer 파일·폴더도 지목 대상이고 @ 멘션으로 나간다", () =>
+  /const overFile = under\?\.closest\?\.\("\.fitem\.file, \.fitem\.dir"\) \|\| null;/.test(pick)
+  && /overFile && \(overFile\.dataset\.file \|\| overFile\.dataset\.dir\) \? overFile/.test(pick)
+  && /export function pickFileAt\(target\)/.test(pickHost)
+  && /const fi = pickFileAt\(e\.target\);/.test(pickHost)
+  && /!pickFileAt\(e\.target\)/.test(pickHost)
+  && /const mention = "@" \+ /.test(pickHost)
+  && /data: "\\x1b\[200~" \+ mention \+ "\\x1b\[201~"/.test(pickHost)
+  && /\.picking-tabs \.fitem\.pick-hover/.test(css("25-pick-record")));
+
 check("고른 세션은 부를 수 있는 주소로 나간다", () =>
   /`주소: herdr pane \$\{a\.paneId\}`/.test(pickHost)
   && /`읽기: herdr pane read \$\{a\.paneId\} --source recent --lines 50`/.test(pickHost)

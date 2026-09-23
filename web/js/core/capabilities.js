@@ -27,6 +27,9 @@
 //   창을 하나 더 만들 때마다 앱 셸을 수정해야 한다.
 //   presets 는 그 기능이 어느 그룹에 드는가다. 그룹 쪽에 id 목록을 두면 두 사람이 각자
 //   기능을 추가할 때 같은 줄에서 충돌하므로, 추가하는 쪽이 스스로 선언한다.
+//   optIn 은 사용자가 설정에서 확인 창을 거쳐 켜야 켜지는 기본 꺼짐 기능이다({ title, items, after }
+//   가 확인 창 문구). 프리셋은 이 기능을 켜지 않는다. 네이티브 표의 optIn 과 같아야 하고, 서버 쪽
+//   구성 요소(server)를 가질 수 없다(서버 부팅 판정은 optIn 을 모른다). 검사가 둘 다 확인한다.
 //   rail 이 붙은 capability 는 rail 표(core/rail-items.js)에 같은 id 가 있어야 한다.
 //   rail 이 없는 항목은 label 을 스스로 갖는다. 설정 목록이 이름을 가져올 곳이 여기뿐이다.
 //   화면(screen)을 반환하는 항목은 반드시 rail 을 갖는다. rail 없는 화면은 진입점이 없다.
@@ -56,17 +59,6 @@
 //   현재 목록 확인: node bin/importers.mjs web/js/core/capabilities.js
 
 export const CAPABILITIES = [
-  {
-    // herdr 화면을 어디서 자를지 마지막 몇 px 은 사용자가 맞춘다. 맞춘 값은 앱 셸이 소유하므로
-    // 이 기능을 꺼도 값은 그대로 남고 조정판만 사라진다.
-    id: "croptuner",
-    windows: ["main"],
-    files: ["panel/crop-tuner.js"],
-    css: ["31-crop-tuner.css"],
-    label: "herdr 자리 맞춤판",
-    presets: ["full"],
-    load: () => import("../panel/crop-tuner.js"),
-  },
   {
     id: "mdformat",
     windows: ["main", "memo", "browser"],
@@ -184,6 +176,31 @@ export const CAPABILITIES = [
     server: ["native/electron/chrome-mirror-backend.cjs"],
     label: "진짜 Chrome 미러",
     load: () => import("../browser/chrome-mirror-surface.js"),
+  },
+  {
+    // 화면·rail 없이 네이티브 쪽(단축키·타이머·복원)만 갖는 기능. 렌더러 진입 파일은 표 계약을
+    // 채우는 최소 껍데기다. label 은 편의 기능 목록에 쓴다.
+    id: "desklayout",
+    native: true,
+    files: ["desklayout/boot.js"],
+    css: [],
+    // 서버(WebSocket·HTTP)가 아니라 네이티브 IPC 두 개(ac-desklayout-save-now·restore-now)로만
+    // 열려 있다. 이 기능의 네이티브 파일은 native/electron/capabilities.cjs 의 desklayout 줄과
+    // host.cjs 의 require 사슬로 귀속되므로 server 목록에는 적지 않는다(그 목록은 WS 메시지나
+    // HTTP 경로를 실제로 다루는 파일에만 쓴다 — "기능의 서버 쪽 반을 표가 밝힌다" 검사 참고).
+    label: "창 레이아웃 저장·복원",
+    // 다른 앱의 창을 옮기고 로그인 항목을 바꾸므로 기본 꺼짐이다. 켤 때 확인 창에 이 문구가 그대로 나온다.
+    optIn: {
+      title: "창 레이아웃 저장·복원을 켤까요?",
+      items: [
+        "다른 앱의 창을 옮기기 위해 손쉬운 사용 권한을 요청합니다",
+        "로그인할 때 Iris 가 자동으로 실행되고, 마지막으로 저장할 때 열려 있던 앱을 다시 엽니다",
+        "ctrl+alt+S 로 지금 배치를 저장하고 ctrl+alt+R 로 되돌립니다",
+        "15분마다 창 배치를 모니터 수별로 저장합니다",
+      ],
+      after: "앱을 다시 시작하면 켜집니다. 켜질 때 손쉬운 사용 권한이 없으면 요청합니다.",
+    },
+    load: () => import("../desklayout/boot.js"),
   },
   {
     // 이 브라우저에서 새로 로그인한 정보를 확인해 저장소에 담는다. 자동완성(autofill)과 반대
@@ -333,6 +350,17 @@ export const CAPABILITIES = [
     panel: "statusbar",
     rail: "usage",
     load: () => import("../statusbar/usage.js"),
+  },
+  {
+    // iOS 시뮬레이터·Android 기기 화면을 가운데 탭에 띄운다. Orca(stablyai/orca)의 구현을 번들로 쓴다.
+    // rail 화면은 기기 목록과 SDK 상태이고, 탭을 전용 창으로 분리할 수 있다(그 창이 page).
+    id: "emulator",
+    native: true,
+    files: ["emulator/boot.js", "emulator/pane.js", "emulator/devices-panel.js", "emulator/launch-button.js"],
+    css: ["33-emulator.css"],
+    page: "web/emulator-window",
+    rail: "emulator",
+    load: () => import("../emulator/boot.js"),
   },
 ];
 

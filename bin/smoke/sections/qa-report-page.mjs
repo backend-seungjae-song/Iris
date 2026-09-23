@@ -25,6 +25,9 @@ import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
 // 회차 폴더 이름을 여기서 다시 적지 않는다. 생산자와 값이 갈리면 이 검사가 엉뚱한 위치를 본다.
 import { artifactDir } from "../../../server/artifacts-home.cjs";
 
+// 장부 회차는 기본 지면(비개발자용)과 옆의 -dev 지면으로 나뉜다. 확인 기록을 보는 검사는 -dev 를 읽는다.
+const devOf = (p) => p.replace(/\.html$/, "-dev.html");
+
 export default async function run() {
 console.log("\n[10h2] 보고서 렌더 결과");
 {
@@ -235,7 +238,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     const out2 = path.join(tmp, "nominal-led.html");
     const rr2 = buildReport({ title: "원장 명사형", runId: "lednominal", out: out2, kind: "proof", steps: [] });
     if (!rr2.ok) return false;
-    const led2 = readFileSync(out2, "utf8");
+    const led2 = readFileSync(devOf(out2), "utf8") + readFileSync(out2, "utf8");
     // 원장 페이지가 실제로 그려졌는지 먼저 확인한다. 그려지지 않으면 이 검사는 아무것도 보지 못한다.
     if (!/고칠 코드가 없는 발견/.test(led2) || !/무엇을 고를 것인가/.test(led2)) return false;
     // 회차 폴더는 이 검사가 쓴 폴더여야 한다. 페이지가 상태 폴더를 고정해 두면 다른 폴더를 읽고,
@@ -341,13 +344,94 @@ console.log("\n[10h2] 보고서 렌더 결과");
     put({ kind: "row", act: "close", row: "U1", path: "정상", color: "red", note: "탭이 없다" });
     const out = path.join(tmp, "ledshot.html");
     buildReport({ title: "장면", runId: "ledshot", out, kind: "proof" });
-    const html = readFileSync(out, "utf8");
+    const html = readFileSync(devOf(out), "utf8");
     const verdict = /여기 탭이 없다/.test(html)          // 설명이 지면에 실린다
       && /녹화 \d+장 접음/.test(html)                    // 접은 것을 숨기지 않고 센다
       && !/>장면 없음</.test(html)             // 찍었는데 없다고 하지 않는다
       && /<span class="lb">찍음<\/span>/.test(html);     // 무엇인지로 라벨이 붙는다
     rmSync(home, { recursive: true, force: true });
     return verdict;
+  });
+  // 기본 지면을 읽는 사람은 확인 기록 번호·선택자·주소로 검증할 수 없다. 흐름과 설명을 단
+  // 장면만 싣고, 개발자가 되짚을 기록은 -dev 지면에 그대로 남아야 한다.
+  // 기본 지면을 읽는 사람은 확인 기록 번호·선택자·주소로 검증할 수 없다. 대신 조건·기대 근거·
+  // 확인마다 대상·기대·실제·맞음 여부와 모든 증거 장면(캐러셀)이 있어야 다시 판정할 수 있다.
+  // 무효로 돌린 판정의 장면은 증거가 아니다. 개발자가 되짚을 기록은 -dev 지면에 그대로 남는다.
+  check("장부 회차의 기본 지면은 판정 정보와 장면을 싣고 확인 기록은 -dev 에 둔다", () => {
+    const home = buildReport({ title: "자리", runId: "ledplain", out: path.join(tmp, "seed-plain.html"),
+      steps: [{ name: "자리", verdict: "info" }] }).store;
+    rmSync(home, { recursive: true, force: true });
+    mkdirSync(home, { recursive: true });
+    // 읽을 수 있는 크기의 장면. 너무 작은 그림은 기본 지면이 빼므로 80x80 을 쓴다.
+    const big = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAIAAAABc2X6AAAAc0lEQVR4nO3PAQ0AIAzAsPvXhihcnGS0CrY5n5nXAdsM1xmuM1xnuM5wneE6w3WG6wzXGa4zXGe4znCd4TrDdYbrDNcZrjNcZ7jOcJ3hOsN1husM1xmuM1xnuM5wneE6w3WG6wzXGa4zXGe4znCd4TrDdRfRQMd2eVIu+QAAAABJRU5ErkJggg==", "base64");
+    const bigShot = (n) => { const q = path.join(tmp, n + ".png"); writeFileSync(q, big); return q; };
+    const J = path.join(home, "journal.jsonl");
+    const put = (o) => appendFileSync(J, JSON.stringify({ source: "server", run_id: "ledplain", ...o }) + "\n");
+    put({ kind: "run_begin", runKind: "proof" });
+    put({ kind: "row", act: "declare", row: "P1", what: "목록 화면 > 저장 버튼 클릭 > 새로고침 > 값 유지",
+      given: "관리자 로그인", basis: "user", basisNote: "사용자 결정 저장 유지", paths: ["정상"] });
+    put({ kind: "row", act: "open", row: "P1", path: "정상" });
+    for (let k = 1; k <= 13; k++) {
+      put({ kind: "artifact", source: "browser", path: bigShot(`plain-meant${k}`), url: "http://localhost:3002/list",
+        caption: `장면 설명 ${k}`, row: "P1", path_: "정상" });
+    }
+    put({ kind: "assertion", source: "browser", id: "r7", row: "P1", path_: "정상", url: "http://localhost:3002/list",
+      selector: "[data-testid=qty]", expected: "[data-testid=qty] = \"3\"", mode: "equals", want: "3", label: "수량 칸", got: "3", pass: true,
+      shot: bigShot("plain-rc") });
+    put({ kind: "assertion", source: "browser", id: "r8", row: "P1", path_: "정상",
+      selector: "[data-testid=other]", mode: "exists", got: null, pass: false, shot: bigShot("plain-voided") });
+    put({ kind: "void", receipt: "r8", why: "질문 오류", row: "P1", path_: "정상" });
+    // 이름표 없이 부른 확인은 판정한 요소 이름이 대상으로 선다.
+    put({ kind: "assertion", source: "browser", id: "r9", row: "P1", path_: "정상",
+      selector: "#save", mode: "exists", element: "버튼 ‘저장’", got: "저장", pass: true });
+    put({ kind: "row", act: "close", row: "P1", path: "정상", color: "green", note: "새로고침 뒤 값 3 유지\\n저장 알림 표시",
+      options: [{ pick: "자동 저장", then: "입력 즉시 저장" }, { pick: "확인 후 저장", then: "버튼으로 저장" }] });
+    const out = path.join(tmp, "ledplain.html");
+    const res = buildReport({ title: "기본 지면", runId: "ledplain", out, kind: "proof",
+      overview: { features: [
+        { name: "수량 저장", need: ["수량을 저장하고 새로고침해도 유지"], understood: ["수량 칸 값 저장"], built: ["저장 버튼"], cases: ["P1"], gaps: ["음수 입력 거부"] },
+        { name: "코드 구조", need: ["모듈 분리"], understood: ["구조 분리"], built: ["모듈 분리"], cases: [], why: "코드 구조 요구" }],
+        diagrams: [{ lanes: ["운영자", "사용자"], steps: [{ id: "a", lane: "운영자", text: "수량 입력" },
+          { id: "b", lane: "사용자", text: "값 확인", focal: true }], links: [{ from: "a", to: "b" }] }] } });
+    const raw = readFileSync(out, "utf8");
+    const plain = raw.replace(/src="data:[^"]*"/g, "");
+    const dev = readFileSync(devOf(out), "utf8");
+    const scenes = (raw.match(/<figure class="sc/g) || []).length;
+    const ok = res.devPath === devOf(out)
+      && /<li>목록 화면<\/li><li>저장 버튼 클릭<\/li>/.test(plain)   // 흐름이 단계로 나뉜다
+      && /Case 1/.test(plain) && !/>P1</.test(plain)                   // 장부 번호 대신 순서 번호
+      && /<h3>수량 저장<\/h3>/.test(plain) && /href="#w1">Case 1 통과/.test(plain) // 기능 → 케이스
+      && /확인 빈 곳<br>음수 입력 거부/.test(plain)                    // 기능 안 빈 검증
+      && /확인 케이스 없음/.test(plain) && /코드 구조 요구/.test(plain)       // 검증 없는 기능이 드러남
+      && /href="#q1">수량 저장/.test(plain)                            // 케이스 → 기능
+      && /<svg class="dia"[^>]*role="img"/.test(plain) && /lanes1-title/.test(plain) // 역할별 흐름도
+      && plain.indexOf("기능과 구현") < plain.indexOf('class="sum"')   // 추적표가 케이스 표보다 먼저
+      && /관리자 로그인/.test(plain) && /사용자 결정 저장 유지/.test(plain) // 조건·기대 근거
+      && /<em>수량 칸<\/em>&#39;3&#39; 일치|<em>수량 칸<\/em>'3' 일치/.test(plain) // 대상·기대값
+      && /장면 설명 13/.test(plain) && scenes === 14                  // 13장 + 판정 1장, 무효 장면 없음
+      && /잘못 설정한 확인 제외 · 사유 질문 오류/.test(plain)   // 무효 사실과 사유는 남는다
+      && /<em>버튼 ‘저장’<\/em>/.test(plain)                          // 이름표 없으면 요소 이름
+      && /자동 저장/.test(plain) && /확인 후 저장/.test(plain)         // 경로에 남긴 선택지
+      && /<li>저장 알림 표시<\/li>/.test(plain)                      // 문자 그대로 적힌 \n 도 줄로 나뉜다
+      && /class="car"/.test(plain) && /class="arw next"/.test(plain) // 장면은 캐러셀로
+      && !/\br7\b|\br8\b|data-testid|localhost/.test(plain)
+      && /\br7\b/.test(dev) && /data-testid/.test(dev);
+    if (!ok) console.log("      기본 지면 검사:", { scenes, flow: /<li>목록 화면<\/li><li>저장 버튼 클릭<\/li>/.test(plain),
+      meta: /관리자 로그인/.test(plain) && /사용자 결정 저장 유지/.test(plain),
+      check: (plain.match(/<em>[^<]*<\/em>[^<]*/) || [""])[0], voidNote: /잘못 설정한 확인 제외 · 사유 질문 오류/.test(plain),
+      el: /<em>버튼 ‘저장’<\/em>/.test(plain), picks: /확인 후 저장/.test(plain),
+      nl: /<li>저장 알림 표시<\/li>/.test(plain), s13: /장면 설명 13/.test(plain), car: /class="car"/.test(plain) && /class="arw next"/.test(plain), dev: /\br7\b/.test(dev) && /data-testid/.test(dev), dp: res.devPath === devOf(out), leak: (plain.match(/\br7\b|\br8\b|data-testid|localhost/) || [""])[0] });
+    rmSync(home, { recursive: true, force: true });
+    return ok;
+  });
+  // 흐름도는 한 장에 역할 5·단계 9를 넘기면 그리지 않고 나누라고 돌려준다.
+  checkAsync("역할별 흐름도가 한도를 넘으면 보고서가 거절한다", async () => {
+    const { checkLanes } = await import(path.join(ROOT, "bin/mcp/report-lanes.mjs"));
+    const many = { lanes: ["a", "b", "c", "d", "e", "f"], steps: Array.from({ length: 10 }, (_, k) => ({ id: "s" + k, lane: "a", text: "x" })) };
+    const bad = checkLanes(many, 1);
+    const ok = checkLanes({ lanes: ["a"], steps: [{ id: "s", lane: "a", text: "x" }], links: [] }, 1);
+    return bad.some((x) => /역할 6개/.test(x)) && bad.some((x) => /단계 10개/.test(x)) && ok.length === 0;
   });
   // 장부가 가리키는 파일이 나중에 다른 그림으로 덮이면 페이지는 그것을 증거로 싣는다.
   // 실제로 매물 관리 줄에 로그인 화면이 실린 사례가 있다.
@@ -371,7 +455,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     put({ kind: "row", act: "close", row: "U1", path: "정상", color: "green", note: "됐다" });
     const out = path.join(tmp, "ledstale.html");
     buildReport({ title: "덮임", runId: "ledstale", out, kind: "proof" });
-    const html = readFileSync(out, "utf8");
+    const html = readFileSync(devOf(out), "utf8");
     const verdict = /장부 시각보다 뒤에/.test(html) && /촬영 시점 불일치/.test(html) && /증거 아님/.test(html)
       && /장면 파일 덮임/.test(html);
     rmSync(home, { recursive: true, force: true });
@@ -403,7 +487,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     put({ kind: "note", id: "n1", what: "문구가 다르다", decide: "어느 쪽으로 통일할지" });
     const out = path.join(tmp, "led.html");
     buildReport({ title: "장부", runId: "ledrun", out, kind: "proof" });
-    const ok = readFileSync(out, "utf8");
+    const ok = readFileSync(devOf(out), "utf8");
     const verdict = /class="req case red row"/.test(ok)          // 줄의 색은 경로 중 가장 나쁜 것
       && /class="lane red"/.test(ok) && /class="lane open"/.test(ok)  // 실행하지 않은 경로가 남는다
       && /안 밟음/.test(ok)
@@ -445,7 +529,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     put({ kind: "row", act: "close", row: "R-36", path: "정상", color: "green", note: "상태 바뀜" });
     const out = path.join(tmp, "vd.html");
     buildReport({ title: "무효", runId: "vdrun", out, kind: "proof" });
-    const html = readFileSync(out, "utf8");
+    const html = readFileSync(devOf(out), "utf8");
     const verdict = /무효로 돌린 판정 1건/.test(html)
       && /r30 · 판매 중 · 통과 판정/.test(html)
       && /사유: R-39 반려 사유를 못 본 채 판정했다/.test(html)
@@ -481,7 +565,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     put({ kind: "row", act: "close", row: "D1", path: "정상", color: "green", note: "숫자 일치" });
     const out = path.join(tmp, "dt.html");
     buildReport({ title: "고르는 순서", runId: "dtrun", out, kind: "proof" });
-    const html = readFileSync(out, "utf8");
+    const html = readFileSync(devOf(out), "utf8");
     const caps = (html.match(/<figcaption>[\s\S]*?<\/figcaption>/g) || []).join("");
     // 장면 밑 주소는 경로만 실린다. 남은 것이 대시보드뿐이어야 한다.
     const verdict = caps.includes("/resale/dashboard") && !caps.includes("/login")
@@ -525,7 +609,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     put({ kind: "row", act: "close", row: "N-2", path: "정상", color: "green", note: "알림 1건 쌓임" });
     const out = path.join(tmp, "set.html");
     buildReport({ title: "목록", runId: "setrun", out, kind: "proof" });
-    const html = readFileSync(out, "utf8");
+    const html = readFileSync(devOf(out), "utf8");
     const verdict = /<h2 class="sec">알림 발생 자리<\/h2>/.test(html)
       && /<h2 class="sec">앞 회차 지적<\/h2>/.test(html)            // 목록 둘이 다 표시된다
       && /3가지 중 1가지를 봄 · 안 본 것 2가지: listingRejected · tradeSettled/.test(html)
@@ -557,7 +641,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     }
     const out = path.join(tmp, "idx.html");
     buildReport({ title: "훑기", runId: "idxrun", out, kind: "proof" });
-    const h2 = readFileSync(out, "utf8");
+    const h2 = readFileSync(devOf(out), "utf8");
     // 해당 영역 안에서만 확인한다. 페이지 전체를 보면 카드의 판정 문장이 같은 문자를 담고 있어
     // 여기서 잘라도 검사가 통과한다(확인 결과: 30자로 잘라도 검출되지 않았다).
     const idxFrom = h2.indexOf('class="qalist idx"');
@@ -604,7 +688,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     put({ kind: "row", act: "close", row: "U1", path: "정상", color: "green", note: "된다" });
     const out = path.join(tmp, "basis.html");
     buildReport({ title: "근거", runId: "basisrun", out, kind: "proof" });
-    const h2 = readFileSync(out, "utf8");
+    const h2 = readFileSync(devOf(out), "utf8");
     // 주소는 장면마다 그 아래에 붙어야 한다. 경고 문구에도 같은 문자가 들어 있어서
     // 페이지 전체를 보면 장면 밑의 표시를 빼도 검사가 통과한다(확인 결과).
     const caps = (h2.match(/<figcaption>[\s\S]*?<\/figcaption>/g) || []).join("");
@@ -615,7 +699,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
       why: "세션이 끊겨 다시 들어간 구간이다" });
     const out2 = path.join(tmp, "basis2.html");
     buildReport({ title: "근거", runId: "basisrun", out: out2, kind: "proof" });
-    const h3 = readFileSync(out2, "utf8");
+    const h3 = readFileSync(devOf(out2), "utf8");
     const verdict = h2.includes("2차 수정 목록")
       && h2.indexOf("2차 수정 목록") < h2.indexOf('class="sec">줄 1')
       && /L1<\/dt>[\s\S]{0,500}?에서 봤다/.test(h2)

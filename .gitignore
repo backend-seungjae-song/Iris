@@ -10,6 +10,8 @@ web/vendor/*
 !web/vendor/docx-editor-core.css
 !web/vendor/docx-editor-core.NOTICE.md
 !web/vendor/docx-editor-core.meta.json
+!web/vendor/orca-emulator-pane.esm.js
+!web/vendor/orca-emulator-pane.NOTICE.md
 !web/vendor/*.wasm
 app.log
 dist/

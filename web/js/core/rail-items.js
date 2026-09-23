@@ -96,6 +96,13 @@ export const RAIL_ITEMS = [
     canDisable: true, disabledReason: "",
   },
   {
+    id: "emulator", label: "모바일",
+    title: "모바일 에뮬레이터: iOS 시뮬레이터·Android 기기",
+    icon: "<rect x=\"6\" y=\"2.5\" width=\"12\" height=\"19\" rx=\"2.5\"/><path d=\"M10.5 18.5h3\"/>",
+    body: "emu-active", panel: "emu-panel", layout: "panel",
+    canDisable: true, disabledReason: "",
+  },
+  {
     id: "keymap", label: "설정",
     title: "설정: 단축키, 보안",
     icon: "<path d=\"M9 9h6v6H9z\"/><path d=\"M9 9V6a3 3 0 1 0-3 3h3z\"/><path d=\"M15 9h3a3 3 0 1 0-3-3v3z\"/><path d=\"M15 15v3a3 3 0 1 0 3-3h-3z\"/><path d=\"M9 15H6a3 3 0 1 0 3 3v-3z\"/>",

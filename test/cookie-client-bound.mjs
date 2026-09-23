@@ -55,3 +55,16 @@ test("이름이 닮았을 뿐인 쿠키는 안 거른다", () => {
   const { list } = decryptCookieRows(rows, null, null);
   assert.equal(list.length, 2);
 });
+
+test("파티션 쿠키는 안 실리고 나머지는 실린다", () => {
+  // Electron cookies API 는 partitionKey 를 받지 않는다. 한 개라도 섞이면 교체 전체가 거부되어
+  // 가져오기가 아무것도 넣지 못한다.
+  const rows = [
+    { ...row(".youtube.com", "VISITOR_INFO1_LIVE", "가져오면안됨"), top_frame_site_key: "https://example.com" },
+    { ...row(".claude.com", "sessionKey", "가져와야함"), top_frame_site_key: "" },
+    row(".github.com", "user_session", "가져와야함"),
+  ];
+  const { list, partitionSkipped } = decryptCookieRows(rows, null, null);
+  assert.deepEqual(list.map((c) => c.name).sort(), ["sessionKey", "user_session"]);
+  assert.equal(partitionSkipped, 1);
+});

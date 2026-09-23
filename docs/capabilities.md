@@ -224,6 +224,26 @@ class 가 `panelId` 인 div 를 만들고, 기능이 로드된 직후 `ensureTab
 `file` 과 `browser` 는 앱 셸의 것이라 등록하지 않는다. 같은 종류를 두 기능이 등록하면 먼저 등록된
 것을 유지하고 나중 것을 거절하며 경고를 남긴다.
 
+## 배치 영역 기여 절차
+
+작업 화면의 영역 배치는 앱 셸의 `web/js/core/layout-engine.js` 가 정한다. 기능이 탐색기·채팅처럼
+따로 놓이는 영역을 더하려면 `web/js/core/layout-regions.js` 에 등록한다. 엔진은 이 표만 읽으므로
+기능 이름을 모른다.
+
+```js
+registerLayoutRegion({
+  id: "emulator",               // 배치 트리에 저장되는 이름
+  label: "에뮬레이터",           // 편집 모드의 이름표
+  el: column,                   // 기능이 .app 에 한 번 붙인 요소. 옮기지 않는다
+  visible: () => !!columnEntry, // 지금 자리를 차지하는가
+  size: 360,                    // 처음 놓일 때의 폭(px). 채팅 왼쪽에 들어간다
+});
+```
+
+보임이 바뀌면 기능이 `notifyLayout()` 을 부른다. 등록하지 않은 기능의 영역 이름이 저장된 배치에
+남아 있어도 지우지 않으므로, 기능을 껐다 켜도 자리는 그대로다. 창 폭 820px 이하에서는 엔진이
+꺼지고(body 에서 `layout-on` 이 빠진다) 등록한 영역은 보이지 않는다.
+
 앱 셸이 기능의 동작을 호출하는 지점은 `web/js/core/hooks.js` 다. 이름은 "기능.동작" 형식이고,
 앞부분이 채우는 쪽을 가리킨다. 로드되지 않은 기능의 이름을 호출하는 것은 오류가 아니며, 그
 지점은 아무 동작도 하지 않는다.
@@ -255,6 +275,28 @@ rail 에서 내려가고, 순환에서 빠지고, 이름으로도 열리지 않�
 메모의 서버 쪽은 꺼져 있어도 조립한다(`serverAlways`). 메모 창과 스페이스 열쇠 이관이 함께
 쓰므로, 본 창에서 껐다고 저장소까지 내리면 그 창이 동작하지 않는다. 원격 창에서는 변경할 수
 없고, 저장이 거절되며 목록이 읽기 전용으로 표시된다.
+
+## 기본 꺼짐 기능(optIn)
+
+다른 앱의 창을 옮기거나 로그인 항목을 바꾸는 것처럼 사용자가 알고 켜야 하는 기능은 기본 꺼짐으로
+등록한다. 렌더러 표 항목에 `optIn: { title, items, after }` 를, 네이티브 표 항목에 `optIn: true` 를
+적는다. 새로 설치한 사람과 이미 쓰던 사람 모두 그 기능이 꺼진 채로 시작한다.
+
+상태는 `features.json` 의 `shown`(사용자가 켠 기본 꺼짐 기능)이다. 판정식은
+`server/feature-state-read.cjs` 의 `featureOn` 하나이고, 렌더러 `core/features.js` 가 같은 식을
+옮겨 쓴다. hidden 에 있으면 꺼짐, 기본 꺼짐 기능은 shown 에도 있어야 켜짐이다. `shown` 이 없는
+옛 파일은 빈 목록으로 읽고, `shown` 을 보내지 않는 저장 요청은 기존 `shown` 을 유지한다.
+
+- 켜기: 설정 목록의 스위치를 누르면 `items` 를 나열한 확인 창이 뜨고, [켜기] 를 눌러야 저장한다.
+  `toggleFeature` 는 `confirmed` 없이 기본 꺼짐 기능을 켜지 않는다. 프리셋은 꺼진 기본 꺼짐 기능을
+  켜지 않는다(켜진 것은 끈다).
+- 끄기: 저장 전에 ``callHook(`${id}.disabling`)`` 를 부르고 최대 3초 기다린다. 기본 꺼짐 기능은 이
+  이름을 채워 재시작 전까지 돌던 네이티브 동작(단축키·타이머·자기가 켠 로그인 항목)을 되돌린다.
+- 서버 쪽 구성 요소는 가질 수 없다. 서버 부팅 판정은 hidden 만 본다.
+
+검사: 두 표의 `optIn` 일치·확인 창 문구·서버 쪽 구성 요소 없음은 `tool-screens.mjs` 의
+「기본 꺼짐(optIn)은 …」, `${id}.disabling` 을 채우는지는 「부르는 이름은 채우는 자리가 있다」가 본다.
+판정·저장·확인·프리셋은 T1~T3 이 본다.
 
 ## 현재 상태와 알려진 한계
 
@@ -359,9 +401,9 @@ body class 이며, `.memo-window .panel-head` 는 앱 셸의 껍데기를 자기
 
 | 검사 | 무엇을 막는가 |
 | --- | --- |
-| `test/feature-server.mjs`(T1) | 실제 서버를 여러 hidden 조합으로 띄워 꺼진 기능의 init·WS·HTTP 가 살아 있는 상태. 상태 HTTP 의 원격 거절·잘못된 입력·CAS 도 함께 |
-| `test/feature-native.mjs`(T2) | 꺼진 네이티브 기능의 `require`·init·IPC 가 남는 상태. 켰을 때 실제로 로드되지 않는 것도 |
-| `test/feature-renderer.mjs`(T3) | 부팅이 상태를 기다리지 않는 것, 꺼진 것을 로드하는 것, 읽기 실패에 앱이 뜨지 않는 것, 이관 반복, 원격 창의 저장, 409 뒤 의도가 뒤집히는 것 |
+| `test/feature-server.mjs`(T1) | 실제 서버를 여러 hidden 조합으로 띄워 꺼진 기능의 init·WS·HTTP 가 살아 있는 상태. 상태 HTTP 의 원격 거절·잘못된 입력·CAS, `shown` 의 검증·유지·옛 파일 읽기도 함께 |
+| `test/feature-native.mjs`(T2) | 꺼진 네이티브 기능의 `require`·init·IPC 가 남는 상태. 켰을 때 실제로 로드되지 않는 것도. 기본 꺼짐 기능이 `shown` 없이 로드되는 것도 |
+| `test/feature-renderer.mjs`(T3) | 부팅이 상태를 기다리지 않는 것, 꺼진 것을 로드하는 것, 읽기 실패에 앱이 뜨지 않는 것, 이관 반복, 원격 창의 저장, 409 뒤 의도가 뒤집히는 것. 기본 꺼짐 기능이 확인 없이·프리셋으로 켜지는 것, 끌 때 disabling 을 안 부르는 것, 판정식이 서버와 갈리는 것 |
 | `bin/smoke/sections/tool-screens.mjs` 의 표 계약 절 | 세 표의 id 가 갈리는 것, 서버 진입점이 기능 초기화를 직접 호출하는 것, 상태가 이관 표식 밖에서 localStorage 를 쓰는 것, 설정 화면의 표시·안내가 실제와 일치하지 않는 것 |
 | `test/capability-share.mjs` | 공유 꾸러미가 충돌·해시·버전 불일치를 숨기는 것, 수신 검사가 작업 트리를 변경하는 것 |
 
@@ -698,7 +740,7 @@ NATIVE_CAPABILITIES = [
 ### 켜짐·꺼짐 상태의 반영
 
 끄고 켜는 집합은 렌더러의 localStorage 가 아니라 상태 폴더의 `features.json` 에 있고, `main.cjs`
-가 `readHiddenSync` 로 같은 파일을 읽어 `isOn` 을 만든다. 꺼진 기능은 `require` 조차 되지
+가 `readFeatureState`·`featureOn` 으로 같은 파일과 표의 `optIn` 을 읽어 `isOn` 을 만든다. 꺼진 기능은 `require` 조차 되지
 않는다. 판정은 부팅 한 번이라 변경한 뒤에는 앱을 다시 시작해야 한다.
 
 서버에도 같은 경계가 있다. `server/capabilities.js` 가 그 표이고, 켜진 행의 `init`·

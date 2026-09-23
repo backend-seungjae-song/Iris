@@ -48,7 +48,8 @@ check("앱 찾는 길이 셋이다", () => {
     && /async function discoverFromPanes/.test(ap)
     && /Promise\.all\(\[discoverMdns\(\), discoverAdb\(\), discoverFromPanes\(deps\.herdr\)\]\)/.test(ap)
     && /redirect: "manual"/.test(ap)      // 302의 location이 진짜 접속 지점이다
-    && /function adbPath\(\)/.test(ap);   // launchd PATH에는 adb가 없다
+    && /import \{ adbPath \} from "\.\/adb-path\.js"/.test(ap)   // launchd PATH에는 adb가 없다
+    && /function adbPath\(\)/.test(read("server/adb-path.js"));
 });
 // 앱 픽은 탭이 없다. 소스 파일:줄과 위젯 경계가 그 역할을 하고, 원본은 app_picks가 준다.
 check("앱에서 고른 것이 소스까지 실려 전달된다", () => {
@@ -756,6 +757,78 @@ await checkAsync("기기를 고르는 도구는 스코프 밖 참조로 죽지 �
   const names = surface.tools.map((x) => x.name);
   const missing = viaTarget.filter((n) => !names.includes(n));
   if (missing.length) throw new Error(`기기를 고르는 도구가 사라졌다: ${missing.join(", ")}`);
+  return true;
+});
+
+// 앱 도구의 대상은 Iris 에뮬레이터 탭에 열린 기기뿐이다. 켜져 있기만 한 기기를 잡으면 에이전트가
+// 사용자가 보지 않는 기기에서 확인하고, 없으면 기기를 따로 켜서 진행했다(사용자 확인 결과).
+// 서버 호출을 가짜로 바꿔 규칙을 실행으로 확인한다: 자기 스페이스 탭 → 없으면 탭 열기 → 탭 밖 기기는 거절.
+await checkAsync("앱 도구는 Iris 에뮬레이터 탭의 기기만 대상으로 한다", async () => {
+  const src = read("bin/mcp/app.mjs");
+  if (/idb\(\["list-targets"/.test(src) || /adb\(\["devices"/.test(src)) throw new Error("앱 도구가 켜진 기기를 직접 훑는다 — 대상은 Iris 탭에서만 받는다");
+  const { createAppSurface } = await import(new URL("../../mcp/app.mjs", import.meta.url).href);
+  const calls = [];
+  let tabs = [];
+  const call = async (cmd, args) => {
+    calls.push(cmd);
+    if (cmd === "app-devices") return { ok: true, data: { tabs } };
+    if (cmd === "app-open") { tabs = [{ space: "s1", tab: "t1", udid: "emulator-5554", name: "Pixel", mine: true }]; return { ok: true, data: { udid: "emulator-5554" } }; }
+    return { ok: false, error: "?" };
+  };
+  const surface = createAppSurface({ currentSession: async () => null, journal: async () => null, addReceipt: () => ({ id: "r" }), call });
+  const listed = await surface.tools.find((t) => t.name === "app_targets").run({});
+  if (!listed.ok || listed.data.count !== 0) throw new Error("탭이 없는데 기기가 잡힌다");
+  if ((await surface.simTarget()) !== "emulator-5554" || !calls.includes("app-open")) throw new Error("탭이 없을 때 Iris 에 탭을 열지 않는다");
+  tabs = [{ space: "s2", tab: "t2", udid: "E92D2EB4-A044-461A-B685-0B6034FF0D59", name: "iPhone 16", mine: false },
+    { space: "s1", tab: "t1", udid: "emulator-5554", name: "Pixel", mine: true }];
+  calls.length = 0;
+  if ((await surface.simTarget()) !== "emulator-5554" || calls.includes("app-open")) throw new Error("이 세션 스페이스의 탭 기기를 고르지 않는다");
+  if ((await surface.simTarget("iPhone 16")) !== "E92D2EB4-A044-461A-B685-0B6034FF0D59") throw new Error("탭에 열린 다른 기기를 이름으로 못 고른다");
+  if ((await surface.simTarget("iPhone SE")) !== null) throw new Error("탭 밖 기기를 대상으로 받는다");
+  return true;
+});
+
+// Android 는 uiautomator 트리를 idb 요소 모양으로 바꿔 같은 도구를 쓴다. 바꾼 모양이 어긋나면
+// 이름 찾기·값 판정·앱 이름·표시 기준 크기가 조용히 비므로, 기기 없이 고정 입력으로 확인한다.
+await checkAsync("Android 화면 트리는 iOS 요소와 같은 모양으로 바뀐다", async () => {
+  const { parseUiautomator } = await import(new URL("../../mcp/app.mjs", import.meta.url).href);
+  const xml = `<?xml version='1.0' ?><hierarchy rotation="0">`
+    + `<node class="android.widget.FrameLayout" package="com.ex.app" text="" content-desc="" bounds="[0,0][1080,2400]">`
+    + `<node class="android.widget.EditText" text="a &amp; b" content-desc="" enabled="true" bounds="[10,20][110,70]" />`
+    + `<node class="android.widget.Switch" text="" content-desc="알림" checkable="true" checked="true" bounds="[0,100][50,150]" />`
+    + `<node class="android.widget.Button" text="확인" content-desc="" enabled="false" bounds="[0,200][100,260]" />`
+    + `<node class="android.widget.TextView" text='say "hi" &apos;x&apos;' content-desc="" bounds="[0,300][100,360]" /></node></hierarchy>`;
+  const t = parseUiautomator(xml);
+  const app = t[0];
+  if (app.type !== "Application" || app.AXLabel !== "com.ex.app" || app.frame.width !== 1080 || app.frame.height !== 2400)
+    throw new Error(`맨 앞 Application 요소가 어긋났다: ${JSON.stringify(app)}`);
+  const edit = t.find((e) => e.type === "EditText");
+  if (!edit || edit.AXLabel !== "a & b" || edit.AXValue !== "a & b" || edit.frame.width !== 100 || edit.frame.height !== 50)
+    throw new Error(`입력칸이 어긋났다: ${JSON.stringify(edit)}`);
+  const sw = t.find((e) => e.type === "Switch");
+  if (!sw || sw.AXLabel !== "알림" || sw.AXValue !== "1") throw new Error(`켜고 끄는 요소가 어긋났다: ${JSON.stringify(sw)}`);
+  const btn = t.find((e) => e.type === "Button");
+  if (!btn || btn.enabled !== false) throw new Error("비활성 버튼을 활성으로 읽는다");
+  // 값에 " 가 있으면 그 속성은 작은따옴표로 온다(확인 결과: text='a\x60b"c&apos;d').
+  if (!t.some((e) => e.AXLabel === `say "hi" 'x'`)) throw new Error("작은따옴표로 감싼 속성을 못 읽는다");
+  return true;
+});
+
+// 표시 상자는 요소 frame(width·height)에서 만든다. writeMarks 는 w·h 를 읽으므로 frame 을 그대로 펼쳐
+// 넘기면 상자 크기가 null 로 저장되어 보고서에 크기 없는 상자가 그려진다(확인 결과: 저장된 표시 전부 null).
+await checkAsync("앱 표시 상자는 크기를 가진 채 저장된다", async () => {
+  const { appMark } = await import(new URL("../../mcp/app.mjs", import.meta.url).href);
+  const { writeMarks } = await import(new URL("../../mcp/report.mjs", import.meta.url).href);
+  const fs = await import("node:fs");
+  const dir = mkdtempSync(path.join(tmpdir(), "iris-marks-"));
+  try {
+    const shot = path.join(dir, "s.png");
+    writeMarks(shot, [appMark({ x: 100, y: 200, width: 50, height: 100 }, "여기")], { width: 1000, height: 2000 });
+    const side = fs.readdirSync(dir).find((f) => f.endsWith(".marks.json"));
+    if (!side) throw new Error("표시 파일이 안 생겼다");
+    const m = JSON.parse(fs.readFileSync(path.join(dir, side), "utf8")).marks[0];
+    if (m.w !== 0.05 || m.h !== 0.05 || m.x !== 0.1 || m.y !== 0.1) throw new Error(`상자 비율이 어긋났다: ${JSON.stringify(m)}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
   return true;
 });
 

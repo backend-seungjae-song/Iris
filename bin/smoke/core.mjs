@@ -109,6 +109,10 @@ const WEB_SHUTTLE_EXCLUDES = new Set([
   "web/memolab/group.js",
   "web/memolab/terms.js",
   "web/memolab/words.js",
+  // 에뮬레이터 분리 창도 앱 셸 밖의 한 장짜리 화면이다. 자기 검사는 bin/smoke/sections/emulator.mjs.
+  "web/emulator-window/index.html",
+  "web/emulator-window/window.js",
+  "web/emulator-window/window.css",
 ]);
 export function sourceFiles(area) {
   if (area === "web") {

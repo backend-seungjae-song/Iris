@@ -50,6 +50,7 @@ const ALLOWED_HOSTS = new Set([
   "opensource.org", "www.w3.org", "developer.mozilla.org", "www.chromium.org",
   "source.chromium.org", "bugs.chromium.org", "chromedevtools.github.io",
   "support.google.com", "security.googleblog.com", "developers.googleblog.com", "developer.chrome.com", "pptr.dev",
+  "developer.android.com",
   "github.io", "xtermjs.org", "microsoft.github.io", "vercel.com", "www.gstatic.com",
   "fonts.googleapis.com", "fonts.gstatic.com", "openfontlicense.org", "tailscale.com", "www.anthropic.com",
   // 구독 사용량을 물어보는 제공자 엔드포인트 (server/usage.js)

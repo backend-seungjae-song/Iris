@@ -421,8 +421,7 @@ console.log("\n[10h] 스크린샷은 증거가 된다");
     && /NO_TAB\.has\(t\.name\) \? t\.schema : \{ \.\.\.t\.schema, \.\.\.TAB_PARAM \}/.test(mcp)
     && /inputSchema: \{ type: "object", properties: schemaOf\(t\)/.test(mcp)   // 목록이 그 표를 쓴다
     && /const s = schemaOf\(t\), names = Object\.keys\(s\);/.test(mcp));     // 검사도 같은 표를 쓴다
-  // 기기를 여럿 켜 두면 "켜져 있는 것 중 첫 번째"는 idb가 정하는 순서라 호출마다 달라진다.
-  // 고정하면 그 기기로만 가고, 그 기기가 꺼지면 조용히 다른 기기로 갈아타지 않는다.
+  // 기기가 여럿이면 고정한 기기로만 간다. 고정한 기기의 탭이 닫히면 조용히 다른 기기로 갈아타지 않는다.
   check("에뮬레이터도 고정할 수 있다", () => {
     const mcp = read("bin/iris-mcp.mjs");
     return /name: "app_target"/.test(mcpApp)
@@ -430,8 +429,8 @@ console.log("\n[10h] 스크린샷은 증거가 된다");
       && /function setPinnedDevice\(session, udid\)/.test(mcpApp)
       && /app-targets\.json/.test(mcpApp)                     // 프로세스가 다시 떠도 유지
       && /if \(list\.some\(\(t\) => t\.udid === pin\)\) return pin;/.test(mcpApp)
-      && /\/\/ 고정한 기기가 꺼졌다\. 조용히 다른 기기로 갈아타지 않는다/.test(mcpApp)
-      && /async function simTargetError\(\)/.test(mcpApp);     // 왜 없는지 구분해 말한다
+      && /\/\/ 고정한 기기의 탭이 닫혔다\. 조용히 다른 기기로 갈아타지 않는다/.test(mcpApp)
+      && /async function simTargetError\(want\)/.test(mcpApp);     // 왜 없는지 구분해 말한다
   });
   check("기기도 최대 4대까지 동시에", () =>
     /const MAX_DEVICES = 4;/.test(mcpApp)

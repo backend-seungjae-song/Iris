@@ -35,6 +35,7 @@ import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { WebSocket } from "ws";
+import { adbPath } from "./adb-path.js";
 
 // dns-sd는 종료되지 않는 명령이라 잠시 실행해 결과를 모으고 종료한다. 이 시간이 모드를 켠 뒤 탭할 수
 // 있을 때까지의 지연이다. 그 전에 탭하면 선택이 아니라 앱이 반응하므로 짧아야 한다. 놓쳐도 15초마다
@@ -140,24 +141,6 @@ async function discoverMdns() {
 //  2) adb forward --list가 그 기기 포트를 받는 host 포트를 준다(확인 결과: tcp:62556 → tcp:41047).
 //  3) 그 주소로 열면 302가 오고 location이 진짜 접속 지점(DDS)을 가리킨다. flutter run이 터미널에
 //     출력하는 값과 같다(확인 결과: 62560/bQssj14LaP8=). DDS가 없으면 302가 없고 그 주소가 접속점이다.
-// 서버는 launchd가 실행하므로 사용자 셸의 PATH가 아니다(확인 결과: adb를 찾지 못했다). 흔한 경로를 직접 확인한다.
-let adbPathCache;
-function adbPath() {
-  if (adbPathCache !== undefined) return adbPathCache;
-  const home = process.env.HOME || "";
-  const cands = [
-    process.env.IRIS_ADB,
-    process.env.ANDROID_HOME && path.join(process.env.ANDROID_HOME, "platform-tools", "adb"),
-    process.env.ANDROID_SDK_ROOT && path.join(process.env.ANDROID_SDK_ROOT, "platform-tools", "adb"),
-    path.join(home, "Library", "Android", "sdk", "platform-tools", "adb"),
-    "/opt/homebrew/share/android-commandlinetools/platform-tools/adb",
-    "/usr/local/share/android-commandlinetools/platform-tools/adb",
-    "/opt/homebrew/bin/adb",
-  ].filter(Boolean);
-  adbPathCache = cands.find((p) => { try { return fs.existsSync(p); } catch { return false; } }) || null;
-  return adbPathCache;
-}
-
 async function discoverAdb() {
   const adb = adbPath();
   if (!adb) return [];

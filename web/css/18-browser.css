@@ -2,7 +2,7 @@
 /* 이 이름을 만드는 곳: main.js · browser/pick.js · browser/tabs.js */
 /* 분리 브라우저 창(?mode=browser): 콘솔 크롬을 숨기고 브라우저만 전체 창으로. 콘솔의 도킹
    브라우저 경로는 그대로 두고, 이 모드에서만 레이아웃과 탭 소스를 서버 상태로 바꾼다. */
-body.browser-mode .sidebar, body.browser-mode .right, body.browser-mode #h-resizer,
+body.browser-mode .sidebar, body.browser-mode .right,
 body.browser-mode #right-restore, body.browser-mode #changebar { display:none !important; }
 body.browser-mode .center { flex:1 1 auto !important; border-right:none; }
 body.browser-mode #center-empty { display:none !important; }

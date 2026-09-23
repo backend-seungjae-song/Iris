@@ -475,6 +475,7 @@ attachWs({
     else if (msg.type === "ai-pick"
       || msg.type === "ai-app-pick"
       || msg.type === "focus-app"
+      || msg.type === "emulator-reply"
       || msg.type === "ai-ask-answer"
       || msg.type === "browser-profiles"
       || msg.type === "ui-auth"

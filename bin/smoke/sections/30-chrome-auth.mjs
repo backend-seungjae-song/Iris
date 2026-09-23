@@ -615,11 +615,14 @@ check("넘겨주기는 어느 탭에서든 손으로 부를 수 있다", () =>
   && /if \(handoffItem\) items\.push\(handoffItem\);/.test(browserTabs));
 // 패스키는 누르게 하지 않는다. 지문 인증을 띄울 수 없는 것이 확정이라 물어볼 것이 없다.
 // 감지는 알림만 한다. 스스로 창을 띄우고 닫으면 사용자가 모르는 사이 세션이 바뀌므로,
-// 자동 처리는 두지 않는다. 창을 여는 결정은 사용자가 🪟로 한다.
+// 자동 처리는 두지 않는다. 창을 여는 결정은 사용자가 알림 막대의 "Chrome에서 열기"로 한다.
 check("패스키 감지는 알리기만 하고 창을 안 연다", () => {
   const seg = sliceBetween(browserHandoff, "function webauthnNotice", "function botCheckNotice", "패스키 감지는 알리기만 하고 창을 안 연다");
+  const hint = sliceBetween(browserHandoff, "function handoffHint", "export function webauthnNotice", "패스키 감지는 알리기만 하고 창을 안 연다");
   return /handoffHint\(rec,/.test(seg) && !/handoffToChrome\(/.test(seg)
-    && /function handoffHint/.test(browserHandoff)
+    // 넘길 수 있는 탭이면 누를 버튼이 있는 막대를 띄운다. auto·now 를 넘기면 누르기 전에 창이 열린다.
+    && /if \(handoffCheck\(rec\)\.ok\) \{ handoffToChrome\(rec, [^,()]+(\([^)]*\))?[^,()]*\); return; \}/.test(hint)
+    && !/🪟/.test(browserHandoff)
     && /if \(auto \|\| now\) run\(\);/.test(browserHandoff) && /if \(!auto && !now\) bar\.appendChild\(go\);/.test(browserHandoff);
 });
 // 보고 있지 않은 탭이 막대를 띄우면 갑자기 튀어나온 것으로 보인다.

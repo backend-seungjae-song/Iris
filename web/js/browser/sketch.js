@@ -1,13 +1,13 @@
 // 화면 스케치 기능의 진입점.
 //
 // 소유 범위
-//   지금 보고 있는 탭을 전체 길이로 찍는 일, 그 위에 그린 결과를 파일로 남기는 일, 그리고 그
-//   경로를 채팅에 넣는 일. 주소줄 버튼과 ⌘⇧D 가 이 셋을 부른다.
+//   지금 보고 있는 탭을 전체 길이로(에뮬레이터 앱 화면이 보이면 그 화면을) 찍는 일, 그 위에 그린
+//   결과를 파일로 남기는 일, 그리고 그 경로를 채팅에 넣는 일. 주소줄 버튼과 ⌘⇧D 가 이 셋을 부른다.
 //   ws 소유자 둘(sketch-relay · sketch-open-relay)을 가진다.
 //
 // 제공 API
 //   initCapability(ctx). 연결과 훅과 메시지 소유자를 여기서 등록한다.
-//   훅: sketch.open
+//   훅: sketch.open. 부르는 훅: emulator.sketchSource(보이는 앱 화면이 있으면 { shot() }).
 //
 // 의존 대상
 //   앱 셸의 통로(ctx 의 $ · wsSend · showToast · acHost · browserMode · getCurTarget),
@@ -25,7 +25,7 @@
 //   ws 이름 둘은 server/index.js 의 같은 이름과 짝이다. 네이티브 쪽 반은
 //   native/electron/sketch-shot.cjs 다. 화면은 web/css/32-sketch.css 가 가진다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/sketch.js
-import { provide } from "../core/hooks.js";
+import { callHook, provide } from "../core/hooks.js";
 import { getXterm } from "../panel/terminal.js";
 import { noticeBlock } from "../panel/xterm-wiring.js";
 import { activeWv } from "./webview.js";
@@ -64,17 +64,10 @@ export function initCapability(ctx) {
     deliverLocal(s);
   };
 
-  const start = async () => {
-    if (sketchOpen()) return;
-    const r = activeWv();
-    if (!r || !r.wc) { showToast("찍을 브라우저 탭이 없습니다."); return; }
-    if (!acHost || !acHost.sketchShot) { showToast("이 빌드는 스케치를 지원하지 않습니다."); return; }
-    showToast("페이지 전체를 찍는 중…");
-    let shot = null;
-    try { shot = await acHost.sketchShot(r.wc); } catch (e) { shot = null; }
-    if (!shot || !shot.ok || !shot.bytes) { showToast((shot && shot.error) || "이 탭을 찍지 못했습니다."); return; }
+  // 찍은 바이트 위에 그리는 화면을 연다. 브라우저 탭과 앱 화면이 같이 쓴다.
+  const openOn = async (bytes, meta, initialFit) => {
     // 바이트를 이 창 안의 이미지로 바꾼다. 경로로는 읽을 수 없다(위 계약).
-    const url = URL.createObjectURL(new Blob([shot.bytes], { type: "image/png" }));
+    const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
     const img = new Image();
     const ok = await new Promise((res) => {
       img.onload = () => res(true);
@@ -82,15 +75,38 @@ export function initCapability(ctx) {
       img.src = url;
     });
     if (!ok) { URL.revokeObjectURL(url); showToast("찍은 그림을 열지 못했습니다."); return; }
-    const meta = { url: shot.url || r.url || "", title: shot.title || r.title || "" };
     const opened = openSketchCanvas({
       png: url,
       width: img.naturalWidth,
       height: img.naturalHeight,
-      onDeliver: async (bytes) => { URL.revokeObjectURL(url); await deliver(bytes, meta); },
+      onDeliver: async (out) => { URL.revokeObjectURL(url); await deliver(out, meta); },
       onCancel: () => URL.revokeObjectURL(url),
+      initialFit,
     });
     if (!opened) URL.revokeObjectURL(url);
+  };
+
+  // 에뮬레이터 탭의 앱 화면. 그 기능이 보이는 화면이 있을 때만 값을 준다.
+  const startApp = async (app) => {
+    let shot = null;
+    try { shot = await app.shot(); } catch (e) { shot = null; }
+    if (!shot || !shot.bytes) { showToast("앱 화면을 찍지 못했습니다. 화면이 나온 뒤에 다시 시도하세요."); return; }
+    // 세로로 긴 휴대폰 화면은 폭에 맞추면 창을 넘친다. 전체가 보이게 연다.
+    await openOn(shot.bytes, { url: "", title: shot.title || "앱 화면" }, "all");
+  };
+
+  const start = async () => {
+    if (sketchOpen()) return;
+    const app = callHook("emulator.sketchSource");
+    if (app) { await startApp(app); return; }
+    const r = activeWv();
+    if (!r || !r.wc) { showToast("찍을 브라우저 탭이 없습니다."); return; }
+    if (!acHost || !acHost.sketchShot) { showToast("이 빌드는 스케치를 지원하지 않습니다."); return; }
+    showToast("페이지 전체를 찍는 중…");
+    let shot = null;
+    try { shot = await acHost.sketchShot(r.wc); } catch (e) { shot = null; }
+    if (!shot || !shot.ok || !shot.bytes) { showToast((shot && shot.error) || "이 탭을 찍지 못했습니다."); return; }
+    await openOn(shot.bytes, { url: shot.url || r.url || "", title: shot.title || r.title || "" });
   };
 
   provide("sketch.open", () => { start(); });

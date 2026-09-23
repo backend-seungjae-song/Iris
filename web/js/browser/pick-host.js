@@ -28,7 +28,7 @@
 //   그러지 않으면 기능을 꺼도 앱 셸의 파일이 로드되어 "끈 기능은 로드되지 않는다"가 깨진다.
 //
 // 영향 범위
-//   콘솔 화면 전반의 지목 대상 DOM(.ctab · .tgroup · .bmk · .srow · 문서 · 표) 과 터미널로 붙여넣는 문구.
+//   콘솔 화면 전반의 지목 대상 DOM(.ctab · .tgroup · .bmk · .srow · .fitem · 문서 · 표) 과 터미널로 붙여넣는 문구.
 //   browser/pick 은 이 모듈을 import 하지 않는다. pickSheetElementAt 를 main 이 주입한다.
 //   그러지 않으면 pick ↔ pick-host 순환이 생긴다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/pick-host.js
@@ -81,6 +81,24 @@ export function deliverAgentPick(a) {
   ]);
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = "세션 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
+  if (getXterm()) setTimeout(() => getXterm().focus(), 0);
+}
+
+// Explorer 의 파일·폴더 한 줄. 고른 것은 화면 요소가 아니라 그 경로다.
+// 경로 설명 대신 @ 멘션으로 넣는다. 제출할 때 하네스가 그 파일·폴더를 붙이므로 받은 쪽이 다시 찾아 읽지 않는다.
+export function pickFileAt(target) {
+  if (!pickMode) return null;
+  const el = target && target.closest ? target.closest(".fitem.file, .fitem.dir") : null;
+  const path = el && el.dataset ? (el.dataset.file || el.dataset.dir) : null;
+  return path ? { el, path, dir: !el.dataset.file } : null;
+}
+function deliverFilePick(f) {
+  if (!getCurTarget()) { bNote.textContent = "먼저 왼쪽에서 에이전트(세션)를 선택하세요."; return; }
+  const kind = f.dir ? "폴더" : "파일";
+  // 공백이 든 경로는 따옴표로 감싸야 멘션이 공백에서 끊기지 않는다. 뒤 공백은 이어 고른 것과 붙지 않게 한다.
+  const mention = "@" + (/\s/.test(f.path) ? JSON.stringify(f.path) : f.path) + " ";
+  wsSend({ type: "pty.input", data: "\x1b[200~" + mention + "\x1b[201~" });
+  bNote.textContent = `${kind} 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.`;
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
 }
 
@@ -398,7 +416,7 @@ function wirePickPointer() {
   // capture 등록 순서가 중요하므로 기존 최상위와 같은 시점에 건다.
   for (const type of ["mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu"]) {
     document.addEventListener(type, (e) => {
-      if (!pickMode || (!pickTabAt(e.target) && !pickGroupAt(e.target) && !pickBmkAt(e.target) && !pickAgentAt(e.target) && !pickCellAt(e.target) && !pickDocxAt(e.target) && !pickSheetAt(e.target))) return;
+      if (!pickMode || (!pickTabAt(e.target) && !pickGroupAt(e.target) && !pickBmkAt(e.target) && !pickAgentAt(e.target) && !pickFileAt(e.target) && !pickCellAt(e.target) && !pickDocxAt(e.target) && !pickSheetAt(e.target))) return;
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
     }, true);
   }
@@ -422,6 +440,13 @@ function wirePickPointer() {
       e.preventDefault(); e.stopPropagation();
       clearPickHover(ag.el);
       deliverAgentPick(ag.a);
+      return;
+    }
+    const fi = pickFileAt(e.target);
+    if (fi) {
+      e.preventDefault(); e.stopPropagation();
+      clearPickHover(fi.el);
+      deliverFilePick(fi);
       return;
     }
     const cell = pickCellAt(e.target);

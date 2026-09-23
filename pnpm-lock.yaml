@@ -46,6 +46,9 @@ importers:
       ws:
         specifier: ^8.21.1
         version: 8.21.1
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
     devDependencies:
       docx:
         specifier: ^9.7.1
@@ -59,6 +62,9 @@ importers:
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
+      serve-sim:
+        specifier: 0.1.40
+        version: 0.1.40(typescript@5.9.3)
 
 packages:
 
@@ -923,6 +929,12 @@ packages:
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
 
+  inspect-webkit@0.0.5:
+    resolution: {integrity: sha512-584wP/2nJO1LX74nqHP2j0tQzlK9ZTi+D0Z9qeLQjtUR/LCMXQHGX8M0vrsqBwTeGakF7q5GMFpg81nxUYlCvw==}
+    hasBin: true
+    peerDependencies:
+      typescript: ^5
+
   is-fullwidth-code-point@3.0.0:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
@@ -1361,6 +1373,11 @@ packages:
     resolution: {integrity: sha512-8I8TjW5KMOKsZQTvoxjuSIa7foAwPWGOts+6o7sgjz41/qMD9VQHEDxi6PBvK2l0MXUmqZyNpUK+T2tQaaElvw==}
     engines: {node: '>=10'}
 
+  serve-sim@0.1.40:
+    resolution: {integrity: sha512-32JSUriN/EnNR3zx6fmiOKjuFrbA8VHWR2J3dX8T51Z/xkSmrSLOwaz/3W9lPiCIaF2O3LT4qpAhLkp0f1kVaw==}
+    engines: {node: '>=18'}
+    hasBin: true
+
   setimmediate@1.0.5:
     resolution: {integrity: sha512-MATJdZp8sLqDl/68LfQmbP8zKPLQNV6BIZoIgrscFDQ+RsvK/BxeDQOgyxKKoh0y/8h3BqVFnCqQ/gd+reiIXA==}
 
@@ -1475,6 +1492,11 @@ packages:
 
   typed-query-selector@2.12.2:
     resolution: {integrity: sha512-EOPFbyIub4ngnEdqi2yOcNeDLaX/0jcE1JoAXQDDMIthap7FoN795lc/SHfIq2d416VufXpM8z/lD+WRm2gfOQ==}
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
@@ -1629,6 +1651,9 @@ packages:
 
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
+  zod@4.5.4:
+    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
 snapshots:
 
@@ -2662,6 +2687,10 @@ snapshots:
 
   inherits@2.0.4: {}
 
+  inspect-webkit@0.0.5(typescript@5.9.3):
+    dependencies:
+      typescript: 5.9.3
+
   is-fullwidth-code-point@3.0.0: {}
 
   is-unsafe@2.0.0: {}
@@ -3068,6 +3097,12 @@ snapshots:
       type-fest: 0.13.1
     optional: true
 
+  serve-sim@0.1.40(typescript@5.9.3):
+    dependencies:
+      inspect-webkit: 0.0.5(typescript@5.9.3)
+    transitivePeerDependencies:
+      - typescript
+
   setimmediate@1.0.5: {}
 
   shebang-command@2.0.0:
@@ -3195,6 +3230,8 @@ snapshots:
 
   typed-query-selector@2.12.2: {}
 
+  typescript@5.9.3: {}
+
   undici-types@7.18.2: {}
 
   undici-types@7.24.6: {}
@@ -3318,3 +3355,5 @@ snapshots:
       readable-stream: 3.6.2
 
   zod@3.25.76: {}
+
+  zod@4.5.4: {}

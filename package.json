@@ -64,6 +64,18 @@
       "web/**",
       "node_modules/**"
     ],
+    "extraResources": [
+      {
+        "from": "node_modules/serve-sim",
+        "to": "node_modules/serve-sim",
+        "filter": [
+          "package.json",
+          "LICENSE*",
+          "dist/**",
+          "bin/**"
+        ]
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
@@ -92,13 +104,15 @@
     "node-pty": "^1.1.0",
     "puppeteer-core": "25.10.0",
     "tldts": "7.4.11",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "docx": "^9.7.1",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "serve-sim": "0.1.40"
   },
   "pnpm": {
     "overrides": {

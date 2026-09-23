@@ -758,6 +758,30 @@ await (async () => {
       && /"quote":"승인 시 만료일을 서버에서 다시 검사한다\."/.test(fromJournal);
   });
 
+  // 줄 설명은 작성한 문장이다. 닫은 뒤에 형식을 바꿔 달라는 요청이 와도 다시 선언은 막히므로
+  // 교정으로 고친다. 원래 선언은 장부에 남고, 지면과 재시작 뒤 원장은 교정된 설명을 쓴다.
+  await checkAsync("닫은 줄의 설명도 교정하고 재시작 뒤에도 남는다", async () => {
+    const M = { runId: "smoke-what-fix" };
+    if (!call("run", { action: "begin", ...M, kind: "review" }).ok) throw new Error("begin");
+    if (!call("row", { action: "declare", ...M, row: { id: "WF", what: "순서를 올리면 바뀜",
+      given: "조건", basis: "user", paths: ["정상"] } }).ok) throw new Error("declare");
+    if (!call("row", { action: "close", ...M, row: "WF", path: "정상", color: "gray", note: "미실행" }).ok)
+      throw new Error("close");
+    const fixed = call("row", { action: "basis", ...M, row: "WF",
+      basis: { what: "일일 퀘스트 > ↑ 클릭 > 저장 > 순서 바뀜" } });
+    if (!fixed.ok) throw new Error("교정 거부: " + fixed.error);
+    const journal = readFileSync(path.join(artifactDir("qa", dir), "smoke-what-fix", "journal.jsonl"), "utf8");
+    if (!/"what":"순서를 올리면 바뀜"/.test(journal)) throw new Error("원래 선언이 장부에서 사라졌다");
+    const fresh = await import(path.join(ROOT, "server/qa-journal.js") + "?what=" + process.pid);
+    fresh.handleQaSessionCmd("run", { action: "begin", ...M, kind: "review" }, "새세션3", M.runId);
+    const listed = fresh.handleQaSessionCmd("row", { action: "list", ...M }, "새세션3", M.runId);
+    const row = ((listed.data || {}).rows || []).find((x) => x.id === "WF");
+    if (!row || row.what !== "일일 퀘스트 > ↑ 클릭 > 저장 > 순서 바뀜")
+      throw new Error("재시작 뒤 교정이 안 살아났다: " + (row && row.what));
+    if (!row.walked || !row.walked["정상"]) throw new Error("교정이 닫힌 경로를 지웠다");
+    return /what: a\.what/.test(mcp) && /if \(e\.what\) r0\.what = e\.what/.test(mcpReport);
+  });
+
   // 2차 QA처럼 앞 회차의 지적을 받아 도는 회차는 그 목록이 맨 앞에 서야 문서 하나로 닫힌다.
   check("회차가 따른 목록을 들고 돈다", () => {
     const M = { runId: "smoke-list" };

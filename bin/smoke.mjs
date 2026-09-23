@@ -181,6 +181,9 @@ await runWebviewContextMenu();
 const { default: runExtensionLoader } = await import("./smoke/sections/extension-loader.mjs");
 await runExtensionLoader();
 
+const { default: runDeskLayout } = await import("./smoke/sections/desk-layout.mjs");
+await runDeskLayout();
+
 const { default: runLocalLink } = await import("./smoke/sections/local-link.mjs");
 await runLocalLink();
 const { default: runBrowserShortcuts } = await import("./smoke/sections/browser-shortcuts.mjs");
@@ -250,6 +253,9 @@ await runViewerAndMenu();
 
 const { default: runMemolab } = await import("./smoke/sections/memolab.mjs");
 await runMemolab();
+
+const { default: runEmulator } = await import("./smoke/sections/emulator.mjs");
+await runEmulator();
 
 const { default: runRedBlocks } = await import("./smoke/sections/80-red-blocks.mjs");
 await runRedBlocks();

@@ -4,16 +4,13 @@
 /* 채팅 폭은 지정한 값을 유지한다. 여기가 남는 공간을 전부 차지하면 왼쪽 도구를 바꿀 때마다
    그 폭 차이만큼 채팅 폭이 바뀐다. 남는 공간은 센터가 받는다. */
 .right { flex:0 0 420px; min-width:0; display:flex; flex-direction:column; min-height:0; background:var(--bg); position:relative; }
-.right.collapsed { flex:0 0 0; width:0 !important; overflow:hidden; }
+/* 배치 엔진이 폭을 인라인으로 넣으므로 접힘 규칙은 인라인보다 강해야 한다. */
+.right.collapsed { flex:0 0 0 !important; width:0 !important; overflow:hidden; }
 /* 터미널 접힘 시 복원 버튼. 접기 버튼이 .right 안에 있어 함께 숨겨지므로 별도 진입점을 둔다. */
 #right-restore { display:none; position:fixed; right:0; top:50%; transform:translateY(-50%); z-index:50;
   background:var(--primary); color:var(--primary-fg); border:none; border-radius:var(--r-card) 0 0 var(--r-card);
   padding:10px 8px; font-size:var(--fs-xs); font-weight:var(--fw-semi); cursor:pointer; writing-mode:vertical-rl; }
 body.right-collapsed #right-restore { display:block; }
-.h-resizer { flex:none; width:6px; cursor:col-resize; background:transparent; position:relative; z-index:2; }
-.h-resizer::after { content:""; position:absolute; top:0; bottom:0; left:2px; width:1px; background:var(--border); }
-.h-resizer:hover::after { left:1px; width:3px; background:var(--ring); }
-.h-resizer.hidden { display:none; }
 .right-head { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--border); flex:none; padding-top:max(10px,env(safe-area-inset-top)); }
 .t-name { font-weight:var(--fw-semi); font-size:var(--fs-sm); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .t-sub { color:var(--muted-fg); font-size:var(--fs-2xs); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -116,7 +113,6 @@ body.right-collapsed #right-restore { display:block; }
   .sidebar.mobile-open { transform:none; }
   .sidebar.collapsed { display:flex; }
   .center { display:none; }
-  .h-resizer { display:none; }
   .center.mobile-show { display:flex; position:absolute; inset:0; z-index:5; }
   .right { width:100%; }
   .right.collapsed { width:100%; }

@@ -18,7 +18,6 @@ body.util-full .center { display:none !important; }
 /* rail ⇤ 접기와 분리 브라우저 창에서는 좌측이 통째로 내려간다.*/
 body.sidebar-collapsed .sidebar { display:none !important; }
 body.browser-mode .rail-panel, body.sidebar-collapsed .rail-panel { display:none !important; }
-body.sidebar-collapsed #util-resizer, body.util-full #util-resizer, body.browser-mode #util-resizer { display:none !important; }
 
 /* ── 별도 메모 창 모드: 창 전체가 메모다. 무엇을 내리고 무엇을 올릴지는 기능이 아니라
  앱 셸이 정하고, main 이 이 클래스를 단다.*/

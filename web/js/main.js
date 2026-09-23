@@ -5,10 +5,10 @@ import {
 import { featureHidden } from "./core/features.js";
 import { CAPABILITIES } from "./core/capabilities.js";
 import { callHook, hasHook } from "./core/hooks.js";
-import { beginDrag } from "./core/drag-shield.js";
 import { isFileLikeTabKind } from "./core/tab-views.js";
 import { bootCapabilities } from "./core/capability-boot.js";
-import { initLayout, toggleSidebar } from "./panel/layout.js";
+import { toggleSidebar } from "./panel/layout.js";
+import { initLayoutEngine } from "./core/layout-engine.js";
 import { initViewport, updateSizeBtn, viewportByTab, viewportLayout } from "./panel/viewport.js";
 import {
   initTouchDrag, isSizeDragging, openSizeMenu, startSizeDrag, syncTouchDrag, toggleDevTools,
@@ -423,7 +423,7 @@ document.querySelectorAll(".panel-head").forEach((h) => h.addEventListener("clic
   }
 })();
 
-initLayout({ $ });
+initLayoutEngine({ $ });
 
 // ── 우측 터미널 (xterm.js 엔진) ──
 const tName = $("#t-name"), tSub = $("#t-sub"), tDot = $("#t-dot");
@@ -520,77 +520,7 @@ function setRightCollapsed(on) {
 $("#right-collapse").addEventListener("click", () => setRightCollapsed(!$("#right").classList.contains("collapsed")));
 $("#right-restore").addEventListener("click", () => setRightCollapsed(false));
 
-// 터미널·채팅 폭 조절: 오른쪽으로 끌면 센터가 넓어지고 채팅이 좁아진다.
-// 다만 잡아 두는 값이 센터가 아니라 채팅이다. 센터가 고정이면 왼쪽 도구 폭이 바뀔 때마다 그 차이를
-// 채팅이 전부 뒤집어써서, 편의 기능 탭만 옮겨도 채팅 크기가 제멋대로 변했다.
-const hResizer = $("#h-resizer"), centerPanel = $("#center"), rightPanel = $("#right");
-const savedRightW = localStorage.getItem("ac.rightW");
-if (savedRightW) rightPanel.style.flexBasis = savedRightW;
-else { // 센터 폭만 저장된 경우, 그 값으로 채팅 폭을 역산해 첫 실행에서 배치가 바뀌지 않게 한다.
-  const old = localStorage.getItem("ac.centerW");
-  if (old) requestAnimationFrame(() => {
-    const w = Math.round(window.innerWidth - parseFloat(old) - (document.querySelector(".actrail")?.getBoundingClientRect().width || 0) - 300);
-    if (w > 300) rightPanel.style.flexBasis = w + "px";
-  });
-}
-hResizer.addEventListener("mousedown", (e) => {
-  if (window.innerWidth <= 820 || e.button !== 0) return;
-  e.preventDefault();
-  const startX = e.clientX, startW = rightPanel.getBoundingClientRect().width;
-  beginDrag({
-    cursor: "col-resize",
-    onMove: (ev) => {
-      const dx = ev.clientX - startX;
-      const w = Math.max(300, Math.min(window.innerWidth - 460, startW - dx)); // 오른쪽으로 끌면 채팅이 좁아진다
-      rightPanel.style.flexBasis = w + "px";
-      fitTerminal();
-    },
-    onEnd: () => {
-      localStorage.setItem("ac.rightW", rightPanel.style.flexBasis);
-      fitTerminal();
-    },
-  });
-});
-
-// 왼쪽 도구 폭 조절. 도구마다 담는 것이 달라 필요한 폭도 다르므로 폭은 도구별로 기억한다.
-// 전체 차지형에서는 센터가 없으니 조절할 것도 없다.
-// 여기서 화면 이름을 나열하지 않는다. 나열하면 화면이 늘 때마다 이 줄을 고쳐야 한다. 실제로
-// 그 목록은 여덟 중 다섯만 담은 채 굳어 있었다. 눈에 보이는 고장은 없었다(확인 결과: 조절할
-// 것이 있는 화면은 파일 섹션과 깃뿐이고, 목록이 빠뜨린 메모·보관·그래프는 전체형이라 애초에
-// 조절할 것이 없다). 현재는 문제가 없지만 패널형 화면이 하나 더 들어오면
-// 아무 말 없이 이 목록 밖으로 떨어진다. rail-panel 하나면 새로 들어온 화면도 저절로 걸린다.
-(function wireUtilResizer() {
-  const bar = $("#util-resizer"); if (!bar) return;
-  const visiblePanel = () => [...document.querySelectorAll(".sidebar, .rail-panel")]
-    .find((el) => el.offsetParent !== null) || null;
-  const applySavedWidths = () => {
-    for (const el of document.querySelectorAll(".sidebar, .rail-panel")) {
-      const w = localStorage.getItem("ac.utilW." + el.id);
-      if (w) el.style.width = w;
-    }
-  };
-  applySavedWidths();
-  const syncBar = () => { bar.classList.toggle("hidden", document.body.classList.contains("util-full") || !visiblePanel()); };
-  syncBar();
-  new MutationObserver(syncBar).observe(document.body, { attributes: true, attributeFilter: ["class"] });
-  bar.addEventListener("mousedown", (e) => {
-    const panel = visiblePanel(); if (!panel || window.innerWidth <= 820 || e.button !== 0) return;
-    e.preventDefault();
-    const startX = e.clientX, startW = panel.getBoundingClientRect().width;
-    beginDrag({
-      cursor: "col-resize",
-      onMove: (ev) => {
-        const w = Math.max(180, Math.min(window.innerWidth - 520, startW + (ev.clientX - startX)));
-        panel.style.width = w + "px";
-        fitTerminal();
-      },
-      onEnd: () => {
-        localStorage.setItem("ac.utilW." + panel.id, panel.style.width);
-        fitTerminal();
-      },
-    });
-  });
-})();
+// 영역 폭·높이 조절과 배치는 core/layout-engine.js 가 맡는다(경계 막대 · 편집 모드).
 
 // 터미널 드래그 선택→자동복사는 xterm.onSelectionChange(initXterm)가 처리한다.
 
@@ -801,8 +731,10 @@ window.acHost?.onViewportChanged?.(({ wc, vp }) => {
   updateSizeBtn(); viewportLayout();
 });
 // 캡처 처리: 그려지지 않은 것은 어떤 방법으로도 캡처할 수 없다(확인 결과: 네 경로 모두 실패). 그 탭이 지금
-// 보이는 탭이 아니어도 찍히게, 찍는 동안만 그 webview를 화면 위에 거의 투명하게 겹쳐 합성 대상으로
-// 만든다. 탭을 바꾸지 않으므로 사용자의 보기 상태는 그대로고, 1% 불투명도라 눈에 띄지 않는다.
+// 보이는 탭이 아니어도 찍히게, 찍는 동안만 그 webview를 화면 위에 올려 합성 대상으로 만든다. 탭을 바꾸지
+// 않으므로 사용자의 보기 상태는 그대로다. 1% 불투명도만으로는 페이지가 비쳐 보여서, 화면에 남는 부분을
+// clip-path로 왼쪽 위 1px로 줄인다. 페이지는 전체가 그려져 캡처된다(확인 결과). 다른 방법은 실패했다.
+// 불투명도 0과 clip 면적 0은 그리지 않았고, 다른 요소 뒤에 두는 방법은 단색 배경이 덮으면 그리지 않았다.
 window.acHost?.onCaptureHold?.(({ wc, on }) => {
   const hit = getWebviewEntries().find(([, rec]) => rec && rec.wc === wc);
   if (!hit) return;
@@ -812,7 +744,8 @@ window.acHost?.onCaptureHold?.(({ wc, on }) => {
     if (el.dataset.acHeld) return;
     el.dataset.acHeld = el.getAttribute("style") || " ";
     el.style.cssText += ";position:fixed;left:0;top:0;width:100vw;height:100vh;"
-      + "opacity:0.01;pointer-events:none;z-index:2147483646;visibility:visible;display:flex;";
+      + "opacity:0.01;clip-path:inset(0 calc(100% - 1px) calc(100% - 1px) 0);"
+      + "pointer-events:none;z-index:2147483646;visibility:visible;display:flex;";
   } else {
     const prev = el.dataset.acHeld;
     if (prev == null) return;
@@ -1245,7 +1178,8 @@ function handleAiAskMessage(m) {
       // 앱 이야기를 하면서 "그 탭으로"라고 적으면 사람이 어디를 봐야 하는지 알 수 없다.
       const isApp = m.where === "app";
       const goTo = isApp
-        ? { label: "그 앱으로", run: () => wsSend({ type: "focus-app", device: m.device || "" }) }
+        // 에뮬레이터 기능이 그 기기의 탭을 갖고 있으면 그 탭으로 옮긴다. 없으면 서버가 시뮬레이터를 앞으로 가져온다.
+        ? { label: "그 앱으로", run: () => { if (!callHook("emulator.focus", m.device || "")) wsSend({ type: "focus-app", device: m.device || "" }); } }
         : (m.tabId ? { label: "그 탭으로", run: () => gotoTabById(m.tabId) } : null);
       showNotice({ hot: true, title: m.title || "AI가 사람을 부릅니다",
         body: m.text || (isApp ? "이 앱에서 사람이 직접 해야 하는 단계입니다."

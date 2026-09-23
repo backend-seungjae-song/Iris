@@ -43,6 +43,7 @@ import {
 } from "./browser-runtime.js";
 import { mutate as bsMutate, wire as bsWire } from "./browser-state-owner.js";
 import { humanPathDeny } from "./human-path.js";
+import { askEmulator } from "./emulator-bridge.js";
 import {
   handleQaSessionCmd,
   isActCmd,
@@ -589,6 +590,21 @@ export function runBrowserCmd(cmd, args, session, noAutoTab, runId) {
     if (targets) args = { ...(args || {}), tab: targets[0] };   // 쉼표 하나짜리도 정규화해 아래로 넘긴다
     if (cmd === "newtab") { createTabForSession(args, session).then(resolve); return; }
     if (cmd === "ask") { askUser(args, session).then(resolve); return; }
+    // MCP 앱 도구의 대상은 Iris 에뮬레이터 탭에 열린 기기뿐이다. 어느 탭이 이 세션 스페이스의 것인지는 여기서 표시한다.
+    if (cmd === "app-devices") {
+      askEmulator("list", {}, 5000).then((r) => {
+        if (!r || r.ok === false) { resolve(r || { ok: false, error: "응답 없음" }); return; }
+        const mine = sessionSpace(session);
+        resolve({ ok: true, data: { space: mine, tabs: (r.tabs || []).map((t) => ({ ...t, mine: !!mine && spaceKey.sameStorageSpace(t.space, mine) })) } });
+      });
+      return;
+    }
+    if (cmd === "app-open") {
+      const wait = Math.min(Math.max(Number(args && args.wait) || 120000, 5000), 240000);
+      askEmulator("open", { space: sessionSpace(session), device: (args && args.device) || null, wait }, wait + 5000)
+        .then((r) => resolve(r && r.ok ? { ok: true, data: r } : (r || { ok: false, error: "응답 없음" })));
+      return;
+    }
     const local = runSessionCmd(cmd, args, session, runId);
     if (local) { resolve(local); return; }
     if (!cdpExecutorReady()) { resolve({ ok: false, error: "브라우저 제어기(앱)가 연결 안 됨 — Iris 앱을 실행하세요(pnpm app).", sent: false, appGone: true }); return; }

@@ -229,6 +229,64 @@ await checkAsync("하위 레포를 찾아내고, 훑는 범위가 묶여 있다"
   return true;
 });
 
+// Base 대비 보기. committed 는 분기점부터 HEAD 까지 커밋된 것만, worktree 는 커밋 전 변경과
+// 추적하지 않는 새 파일까지 담아야 두 보기가 서로 다른 것을 보여 준다. base 는 브랜치 목록에
+// 있는 값만 git 에 넘긴다. 목록 밖 문자열은 "--output=..." 처럼 옵션으로 해석될 수 있다.
+await checkAsync("Base 대비 목록이 보기별로 갈리고, 목록 밖 base 는 거절된다", async () => {
+  const { mkdtempSync, writeFileSync, rmSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const pathMod = await import("node:path");
+  const rs = await import(new URL("../../../server/runtime-state.js", import.meta.url).href);
+  const mod = await import(new URL("../../../server/git-handlers.js", import.meta.url).href);
+  const dir = realpathSync(mkdtempSync(pathMod.join(tmpdir(), "iris-branchdiff-")));
+  const g = (...a) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8",
+    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  try {
+    g("init", "-q", "-b", "main");
+    writeFileSync(pathMod.join(dir, "a.js"), "1\n"); writeFileSync(pathMod.join(dir, "old.js"), "x\ny\nz\n");
+    g("add", "-A"); g("commit", "-qm", "base");
+    g("checkout", "-qb", "feat");
+    writeFileSync(pathMod.join(dir, "b.js"), "2\n"); g("mv", "old.js", "new.js");
+    g("add", "-A"); g("commit", "-qm", "feat");
+    writeFileSync(pathMod.join(dir, "a.js"), "1 changed\n");   // 커밋 전 수정
+    writeFileSync(pathMod.join(dir, "u.js"), "untracked\n");   // 추적 안 함
+    rs.replace({ allowedRoots: [dir] });
+    const out = [];
+    const ws = { _local: false, send: (x) => out.push(JSON.parse(x)) };
+    const ask = (extra) => { out.length = 0; mod.handleGit(ws, { type: "git.branchDiff", path: dir, ...extra }); return out[0]; };
+    const names = (r) => (r.files || []).map((f) => f.code + ":" + f.rel + (f.oldRel ? "<" + f.oldRel : "")).sort().join(" ");
+    const c = ask({ mode: "committed" });
+    if (c.base !== "main") throw new Error("기본 base 감지: " + c.base);
+    if (names(c) !== "A:b.js R:new.js<old.js") throw new Error("committed: " + names(c));
+    const w = ask({ mode: "worktree", base: "main" });
+    if (names(w) !== "A:b.js M:a.js R:new.js<old.js U:u.js") throw new Error("worktree: " + names(w));
+    for (const bad of ["--output=/tmp/x", "HEAD~1", "nope"]) {
+      const r = ask({ mode: "committed", base: bad });
+      if (!r.error || (r.files || []).length) throw new Error("목록 밖 base 를 받았다: " + bad);
+    }
+    // 파일 diff 도 같은 기준을 쓴다. committed 에는 커밋 전 수정이 없다.
+    out.length = 0;
+    mod.handleGit(ws, { type: "git.diff", path: dir, file: pathMod.join(dir, "a.js"), mode: "committed", base: "main" });
+    if (out[0].patch.trim()) throw new Error("committed diff 에 커밋 전 수정이 섞였다");
+    out.length = 0;
+    mod.handleGit(ws, { type: "git.diff", path: dir, file: pathMod.join(dir, "a.js"), mode: "worktree", base: "main" });
+    if (!/\+1 changed/.test(out[0].patch) || out[0].mode !== "worktree") throw new Error("worktree diff: " + out[0].patch);
+    return true;
+  } finally { rs.replace({ allowedRoots: [] }); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// 강조는 옛쪽·새쪽을 따로 토큰화한 뒤 줄에 되돌려 넣는다. 짝이 한 칸 밀리면 모든 줄이 남의 색을 단다.
+await checkAsync("강조 줄이 옛쪽·새쪽의 같은 줄과 짝지어진다", async () => {
+  const mod = await import(new URL("../../../web/js/devtool/diff.js", import.meta.url).href);
+  const rows = mod.diffRows(["--- a/x.js", "+++ b/x.js", "@@ -1,3 +1,3 @@", " k1", "-o1", "+n1", "+n2", " k2"].join("\n"));
+  const { oldLines, newLines, at } = mod.diffSides(rows);
+  if (oldLines.join(",") !== "k1,o1,k2" || newLines.join(",") !== "k1,n1,n2,k2") throw new Error(oldLines + " / " + newLines);
+  const got = rows.map((r, i) => (at[i] ? (at[i].side === "o" ? oldLines : newLines)[at[i].i] : "-")).join(",");
+  if (got !== "-,-,-,k1,o1,n1,n2,k2") throw new Error(got);
+  return true;
+});
+
 // 찾아낸 레포도 후보 목록에 들어가지 않으면 화면에 나오지 않는다. 서버가 준 목록이 후보로 들어가는지 확인한다.
 await checkAsync("찾은 하위 레포가 후보에 얹힌다", async () => {
   const mod = await import(new URL("../../../web/js/devtool/source-control.js", import.meta.url).href);
@@ -528,7 +586,7 @@ await checkAsync("표의 각 줄이 실물과 이어져 있다", async () => {
   // 그 둘을 표에서 읽어 다는지 확인한다. 손으로 적으면 표가 정본이 아니게 된다.
   if (!/el\.className = "rail-panel " \+ item\.panel;/.test(railJs)) bad.push("들고 온 자리에 공통 이름을 표에서 안 단다");
   if (!/el\.id = item\.panel;/.test(railJs)) bad.push("들고 온 자리의 id 를 표에서 안 단다");
-  if (!/insertBefore\(el, host\)/.test(railJs)) bad.push("들고 온 자리를 폭 조절 막대 앞에 안 넣는다");
+  if (!/const host = document\.getElementById\("center"\);/.test(railJs) || !/insertBefore\(el, host\)/.test(railJs)) bad.push("들고 온 자리를 가운데 영역 앞에 안 넣는다");
   if (!/\.rail-panel\.is-open \{ display:flex; \}/.test(css)) bad.push("켠 자리를 세우는 규칙이 없다");
   if (!/body\.screen-open \.sidebar \{ display:none; \}/.test(css)) bad.push("자리가 열려도 파일 섹션이 안 내려간다");
   // main 의 화면 콜백 표와 어긋나면 그 화면은 열려도 아무것도 안 불린다.
@@ -754,6 +812,31 @@ await checkAsync("서버·네이티브 표의 행은 렌더러 표에 server·na
   return true;
 });
 
+// 기본 꺼짐은 렌더러(설정 목록·확인 창)와 네이티브(부팅 판정)가 각자 표에서 읽는다. 한쪽만 적으면
+// 설정은 꺼짐인데 네이티브가 돌거나, 확인 창 없이 켜진다. 서버 부팅 판정은 optIn 을 모른다.
+await checkAsync("기본 꺼짐(optIn)은 렌더러·네이티브 표가 같고, 확인 창 문구를 갖고, 서버 쪽 구성 요소가 없다", async () => {
+  const { CAPABILITIES } = await import(new URL("../../../web/js/core/capabilities.js", import.meta.url).href);
+  const { capabilities } = await import(new URL("../../../server/capabilities.js", import.meta.url).href);
+  const { createRequire } = await import("node:module");
+  const { NATIVE_CAPABILITIES } = createRequire(import.meta.url)("../../../native/electron/capabilities.cjs");
+  const optIn = CAPABILITIES.filter((cap) => cap.optIn);
+  if (!optIn.length) cannotMeasure("렌더러 표에 기본 꺼짐 기능이 없다");
+  const native = new Map(NATIVE_CAPABILITIES.map((cap) => [cap.id, !!cap.optIn]));
+  const bad = [];
+  for (const cap of CAPABILITIES) {
+    if (native.has(cap.id) && native.get(cap.id) !== !!cap.optIn) bad.push(`${cap.id}: 렌더러 ${!!cap.optIn} · 네이티브 ${native.get(cap.id)}`);
+  }
+  for (const [id, on] of native) if (on && !CAPABILITIES.some((cap) => cap.id === id && cap.optIn)) bad.push(`${id}: 네이티브만 optIn`);
+  for (const cap of optIn) {
+    const o = cap.optIn;
+    if (typeof o.title !== "string" || !o.title || !Array.isArray(o.items) || !o.items.length
+      || o.items.some((item) => typeof item !== "string" || !item)) bad.push(`${cap.id}: 확인 창 문구(title·items) 없음`);
+    if (cap.server?.length || capabilities.some((row) => row.id === cap.id)) bad.push(`${cap.id}: 서버 쪽 구성 요소가 있음`);
+  }
+  if (bad.length) throw new Error(bad.join(" · "));
+  return true;
+});
+
 await checkAsync("서버 진입점에 기능 표가 선언한 WS 접두사·HTTP 경로가 리터럴로 없다", async () => {
   const { capabilities } = await import(new URL("../../../server/capabilities.js", import.meta.url).href);
   const strip = (file) => read(file).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
@@ -875,6 +958,11 @@ await checkAsync("부르는 이름은 채우는 자리가 있다", async () => {
     const src = read(rel).replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     // hasHook 도 호출 지점이다. 그 이름이 없으면 항상 거짓이 된다.
     for (const m of src.matchAll(/(?:callHook|hasHook)\(\s*"([^"]+)"/g)) called.set(m[1], rel);
+    // 기능 id 를 앞에 붙여 부르는 이름(features.js 가 끌 때 부르는 `${id}.disabling`)은 기본 꺼짐 기능마다
+    // 부르는 이름으로 센다. 그래서 기본 꺼짐 기능은 그 이름을 채워야 한다.
+    for (const m of src.matchAll(/callHook\(\s*`\$\{\w+\}\.(\w+)`/g)) {
+      for (const cap of CAPABILITIES.filter((c) => c.optIn)) called.set(`${cap.id}.${m[1]}`, rel);
+    }
     // 채우는 쪽은 여러 곳일 수 있으므로 덮어쓰지 않고 쌓는다. 덮으면 둘이 같은 이름을 채우는
     // 것이 한 곳으로 보여서, 먼저 것이 거절당하는 그 상황을 검사가 못 본다.
     for (const m of src.matchAll(/\bprovide\(\s*"([^"]+)"/g)) {
@@ -1448,14 +1536,25 @@ await checkAsync("두 기능이 같은 이름을 쓰지 않는다", async () => 
     { 이름: "window 전역", re: /window\.([A-Za-z_$][\w$]*)\s*=(?!=)/g, 바닥: 5,
       읽기: /window\.([A-Za-z_$][\w$]*)/g, 읽기바닥: 12 },
   ];
+  // 에뮬레이터는 serve-sim 헬퍼의 소켓에 터치 프레임을 직접 보낸다. begin·move·end 는 그 프로토콜의 값이라
+  // Iris 의 이름이 아니고, 바꾸면 기기에 드래그가 들어가지 않는다. 그 값을 에뮬레이터가 더 쓰지 않으면
+  // 예외도 필요 없으므로 아래에서 실제로 쓰는지 확인한다.
+  const FOREIGN_PROTOCOL = { "ws 메시지": { emulator: ["begin", "move", "end"] } };
   const bad = [];
   for (const ax of axes) {
     const who = new Map();
+    const foreign = FOREIGN_PROTOCOL[ax.이름] || {};
     for (const rel of js) {
       const cap = owned.get(rel) || "틀";
       for (const m of nude(rel).matchAll(ax.re)) {
         if (!who.has(m[1])) who.set(m[1], new Set());
         who.get(m[1]).add(cap);
+      }
+    }
+    for (const [cap, names] of Object.entries(foreign)) {
+      for (const n of names) {
+        if (!who.get(n)?.has(cap)) bad.push(`${ax.이름} 예외 "${n}" 을 ${cap} 가 더 쓰지 않는다 — 예외를 지운다`);
+        else who.get(n).delete(cap);
       }
     }
     if (who.size < ax.바닥) cannotMeasure(`${ax.이름} 이름을 ${who.size} 개만 찾았다 — 훑개가 죽었다`);
@@ -1855,14 +1954,12 @@ await checkAsync("화면 폭은 그 화면의 지면이 갖는다", async () => 
 
 // 폭 조절 막대가 화면 이름을 여덟 중 다섯만 담은 채로 세고 있었다. 확인 결과: 화면 동작은
 // 달라지지 않는다(빠진 셋은 전체형이라 조절할 것이 없다). 막으려는 것은 패널형 화면이 하나 더
-// 추가될 때 아무 경고 없이 그 목록 밖으로 떨어지는 것이다.
+// 추가될 때 아무 경고 없이 그 목록 밖으로 떨어지는 것이다. 지금은 배치 엔진이 도구 화면을 잡는다.
 check("폭 조절 막대는 화면을 세지 않는다", () => {
-  const src = read("web/js/main.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
-  const fn = /function wireUtilResizer\(\) \{([\s\S]*?)\n\}\)\(\);/.exec(src);
-  if (!fn) throw new Error("폭 조절 자리를 못 찾았다");
-  const named = (fn[1].match(/\.(?:sc|acct|ld|af|mm|ar|sg|km)-panel/g) || []);
-  if (named.length) throw new Error("화면 이름을 센다: " + [...new Set(named)].join(", "));
-  if (!/\.sidebar, \.rail-panel/.test(fn[1])) throw new Error("rail-panel 로 안 잡는다");
+  const src = read("web/js/core/layout-engine.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
+  const named = (src.match(/\b(?!rail-)[a-z]+-panel\b/g) || []);
+  if (named.length) throw new Error("배치 엔진이 화면 이름을 센다");
+  if (!/const openTool = \(\) => document\.querySelector\("\.rail-panel\.is-open"\);/.test(src)) throw new Error("열린 rail-panel 로 안 잡는다");
   return true;
 });
 
@@ -2459,21 +2556,21 @@ check("끌기 배선을 기능이 들고 온다", () => {
 check("크기 조절 손잡이는 손잡이마다 덮개 경로로 끈다", () => {
   const shield = read("web/js/core/drag-shield.js");
   const mainSrc = read("web/js/main.js");
-  const layout = read("web/js/panel/layout.js");
+  const engine = read("web/js/core/layout-engine.js");
   const base = read("web/css/01-base.css");
   if (!/\.drag-shield \{ position:fixed; inset:0;/.test(base)) throw new Error("덮개가 화면을 안 덮는다");
   if (!/z-index:9998/.test(base)) throw new Error("덮개가 iframe·webview 위에 안 선다");
   if (!/export function beginDrag/.test(shield)) throw new Error("공용 경로가 없다");
+  // 영역 경계(폭·높이)와 편집 모드의 영역 옮기기가 끄는 곳의 전부다.
   const sites = [
-    ["채팅 폭", sliceBetween(mainSrc, 'hResizer.addEventListener("mousedown"', "// 왼쪽 도구 폭 조절", "채팅 폭 손잡이")],
-    ["도구 폭", sliceBetween(mainSrc, 'bar.addEventListener("mousedown"', "})();", "도구 폭 손잡이")],
-    ["패널 높이", sliceBetween(layout, 'rz.addEventListener("mousedown"', "  });\n}", "패널 높이 손잡이")],
+    ["영역 경계", sliceBetween(engine, "function startResize(", "\n}\n", "영역 경계 손잡이")],
+    ["영역 옮기기", sliceBetween(engine, "function startMove(", "\n}\n", "영역 옮기기 손잡이")],
   ];
   for (const [name, body] of sites) {
     if (!/beginDrag\(\{/.test(body)) throw new Error(name + " 손잡이가 덮개를 안 씌운다");
     if (!/e\.button !== 0/.test(body)) throw new Error(name + " 손잡이가 오른쪽 버튼으로도 끌린다");
   }
-  for (const [name, src] of [["main.js", mainSrc], ["layout.js", layout]]) {
+  for (const [name, src] of [["main.js", mainSrc], ["layout-engine.js", engine]]) {
     if (/document\.addEventListener\("mousemove"/.test(src)) throw new Error(name + " 이 아직 document 로 직접 끈다");
   }
   return true;

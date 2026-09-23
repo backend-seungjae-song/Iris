@@ -8,7 +8,7 @@ import vm from "node:vm";
 import { EventEmitter } from "node:events";
 
 const require = createRequire(import.meta.url);
-const { readHiddenSync } = require("../server/feature-state-read.cjs");
+const { readFeatureState, featureOn } = require("../server/feature-state-read.cjs");
 const { bootNativeCapabilities } = require("../native/electron/capability-host.cjs");
 const { NATIVE_CAPABILITIES } = require("../native/electron/capabilities.cjs");
 
@@ -60,7 +60,7 @@ function bootActualNative(hiddenFile, t) {
   let loaded;
   try {
     loaded = vm.runInNewContext(`${prefix} ctx, onError: (id, error) => errors.push({ id, error }) })`, {
-      bootNativeCapabilities, NATIVE_CAPABILITIES, readHiddenSync, IRIS_HOME: home, ctx, errors,
+      bootNativeCapabilities, NATIVE_CAPABILITIES, readFeatureState, featureOn, IRIS_HOME: home, ctx, errors,
     });
   } finally {
     Module._load = originalLoad;
@@ -74,14 +74,14 @@ function bootActualNative(hiddenFile, t) {
 
 test("T2: main의 hidden 판정은 chromemirror require·init·IPC를 모두 막는다", (t) => {
   const result = bootActualNative(JSON.stringify({ version: 1, revision: 1, hidden: ["chromemirror"] }), t);
-  const enabled = ["detachtab", "extensionloader", "sketch"];
+  const enabled = ["detachtab", "emulator", "extensionloader", "sketch"];
   assert.deepEqual(result.loaded, enabled);
   assert.deepEqual(result.initialized, enabled);
   for (const cap of NATIVE_CAPABILITIES) {
-    assert.equal(!!require.cache[cap.module], cap.id !== "chromemirror", `${cap.id} require.cache`);
+    assert.equal(!!require.cache[cap.module], enabled.includes(cap.id), `${cap.id} require.cache`);
   }
   assert.deepEqual([...result.channels.keys()].filter((id) => /mirror|live-chrome/.test(id)), []);
-  for (const channel of ["ac-detach-tab", "ac-tabdrag-start", "ac-extension-loader-enable", "ac-sketch-shot"]) {
+  for (const channel of ["ac-detach-tab", "ac-tabdrag-start", "ac-emulator-rpc", "ac-extension-loader-enable", "ac-sketch-shot"]) {
     assert.equal(result.channels.has(channel), true, `${channel} 등록`);
   }
 });
@@ -91,16 +91,28 @@ for (const [name, content] of [
   ["파일 없음", null],
   ["파일 파손", "{broken"],
 ]) {
-  test(`T2: ${name}이면 실제 native 4개가 init되고 IPC를 등록한다`, (t) => {
+  test(`T2: ${name}이면 기본 꺼짐이 아닌 native 가 모두 init되고 IPC를 등록한다`, (t) => {
     const result = bootActualNative(content, t);
-    const all = NATIVE_CAPABILITIES.map((cap) => cap.id);
+    const all = NATIVE_CAPABILITIES.filter((cap) => !cap.optIn).map((cap) => cap.id);
     assert.deepEqual(result.loaded, all);
     assert.deepEqual(result.initialized, all);
-    for (const cap of NATIVE_CAPABILITIES) assert.ok(require.cache[cap.module]);
+    for (const cap of NATIVE_CAPABILITIES) assert.equal(!!require.cache[cap.module], !cap.optIn, `${cap.id} require.cache`);
+    assert.equal(result.channels.has("ac-desklayout-disable"), false, "켜지 않은 기본 꺼짐 기능은 IPC 도 없다");
     assert.ok(result.channels.has("ac-mirror-start"));
     assert.ok(result.channels.has("ac-live-chrome-connect"));
     assert.ok(result.channels.has("ac-detach-tab"));
+    assert.ok(result.channels.has("ac-emulator-rpc"));
     assert.ok(result.channels.has("ac-extension-loader-enable"));
     assert.ok(result.channels.has("ac-sketch-shot"));
   });
 }
+
+test("T2: 기본 꺼짐 기능은 사용자가 켠 목록(shown)에 있을 때만, 그리고 hidden 에 없을 때만 로드된다", (t) => {
+  const optIn = NATIVE_CAPABILITIES.filter((cap) => cap.optIn).map((cap) => cap.id);
+  assert.ok(optIn.includes("desklayout"), "desklayout 은 기본 꺼짐");
+  const shown = bootActualNative(JSON.stringify({ version: 1, revision: 3, hidden: [], shown: optIn }), t);
+  assert.deepEqual(shown.loaded, NATIVE_CAPABILITIES.map((cap) => cap.id));
+  assert.ok(shown.channels.has("ac-desklayout-disable"));
+  const both = bootActualNative(JSON.stringify({ version: 1, revision: 4, hidden: optIn, shown: optIn }), t);
+  assert.deepEqual(both.loaded, NATIVE_CAPABILITIES.filter((cap) => !cap.optIn).map((cap) => cap.id));
+});

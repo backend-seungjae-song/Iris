@@ -52,8 +52,10 @@ async function replaceCookieSnapshot({ session, transfer, scope, list, preserveC
     for (const c of before) if (preserveCookie(c)) desired.set(cookieKey(c), c);
     const expected = new Set(desired.keys());
     try {
+      // 기존 행을 먼저 지운다. Chromium 은 Secure 가 아닌 쿠키로 같은 이름의 Secure 쿠키를 덮지 못하게 해서
+      // (EXCLUDE_OVERWRITE_SECURE) 덮어쓰기 순서로는 두 브라우저의 Secure 표시가 다른 한 행 때문에 전체가 실패한다.
+      for (const c of before) if (!preserveCookie(c)) await session.cookies.remove(removeUrl(c), c.name);
       for (const { cookie, details } of prepared) if (!preserveCookie(cookie)) await session.cookies.set(details);
-      for (const c of before) if (!expected.has(cookieKey(c))) await session.cookies.remove(removeUrl(c), c.name);
       const after = (await session.cookies.get({})).filter(c => scope(c.domain));
       if (cookieFingerprint(after) !== cookieFingerprint([...desired.values()])) throw new Error("cookie-readback-mismatch");
       await session.cookies.flushStore();

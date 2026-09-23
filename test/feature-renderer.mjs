@@ -6,6 +6,9 @@ import { CAPABILITIES } from "../web/js/core/capabilities.js";
 let sequence = 0;
 const LEGACY = "ac.railHidden";
 const MARKER = "ac.railHidden.migrated";
+// 기본 꺼짐 기능은 사용자가 켜기 전까지 꺼진 목록에 함께 나온다.
+const OPT_IN = CAPABILITIES.filter((c) => c.optIn).map((c) => c.id);
+const off = (ids) => new Set([...ids, ...OPT_IN]);
 const state = (hidden, extra = {}) => ({ exists: true, revision: 1, hidden, local: true, ...extra });
 const reply = (body, status = 200) => new Response(JSON.stringify(body), { status });
 const deferred = () => {
@@ -48,7 +51,7 @@ test("T3: features import는 GET을 기다리고 실제 bootCapabilities는 hidd
   assert.equal(imported, false);
   response.resolve(reply(state(["usage"])));
   const features = await pending;
-  assert.deepEqual(features.featureHidden(), new Set(["usage"]));
+  assert.deepEqual(features.featureHidden(), off(["usage"]));
   const loads = [];
   const inits = [];
   const errors = [];
@@ -133,9 +136,9 @@ test("T3: legacy 이관은 PUT 성공 뒤 표식을 남기고 다음 부팅에�
   assert.equal(browser.storage.has(MARKER), false);
   current = state(["usage"], { revision: 1 });
   putResponse.resolve(reply(current));
-  assert.deepEqual((await pending).featureHidden(), new Set(["usage"]));
+  assert.deepEqual((await pending).featureHidden(), off(["usage"]));
   assert.equal(browser.storage.get(MARKER), "1");
-  assert.deepEqual((await browser.boot()).featureHidden(), new Set(["usage"]));
+  assert.deepEqual((await browser.boot()).featureHidden(), off(["usage"]));
   assert.equal(browser.calls.filter((call) => call.method === "PUT").length, 1);
   assert.equal(browser.storage.get(LEGACY), JSON.stringify(["usage"]));
 });
@@ -145,7 +148,7 @@ test("T3: 이관 표식이 있으면 서버 파일이 없어져도 legacy를 재
     assert.equal(call.method, "GET");
     return reply(state([], { exists: false, revision: 0 }));
   }, { [LEGACY]: JSON.stringify(["usage"]), [MARKER]: "7" });
-  assert.deepEqual((await browser.boot()).featureHidden(), new Set());
+  assert.deepEqual((await browser.boot()).featureHidden(), off([]));
   assert.equal(browser.calls.length, 1);
 });
 
@@ -154,7 +157,7 @@ test("T3: 서버 상태가 있으면 이관 전 legacy보다 서버의 hidden을
     assert.equal(call.method, "GET");
     return reply(state(["archive"]));
   }, { [LEGACY]: JSON.stringify(["usage"]) });
-  assert.deepEqual((await browser.boot()).featureHidden(), new Set(["archive"]));
+  assert.deepEqual((await browser.boot()).featureHidden(), off(["archive"]));
   assert.equal(browser.calls.length, 1);
 });
 
@@ -166,7 +169,7 @@ test("T3: 원격 창은 legacy·toggle·preset으로 PUT하거나 상태를 바�
   const features = await browser.boot();
   for (const action of [() => features.toggleFeature("usage"), () => features.applyPreset("full")]) {
     try { await action(); } catch (error) { assert.match(String(error), /local|remote|원격|로컬|403/i); }
-    assert.deepEqual(features.featureHidden(), new Set(["usage"]));
+    assert.deepEqual(features.featureHidden(), off(["usage"]));
   }
   assert.equal(browser.calls.length, 1);
   assert.equal(browser.storage.has(MARKER), false);
@@ -188,7 +191,7 @@ test("T3: PUT 409 뒤 최신 revision에 의도를 다시 적용해 다른 창�
   });
   const features = await browser.boot();
   await features.toggleFeature("sketch");
-  assert.deepEqual(features.featureHidden(), new Set(["usage", "archive", "sketch"]));
+  assert.deepEqual(features.featureHidden(), off(["usage", "archive", "sketch"]));
   assert.equal(browser.calls.length, 3);
 });
 
@@ -212,7 +215,7 @@ for (const [name, before, target] of [
     const features = await browser.boot();
     await features.toggleFeature("usage");
     const saved = new Set(features.featureList().filter((r) => !r.on).map((r) => r.id));
-    assert.deepEqual(saved, new Set(target));
+    assert.deepEqual(saved, off(target));
     assert.equal(browser.calls.length, 3);
   });
 }
@@ -228,10 +231,10 @@ test("T3: toggle은 PUT 성공 전에 메모리 상태를 바꾸지 않는다", 
   const features = await browser.boot();
   const pending = features.toggleFeature("usage");
   await putSeen.promise;
-  assert.deepEqual(features.featureHidden(), new Set());
+  assert.deepEqual(features.featureHidden(), off([]));
   putResponse.resolve(reply(state(["usage"], { revision: 2 })));
   await pending;
-  assert.deepEqual(features.featureHidden(), new Set(["usage"]));
+  assert.deepEqual(features.featureHidden(), off(["usage"]));
 });
 
 test("T3: PUT 실패는 메모리 상태를 바꾸지 않는다", async (t) => {
@@ -239,6 +242,66 @@ test("T3: PUT 실패는 메모리 상태를 바꾸지 않는다", async (t) => {
     ? reply(state(["archive"])) : reply({ error: "write failed" }, 500));
   const features = await browser.boot();
   await Promise.resolve(features.toggleFeature("usage")).catch(() => {});
-  assert.deepEqual(features.featureHidden(), new Set(["archive"]));
+  assert.deepEqual(features.featureHidden(), off(["archive"]));
   assert.deepEqual(browser.calls.map((call) => call.method), ["GET", "PUT"]);
+});
+
+test("T3: 기본 꺼짐 기능은 확인 없이 켜지지 않고, 켜면 shown 에 들어가며, 끌 때 disabling 을 먼저 부른다", async (t) => {
+  assert.ok(OPT_IN.includes("desklayout"));
+  const { provide, clearHooks } = await import("../web/js/core/hooks.js");
+  t.after(() => clearHooks());
+  const order = [];
+  provide("desklayout.disabling", async () => { order.push("disabling"); });
+  let saved = state([]);
+  const browser = browserStub(t, (call) => {
+    if (call.method === "GET") return reply(saved);
+    order.push("put");
+    saved = state(call.body.hidden, { revision: saved.revision + 1, shown: call.body.shown });
+    return reply(saved);
+  });
+  const features = await browser.boot();
+  assert.equal(features.featureList().find((r) => r.id === "desklayout").on, false);
+  assert.equal(await features.toggleFeature("desklayout"), false, "확인 없이는 켜지 않는다");
+  assert.equal(browser.calls.length, 1);
+  assert.equal(await features.toggleFeature("desklayout", { confirmed: true }), true);
+  assert.deepEqual(browser.calls.at(-1).body.shown, ["desklayout"]);
+  assert.ok(!browser.calls.at(-1).body.hidden.includes("desklayout"));
+  assert.equal(features.featureList().find((r) => r.id === "desklayout").on, true);
+  assert.ok(features.featurePendingRestart().has("desklayout"), "네이티브 기능이라 재시작 뒤에 켜진다");
+  order.length = 0;
+  await features.toggleFeature("desklayout");
+  assert.deepEqual(order, ["disabling", "put"]);
+  assert.deepEqual(browser.calls.at(-1).body.shown, []);
+  assert.ok(features.featureHidden().has("desklayout"));
+});
+
+test("T3: 프리셋은 꺼진 기본 꺼짐 기능을 켜지 않고, 켜진 것은 끌 수 있다", async (t) => {
+  let saved = state([]);
+  const browser = browserStub(t, (call) => {
+    if (call.method === "GET") return reply(saved);
+    saved = state(call.body.hidden, { revision: saved.revision + 1, shown: call.body.shown });
+    return reply(saved);
+  });
+  const features = await browser.boot();
+  const full = features.presetPlan("full");
+  for (const id of OPT_IN) assert.ok(!full.on.includes(id) && !full.turningOn.includes(id), id);
+  await features.applyPreset("full");
+  for (const id of OPT_IN) assert.ok(features.featureHidden().has(id), id);
+  await features.toggleFeature("desklayout", { confirmed: true });
+  const minimal = features.presetPlan("minimal");
+  // 이 회차에 켜 재시작을 기다리는 중이라 아직 로드되지 않았다. 끌 목록(off)에는 들어가 저장에서 빠진다.
+  assert.ok(minimal.off.includes("desklayout"));
+  await features.applyPreset("minimal");
+  assert.ok(!saved.shown.includes("desklayout"));
+});
+
+test("T3: 렌더러와 서버·네이티브의 켜짐 판정은 같은 식이다", async (t) => {
+  const { createRequire } = await import("node:module");
+  const server = createRequire(import.meta.url)("../server/feature-state-read.cjs");
+  const browser = browserStub(t, () => reply(state([])));
+  const features = await browser.boot();
+  for (const hidden of [[], ["a"]]) for (const shown of [[], ["a"], undefined]) for (const optIn of [false, true]) {
+    const s = shown === undefined ? { hidden } : { hidden, shown };
+    assert.equal(features.featureOn(s, "a", optIn), server.featureOn(s, "a", optIn), JSON.stringify({ s, optIn }));
+  }
 });

@@ -1,5 +1,10 @@
 // 렌더러 ↔ 메인 IPC 브릿지 (contextIsolation 유지). 브라우저 탭 외부 분리/재도킹용.
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
+function subscribe(channel, cb) {
+  const handler = (_e, data) => { try { cb(data); } catch {} };
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
 contextBridge.exposeInMainWorld("acHost", {
   // 클립보드 텍스트 읽기. 터미널 Cmd+V가 kitty 인코딩에 막히는 문제를 우회한다(직접 붙여넣기).
   // preload가 sandbox라 clipboard 모듈이 없으므로, 메인 프로세스에 동기 IPC로 요청한다.
@@ -137,6 +142,8 @@ contextBridge.exposeInMainWorld("acHost", {
   // 스케치. 캡처는 바이트로 받고(창은 file:// 을 읽지 못한다), 그린 결과는 상태 폴더에 저장한다.
   sketchShot: (wc) => ipcRenderer.invoke("ac-sketch-shot", { wc }),
   sketchSave: (bytes) => ipcRenderer.invoke("ac-sketch-save", { bytes }),
+  // 창 레이아웃 기능을 끌 때 단축키·타이머·이 기능이 켠 로그인 항목을 되돌린다.
+  deskLayoutDisable: () => ipcRenderer.invoke("ac-desklayout-disable"),
   // AI 자동완성 로그인 허용 목록. 사이트·아이디만 오가며 비번은 이 경로로 전달하지 않는다.
   aiLoginList: () => ipcRenderer.invoke("ac-ai-login-list"),
   aiLoginSources: (sources) => ipcRenderer.invoke("ac-ai-login-sources", { sources }),
@@ -164,6 +171,29 @@ contextBridge.exposeInMainWorld("acHost", {
   // 앱이 렌더링하는 링크 확장자 표. 등록표는 렌더러가 소유하고 main 은 복사본만 본다.
   // webview 안에서 누른 링크는 렌더러 이벤트로 오지 않아서 그쪽도 같은 표를 봐야 한다(setKeymap 과 같은 이유).
   setAppDrawnLinkExts: (list) => ipcRenderer.send("ac-app-drawn-link-exts", list),
+
+  // 모바일 에뮬레이터. 스트림 함수는 Orca preload(emulator-bridge.ts)와 같은 이름·채널이다.
+  // 해제 함수를 돌려준다. 탭을 닫거나 창을 옮길 때마다 구독이 쌓이면 프레임이 여러 번 그려진다.
+  emulator: {
+    rpc: (method, params) => ipcRenderer.invoke("ac-emulator-rpc", { method, params }),
+    getSettings: () => ipcRenderer.invoke("ac-emulator-settings-get"),
+    setSettings: (patch) => ipcRenderer.invoke("ac-emulator-settings-set", patch),
+    pickSdkFolder: () => ipcRenderer.invoke("ac-emulator-pick-sdk"),
+    openAndroidStudioDownload: () => ipcRenderer.invoke("ac-emulator-open-android-studio"),
+    startFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStart", args),
+    stopFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStop", args),
+    startVideoStream: (args) => ipcRenderer.invoke("emulator:videoStreamStart", args),
+    stopVideoStream: (args) => ipcRenderer.invoke("emulator:videoStreamStop", args),
+    onFrameStreamFrame: (cb) => subscribe("emulator:frameStreamFrame", cb),
+    onFrameStreamError: (cb) => subscribe("emulator:frameStreamError", cb),
+    onVideoStreamMeta: (cb) => subscribe("emulator:videoStreamMeta", cb),
+    onVideoStreamFrame: (cb) => subscribe("emulator:videoStreamFrame", cb),
+    onPaneFocus: (cb) => subscribe("emulator:pane-focus", cb),
+    onAutoAttach: (cb) => subscribe("ui:emulatorAutoAttach", cb),
+    openWindow: (args) => ipcRenderer.invoke("ac-emulator-window-open", args),
+    closeWindow: (args) => ipcRenderer.invoke("ac-emulator-window-close", args),
+    onWindowClosed: (cb) => subscribe("ac-emulator-window-closed", cb),
+  },
 
   refocusConsole: () => ipcRenderer.send("ac-refocus-console"),
   appReload: () => ipcRenderer.send("ac-app-reload"),

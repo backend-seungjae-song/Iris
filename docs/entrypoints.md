@@ -29,6 +29,7 @@
 | `scripts/probe/space-binding.mjs` | 스페이스 키 해석 결과 확인 | `node scripts/probe/space-binding.mjs <dev> <ino>` |
 | `scripts/probe/window-raise.mjs` | 창 활성화 확인 | `node scripts/probe/window-raise.mjs` |
 | `bin/frame-purity.mjs` | 앱 셸이 기능 코드에 의존하는 위치 집계 | `node bin/frame-purity.mjs`. 결과가 0인지 확인 |
+| `scripts/vendor-orca-emulator.mjs` | Orca 에뮬레이터 코드를 고정 커밋에서 다시 번들 | `node scripts/vendor-orca-emulator.mjs --orca <Orca 저장소> --commit 841d06a96` |
 | `scripts/parallel-proof.sh` | 두 작업자가 기능을 각각 수정한 뒤 병합하는 실험 | `bash scripts/parallel-proof.sh` |
 
 ## 진입점 목록 검증

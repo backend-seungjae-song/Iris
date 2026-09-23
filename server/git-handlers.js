@@ -11,7 +11,8 @@ import {
 // git.* WebSocket 요청의 저장소 경계·명령 실행·응답 조립을 맡는 leaf handler.
 //
 // 소유 범위
-//   Git root 해석, status/diff 파싱, mutation whitelist와 git.* namespace 분기·응답 순서.
+//   Git root 해석, status/diff 파싱, Base 브랜치 대비 목록(branchDiff), mutation whitelist와
+//   git.* namespace 분기·응답 순서.
 //
 // 제공 API
 //   entry의 exact namespace dispatch가 호출하는 handleGit.
@@ -88,6 +89,69 @@ function gitStatusRich(root, reqPath) {
   }
   return { type: "git-status", root, path: reqPath || root, isRepo: true, branch, ahead, behind, staged, changes };
 }
+// Base 브랜치 후보는 로컬·원격 브랜치 목록이다. 화면이 보낸 base 는 이 목록에 있을 때만 git 에
+// 넘긴다. 목록 밖 문자열을 그대로 넘기면 "--output=..." 같은 값이 옵션으로 해석된다.
+export function gitBranchRefs(root) {
+  const r = git(root, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]);
+  const out = [];
+  for (const ref of (r.out || "").split("\n")) {
+    if (!ref || ref.endsWith("/HEAD")) continue;
+    if (ref.startsWith("refs/heads/")) out.push(ref.slice(11));
+    else if (ref.startsWith("refs/remotes/")) out.push(ref.slice(13));
+  }
+  return out;
+}
+// 기본 Base: origin/HEAD 가 가리키는 브랜치, 없으면 흔한 이름 순으로 처음 있는 것.
+// 원격 쪽을 먼저 본다. PR 이 비교하는 대상은 원격의 기본 브랜치다.
+export function defaultBase(root, refs) {
+  const head = git(root, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]).out.trim();
+  if (head.startsWith("refs/remotes/")) { const b = head.slice(13); if (refs.includes(b)) return b; }
+  for (const n of ["main", "master", "develop"]) {
+    if (refs.includes("origin/" + n)) return "origin/" + n;
+    if (refs.includes(n)) return n;
+  }
+  return "";
+}
+// base·mode 로 비교 기준을 정한다. committed = base...HEAD(분기점부터 HEAD 까지 커밋된 것),
+// worktree = 분기점부터 지금 디스크 상태까지(커밋 전 변경 포함).
+function branchCompare(root, base, mode) {
+  const refs = gitBranchRefs(root);
+  const b = base ? String(base) : defaultBase(root, refs);
+  if (!b) return { refs, base: "", error: "Base 브랜치를 찾지 못했습니다." };
+  if (!refs.includes(b)) return { refs, base: b, error: `브랜치가 없습니다: ${b}` };
+  const mb = git(root, ["merge-base", b, "HEAD"]);
+  if (!mb.ok || !mb.out.trim()) return { refs, base: b, error: `${b} 와 공통 조상이 없습니다.` };
+  const range = mode === "worktree" ? [mb.out.trim()] : [mb.out.trim(), "HEAD"];
+  return { refs, base: b, range };
+}
+// --name-status -z 출력: 상태 뒤에 경로 하나, 이름 바뀜·복사(R·C)는 경로 둘(옛 이름, 새 이름).
+export function parseNameStatusZ(out) {
+  const parts = String(out || "").split("\0");
+  const files = [];
+  for (let i = 0; i < parts.length;) {
+    const st = parts[i++]; if (!st) continue;
+    const c = st[0];
+    if (c === "R" || c === "C") { const from = parts[i++], to = parts[i++]; if (to) files.push({ code: c, rel: to, oldRel: from }); }
+    else { const rel = parts[i++]; if (rel) files.push({ code: gitCodeOf(c), rel }); }
+  }
+  return files;
+}
+function gitBranchDiff(root, reqPath, base, mode) {
+  const m = mode === "worktree" ? "worktree" : "committed";
+  const cmp = branchCompare(root, base, m);
+  const head = { type: "git-branch-diff", root, path: reqPath || root, mode: m, base: cmp.base, bases: cmp.refs };
+  if (cmp.error) return { ...head, files: [], error: cmp.error };
+  const r = git(root, ["diff", "--name-status", "-z", "-M", ...cmp.range]);
+  if (!r.ok) return { ...head, files: [], error: (r.err || "diff 실패").trim() };
+  const files = parseNameStatusZ(r.out);
+  // 작업 트리 기준이면 아직 추적하지 않는 새 파일도 분기점 이후의 변경이다.
+  if (m === "worktree") {
+    const u = git(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
+    for (const rel of (u.out || "").split("\0")) if (rel) files.push({ code: "U", rel, untracked: true });
+  }
+  for (const f of files) f.abs = path.join(root, f.rel);
+  return { ...head, files };
+}
 const GIT_MUTATIONS = new Set(["stage", "unstage", "stageAll", "discard", "commit", "push", "pull"]);
 // 응답에는 항상 어느 저장소의 결과인지 남긴다. 화면이 저장소를 여러 개 동시에 관리해서,
 // root가 없으면 성공·실패 알림이 어느 섹션 것인지 붙일 데가 없다. root를 아직 모르는 단계(경로
@@ -114,11 +178,27 @@ export function handleGit(ws, msg) {
   const safeRels = (msg.paths || []).map(String).filter((r) => inRoot(path.resolve(root, r)));
   try {
     if (op === "status") { ws.send(JSON.stringify(gitStatusRich(root, dir))); return; }
+    if (op === "branchDiff") { ws.send(JSON.stringify(gitBranchDiff(root, dir, msg.base, msg.mode))); return; }
     if (op === "diff") {
       const abs = msg.file;
       if (!abs || !inRoot(abs)) { ws.send(JSON.stringify({ type: "git-diff", root, file: abs || "", error: "허용되지 않은 경로" })); return; }
       const rel = path.relative(root, path.resolve(abs));
       let patch = "";
+      // Base 대비 보기에서 연 파일. 응답에 mode·base 를 되돌려야 화면이 같은 파일의 다른 보기 탭과 구분한다.
+      if (msg.mode) {
+        const mode = msg.mode === "worktree" ? "worktree" : "committed";
+        const cmp = branchCompare(root, msg.base, mode);
+        const head = { type: "git-diff", root, file: abs, mode, base: msg.base || "" };
+        if (cmp.error) { ws.send(JSON.stringify({ ...head, error: cmp.error })); return; }
+        if (msg.untracked && mode === "worktree") patch = git(root, ["diff", "--no-index", "--", "/dev/null", abs]).out;
+        else {
+          // 이름이 바뀐 파일은 옛 경로도 함께 넘겨야 git 이 이름 바뀜으로 짝짓는다. 새 경로만 주면 통째로 추가로 나온다.
+          const old = msg.oldRel && inRoot(path.resolve(root, String(msg.oldRel))) ? [String(msg.oldRel)] : [];
+          patch = git(root, ["diff", "-M", ...cmp.range, "--", ...old, rel]).out;
+        }
+        ws.send(JSON.stringify({ ...head, patch }));
+        return;
+      }
       if (msg.untracked) patch = git(root, ["diff", "--no-index", "--", "/dev/null", abs]).out;
       else if (msg.staged) patch = git(root, ["diff", "--staged", "--", rel]).out;
       else patch = git(root, ["diff", "--", rel]).out;

@@ -27,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { artifactDir } from "../../server/artifacts-home.cjs";
+import { renderPlain } from "./report-plain.mjs";
 
 // 개발 인스턴스와 설치된 앱이 같은 폴더를 쓰면 회차 장부가 섞인다. 어디인지는 한 곳이 정한다.
 // 상태 폴더를 import 시점에 고정하면 그 뒤에 IRIS_STATE_DIR 을 지정해도 반영되지 않는다. 개발 환경이
@@ -435,6 +436,7 @@ function readLedger(runId) {
           if (e.source) r0.source = e.source;
           if (e.sourceShot) r0.sourceShot = e.sourceShot;
           if (e.basisNote) r0.basisNote = e.basisNote;
+          if (e.what) r0.what = e.what;
         }
       }
       else if (e.act === "open") {
@@ -758,7 +760,7 @@ function ledgerCard(dir, r, i) {
 // 94개에서 무너졌다(문서 95000px). 그 사이 어디를 경계로 둘지는 취향이 아니라 규모의 문제다.
 const DENSE_FROM = 40;
 
-function buildReport({ title, summary, steps, out, kind, runId, target, setup, run, resume }) {
+function buildReport({ title, summary, steps, out, kind, runId, target, setup, run, resume, overview }) {
   const handoff = kind === "handoff";
   const rid = runId || "run-" + Date.now();
   const dir = runStore(rid);
@@ -1734,7 +1736,14 @@ document.addEventListener("keydown", (e) => {
 </script>`;
   const p = out || path.join(dir, handoff ? "handoff.html" : "report.html");
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, html);
+  // 장부 회차의 기본 지면은 개발자가 아닌 사람이 읽는다. 확인 기록 번호·선택자·주소는
+  // 그 사람이 검증에 쓸 수 없어서 옆 파일(-dev)에 두고, 기본 지면에는 흐름과 장면만 싣는다.
+  const devPath = led ? p.replace(/(\.html?)?$/i, "-dev.html") : null;
+  if (led) {
+    fs.writeFileSync(devPath, html);
+    fs.writeFileSync(p, renderPlain({ title, summary, overview, led, dir, devHref: path.basename(devPath) },
+      { esc, keepShot, dataUri, pngSize, readMarks, boxesOf, rowColor, frameStale, COLOR }));
+  } else fs.writeFileSync(p, html);
   // 다음 실행이 이 장면들을 '이전'으로 집어 쓸 수 있게 이름과 함께 남긴다.
   const mf = path.join(dir, "manifest.json");
   let prev = {}; try { prev = JSON.parse(fs.readFileSync(mf, "utf8")); } catch {}
@@ -1769,7 +1778,7 @@ document.addEventListener("keydown", (e) => {
         return acc;
       }, { rows: 0 })
     : null;
-  return { ok: true, path: p, runId: rid, store: dir, steps: n,
+  return { ok: true, path: p, ...(devPath ? { devPath } : {}), runId: rid, store: dir, steps: n,
     ...(ledTally ? { ledger: ledTally } : {}),
     ...(handoff ? {} : { checks: checks.length, failed: checkBad, failedSteps: bad,
       unverified: unver.length, unreported: missing.length }) };

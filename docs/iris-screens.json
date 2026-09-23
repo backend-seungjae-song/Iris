@@ -175,6 +175,15 @@
       "surfaceIds": []
     },
     {
+      "name": "모바일 에뮬레이터",
+      "kind": "rail",
+      "entry": "emulator",
+      "rootIds": [
+        "emu-panel"
+      ],
+      "surfaceIds": []
+    },
+    {
       "name": "설정",
       "kind": "rail",
       "entry": "keymap",

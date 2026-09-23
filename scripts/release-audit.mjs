@@ -120,7 +120,7 @@ else bad("오프라인 테스트", tail(tests.out, 3));
 
 console.log("\n[5] 라이선스 고지");
 // LICENSE·NOTICE·THIRD-PARTY 는 배포 의무다. 없으면 배포 자체가 성립하지 않는다.
-for (const f of ["LICENSE", "NOTICE", "THIRD-PARTY.md", "README.md", "SECURITY.md", "CONTRIBUTING.md", "web/fonts/OFL.txt", "web/vendor/docx-editor-core.NOTICE.md"]) {
+for (const f of ["LICENSE", "NOTICE", "THIRD-PARTY.md", "README.md", "SECURITY.md", "CONTRIBUTING.md", "web/fonts/OFL.txt", "web/vendor/docx-editor-core.NOTICE.md", "web/vendor/orca-emulator-pane.NOTICE.md"]) {
   if (existsSync(path.join(ROOT, f))) ok(`${f} 가 있다`);
   else bad(`${f} 가 있다`);
 }

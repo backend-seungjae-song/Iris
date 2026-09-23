@@ -38,6 +38,11 @@ export const panelHtml = `
     <span class="sc-branch" id="sc-branch"></span>
     <button class="sc-ico" id="sc-refresh" title="전체 새로고침">↻</button>
   </div>
+  <div class="sc-views" id="sc-views" role="tablist" aria-label="변경 보기">
+    <button class="sc-view" data-view="local" role="tab" title="커밋하지 않은 변경 (스테이지·작업 트리)">커밋 전</button>
+    <button class="sc-view" data-view="base" role="tab" title="Base 브랜치와 갈라진 뒤 커밋된 변경 (base...HEAD)">Base 대비</button>
+    <button class="sc-view" data-view="baseWork" role="tab" title="Base 브랜치와 갈라진 뒤의 모든 변경 (커밋 전 변경 포함)">Base+커밋 전</button>
+  </div>
   <div class="sc-note" id="sc-note"></div>
   <div class="sc-body" id="sc-body"><div class="sc-empty">스페이스를 선택하세요.</div></div>
 `;
@@ -50,6 +55,15 @@ let scMsg = new Map();     // root → 쓰다 만 커밋 메시지(재렌더에�
 let scFold = new Set();    // 사용자가 접어 둔 root (기본은 펼침)
 let scNested = new Map();  // 스페이스 폴더 → 그 아래에서 서버가 찾아 준 레포 폴더들
 let scScanned = new Set(); // 이미 훑어 달라고 부탁한 폴더: 4초마다 다시 훑지 않게
+let scBranch = new Map();  // root → git-branch-diff 응답(Base 대비 보기의 파일 목록)
+// 보기: local = 커밋 전(status), base = Base 대비 커밋된 것, baseWork = Base 대비 작업 트리까지.
+// 보기와 레포별 Base 선택은 이 창을 쓰는 사람의 편의 설정이라 localStorage 에 둔다. 못 읽어도 기본값으로 동작한다.
+const SC_VIEWS = ["local", "base", "baseWork"];
+const SC_VIEW_KEY = "iris.sc.view", SC_BASE_KEY = "iris.sc.base";
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+let scView = SC_VIEWS.includes(lsGet(SC_VIEW_KEY)) ? lsGet(SC_VIEW_KEY) : "local";
+let scBase = new Map(Object.entries((() => { try { return JSON.parse(lsGet(SC_BASE_KEY) || "{}") || {}; } catch { return {}; } })()));
 let scVer = 0;             // 화면이 달라질 일이 생길 때마다 올린다(state가 4초마다 와도 불필요한 재렌더를 막는다)
 let scSig = "";            // 마지막으로 그린 화면의 지문
 let scNoteTimer = null;
@@ -75,7 +89,23 @@ export function initSourceControl(deps) {
   openDiff = deps.openDiff;
   const refresh = $("#sc-refresh");
   if (refresh) refresh.onclick = () => { scDead.clear(); scRefresh(); }; // 막혔다고 지워둔 후보도 다시 본다
+  const views = $("#sc-views");
+  if (views) {
+    views.addEventListener("click", (e) => {
+      const b = e.target.closest(".sc-view"); if (!b || b.dataset.view === scView) return;
+      scView = b.dataset.view; lsSet(SC_VIEW_KEY, scView);
+      scBranch.clear(); // 다른 mode 의 목록이 잠깐이라도 보이면 어느 보기인지 헷갈린다
+      scPaintViews(); scVer++; scAskBranchAll(); renderSc();
+    });
+    scPaintViews();
+  }
   const body = $("#sc-body");
+  if (body) body.addEventListener("change", (e) => {
+    const sel = e.target.closest(".sc-base"); if (!sel) return;
+    const root = scRepoOf(sel); if (!root) return;
+    scBase.set(root, sel.value); lsSet(SC_BASE_KEY, JSON.stringify(Object.fromEntries(scBase)));
+    scAskBranch(root);
+  });
   // 조작은 전부 자기 섹션의 레포에만 적용된다. 대상 레포는 클릭한 위치로 결정된다.
   const scCommit = (root) => {
     const m = (scMsg.get(root) || "").trim();
@@ -116,6 +146,11 @@ export function initSourceControl(deps) {
       return;
     }
     const rel = row.dataset.rel, abs = row.dataset.abs, staged = row.dataset.staged === "1", untracked = row.dataset.untracked === "1";
+    // Base 대비 목록의 파일은 그 목록을 만든 기준(base·mode)으로 연다. 조작 버튼은 없다.
+    if (row.dataset.mode) {
+      openDiff(abs, { root, rel, untracked, mode: row.dataset.mode, base: row.dataset.base, oldRel: row.dataset.old || "" });
+      return;
+    }
     const act = e.target.closest(".sc-act");
     if (act) {
       const a = act.dataset.act;
@@ -200,7 +235,7 @@ export function scSync() {
   // 사라진 레포의 상태는 버린다(다시 열리면 새로 묻는다). 접힘 상태와 작성 중인 메시지는 남긴다.
   // 스페이스를 잠깐 닫았다 여는 동안 작성 중이던 글까지 지우면 손실이 크다.
   const live = scLiveRoots(cands);
-  for (const root of [...scRepos.keys()]) if (!live.has(root)) { scRepos.delete(root); scVer++; }
+  for (const root of [...scRepos.keys()]) if (!live.has(root)) { scRepos.delete(root); scBranch.delete(root); scVer++; }
   let asked = 0;
   for (const c of cands) if (!scDead.has(c.dir) && !scAsked.has(c.dir)) { scAsked.add(c.dir); wsSend({ type: "git.status", path: c.dir }); asked++; }
   // state는 4초마다 온다. 화면이 달라질 일이 없으면 다시 그리지 않는다. 통째로 교체하면
@@ -230,6 +265,20 @@ export function scRepoName(root) { return repoNameOf(root); }
 provide("git.sync", () => { scSync(); scRefreshFor(scRoot()); });
 provide("git.syncOnly", () => scSync());
 provide("git.refreshFor", (dir) => scRefreshFor(dir));
+// 보기 이름 → 서버 mode. local 은 status 를 쓰므로 mode 가 없다.
+const scModeOf = (v) => (v === "base" ? "committed" : v === "baseWork" ? "worktree" : "");
+function scPaintViews() {
+  for (const b of document.querySelectorAll("#sc-views .sc-view")) {
+    const on = b.dataset.view === scView;
+    b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false");
+  }
+}
+// Base 대비 목록 요청. base 가 비어 있으면 서버가 기본 브랜치를 골라 응답에 적어 준다.
+function scAskBranch(root) {
+  const mode = scModeOf(scView); if (!mode || !root) return;
+  wsSend({ type: "git.branchDiff", path: root, base: scBase.get(root) || "", mode });
+}
+function scAskBranchAll() { for (const root of scRepos.keys()) scAskBranch(root); }
 // expectRoot = 화면이 "이 레포에 한다"고 알고 있던 것. 서버가 그 사이 다른 레포로 풀리면 거절한다.
 function scOp(op, root, extra) {
   if (!root) { scNote("레포를 찾지 못했습니다.", true); return; }
@@ -242,7 +291,16 @@ function scOnStatus(m) {
   if (m.isRepo === false) { scDead.add(dir); scRootOf.delete(dir); }
   else { scRootOf.set(dir, m.root); scRepos.set(m.root, m); }
   // 그 폴더가 전에 다른 레포로 풀려 있었다면, 후보가 남지 않은 이전 레포는 화면에서 뺀다.
-  if (was && was !== m.root && ![...scRootOf.values()].includes(was)) scRepos.delete(was);
+  if (was && was !== m.root && ![...scRootOf.values()].includes(was)) { scRepos.delete(was); scBranch.delete(was); }
+  // status 가 다시 온 때가 곧 그 레포가 바뀌었을 수 있는 때다(저장·커밋·새로고침). Base 보기도 함께 갱신한다.
+  if (m.isRepo !== false) scAskBranch(m.root);
+  scVer++;
+  renderSc();
+}
+function scOnBranchDiff(m) {
+  // 보기를 바꾼 뒤 늦게 도착한 이전 mode 의 응답은 버린다.
+  if (!m.root || m.mode !== scModeOf(scView) || !scRepos.has(m.root)) return;
+  scBranch.set(m.root, m);
   scVer++;
   renderSc();
 }
@@ -269,11 +327,15 @@ function renderSc() {
     scSig = sig;
     return;
   }
+  // 레포 하나의 변경 수. 지금 보기 기준으로 센다(Base 보기에서 커밋 전 개수를 적으면 목록과 어긋난다).
+  const countOf = (r) => scView === "local"
+    ? (r.st.staged || []).length + (r.st.changes || []).length
+    : ((scBranch.get(r.root) || {}).files || []).length;
   // 머리글 요약: 레포가 하나면 브랜치를, 여럿이면 몇 개가 얼마나 밀려 있는지를 적는다.
   if (branch) {
     if (rows.length > 1) {
-      const n = rows.reduce((a, r) => a + ((r.st.staged || []).length + (r.st.changes || []).length), 0);
-      const dirty = rows.filter((r) => (r.st.staged || []).length + (r.st.changes || []).length).length;
+      const n = rows.reduce((a, r) => a + countOf(r), 0);
+      const dirty = rows.filter((r) => countOf(r)).length;
       branch.textContent = n ? `레포 ${rows.length} · ${dirty}곳 ${n}개 변경` : `레포 ${rows.length} · 변경 없음`;
     } else {
       const c = rows[0];
@@ -294,16 +356,42 @@ function renderSc() {
       + `<span class="sc-name">${esc(name)}</span>` + (dir ? `<span class="sc-dir">${esc(dir)}</span>` : "")
       + `<span class="sc-actions">${acts}</span></div>`;
   };
+  // Base 대비 목록의 파일 줄. 이 목록은 비교 결과라 스테이지·되돌리기 버튼을 두지 않는다.
+  const branchRow = (f, br) => {
+    const rel = f.rel || f.abs, slash = rel.lastIndexOf("/");
+    const name = slash >= 0 ? rel.slice(slash + 1) : rel, dir = slash >= 0 ? rel.slice(0, slash) : "";
+    const tip = f.oldRel ? `${f.oldRel} → ${rel}` : rel;
+    return `<div class="sc-file" title="${esc(tip)}" data-abs="${esc(f.abs)}" data-rel="${esc(rel)}" data-untracked="${f.untracked ? 1 : 0}"`
+      + ` data-mode="${esc(br.mode)}" data-base="${esc(br.base)}" data-old="${esc(f.oldRel || "")}">`
+      + `<span class="sc-code ${esc(f.code)}">${esc(f.code)}</span>`
+      + `<span class="sc-name">${esc(name)}</span>` + (dir ? `<span class="sc-dir">${esc(dir)}</span>` : "")
+      + `</div>`;
+  };
+  const branchInner = (root) => {
+    const br = scBranch.get(root);
+    if (!br) return `<div class="sc-repo-clean">불러오는 중…</div>`;
+    const bases = br.bases || [];
+    const opts = bases.map((b) => `<option value="${esc(b)}"${b === br.base ? " selected" : ""}>${esc(b)}</option>`).join("")
+      + (br.base && !bases.includes(br.base) ? `<option value="${esc(br.base)}" selected>${esc(br.base)} (없음)</option>` : "");
+    let html = `<div class="sc-base-row"><label class="sc-base-lbl">Base</label>`
+      + `<select class="sc-base" title="비교할 Base 브랜치">${opts || `<option value="">(브랜치 없음)</option>`}</select></div>`;
+    if (br.error) return html + `<div class="sc-repo-clean err">${esc(br.error)}</div>`;
+    const files = br.files || [];
+    if (!files.length) return html + `<div class="sc-repo-clean">${esc(br.base)} 대비 달라진 파일이 없습니다.</div>`;
+    html += `<div class="sc-group-head">${br.mode === "worktree" ? "커밋 전 포함 변경" : "커밋된 변경"}<span class="sc-count">${files.length}</span></div>`;
+    return html + files.map((f) => branchRow(f, br)).join("");
+  };
   const section = (r) => {
     const st = r.st, folded = scFold.has(r.root);
-    const staged = st.staged || [], changes = st.changes || [], n = staged.length + changes.length;
+    const staged = st.staged || [], changes = st.changes || [], n = countOf(r);
     const name = scRepoName(r.root);
     const where = r.labels.filter((l) => l !== name).join(" · ");
     let bt = "⎇ " + (st.branch || "?"); if (st.ahead) bt += " ↑" + st.ahead; if (st.behind) bt += " ↓" + st.behind;
     let inner = "";
+    if (scView !== "local") inner = branchInner(r.root);
     // 변경이 없어도 작성 중인 커밋 메시지가 있으면 입력란을 남긴다. 마지막 변경을 되돌린 순간
     // 입력란이 사라지면 작성 중이던 글도 사라진 것으로 보인다.
-    if (n || (scMsg.get(r.root) || "").trim()) {
+    else if (n || (scMsg.get(r.root) || "").trim()) {
       inner += `<div class="sc-commit">`
         + `<textarea class="sc-msg" data-root="${esc(r.root)}" rows="2" placeholder="${esc(name)}에 커밋 (⌘Enter)"></textarea>`
         + `<div class="sc-commit-row"><button class="sc-commit-btn" data-ract="commit" title="스테이지된 변경을 커밋">✓ 커밋</button>`
@@ -352,6 +440,8 @@ export function handleSourceControlMessage(m) {
   }
   if (m.type === "git-status") {
     scOnStatus(m);
+  } else if (m.type === "git-branch-diff") {
+    scOnBranchDiff(m);
   } else if (m.type === "git-ok") {
     if (m.op === "commit" && m.root) { scMsg.delete(m.root); for (const el of document.querySelectorAll(".sc-msg")) if (el.dataset.root === m.root) el.value = ""; }
     scNote((m.root ? scRepoName(m.root) + ": " : "") + (m.message || "완료"), false);
@@ -371,6 +461,7 @@ export function initCapability(ctx) {
     $: ctx.$, esc: ctx.esc, wsSend: ctx.wsSend,
     getSelectedSpaceId: ctx.getSelectedSpaceId,
     renderTabs: ctx.renderTabs, showActiveTab: ctx.showActiveTab,
+    ensureMonacoLib: ctx.ensureMonacoLib, monacoTheme: ctx.monacoTheme,
   });
   registerTabView({ kind: "diff", panelId: "diffview", render: (t) => renderDiffView(t) });
   initSourceControl({
@@ -386,7 +477,7 @@ export function initCapability(ctx) {
   return {
     screen: { enter: scRefresh },
     ws: {
-      "git-repos": on, "git-status": on, "git-ok": on, "git-error": on,
+      "git-repos": on, "git-status": on, "git-branch-diff": on, "git-ok": on, "git-error": on,
       "git-diff": handleGitDiffMessage,
     },
   };

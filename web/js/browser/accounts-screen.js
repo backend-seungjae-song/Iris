@@ -159,7 +159,11 @@ function wireAccounts() {
       const withPw = !!(document.getElementById("acct-with-pw") || {}).checked;
       const res = await importChromeToProfile(cid, label, withPw);
       if (res && res.error) { imp.textContent = "실패"; showToast("가져오기 실패: " + res.error); }
-      else {
+      // 바로 넣지 못한 쿠키는 다음 실행 때 한 번 적용을 시도할 뿐이고, 그사이 로그인 상태가 바뀌면 버려진다.
+      else if (res && !res.live && res.staged) {
+        imp.textContent = "미완료";
+        showToast(`가져오기 미완료: ${label} 쿠키 ${res.staged}개를 바로 넣지 못했습니다. 앱을 다시 시작하면 한 번 더 적용을 시도합니다.`);
+      } else {
         // 비밀번호를 가져오지 않은 것은 실패가 아니라 선택이므로, 화면에 그대로 구분해 표시한다.
         const pw = res && res.loginsSkipped ? "로그인 미포함" : `로그인 ${(res && res.logins) || 0}`;
         showToast(`가져오기 완료: ${label} (쿠키 ${(res && res.imported) || 0}, ${pw})`); acctRefresh();

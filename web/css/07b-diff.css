@@ -24,3 +24,5 @@
 .dv-body .dl.hunk { color:var(--ai); background:color-mix(in srgb,var(--ai) 8%,transparent); }
 .dv-body .dl.meta { color:var(--muted-fg); }
 .dv-empty { padding:20px; color:var(--muted-fg); font-size:var(--fs-xs); }
+/* 문법 강조: 토큰 색은 Monaco 테마 규칙(.mtkN)이 칠한다. 줄 앞 +/- 기호는 코드가 아니라서 흐리게 둔다. */
+.dv-body .dp { color:var(--muted-fg); }

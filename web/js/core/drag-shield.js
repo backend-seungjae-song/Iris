@@ -24,7 +24,7 @@
 //   창이 포커스를 잃으면(⌘Tab) 끌기도 끝낸다. 돌아왔을 때 끌기가 이어지면 안 된다.
 //
 // 영향 범위
-//   web/js/main.js(#h-resizer · #util-resizer) · web/js/panel/layout.js(.v-resizer) 가 호출한다.
+//   web/js/core/layout-engine.js(경계 막대 · 편집 모드 끌기)가 호출한다.
 //   panel/memo.js 와 panel/touch-drag.js 는 각자 만든 덮개를 계속 사용한다.
 
 let active = null;

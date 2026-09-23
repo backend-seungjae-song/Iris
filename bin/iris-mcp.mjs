@@ -280,10 +280,10 @@ async function call(cmd, args = {}) {
   });
 }
 
-// iOS 시뮬레이터 표면은 bin/mcp/app.mjs 가 소유한다. 브라우저 표면과 바뀌는 이유가 다르고,
-// 그쪽은 서버를 거치지 않고 idb 를 직접 부른다.
+// 모바일 앱 표면(iOS·Android)은 bin/mcp/app.mjs 가 소유한다. 브라우저 표면과 바뀌는 이유가 다르고,
+// 그쪽은 대상 기기(Iris 에뮬레이터 탭)만 서버에 묻고 조작은 idb·adb 를 직접 부른다.
 // 앱 영수증도 회차를 달고 나가야 한다. 그러지 않으면 웹만 회차로 나뉘고 앱은 전역으로 남는다.
-const appSurface = createAppSurface({ currentSession, journal,
+const appSurface = createAppSurface({ currentSession, journal, call,
   addReceipt: (d, serverId) => addReceipt(d, serverId, CURRENT_RUN) });
 const MAX_DEVICES = appSurface.MAX_DEVICES;
 // 요소 지정은 snapshot ref(@e5)와 CSS 선택자를 모두 받는다. 둘 다 없으면 서버가 거부한다.
@@ -488,6 +488,14 @@ const TOOLS = [
             description: "이 단계의 기대(expected)가 어디서 왔는가. spec=명세, plan=기획서, code=코드를 읽어 확인, user=사용자가 정해 줌, assumed=출처 없이 내가 정함. pass엔 필수 — 화면을 보고 기대를 만들면 구현이 곧 명세가 되어 그 통과는 아무것도 보증하지 않는다." },
           basisNote: { type: "string", description: "그 출처를 짚는 한 줄. spec이면 문서와 대목, code면 파일:줄, user면 사용자가 한 말. assumed면 무엇을 어떤 근거로 그렇게 잡았는지를 그 자리에서 읽고 알 수 있게 — 읽는 사람이 다른 문서를 찾아보지 않아도 되게 쓴다." },
           verdict: { type: "string", enum: ["pass", "fail", "info"] } } } },
+      overview: { type: "object", description: "보고서 맨 위. 이 보고서 한 장으로 사용자의 최종 요구(기능 단위)·AI가 어떻게 이해하고 구현했는지·어느 케이스가 스크린샷으로 확인했는지를 대조하게 한다. 개발자가 아닌 사람이 읽을 말로 쓰고 코드·선택자·저장소 키를 쓰지 않는다. 장부 회차의 기본 지면에만 실린다.",
+        properties: {
+          features: { type: "array", description: "사용자의 최종 요구를 기능 단위로 종합한 목록. 요청 발화를 하나씩 옮기지 않는다. 기능마다 {name, need: 교정·결정까지 반영한 최종 요구(줄 배열), understood: AI 이해(줄 배열), built: 구현한 것(줄 배열), cases: 확인한 줄 id 배열, gaps?: 케이스로 확인하지 않은 부분(줄 배열), why?: 케이스가 하나도 없는 이유}.",
+            items: { type: "object", properties: { name: { type: "string" }, need: { type: ["string", "array"] }, understood: { type: ["string", "array"] },
+              built: { type: ["string", "array"] }, cases: { type: "array", items: { type: "string" } }, gaps: { type: ["string", "array"] }, why: { type: "string" } } } },
+          diagrams: { type: "array", description: "역할별 흐름도. {title?, lanes: 역할 이름 배열(제품마다 다름: 사용자·운영자·제휴사 등), steps: [{id, lane, text, col?, focal?}], links: [{from, to, focal?, dashed?}]}. 한 장에 역할 5·단계 9·연결 12·강조 2까지.",
+            items: { type: "object" } },
+          scope: { type: ["string", "array"], description: "이번 확인 범위와 확인하지 못한 부분(줄 배열)" } } },
       resume: { type: "object", description: "앞 회차를 이어받는다. 이미 통과했고 그 사이에 아무것도 안 바뀐 구간을 다시 밟는 것은 시간만 쓰고 새로 아는 것이 없다. 이어받은 단계는 '이어받음'으로 표시되어 이번에 밟지 않았다는 사실이 지면에 남는다.",
         properties: {
           from: { type: "string", description: "이어받을 회차 id(run-…). 그 회차의 통과 단계를 그대로 물려받는다." },
@@ -619,7 +627,8 @@ const TOOLS = [
           + "찍을 수 없었다면 그 단계의 noShot에 사유를 적는다 — 보고서에 그대로 실린다.\n"
           + "판정을 info로 내리거나 expected를 지워서 통과시키지 않는다." };
         return await openInIris(buildReport({ title: a.title, summary: a.summary, steps, out: a.path,
-          kind: a.kind, runId: a.runId, target: a.target, setup: a.setup, run: a.run, resume: a.resume }),
+          kind: a.kind, runId: a.runId, target: a.target, setup: a.setup, run: a.run, resume: a.resume,
+          overview: a.overview }),
           a.kind === "handoff");
       } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
     } },
@@ -629,14 +638,15 @@ const TOOLS = [
     schema: { selector: { type: "string", description: "확인할 요소(CSS 선택자)" },
       text: { type: "string", description: "기대하는 텍스트(contains/equals일 때)" },
       mode: { type: "string", enum: ["contains", "equals", "exists", "absent"], description: "기본 contains(text 있을 때)·exists(없을 때)" },
+      label: { type: "string", description: "확인 대상을 화면에 보이는 이름으로(예: '주간 미션 스위치'). 보고서 기본 지면은 선택자 대신 이 이름을 싣는다" },
       dpr: { type: "number", description: "증거 이미지 배율(2면 레티나)" },
       tab: { type: "string" } },
     req: ["selector"],
     run: async (a, C) => {
-      const r = await C("expect", { sel: String(a.selector), text: a.text, mode: a.mode, dpr: a.dpr, tab: a.tab });
+      const r = await C("expect", { sel: String(a.selector), text: a.text, mode: a.mode, label: a.label, dpr: a.dpr, tab: a.tab });
       // 이 순간의 사실을 영수증으로 남긴다. 보고서의 통과는 이 기록에서만 나온다.
       if (r && r.ok && r.data) {
-        const rc = addReceipt({ selector: String(a.selector), mode: a.mode || (a.text == null ? "exists" : "contains"),
+        const rc = addReceipt({ selector: String(a.selector), label: a.label || null, mode: a.mode || (a.text == null ? "exists" : "contains"),
           want: a.text == null ? null : String(a.text), expected: r.data.expected, displayExpected: r.data.displayExpected, element: r.data.element, got: r.data.got,
           pass: !!r.data.pass, found: !!r.data.found, shot: r.data.shot || null }, r.data.receipt, CURRENT_RUN);
         r.data.receipt = rc.id;
@@ -707,16 +717,18 @@ const TOOLS = [
     schema: { message: { type: "string", description: "무엇을 해달라는지 한 줄. 예: 결제 수단을 선택하고 결제해 주세요." },
       title: { type: "string", description: "알림 제목(생략 가능)." },
       tab: { type: "string", description: "그 자리가 있는 탭. 생략하면 이 세션이 쓰는 탭." },
-      device: { type: "string", description: "브라우저가 아니라 iOS 시뮬레이터 앱에서 해야 하는 자리면 그 기기(app_targets의 udid·이름). 주면 알림이 [그 앱으로]로 바뀌고 눌렀을 때 시뮬레이터를 앞으로 데려온다. tab과 함께 주지 않는다." },
+      device: { type: "string", description: "브라우저가 아니라 기기 앱(iOS 시뮬레이터·Android)에서 해야 하는 자리면 그 기기(app_targets의 udid·시리얼·이름). 주면 알림이 [그 앱으로]로 바뀌고, 눌렀을 때 그 기기가 열린 Iris 에뮬레이터 탭으로 데려간다. tab과 함께 주지 않는다." },
       choices: { type: "array", items: { type: "string" }, maxItems: 4,
         description: "사람이 고를 답을 직접 정한다(최대 4개). 예: [\"네\",\"아니오\"] · [\"승인\",\"취소\",\"나중에\"]. 첫 번째가 진행을 뜻하는 답이고 그것을 고르면 done:true로 온다. 생략하면 예전대로 [확인] 하나이며 다 했음/못 했음만 받는다. 답은 고른 글자 그대로 answer에 온다." },
       wait: { type: "number", description: "사람의 응답을 기다릴 초(기본 180, 0이면 안 기다림, 한 호출 최대 240 — 넘으면 다시 불러 이어 기다린다)." },
       ready: { type: "boolean", description: "네가 채울 수 있는 칸을 다 채웠다는 확인. 화면에 아직 채울 수 있는 필수 칸이 남아 있으면 이 도구는 부르지 않고 그 목록을 돌려준다 — 값을 모르면 탭을 넘기지 말고 사용자에게 값만 물어 네가 채워라. 사람만 할 수 있는 부분(카드·비밀번호·인증번호·본인확인)만 남았을 때 true." } },
-    run: (a, C) => C("ask", { message: a.message, title: a.title, tab: a.tab, device: a.device,
+    // 기기 이름은 udid·시리얼로 바꿔 보낸다. 서버는 그 값의 모양으로 iOS 와 Android 를 가른다.
+    run: async (a, C) => C("ask", { message: a.message, title: a.title, tab: a.tab,
+      device: a.device ? (await appSurface.simTarget(a.device)) || a.device : a.device,
       choices: Array.isArray(a.choices) ? a.choices : undefined, wait: a.wait, ready: a.ready }) },
   { name: "browser_picks", desc: "사용자가 화면에서 직접 고른 요소들(최근 10개). 고르는 순간 그 탭은 이 세션이 만질 수 있게 열리지만(권한) 대상 탭이 바뀌지는 않는다 — 그 탭을 직접 다뤄야 할 때만 tab에 그 핸들을 넣어라. 터미널에 붙은 글은 사람이 읽는 형식이고, 이 도구는 선택자·대체 선택자·속성·소스 파일 같은 원본 필드를 준다.",
     schema: {}, run: (a, C) => C("picks") },
-  // ── iOS 시뮬레이터 ──
+  // ── 모바일 앱(iOS·Android) ──
   // 브라우저와 같은 QA 방식을 앱에도 쓴다. 판정은 여기서도 app_expect의 영수증에서만 나오고,
   // 보고서·실행 폴더·전후 비교는 브라우저와 같은 것을 쓴다.
   ...appSurface.tools,
@@ -788,7 +800,7 @@ const TOOLS = [
         description: "close의 판정. red=흐름이 깨진다 · orange=쓰기 어렵다 · yellow=수정 권함 · green=정상 · blue=사용자가 정해야 함 · gray=분류 불가. basis가 spec·plan·user인 줄이 미충족이면 red 말고는 거부된다." },
       note: { type: "string", description: "close에서 한 줄 설명" },
       id: { type: "string", description: "declare: 줄 번호(U5 등)" },
-      what: { type: "string", description: "declare: 이 조건에서 무엇이 성립해야 하는가 / note: 무엇을 봤는가" },
+      what: { type: "string", description: "declare: 이 조건에서 무엇이 성립해야 하는가 / note: 무엇을 봤는가 / basis: 이미 선언된 줄의 설명 교정 — 원래 선언은 장부에 남고 교정이 뒤에 붙는다" },
       given: { type: "string", description: "declare: 이 줄이 성립하려면 세계가 어떠해야 하는가" },
       basis: { type: "string", enum: ["spec", "plan", "user", "code", "assumed"],
         description: "declare: 이 기대가 어디서 왔는가. spec·plan·user는 미충족 시 red 고정." },
@@ -826,7 +838,7 @@ const TOOLS = [
           quote: a.quote, source: a.source, options: a.options, lean: a.lean, simple: a.simple } });
       if (act === "basis") return C("row", { action: "basis", runId: a.runId || CURRENT_RUN || undefined,
         row: a.row, basis: { quote: a.quote, source: a.source, shot: a.sourceShot || a.shot,
-          note: a.basisNote } });
+          note: a.basisNote, what: a.what } });
       // 스키마만 있고 전달자가 없으면 값이 서버까지 안 간다.
       if (act === "covers") return C("row", { action: "covers", runId: a.runId || CURRENT_RUN || undefined,
         row: a.row, covers: a.covers });
@@ -857,7 +869,7 @@ const NO_TAB = new Set(["browser_tabs", "browser_target", "browser_new_tab", "br
 // 탭과 같은 규칙으로 목록도 받는다. 하나면 그것만, 여럿이면 동시에 실행한다.
 const DEVICE_PARAM = { device: {
   type: ["string", "array"], items: { type: "string" }, maxItems: 4,
-  description: "이 호출만 지정한 기기에서 실행. app_targets가 준 udid(앞자리만 적어도 됨) 또는 기기 이름. 여러 개를 주면(배열 또는 쉼표, 최대 4) 그 기기들에 같은 명령을 동시에 돌리고 결과를 기기별로 돌려준다. 생략하면 켜져 있는 첫 기기.",
+  description: "이 호출만 지정한 기기에서 실행. app_targets가 준 udid·Android 시리얼(앞자리만 적어도 됨) 또는 기기 이름. 여러 개를 주면(배열 또는 쉼표, 최대 4) 그 기기들에 같은 명령을 동시에 돌리고 결과를 기기별로 돌려준다. 생략하면 켜져 있는 첫 기기.",
 } };
 const NO_DEVICE = new Set(["app_targets", "app_target", "app_picks"]);   // 목록·고정 자체는 대상을 받지 않는다
 // 도구가 실제로 받는 인자표. 목록에 내는 것과 호출을 검사하는 것이 같은 표여야 한다.
@@ -1015,7 +1027,9 @@ rl.on("line", async (line) => {
           + "결제·본인확인처럼 사람이 해야만 하는 자리에서는 작업을 멈추고 대화로 부탁하지 말고 browser_ask_user를 불러라 — "
           + "사용자는 다른 스페이스나 다른 앱을 보고 있어 대화를 못 볼 수 있다. 그 도구가 알림으로 부르고 그 탭까지 데려간다. "
           + "화면은 사람이 하듯 밟아라 — 스냅샷을 보고 누르고 입력한다. 같은 사이트 안을 주소로 건너뛰거나 eval로 조작하는 것은 서버가 거부한다. "
-          + "밟지 않은 경로는 확인된 것이 아니라서, 그렇게 '됐다'고 적은 것이 사람이 해보면 안 되는 경우가 많았다." });
+          + "밟지 않은 경로는 확인된 것이 아니라서, 그렇게 '됐다'고 적은 것이 사람이 해보면 안 되는 경우가 많았다. "
+          + "모바일 앱은 Iris 에뮬레이터 탭의 기기에서만 확인한다 — simctl·emulator·open -a Simulator로 기기를 따로 켜지 마라. "
+          + "사용자는 Iris 탭만 본다. app_* 도구가 탭이 없으면 이 스페이스에 열고, 다른 기기가 필요하면 app_target이 그 탭을 바꾼다." });
     }
     if (method === "notifications/initialized" || method === "notifications/cancelled") return; // 알림은 응답 없음
     if (method === "ping") return ok(id, {});

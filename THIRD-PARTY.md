@@ -14,6 +14,8 @@ Apache-2.0(`LICENSE`)이고, 아래 항목들은 각자의 원래 라이선스�
 | `native/electron/cookie-import.cjs` | Orca `src/main/browser/browser-cookie-import.ts` | MIT |
 | `native/electron/browser-hardening.cjs`, `native/electron/google-auth-user-agent.cjs` | Orca `browser-session-ua.ts`, `browser-google-auth-ua.ts`, 탐색 UA 정책 (`436ef827dda5941940a072b754ee3162aadcee1b`)을 Iris 수명주기에 맞게 적용 | MIT |
 | `native/electron/cdp-control.cjs` | Orca의 CDP 제어 방식 | MIT |
+| `native/electron/emulator/orca-emulator.cjs` | Orca `src/main/emulator/`, `src/main/ipc/emulator-frame-stream.ts`·`emulator-video-stream.ts`, `src/main/runtime/orca-runtime-emulator.ts`, `src/main/runtime/rpc/methods/emulator.ts` (`841d06a96`). `scripts/vendor-orca-emulator.mjs` 가 수정 없이 번들로 만든다 | MIT |
+| `web/vendor/orca-emulator-pane.esm.js`, `web/js/emulator/pane*.js`, `web/js/emulator/devices-panel.js` | Orca `src/renderer/src/components/emulator-pane/`, `settings/MobileEmulatorSettingsPane.tsx`·`MobileEmulatorAvailabilityDetails.tsx` (`841d06a96`). 순수 모듈은 번들, React 화면은 일반 JS 로 다시 작성 | MIT |
 
 이식하며 타입 제거·CJS 변환·macOS 환경 대응 등의 수정을 했다. Orca는 MIT이므로 재배포와
 수정이 허용되며, 원 저작권 고지와 라이선스 전문은 아래에 그대로 둔다(이식한 revision
@@ -93,6 +95,12 @@ esbuild 등 만드는 도구라 나가지 않는다). 그 트리는 전부 허�
 | MIT 또는 GPL-3.0-or-later 중 선택 | 1 | `jszip`. 이 프로젝트는 MIT를 택한다 |
 | MIT AND Zlib | 1 | `pako` |
 
+앱에는 `dependencies` 밖에서 하나를 더 싣는다. [serve-sim](https://github.com/EvanBacon/serve-sim) 0.1.40
+(Apache-2.0, Evan Bacon)은 `devDependencies` 에 두고, 빌드가 `package.json`·`dist/`·`bin/` 만
+`Resources/node_modules/serve-sim` 으로 복사한다(`build.extraResources`). 패키지가 선언한 `inspect-webkit` 과 그
+peer 인 `typescript` 는 실행 중에 불리지 않아 싣지 않는다. 패키지에 라이선스 파일이 없으므로 전문은 이 저장소의
+`LICENSE`(Apache-2.0 전문)로 대신한다.
+
 `exceljs` 가 끌어오던 옛 `unzipper 0.10` 은 라이선스를 선언하지 않은 `buffers@0.1.1` 을 실었다.
 `package.json` 의 `pnpm.overrides` 로 `unzipper` 를 0.12 로 고정해 그 사슬을 뺐다. 표는
 그 상태의 것이다.
@@ -102,5 +110,5 @@ esbuild 등 만드는 도구라 나가지 않는다). 그 트리는 전부 허�
 
 측정: pnpm 9.12.2. 이때의 직접 의존성은 이것들이었다:
 `@docx-editor.dev/core`, `@xterm/addon-fit`, `@xterm/xterm`, `exceljs`, `jszip`,
-`monaco-editor`, `node-pty`, `puppeteer-core`, `tldts`, `ws`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
+`monaco-editor`, `node-pty`, `puppeteer-core`, `tldts`, `ws`, `zod`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
 smoke가 막는다(다시 재고 이 절과 목록을 함께 고칠 것).

@@ -21,12 +21,12 @@
 //   settings-view 의 순수 마크업, web/css/20-keymap.css 의 이름.
 //   현재 목록 확인: node bin/importers.mjs web/js/devtool/keymap-page.js
 
-import { applyPreset, featureEnableNote, featureNeedsRestart, featureRestartNote } from "../core/features.js";
+import { applyPreset, featureEnableNote, featureNeedsRestart, featureOptIn, featureRestartNote } from "../core/features.js";
 import {
   bindingFromEvent, findConflicts, formatBinding, resolvedKeymap, sameBinding,
 } from "../core/keymap.js";
 import { artifactsClick, artifactsModel, enterArtifacts, initArtifacts } from "./artifacts-page.js";
-import { settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
+import { optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
 import { CAPABILITIES } from "../core/capabilities.js";
 
 let $ = null, wsSend = null, showToast = null, getSecurityToggles = null, setSecurityToggle = null;
@@ -126,7 +126,9 @@ export function initKeymapPage(deps) {
     if (scr) {
       const id = scr.dataset.setScreen;
       const wasOn = (getRailScreens ? getRailScreens() : []).some((t) => t.id === id && t.on);
-      try { if (!setRailScreen || !await setRailScreen(id)) return; }
+      const optIn = wasOn ? null : featureOptIn(id);
+      if (optIn && !await confirmOptIn(optIn)) return;
+      try { if (!setRailScreen || !await setRailScreen(id, { confirmed: !!optIn })) return; }
       catch (error) { showToast && showToast(error.message); return; }
       renderKeymapPage();
       if (CAPABILITIES.some((c) => (c.rail || c.id) === id)) {
@@ -183,6 +185,28 @@ export function initKeymapPage(deps) {
     wsSend({ type: "keymap-set", id, binding: b });
     renderKeymapPage();
   }, true);
+}
+
+// 확인하면 true. 바깥을 누르거나 Esc 를 누르면 취소다.
+function confirmOptIn(optIn) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement("div");
+    wrap.className = "askwrap";
+    wrap.innerHTML = optInConfirmMarkup(optIn);
+    let done = false;
+    const finish = (value) => { if (done) return; done = true; wrap.remove(); resolve(value); };
+    wrap.addEventListener("click", (e) => {
+      if (e.target === wrap) return finish(false);
+      const b = e.target.closest("button");
+      if (b) finish(b.dataset.a === "ok");
+    });
+    wrap.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); finish(false); }
+      e.stopPropagation();
+    });
+    document.body.appendChild(wrap);
+    wrap.querySelector('[data-a="ok"]')?.focus();
+  });
 }
 
 function startRecording(id) {

@@ -109,7 +109,7 @@ for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sour
     }
     assert.equal((await fetch(url + "/MeMoLaB/index.html")).status, memolabOn && fs.existsSync(path.join(root, "web/MeMoLaB/index.html")) ? 200 : 404, "파일시스템 대소문자 별칭");
     const feature = await (await fetch(url + "/features")).json();
-    assert.deepEqual(feature, { exists: true, revision: 7, hidden, local: true });
+    assert.deepEqual(feature, { exists: true, revision: 7, hidden, shown: [], local: true });
     const update = await fetch(url + "/features", { method: "PUT", body: JSON.stringify({ baseRevision: 7, hidden: ["archive"] }) });
     assert.equal(update.status, 200);
     const conflict = await fetch(url + "/features", { method: "PUT", body: JSON.stringify({ baseRevision: 7, hidden: [] }) });
@@ -127,6 +127,22 @@ test("기능 id 규칙은 경계값에서 갈린다", async () => {
   const { FEATURE_ID } = createRequire(import.meta.url)("../server/feature-state-read.cjs");
   for (const ok of ["a", "usage", "lab-hello_2", "a" + "b".repeat(99)]) assert.ok(FEATURE_ID.test(ok), ok);
   for (const bad of ["", "A", "1a", " a", "a b", "a.b", "한글", "a" + "b".repeat(100)]) assert.ok(!FEATURE_ID.test(bad), JSON.stringify(bad));
+});
+
+test("shown 이 없는 옛 features.json 은 빈 목록으로 읽고, 형식이 틀린 shown 은 파손으로 본다", async () => {
+  const { createRequire } = await import("node:module");
+  const { readFeatureState } = createRequire(import.meta.url)("../server/feature-state-read.cjs");
+  const home = fs.mkdtempSync(path.join(base, "feature-read-"));
+  const write = (value) => fs.writeFileSync(path.join(home, "features.json"), JSON.stringify(value));
+  write({ version: 1, revision: 3, hidden: ["usage"] });
+  assert.deepEqual(readFeatureState(home), { exists: true, revision: 3, hidden: ["usage"], shown: [] });
+  write({ version: 1, revision: 3, hidden: [], shown: ["desklayout"] });
+  assert.deepEqual(readFeatureState(home).shown, ["desklayout"]);
+  for (const shown of ["desklayout", [1], null]) {
+    write({ version: 1, revision: 3, hidden: [], shown });
+    assert.equal(readFeatureState(home).exists, false, JSON.stringify(shown));
+  }
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test("상태 HTTP 계약: 원격 읽기·쓰기 거절, Origin 거절, 잘못된 입력과 CAS", async () => {
@@ -148,11 +164,15 @@ test("상태 HTTP 계약: 원격 읽기·쓰기 거절, Origin 거절, 잘못된
     assert.equal(JSON.parse((await request("GET", undefined, "100.64.0.2")).value).local, false);
     assert.equal((await request("PUT", { hidden: [], baseRevision: 0 }, "100.64.0.2")).status, 403);
     assert.equal((await request("GET", undefined, "127.0.0.1", "https://evil.invalid")).status, 403);
-    for (const body of ["{", null, { hidden: [3], baseRevision: 0 }, { hidden: [], baseRevision: -1 }]) {
+    for (const body of ["{", null, { hidden: [3], baseRevision: 0 }, { hidden: [], baseRevision: -1 },
+      { hidden: [], shown: "desklayout", baseRevision: 0 }, { hidden: [], shown: ["Bad"], baseRevision: 0 }]) {
       assert.equal((await request("PUT", body)).status, 400);
     }
-    assert.equal((await request("PUT", { hidden: ["usage"], baseRevision: 0 })).status, 200);
+    assert.equal((await request("PUT", { hidden: ["usage"], shown: ["desklayout"], baseRevision: 0 })).status, 200);
     assert.equal((await request("PUT", { hidden: [], baseRevision: 0 })).status, 409);
+    // shown 을 보내지 않는 옛 요청은 사용자가 켠 기본 꺼짐 기능을 지우지 않는다.
+    assert.deepEqual(JSON.parse((await request("PUT", { hidden: [], baseRevision: 1 })).value).shown, ["desklayout"]);
+    assert.deepEqual(JSON.parse((await request("PUT", { hidden: [], shown: [], baseRevision: 2 })).value).shown, []);
     assert.deepEqual(fs.readdirSync(home), ["features.json"]);
   } finally {
     if (previous === undefined) delete process.env.IRIS_STATE_DIR; else process.env.IRIS_STATE_DIR = previous;

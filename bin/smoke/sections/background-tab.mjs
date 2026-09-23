@@ -262,6 +262,9 @@ console.log("\n[10j] 보고 있지 않은 탭도 QA 대상");
     && /acHost\?\.onNativeNotice\?\.\(\(m\) => \{ if \(m && m\.text\) showToast/.test(mainJs));
   check("캡처 순간에만 붙잡는다", () => /setCaptureHold\(async \(wcId, on\)/.test(mainH)
     && /ac-capture-hold/.test(pre) && /onCaptureHold\?\.\(/.test(web) && /opacity:0\.01/.test(web));
+  // 1% 불투명도만으로는 붙잡은 탭이 사용자가 보던 화면 위로 비쳐 보였다. 보이는 부분을 1px로 자른다.
+  check("붙잡은 탭은 화면에 비치지 않는다", () =>
+    /clip-path:inset\(0 calc\(100% - 1px\) calc\(100% - 1px\) 0\)/.test(web));
   check("붙잡은 것은 반드시 놓는다", () => /finally \{\n            if \(held\) \{ try \{ await captureHold\(wc\.id, false\)/.test(capture)
     && /delete el\.dataset\.acHeld/.test(web));
   check("빠른 길은 그대로", () => /"cdp-capture-slow"\);\n          png = Buffer/.test(capture));

@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { stateHome } = require("../../server/state-home.cjs");
-const { readHiddenSync } = require("../../server/feature-state-read.cjs");
+const { readFeatureState, featureOn } = require("../../server/feature-state-read.cjs");
 const { artifactDir } = require("../../server/artifacts-home.cjs");
 const { pinUserDataHome } = require("./user-data-home.cjs");
 
@@ -246,7 +246,7 @@ setViewportNotify((wcId, vp) => {
 // 캡처 유지. 지금 보고 있지 않은 탭도 캡처되게 한다.
 // 그려지지 않는 화면은 어떤 방법으로도 가져올 수 없다(확인 결과: 기본·fromSurface:false·screencast·
 // capturePage 네 경로 모두 실패). 그리려면 그 webview가 합성 대상이어야 한다. 그래서 캡처하는 순간에만
-// 화면 위에 거의 투명하게(1%) 겹쳐 둔다. 화면에는 드러나지 않고 탭도 바뀌지 않으며, 끝나면 되돌린다.
+// 화면 위에 올리되 보이는 부분은 1px로 잘라 둔다(web/js/main.js). 탭은 바뀌지 않고, 끝나면 되돌린다.
 // 이 유지를 요청하는 곳이 여럿이다. 키 입력 도달, 조작 뒤 그리기, 즉시 알림 촬영이 그렇다. 렌더러의
 // 유지 상태는 플래그 하나라, 먼저 끝난 쪽이 해제하면 아직 사용 중인 쪽의 화면도 함께 꺼진다.
 // 그래서 요청 수를 세어 마지막 요청이 해제하게 한다.
@@ -763,7 +763,7 @@ memoWindowManager.registerMemoIpc();
 // 기능을 제거해도 이 줄은 그대로다. 넘기는 ctx 는 앱 셸이 가진 공용 요소뿐이다.
 bootNativeCapabilities({
   items: NATIVE_CAPABILITIES,
-  isOn: (id) => !readHiddenSync(IRIS_HOME).has(id),
+  isOn: (id) => featureOn(readFeatureState(IRIS_HOME), id, NATIVE_CAPABILITIES.some((c) => c.id === id && c.optIn)),
   ctx: {
     BrowserWindow,
     ipcMain,

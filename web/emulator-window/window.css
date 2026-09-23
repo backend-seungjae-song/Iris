@@ -1,0 +1,3 @@
+/* 에뮬레이터 전용 창. 창 전체를 화면 하나가 쓴다. 화면 자체의 모양은 33-emulator.css 가 정한다. */
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
+.emu-window { height: 100%; display: flex; flex-direction: column; }

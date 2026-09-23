@@ -40,14 +40,13 @@ const MIN_VERTICAL_GAP_PX = 6;
 // 오른쪽 끝의 빈 여백. 글자가 채팅 칸 테두리에 붙어 보이지 않게 한다.
 const RIGHT_GAP_PX = 2;
 
-// 사용자가 조정판으로 더하는 보정치. 기능(panel/crop-tuner)이 이 값을 쓰고, 기능을 꺼도
-// 저장된 값은 그대로 적용된다. 끄는 것은 조정판이지 맞춰 놓은 값이 아니다.
+// 사용자가 조정판으로 맞춰 둔 보정치. 조정판은 없어졌지만 저장된 값은 그대로 적용한다.
 const TUNE_KEY = "ac.crop.tune";
 // 기준이 바뀌면 올린다. 이전 보정치를 새 기준에 그대로 적용하면 두 번 밀린다.
 const TUNE_V = 3;
 const TUNE_ZERO = { left: 0, top: 0, right: 0, padTop: 0, padBottom: 0 };
 let tune = null;
-export function getCropTune() {
+function getCropTune() {
   if (tune) return tune;
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(TUNE_KEY) || "null"); } catch {}
@@ -56,14 +55,6 @@ export function getCropTune() {
   for (const k of Object.keys(TUNE_ZERO)) tune[k] = Math.round(Number(src[k]) || 0);
   return tune;
 }
-export function setCropTune(patch) {
-  tune = { ...getCropTune(), ...patch };
-  for (const k of Object.keys(TUNE_ZERO)) tune[k] = Math.round(Number(tune[k]) || 0);
-  try { localStorage.setItem(TUNE_KEY, JSON.stringify({ v: TUNE_V, ...tune })); } catch {}
-  applyCropAndFit();
-  return tune;
-}
-export function resetCropTune() { return setCropTune({ ...TUNE_ZERO }); }
 
 export function initTerminal(deps) {
   ({ $, wsSend } = deps);

@@ -548,7 +548,7 @@ function storedValueBuffer(value) {
 }
 
 function decryptCookieRows(sourceRows, key, hostFilter) {
-  const list = []; let decryptSkipped = 0, integritySkipped = 0;
+  const list = []; let decryptSkipped = 0, integritySkipped = 0, partitionSkipped = 0;
   for (const sourceRow of sourceRows) {
     const domain = typeof sourceRow.host_key === "string" ? sourceRow.host_key : "";
     const name = typeof sourceRow.name === "string" ? sourceRow.name : "";
@@ -557,6 +557,9 @@ function decryptCookieRows(sourceRows, key, hostFilter) {
     // 도전 풀이 증표는 가져오지 않는다. 가져오면 이 브라우저가 스스로 푼 것을 덮어써서
     // 다음 요청부터 다시 검사를 받는다.
     if (isClientBoundCookie(name)) { integritySkipped++; continue; }
+    // 파티션 쿠키(CHIPS)는 Electron cookies API 로 넣을 수 없다. 섞여 있으면 교체 전체가 거부되어
+    // 가져오기가 아무것도 넣지 못하므로 여기서 뺀다. 다른 사이트에 임베드된 상태라 로그인과는 무관하다.
+    if (sourceRow.top_frame_site_key) { partitionSkipped++; continue; }
     let rawValue;
     try {
       const enc = Buffer.isBuffer(sourceRow.encrypted_value) ? sourceRow.encrypted_value : Buffer.alloc(0);
@@ -571,7 +574,7 @@ function decryptCookieRows(sourceRows, key, hostFilter) {
       expirationDate: chromiumTsToUnix(sourceRow.expires_utc),
     });
   }
-  return { list, decryptSkipped, integritySkipped };
+  return { list, decryptSkipped, integritySkipped, partitionSkipped };
 }
 
 function readSourceCookieRows(dbPath) {

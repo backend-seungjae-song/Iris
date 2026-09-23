@@ -225,6 +225,9 @@ export function noteRunEvent(callId, cmd, args, session, res, tries, runId) {
       selector: String(a.sel || a.selector || ""),
       mode: a.mode || (a.text == null ? "exists" : "contains"),
       want: a.text == null ? null : String(a.text),
+      label: a.label ? String(a.label).slice(0, 80) : undefined,
+      // 판정한 요소를 사람이 읽는 이름(예: 버튼 '저장')으로. 이름표 없이 부른 확인도 대상이 지면에 선다.
+      element: d.element ? String(d.element).slice(0, 80) : undefined,
       step_id: a.step_id || undefined, scenario_id: a.scenario_id || undefined,
       url: d.url || undefined,
       // 몇 곳이 일치했는가. 판정문 문자열 안의 "(3곳 중 1번째)"는 집계할 수 없어, 화면이 하나로
@@ -465,6 +468,11 @@ function rehydrateRows(st) {
         state: "declared", walked: {}, at: e.t || Date.now() });
     } else if (e.act === "covers") {
       const row = rows.get(e.row); if (row) row.covers = Array.isArray(e.covers) ? e.covers : row.covers;
+    } else if (e.act === "basis") {
+      // 교정을 복원하지 않으면 재시작 한 번으로 고친 설명·근거가 원래 문장으로 돌아간다.
+      const row = rows.get(e.row); if (!row) continue;
+      if (e.basisNote) row.basisNote = e.basisNote;
+      if (e.what) row.what = e.what;
     } else if (e.act === "close") {
       const row = rows.get(e.row); if (!row) continue;
       row.walked[e.path] = { color: e.color, at: e.t, note: e.note,
@@ -765,8 +773,10 @@ function rowBasis(st, id, b) {
   // 근거를 가리키는 한 줄(basisNote)은 작성한 문장이지 측정값이 아니다. 잘못 쓴 것을 고칠 수
   // 없으면 화면이 틀린 채로 남으므로, 덮어쓰지 않고 교정 기록을 뒤에 붙여 원래 선언도 남긴다.
   const noteFix = b && b.note != null ? String(b.note).trim() : "";
-  if (!quote && !shot && !noteFix) return { ok: false, error:
-    "원문(quote)·그 화면(shot)·근거 한 줄(basisNote) 중 하나는 있어야 합니다 — 근거 이름만으로는 문서를 열어야 합니다.\n"
+  // 줄 설명(what)도 작성한 문장이라 같은 방식으로 교정한다. 원래 선언은 장부에 남는다.
+  const whatFix = b && b.what != null ? String(b.what).trim() : "";
+  if (!quote && !shot && !noteFix && !whatFix) return { ok: false, error:
+    "원문(quote)·그 화면(shot)·근거 한 줄(basisNote)·줄 설명(what) 중 하나는 있어야 합니다 — 근거 이름만으로는 문서를 열어야 합니다.\n"
     + "source를 \"경로:12-14\" 모양으로 주면 그 줄들을 파일에서 그대로 떠 옵니다 — 옮겨 적지 않는 쪽이 안전합니다." };
   if (noteFix) {
     const fault = nominalFault(`${row.id} 근거`, noteFix);
@@ -778,9 +788,10 @@ function rowBasis(st, id, b) {
   if (b && b.source) row.source = String(b.source);
   if (kept) row.sourceShot = kept;
   if (noteFix) row.basisNote = noteFix;
+  if (whatFix) row.what = whatFix;
   appendEvent(st, { kind: "row", source: "server", row: row.id, act: "basis",
     quote: quote || undefined, source: b && b.source ? String(b.source) : undefined,
-    sourceShot: kept, basisNote: noteFix || undefined });
+    sourceShot: kept, basisNote: noteFix || undefined, what: whatFix || undefined });
   return { ok: true, row: rowShape(row) };
 }
 

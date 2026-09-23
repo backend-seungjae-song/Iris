@@ -4,8 +4,9 @@
 //   기능 하나가 네이티브에서 어느 모듈로 들어가는가. 그 진입점 목록 하나.
 //
 // 제공 API
-//   NATIVE_CAPABILITIES: { id, module } 의 배열. id 는 렌더러 표(web/js/core/capabilities.js)의
+//   NATIVE_CAPABILITIES: { id, module, optIn? } 의 배열. id 는 렌더러 표(web/js/core/capabilities.js)의
 //   id 와 같은 용어를 쓴다. 같은 기능이 두 이름을 가지면 양쪽을 연결해 볼 수 없다.
+//   optIn 은 사용자가 설정에서 켜야 로드되는 기본 꺼짐 기능이다. 렌더러 표의 optIn 과 같아야 한다(검사).
 //
 // 의존 대상
 //   없다. 이 파일은 문자열만 갖는다. 여기서 require 를 하면 표를 읽는 순간 전부 로드된다.
@@ -26,7 +27,9 @@
 
 const NATIVE_CAPABILITIES = [
   { id: "chromemirror", module: require.resolve("./chrome-mirror-backend.cjs") },
+  { id: "desklayout", module: require.resolve("./desk-layout/host.cjs"), optIn: true },
   { id: "detachtab", module: require.resolve("./detached-tab-window.cjs") },
+  { id: "emulator", module: require.resolve("./emulator/emulator-host.cjs") },
   { id: "extensionloader", module: require.resolve("./extension-loader.cjs") },
   { id: "sketch", module: require.resolve("./sketch-shot.cjs") },
 ];
