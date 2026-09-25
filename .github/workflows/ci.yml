@@ -22,4 +22,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # smoke가 herdr를 PATH에서 실제로 찾는지 검사한다(server/pty.js의 findHerdrBin) — 없으면 그 검사가 떨어진다.
       - run: brew install herdr
+      # 파일 드롭 실측 검사는 사용자 Chrome 앱 대신 chrome-headless-shell 을 찾는다(bin/smoke/browser-file-drop-runtime.mjs).
+      - run: pnpm dlx @puppeteer/browsers@3.2.2 install chrome-headless-shell@stable --path ~/.cache/puppeteer
       - run: pnpm test
