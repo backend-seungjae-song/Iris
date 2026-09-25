@@ -401,3 +401,17 @@ export function activeBrowserId() {
 export function activeWv() {
   const id = activeBrowserId(); return id ? getWebview(id) : null;
 }
+
+// 뒤로·앞으로 단추는 갈 곳이 없으면 누를 수 없게 둔다. 미러 탭은 기록을 원격 쪽이 갖고 있어 웹뷰에 물을 수
+// 없으므로 누를 수 있게 남긴다. 기록을 묻는 함수가 없는 요소(웹뷰가 아닌 곳)는 갈 곳이 없는 것으로 본다.
+export function syncNavButtons() {
+  const r = activeWv();
+  const mirrored = !!(r && callHook("mirror.tabUrl", r.tabId));
+  const can = (fn) => {
+    if (!r || mirrored) return true;
+    try { return typeof r.el?.[fn] === "function" ? !!r.el[fn]() : false; } catch { return true; }
+  };
+  const back = document.getElementById("wv-back"), fwd = document.getElementById("wv-fwd");
+  if (back) back.disabled = !can("canGoBack");
+  if (fwd) fwd.disabled = !can("canGoForward");
+}

@@ -27,13 +27,15 @@ const fs = require("fs");
 const path = require("path");
 
 const guard = require("./electron-guard.cjs");
+const { cleanupPriorHelpers } = require("./stale-helper-cleanup.cjs");
+const { XCODE_DOWNLOAD_URL, inspectXcode, switchXcode, xcodeAppPath } = require("./xcode-setup.cjs");
+const { ANDROID_STUDIO_URL, inspectAndroidSetup } = require("./android-setup.cjs");
 
 const RENDERER_METHODS = new Set([
   "emulator.attach", "emulator.availability", "emulator.button", "emulator.gesture",
   "emulator.listDevices", "emulator.rotate", "emulator.shutdown", "emulator.tap",
 ]);
 const SETTINGS_FILE = "emulator-settings.json";
-const ANDROID_STUDIO_URL = "https://developer.android.com/studio";
 const SETTING_KEYS = ["mobileEmulatorDefaultDeviceUdid", "androidSdkPath"];
 
 function initCapability(ctx) {
@@ -83,7 +85,24 @@ function initCapability(ctx) {
     if (!method) return { ok: false, error: { code: "unknown_method", message: String(arg && arg.method) } };
     try {
       const params = method.params ? method.params.parse(arg.params ?? {}) : undefined;
-      return { ok: true, result: await method.handler(params, { runtime: commands }) };
+      const result = await method.handler(params, { runtime: commands });
+      if (arg.method === "emulator.availability" && result?.platform === "darwin") {
+        result.xcode = inspectXcode();
+      }
+      if (arg.method === "emulator.availability") {
+        result.androidSetup = inspectAndroidSetup({ configuredPath: readSettings().androidSdkPath });
+      }
+      if (arg.method === "emulator.attach" && result?.attached && result.info?.deviceUdid) {
+        void cleanupPriorHelpers({
+          runtimeRoot: path.join(app.getPath("userData"), "serve-sim-runtime"),
+          deviceUdid: result.info.deviceUdid,
+          activePid: result.info.helperPid,
+          appUptimeSeconds: process.uptime(),
+        }).then((pids) => {
+          if (pids.length) console.info(`[emulator] stopped unused helpers from a prior Iris run: ${pids.join(", ")}`);
+        }).catch((err) => console.warn("[emulator] prior helper check failed:", err));
+      }
+      return { ok: true, result };
     } catch (err) {
       return { ok: false, error: { code: (err && err.code) || "error", message: String((err && err.message) || err) } };
     }
@@ -111,18 +130,58 @@ function initCapability(ctx) {
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   });
 
-  // SDK 상태 화면의 두 버튼. Orca 는 범용 pickDirectory·openExternal 을 쓰지만, 여기서는 이 화면이 쓰는
-  // 한 가지 용도로만 연다. 임의 주소를 여는 통로가 되지 않게 주소는 Orca 의 ANDROID_STUDIO_URL 하나다.
   ipcMain.handle("ac-emulator-pick-sdk", async (e) => {
     if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
     const win = BrowserWindow.fromWebContents(e.sender);
     const r = await dialog.showOpenDialog(win, { title: "Android SDK 폴더 선택", properties: ["openDirectory"] });
     return { ok: true, path: r.canceled || !r.filePaths[0] ? null : r.filePaths[0] };
   });
-  ipcMain.handle("ac-emulator-open-android-studio", (e) => {
+  ipcMain.handle("ac-emulator-android-action", async (e, action) => {
     if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
-    shell.openExternal(ANDROID_STUDIO_URL);
-    return { ok: true };
+    if (!['download', 'open'].includes(action)) return { ok: false, error: "Android Studio 작업이 올바르지 않습니다" };
+    try {
+      if (action === 'download') {
+        await shell.openExternal(ANDROID_STUDIO_URL);
+        return { ok: true };
+      }
+      const studioPath = inspectAndroidSetup().studioPath;
+      if (!studioPath) return { ok: false, error: "Android Studio를 찾지 못했습니다. 먼저 설치하세요." };
+      const error = await shell.openPath(studioPath);
+      return error ? { ok: false, error } : { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) };
+    }
+  });
+
+  ipcMain.handle("ac-emulator-xcode-action", async (e, action) => {
+    if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
+    if (!['download', 'open', 'select'].includes(action)) return { ok: false, error: "Xcode 작업이 올바르지 않습니다" };
+    const status = inspectXcode();
+    try {
+      if (action === 'download') {
+        await shell.openExternal(XCODE_DOWNLOAD_URL);
+        return { ok: true };
+      }
+      if (action === 'open') {
+        const appPath = xcodeAppPath(status.selectedDir || '') || status.installedApps?.[0]
+          || xcodeAppPath(status.candidates[0]);
+        if (!appPath) return { ok: false, error: "설치된 Xcode를 찾지 못했습니다" };
+        const error = await shell.openPath(appPath);
+        return error ? { ok: false, error } : { ok: true };
+      }
+      let developerDir = status.candidates.length === 1 ? status.candidates[0] : null;
+      if (!developerDir) {
+        const win = BrowserWindow.fromWebContents(e.sender);
+        const choice = await dialog.showOpenDialog(win, {
+          title: "Iris에서 사용할 Xcode 선택", defaultPath: "/Applications", properties: ["openFile"],
+        });
+        if (choice.canceled || !choice.filePaths[0]) return { ok: false, canceled: true };
+        developerDir = path.join(choice.filePaths[0], "Contents", "Developer");
+      }
+      return await switchXcode(developerDir);
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) };
+    }
   });
 
   // 분리 창. 앱 셸의 window.open 허용은 preload 를 붙이지 않아 그 창에는 acHost 가 없다. 그래서 탭 분리

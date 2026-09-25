@@ -3,26 +3,36 @@
 /* 깃 화면이 여는 탭이지만 깃 기능의 규칙은 아니다. 가운데 탭이 kind 로 그리는 화면이라,
    탭 쪽이 그리기를 넘겨받기 전까지는 앱 셸에 남는다. CSS 만 먼저 분리해 둔다. */
 
-/* ── diff 뷰(변경 파일 클릭 시 center 탭) ── */
-.diffview { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--bg); }
-.dv-bar { flex:none; display:flex; align-items:center; gap:8px; padding:7px 12px; border-bottom:1px solid var(--border); background:var(--sidebar); font-size:var(--fs-xs); }
-.dv-bar .dv-name { font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.dv-bar .dv-where { font-size:var(--fs-2xs); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
-.dv-bar .dv-tag { font-size:var(--fs-2xs); color:var(--muted-fg); border:1px solid var(--sidebar-border); border-radius:var(--r-ctl); padding:0 5px; margin-left:auto; flex:none; }
-.dv-body { flex:1 1 auto; overflow:auto; margin:0; padding:8px 0; font:var(--fs-xs)/1.55 var(--mono); white-space:pre; tab-size:2; }
+.diffview { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); }
+/* 머리: 무엇과 비교했는가(태그) → 어느 레포의 어느 파일인가(경로) → 파일 머리 줄 펼치기(index). */
+.dv-bar { height:34px; flex:none; display:flex; align-items:center; gap:8px; padding:0 14px; border-bottom:1px solid var(--line); }
+.dv-bar .dv-tag { flex:none; font-size:var(--fs-xs); color:var(--muted); border:1px solid var(--line); border-radius:var(--r-s); padding:2px 6px; }
+.dv-bar .dv-crumb { font:500 var(--fs-s)/1 var(--mono); color:var(--faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.dv-bar .dv-crumb b { color:var(--fg); font-weight:600; }
+/* index 글자가 파일 머리 줄을 펼치고 접는 단추다. 펼친 동안은 밝게 둔다. */
+.dv-bar .dv-meta { margin-left:auto; font:500 var(--fs-s)/1 var(--mono); color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  min-width:0; padding:0; border:0; background:none; letter-spacing:inherit; cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.dv-bar .dv-meta:hover, .dv-bar .dv-meta[aria-pressed="true"] { color:var(--fg); }
+/* 긴 줄은 잘라 내지 않고 가로로 스크롤해 읽는다. */
+.dv-body { flex:1; min-height:0; overflow:auto; margin:0; padding:6px 0; font:400 var(--fs)/1.62 var(--mono); color:var(--fg-2); white-space:pre; tab-size:2; }
 /* 줄 번호는 한 칸이다. 그 줄이 실제로 있는 파일의 번호를 적는다. 지운 줄은 이전 파일,
    나머지는 새 파일 기준이다. 두 칸을 두면 번호가 코드보다 먼저 눈에 들어온다.
-   자릿수가 흔들리면 눈이 미끄러지므로 tabular 로 세우고, 복사할 때 딸려오면 붙여넣은 코드가
-   못 쓰게 되므로 고르지 못하게 막는다. */
-.dv-body .dl { display:flex; align-items:baseline; padding:0 12px 0 0; }
-.dv-body .dn { flex:none; width:3.6em; padding-right:.9em; text-align:right; color:var(--muted-fg);
-  opacity:.55; font-variant-numeric:tabular-nums; user-select:none; -webkit-user-select:none; }
-.dv-body .dl.hunk .dn, .dv-body .dl.meta .dn { opacity:.28; }
-.dv-body .dt { flex:1 1 auto; min-width:0; white-space:pre; }
-.dv-body .dl.add { background:color-mix(in srgb,var(--success) 16%,transparent); }
-.dv-body .dl.del { background:color-mix(in srgb,var(--destructive) 15%,transparent); }
-.dv-body .dl.hunk { color:var(--ai); background:color-mix(in srgb,var(--ai) 8%,transparent); }
-.dv-body .dl.meta { color:var(--muted-fg); }
-.dv-empty { padding:20px; color:var(--muted-fg); font-size:var(--fs-xs); }
+   복사할 때 딸려오면 붙여넣은 코드가 못 쓰게 되므로 고르지 못하게 막는다. */
+.dv-body .dl { display:flex; align-items:baseline; padding-right:12px; }
+.dv-body .dn { flex:none; width:3.6em; padding-right:.9em; text-align:right; color:var(--faint); opacity:.8; user-select:none; -webkit-user-select:none; }
+.dv-body .dt { flex:1; min-width:0; white-space:pre; }
+.dv-body .dl.add { background:color-mix(in srgb, var(--ok) 11%, transparent); }
+.dv-body .dl.del { background:color-mix(in srgb, var(--pal-danger) 12%, transparent); }
+.dv-body .dl.hunk { color:var(--ai); background:color-mix(in srgb, var(--ai) 7%, transparent); }
+.dv-body .dl.meta { color:var(--faint); font-size:var(--fs-xs); }
+.dv-body .dl.hunk .dn, .dv-body .dl.meta .dn { opacity:.3; }
+/* 파일 머리 줄을 접으면 hunk 머리는 hunk 사이의 구분선이 된다. */
+.dv-body.fold-meta .dl.fh { display:none; }
+.dv-body.fold-meta .dl.hunk { margin:8px 0 2px; background:none; border-top:1px solid var(--line); border-bottom:1px solid var(--line); font-size:var(--fs-s); color:var(--muted); }
+/* 불러오는 중 · 표시할 diff 가 없을 때 */
+.dv-empty { padding:20px 14px; color:var(--muted); font-size:var(--fs-s); }
 /* 문법 강조: 토큰 색은 Monaco 테마 규칙(.mtkN)이 칠한다. 줄 앞 +/- 기호는 코드가 아니라서 흐리게 둔다. */
-.dv-body .dp { color:var(--muted-fg); }
+.dv-body .dp { color:var(--faint); }
+.dv-body .dl.add .dp { color:var(--ok); }
+.dv-body .dl.del .dp { color:var(--pal-danger); }

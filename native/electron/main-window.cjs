@@ -46,6 +46,7 @@ const DEFAULT_RELAY = {
   "detach": { mod: true, shift: true, key: "o" },
   "file-search": { mod: true, shift: true, key: "p" },
   "memo-archive": { mod: true, shift: true, key: "s" },
+  "agent-chat": { mod: true, shift: true, key: "j" },
   "new-tab": { mod: true, key: "t" },
   "reopen-tab": { mod: true, shift: true, key: "t" },
   "find-in-page": { mod: true, key: "f" },

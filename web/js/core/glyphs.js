@@ -28,6 +28,15 @@ const PATHS = {
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   close: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
   pin: '<path d="M9 3h6l-1 6 3.5 3.5H6.5L10 9z"/><path d="M12 12.5V21"/>',
+  minus: '<path d="M5 12h14"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
+  // 받기(pull)·보내기(push)
+  arrowDown: '<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
+  arrowUp: '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+  reload: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v5h-5"/>',
+  // 변경 취소(되돌리기)
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  branch: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="17.5" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M17.5 8.5a6 6 0 0 1-6 6H8.5"/>',
 };
 
 export function icon(name, size = 14) {
@@ -47,8 +56,32 @@ const MARK_SVG = {
   codex: '<svg viewBox="0 0 24 24" width="S" height="S" fill="currentColor" fill-rule="evenodd" aria-hidden="true">'
     + '<path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>',
 };
-// 이 둘은 그림 파일로만 배포돼 경로를 그대로 쓴다.
-const MARK_IMG = { gemini: "/img/agents/gemini.png", antigravity: "/img/agents/antigravity.png" };
+// Orca 가 직접 그린 마크(src/renderer/src/lib/agent-icon-glyphs.tsx). 글자색을 따르는 것은 currentColor 다.
+MARK_SVG.aider = '<svg viewBox="0 0 436 436" width="S" height="S" aria-hidden="true"><g transform="translate(0,436) scale(0.1,-0.1)" fill="currentColor">'
+  + '<path d="M0 2180 l0 -2180 2180 0 2180 0 0 2180 0 2180 -2180 0 -2180 0 0 -2180z m2705 1818 c20 -20 28 -121 30 -398 l2 -305 216 -5 c118 -3 218 -8 222 -12 3 -3 10 -46 15 -95 5 -48 16 -126 25 -172 17 -86 17 -81 -17 -233 -14 -67 -13 -365 2 -438 21 -100 22 -159 5 -247 -24 -122 -24 -363 1 -458 23 -88 23 -213 1 -330 -9 -49 -17 -109 -17 -132 l0 -43 203 0 c111 0 208 -4 216 -9 10 -6 18 -51 27 -148 8 -76 16 -152 20 -168 7 -39 -23 -361 -37 -387 -10 -18 -21 -19 -214 -16 -135 2 -208 7 -215 14 -22 22 -33 301 -21 501 6 102 8 189 5 194 -8 13 -417 12 -431 -2 -12 -12 -8 -146 8 -261 8 -55 8 -95 1 -140 -6 -35 -14 -99 -17 -143 -9 -123 -14 -141 -41 -154 -18 -8 -217 -11 -679 -11 l-653 0 -11 33 c-31 97 -43 336 -27 533 5 56 6 113 2 128 l-6 26 -194 0 c-211 0 -252 4 -261 28 -12 33 -17 392 -6 522 15 186 -2 174 260 180 115 3 213 8 217 12 4 4 1 52 -5 105 -7 54 -17 130 -22 168 -7 56 -5 91 11 171 10 55 22 130 26 166 4 36 10 72 15 79 7 12 128 15 665 19 l658 5 8 30 c5 18 4 72 -3 130 -12 115 -7 346 11 454 10 61 10 75 -1 82 -8 5 -300 9 -650 9 l-636 0 -27 25 c-18 16 -26 34 -26 57 0 18 -5 87 -10 153 -10 128 5 449 22 472 5 7 26 13 46 15 78 6 1281 3 1287 -4z"/>'
+  + '<path d="M1360 1833 c0 -5 -1 -164 -3 -356 l-2 -347 625 -1 c704 -1 708 -1 722 7 5 4 7 20 4 38 -29 141 -32 491 -6 595 9 38 8 45 -7 57 -15 11 -139 13 -675 14 -362 0 -658 -3 -658 -7z"/></g></svg>';
+MARK_SVG.pi = '<svg viewBox="0 0 800 800" width="S" height="S" aria-hidden="true">'
+  + '<path fill="currentColor" fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/>'
+  + '<path fill="currentColor" d="M517.36 400 H634.72 V634.72 H517.36 Z"/></svg>';
+// Kilo 의 그림 파일은 검은 바탕에 어두운 모양이라 어두운 화면에서 보이지 않는다. Orca 처럼 노란 마크를 그린다.
+MARK_SVG.kilo = '<svg viewBox="0 0 512 512" width="S" height="S" aria-hidden="true" style="border-radius:2px"><path d="M512 0H0V512H512V0Z" fill="#000"/>'
+  + '<path fill="#FAF74F" d="M322 377H377V421H307.857L278 391.143V322H322V377ZM421 307.857L391.143 278H322V322L377 322V377H421V307.857ZM234 278H190V322H234V278ZM91 391.143L120.857 421H234V377H135V278H91V391.143ZM371.172 189.999V120.856L341.315 90.9995H278V135H327.172V189.999H278V233.999H421V189.999H371.172ZM135 91H91V233.999H135V184.5H190V233.999H234V184.5L190 140.5H135V91ZM234 91H190V140.5H234V91Z"/></svg>';
+// 그라디언트 id 는 문서 안에서 하나여야 한다. 줄마다 같은 id 를 쓰면 첫 줄이 사라질 때 나머지가 색을 잃는다.
+let ompSeq = 0;
+function ompMark(size) {
+  const id = `omp-g-${++ompSeq}`;
+  return `<svg viewBox="0 0 64 64" width="${size}" height="${size}" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">`
+    + '<stop offset="0" stop-color="oklch(0.7 0.24 340)"/><stop offset=".5" stop-color="oklch(0.62 0.21 295)"/><stop offset="1" stop-color="oklch(0.81 0.14 200)"/>'
+    + `</linearGradient></defs><path fill="url(#${id})" d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z"/></svg>`;
+}
+// 나머지는 Orca 가 앱에 묶어 배포하는 그림(src/shared/agent-icons)을 그대로 쓴다.
+const MARK_IMG = Object.fromEntries([
+  "amp", "ante", "antigravity", "aug", "autohand", "cline", "codebuff", "command-code", "continue", "copilot",
+  "crush", "cursor", "devin", "droid", "gemini", "goose", "grok", "hermes", "kimi", "kiro", "mimo-code",
+  "mistral-vibe", "openclaude", "openclaw", "opencode", "qwen-code", "rovo", "trae",
+].map((id) => [id, `/img/agents/${id}.png`]));
+// 같은 도구를 다른 이름으로 알리는 경우. herdr 는 Cursor 를 cursor-agent 로도 적는다.
+const MARK_ALIAS = { "claude-agent-teams": "claude", "cursor-agent": "cursor" };
 // 목록에 없는 것은 첫 글자를 표시한다. 모르는 도구를 물음표로 그리면 오류처럼 보인다.
 function letterMark(key, size) {
   const ch = (key || "?").slice(0, 1).toUpperCase();
@@ -56,8 +89,10 @@ function letterMark(key, size) {
 }
 
 export function agentMark(agent, size = 12) {
-  const key = String(agent || "").toLowerCase();
-  const body = MARK_SVG[key] ? MARK_SVG[key].replaceAll('width="S" height="S"', `width="${size}" height="${size}"`)
+  const raw = String(agent || "").toLowerCase();
+  const key = MARK_ALIAS[raw] || raw;
+  const body = key === "omp" ? ompMark(size)
+    : MARK_SVG[key] ? MARK_SVG[key].replaceAll('width="S" height="S"', `width="${size}" height="${size}"`)
     : MARK_IMG[key] ? `<img src="${MARK_IMG[key]}" width="${size}" height="${size}" alt="" decoding="async">`
     : letterMark(key, size);
   return `<span class="srow-mark" title="${key || "알 수 없음"}">${body}</span>`;

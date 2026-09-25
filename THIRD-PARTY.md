@@ -69,9 +69,10 @@ SOFTWARE.
 
 ## 다른 회사의 표장
 
-화면이 어느 에이전트인지 보여 주려고 그 도구의 표장을 싣는다: `web/img/agents/gemini.png`,
-`web/img/agents/antigravity.png`, 그리고 `web/js/core/glyphs.js`의 Claude·Codex(OpenAI) 마크.
-이 표장들은 각 회사(Google, Anthropic, OpenAI)의 상표이며, 그 도구를 가리키는 용도로만 쓴다.
+화면이 어느 에이전트인지 보여 주려고 그 도구의 표장을 싣는다: `web/img/agents/*.png`
+(Orca `src/shared/agent-icons`(`2d2321716`)에서 가져온 각 도구의 파비콘), 그리고
+`web/js/core/glyphs.js`의 Claude·Codex(OpenAI) 마크와 Orca `agent-icon-glyphs.tsx`의 Aider·Pi·OMP 마크.
+이 표장들은 각 도구를 만든 회사와 프로젝트의 상표이며, 그 도구를 가리키는 용도로만 쓴다.
 이 저장소의 Apache-2.0은 여기에 미치지 않고, 어느 회사도 이 프로젝트를 후원하거나 보증하지
 않는다. 다른 용도로 쓰려면 각 회사의 상표 지침을 따른다.
 

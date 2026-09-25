@@ -1,0 +1,126 @@
+/* 에이전트 채팅 보기: 터미널 머리의 전환 단추와 터미널 위에 덮는 채팅 판. */
+
+/* 머리 단추. 켜진 동안(채팅 보기) 선택 색으로 남는다. */
+.achat-toggle { width:26px; height:26px; display:grid; place-items:center; flex:none; padding:0; border:0;
+  border-radius:var(--r-s); background:none; color:var(--muted); cursor:pointer; }
+.achat-toggle[hidden] { display:none; }
+.achat-toggle:hover { background:var(--hover); color:var(--fg); }
+.achat-toggle:active { transform:scale(.96); }
+.achat-toggle.on { background:var(--select); color:var(--select-fg); }
+
+/* 판. 터미널 전체를 덮고 아래의 xterm 은 그대로 돈다. */
+.achat { position:absolute; inset:0; z-index:4; display:flex; flex-direction:column; min-height:0;
+  background:var(--surface); color:var(--fg); font:500 var(--fs)/1.55 var(--sans); letter-spacing:-.005em;
+  user-select:text; cursor:auto; }
+.achat[hidden] { display:none; }
+
+/* 서브에이전트 머리 */
+.achat-head { flex:none; height:30px; display:flex; align-items:center; gap:6px; padding:0 6px 0 4px;
+  border-bottom:1px solid var(--line); background:var(--chrome); min-width:0; }
+.achat-head[hidden] { display:none; }
+.achat-head-parent { font-weight:600; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40%; }
+.achat-head-sep { color:var(--faint); flex:none; }
+.achat-head-desc { color:var(--fg-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1; }
+.achat-head-mk { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); flex:none; }
+.achat-ib { width:26px; height:26px; display:grid; place-items:center; flex:none; border:0; padding:0;
+  border-radius:var(--r-s); background:none; color:var(--muted); cursor:pointer; }
+.achat-ib:hover { background:var(--hover); color:var(--fg); }
+.achat-ib:active { transform:scale(.96); }
+
+/* 대화 목록 */
+.achat-list { flex:1; min-height:0; overflow-y:auto; padding:12px 12px 16px; display:flex; flex-direction:column; gap:14px; outline:0; }
+.achat-older { align-self:center; font-size:var(--fs-xs); color:var(--faint); }
+.achat-turn { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.achat-who { font:600 var(--fs-xs)/1 var(--sans); color:var(--muted); letter-spacing:.01em; }
+.achat-who .srow-mark { margin:0 5px 0 0; vertical-align:-2px; }
+.achat-turn.agent > .achat-who { color:var(--ai); }
+/* 사람이 쓴 턴은 올린 면으로 묶어 에이전트 턴과 한눈에 갈린다. */
+.achat-turn.user { background:var(--raised); border:1px solid var(--line); border-radius:var(--r); padding:8px 10px; }
+.achat-turn.user > .achat-who { color:var(--accent); }
+.achat-turn.system { align-self:center; font-size:var(--fs-xs); color:var(--faint); }
+
+/* 본문 마크다운 */
+.achat-md { color:var(--fg); overflow-wrap:anywhere; min-width:0; }
+.achat-md > :first-child { margin-top:0; }
+.achat-md > :last-child { margin-bottom:0; }
+.achat-md p { margin:.45em 0; }
+.achat-md h1, .achat-md h2, .achat-md h3, .achat-md h4, .achat-md h5, .achat-md h6 { font-size:var(--fs-h); font-weight:650; margin:.9em 0 .35em; letter-spacing:-.01em; }
+.achat-md h1 { font-size:14px; }
+.achat-md ul, .achat-md ol { margin:.4em 0; padding-left:1.4em; }
+.achat-md li { margin:.15em 0; }
+.achat-md li.md-task { list-style:none; display:flex; align-items:baseline; gap:.5em; margin-left:-1.4em; }
+.achat-md blockquote { margin:.5em 0; padding:0 0 0 10px; border-left:2px solid var(--line-strong); color:var(--muted); }
+.achat-md hr { border:0; border-top:1px solid var(--line); margin:.8em 0; }
+.achat-md a { color:var(--accent); text-decoration:none; }
+.achat-md a:hover { text-decoration:underline; }
+.achat-md strong { font-weight:650; color:var(--fg); }
+.achat-md code { font:400 var(--fs-s)/1.4 var(--mono); background:rgb(var(--pal-babyblue-rgb) / .08); border-radius:var(--r-s); padding:1px 4px; color:var(--fg-2); }
+.achat-md pre.md-code { margin:.5em 0; padding:8px 10px; background:var(--raised); border:1px solid var(--line); border-radius:var(--r-s);
+  font:400 var(--fs-s)/1.55 var(--mono); color:var(--fg-2); white-space:pre; overflow-x:auto; }
+.achat-md table { border-collapse:collapse; margin:.5em 0; font-size:var(--fs-s); display:block; overflow-x:auto; max-width:100%; }
+.achat-md th, .achat-md td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
+.achat-md th { background:var(--raised); color:var(--fg-2); font-weight:600; }
+
+/* 도구 묶음: 접힌 한 줄 → 도구마다 한 줄 → 입력·diff·결과 */
+.achat-tools, .achat-reason { display:flex; flex-direction:column; min-width:0; }
+.achat-tools-head, .achat-tool-head, .achat-reason-head { height:var(--row); display:flex; align-items:center; gap:6px; padding:0 6px;
+  border:0; border-radius:var(--r-s); background:none; color:var(--muted); cursor:pointer; text-align:left; min-width:0; width:100%;
+  font:500 var(--fs-s)/1 var(--mono); }
+.achat-tools-head:hover, .achat-tool-head:hover, .achat-reason-head:hover { background:var(--hover); color:var(--fg); }
+.achat-chev { width:10px; height:10px; color:var(--faint); flex:none; transition:transform var(--t) var(--ease); }
+.open > button > .achat-chev { transform:rotate(90deg); }
+.achat-tools-n { color:var(--faint); flex:none; }
+.achat-tools-sum, .achat-tool-arg, .achat-reason-sum { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.achat-tools.failed > .achat-tools-head .achat-tools-n { color:var(--pal-danger); }
+.achat-tool-list { display:flex; flex-direction:column; padding-left:12px; border-left:1px solid var(--line); margin-left:10px; }
+.achat-tool-name { color:var(--fg-2); flex:none; }
+.achat-tool-arg { color:var(--faint); }
+.achat-tool.err .achat-tool-name { color:var(--pal-danger); }
+.achat-tool.pending .achat-tool-name::after { content:"…"; color:var(--faint); }
+.achat-tool-detail { display:flex; flex-direction:column; gap:4px; padding:4px 0 6px 16px; }
+.achat-pre, .achat-diff { margin:0; padding:6px 8px; max-height:280px; overflow:auto; background:var(--raised); border:1px solid var(--line);
+  border-radius:var(--r-s); font:400 var(--fs-xs)/1.55 var(--mono); color:var(--fg-2); white-space:pre-wrap; overflow-wrap:anywhere; }
+.achat-result { color:var(--muted); }
+.achat-result.err { color:var(--pal-danger); }
+.achat-diff { white-space:pre; overflow-wrap:normal; }
+.achat-diff span { display:block; padding:0 4px; margin:0 -4px; }
+.achat-d-add { background:color-mix(in srgb, var(--ok) 12%, transparent); color:var(--fg); }
+.achat-d-del { background:color-mix(in srgb, var(--pal-danger) 12%, transparent); color:var(--fg-2); }
+.achat-d-meta { color:var(--faint); }
+.achat-note { font-size:var(--fs-xs); color:var(--faint); padding:0 6px; }
+
+/* 생각(reasoning)은 흐린 접힌 줄 */
+.achat-reason-head { color:var(--faint); font-family:var(--sans); }
+.achat-reason-k { flex:none; font-weight:600; }
+.achat-reason-body { padding:4px 8px 6px 22px; color:var(--muted); font-size:var(--fs-s); white-space:pre-wrap; overflow-wrap:anywhere; }
+
+/* 빈 상태 */
+.achat-empty { margin:auto 0; padding:0 8px; max-width:360px; }
+.achat-empty-t { font-size:var(--fs-h); font-weight:600; color:var(--fg); margin-bottom:4px; }
+.achat-empty-s { font-size:var(--fs); color:var(--muted); margin-bottom:16px; overflow-wrap:anywhere; }
+.achat-empty-acts { border-top:1px solid var(--line); }
+.achat-empty-act { width:100%; height:36px; display:flex; align-items:center; gap:10px; padding:0 8px; border:0; border-bottom:1px solid var(--line);
+  background:none; color:var(--fg-2); cursor:pointer; font:inherit; text-align:left; }
+.achat-empty-act:hover { background:var(--hover); color:var(--fg); }
+.achat-empty-act svg.i { color:var(--muted); }
+
+/* 최신으로 · 답 기다림 안내 · 입력창 */
+.achat-latest { position:absolute; right:12px; bottom:64px; z-index:1; background:var(--raised); box-shadow:var(--menu-shadow); }
+.achat.sub .achat-latest { bottom:12px; }
+.achat-latest[hidden] { display:none; }
+.achat-hint { flex:none; display:flex; align-items:center; gap:8px; padding:6px 10px; border-top:1px solid var(--line);
+  background:color-mix(in srgb, var(--pal-danger) 8%, var(--chrome)); color:var(--fg-2); font-size:var(--fs-s); }
+.achat-hint[hidden] { display:none; }
+.achat-hint span { flex:1; min-width:0; }
+.achat-compose { flex:none; display:flex; align-items:flex-end; gap:6px; padding:8px 10px 10px; border-top:1px solid var(--line); background:var(--chrome); }
+.achat-compose[hidden] { display:none; }
+.achat-input { flex:1; min-width:0; min-height:28px; max-height:160px; resize:none; padding:5px 10px; border-radius:var(--r);
+  background:var(--raised); border:1px solid var(--line); color:var(--fg); font:500 var(--fs)/1.45 var(--sans); outline:0;
+  transition:border-color var(--t) var(--ease); }
+.achat-input:focus { border-color:var(--focus); }
+.achat-input:focus-visible { box-shadow:none; }
+.achat-input::placeholder { color:var(--faint); }
+.achat-send { height:28px; }
+
+/* 전환 시간은 body.motion-off 에서 01-base.css 가 0 으로 만든다. 누를 때 줄어드는 것만 여기서 끈다. */
+body.motion-off .achat-toggle:active, body.motion-off .achat-ib:active { transform:none; }

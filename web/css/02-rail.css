@@ -1,32 +1,19 @@
-/* 좌측 액티비티 rail 과 그 자리를 대체하는 소스 제어 패널 */
-/* 이 이름을 만드는 곳: main.js · devtool/rail.js · devtool/localdev.js */
-/* 기능 요구: 세로 도구 목록 · 그림과 이름 · 지금 어디인지 · 맨 아래 사이드바 접기. */
-.actrail { width:52px; flex:none; background:var(--sidebar); border-right:1px solid var(--sidebar-border); display:flex; flex-direction:column; align-items:center; padding-top:6px; gap:1px; z-index:160; }
-/* 아이콘만 있으면 무엇인지도 지금 어디인지도 눌러봐야 알 수 있으므로 이름을 함께 표시한다. */
-/* 비활성 상태를 흐리게 하는 것은 글자 등급이 담당한다. --muted-fg 위에 opacity:.72 를
-   더 걸면 두 값이 겹쳐, 호버로 밝아질 때 색과 투명도가 따로 변한다. */
-.rail-ico { width:40px; padding:5px 0 4px; border:none; background:none; color:var(--muted-fg); cursor:pointer;
-  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
-  border-radius:var(--r-blk); position:relative;
-  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-/* 아이콘은 이제 이모지가 아니라 선 그림이다. 이모지는 OS 판이 올라갈 때마다 모양·색·굵기가
-   제각각으로 바뀌고, 옆에 놓으면 서로 크기가 맞지 않는다. 색도 고정되어 있어 활성 상태를
-   currentColor 로 바꿀 수 없다. 24 격자·1.5px 선·둥근 끝으로 통일해 직접 그렸다(Lucide 의
-   시각 언어를 따랐다. 그 세트 자체는 ISC 라 나중에 통째로 갈아 끼워도 된다). */
-.rail-ico .ri { font-size:var(--ic-lg); line-height:1; display:flex; }
-.rail-ico .ri svg { width:var(--ic-lg); height:var(--ic-lg); display:block; fill:none; stroke:currentColor;
+/* 좌측 액티비티 rail: 도구 단추와 맨 아래 사이드바 접기 단추 */
+/* 이 이름을 만드는 곳: index.html(rail 사본) · devtool/rail.js(rail-items.js 표로 버튼을 그린다) · body 클래스는 panel/layout.js(sidebar-collapsed) · browser/tabs.js · browser/dock.js(browser-mode) */
+.actrail { width:var(--rail-w); flex:none; background:var(--chrome); border-right:1px solid var(--line); display:flex; flex-direction:column; align-items:center; gap:2px; padding-top:6px; z-index:160; }
+.rail-ico { width:40px; padding:6px 0 5px; border:0; border-radius:var(--r); background:none; font:inherit; color:var(--muted); cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; gap:3px; position:relative;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.rail-ico .ri { display:flex; }
+.rail-ico .ri svg { width:16px; height:16px; display:block; flex:none; fill:none; stroke:currentColor;
   stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
-/* 10px 글자에는 음수 자간을 쓰지 않는다. 작은 글자는 자간이 넓어야 읽힌다. */
-.rail-ico .rl { font-size:var(--fs-2xs); line-height:1; font-weight:var(--fw); }
-.rail-ico.rail-toggle { width:40px; height:32px; }
+.rail-ico .rl { font-size:var(--fs-xs); line-height:1; font-family:var(--sans); }
 .rail-ico[hidden] { display:none !important; }
-.rail-ico:hover { background:var(--accent); color:var(--fg); }
-/* 어느 도구에 있는지 한눈에 보여야 한다. 색만 조금 밝게 해서는 구분되지 않으므로
-   항목 자체를 채우고 왼쪽에 띠를 둔다. */
-.rail-ico.active { color:var(--fg); background:var(--sidebar-accent); }
-.rail-ico.active::before { content:""; position:absolute; left:-5px; top:7px; bottom:7px; width:2px; border-radius:var(--r-pill); background:var(--ai); }
-.rail-ico.active .rl { color:var(--ai); font-weight:var(--fw-semi); }
+.rail-ico:hover { background:var(--hover); color:var(--fg); }
+.rail-ico:active { transform:scale(.96); }
+.rail-ico.active { color:var(--fg); background:var(--select); }
+.rail-ico.active::before { content:""; position:absolute; left:-6px; top:8px; bottom:8px; width:2px; border-radius:2px; background:var(--ai); }
+.rail-ico.active .rl { color:var(--ai); font-weight:600; }
 .rail-ico.rail-toggle { margin-top:auto; margin-bottom:6px; }
-.rail-ico.rail-toggle .ri svg { width:var(--ic); height:var(--ic); }
 body.sidebar-collapsed .rail-ico.rail-toggle { transform:scaleX(-1); }
 body.browser-mode .actrail { display:none !important; }

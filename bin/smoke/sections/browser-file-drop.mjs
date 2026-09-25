@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { checkAsync } from "../core.mjs";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { checkAsync, ROOT } from "../core.mjs";
 import { runBrowserFileDropRuntime } from "../browser-file-drop-runtime.mjs";
 import { openDroppedEntries } from "../../../web/js/center/file-drop.js";
 import { initFileRouting, openDroppedLocal } from "../../../web/js/center/file-routing.js";
@@ -32,6 +34,11 @@ export const cases = {
     openDroppedEntries([{ error: "directory", path: "/folder" }, { path: "file:///tmp/a" }, { path: "/tmp/\0bad" }, { error: "entry" }, { path: "/tmp/valid" }],
       (path) => opened.push(path), (message) => notices.push(message));
     assert.deepEqual(opened, ["/tmp/valid"]); assert.equal(notices.length, 4); assert.match(notices[0], /폴더/);
+  },
+  "실제 드롭 검사는 사용자의 Google Chrome 앱을 실행하지 않는다"() {
+    const source = readFileSync(path.join(ROOT, "bin/smoke/browser-file-drop-runtime.mjs"), "utf8")
+      .replace(/^\s*\/\/.*$/gm, "");
+    assert.doesNotMatch(source, /Google Chrome\.app|channel:\s*["']chrome/);
   },
   "실제 Chromium 파일 드롭이 호스트·격리 게스트까지 도달하고 사이트 업로드를 보존한다": runBrowserFileDropRuntime,
 };

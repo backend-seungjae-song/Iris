@@ -46,11 +46,13 @@ export function registerViewportTouchDrag(handlers) {
   ({ setTouchDrag } = handlers);
 }
 
+const SIZE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>';
 export function updateSizeBtn() {
   const btn = $("#wv-size"); if (!btn) return;
   const id = activeBrowserId();
   const vp = id ? viewportByTab[id] : null;
-  btn.textContent = vp ? `🖥 ${vp.w}×${vp.h}` : "🖥 크기";
+  // 크기를 지정하지 않았으면 아이콘만, 지정했으면 그 값을 붙인다. 지금 보는 화면이 실제 크기가 아니라는 표시다.
+  btn.innerHTML = SIZE_ICON + (vp ? `<span>${vp.w}×${vp.h}</span>` : "");
   btn.classList.toggle("on", !!vp);
 }
 

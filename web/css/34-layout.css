@@ -6,45 +6,47 @@ body.layout-on .app { position:relative; }
 body.layout-on .sidebar { display:contents !important; }
 body.layout-on .lay-region { position:absolute !important; box-sizing:border-box; flex:none !important; margin:0; min-width:0; max-width:none; }
 body.layout-on .lay-off { display:none !important; }
-body.layout-on .sidebar-head, body.layout-on #sidebar > .panel { background:var(--sidebar); border-right:1px solid var(--sidebar-border); }
+body.layout-on .sidebar-head, body.layout-on #sidebar > .panel { background:var(--chrome); border-right:1px solid var(--line); }
 body.layout-on #file-tree, body.layout-on #space-list { height:auto; flex:1 1 auto; }
 
 /* 경계 막대: 영역 경계 위에 겹친다. 모양은 예전 조절 막대와 같다(6px 안의 1px 선). */
 .lay-split { position:absolute; z-index:30; background:transparent; }
 .lay-split-col { cursor:col-resize; }
 .lay-split-row { cursor:row-resize; }
-.lay-split::after { content:""; position:absolute; background:var(--border); }
+.lay-split::after { content:""; position:absolute; background:var(--line); }
 .lay-split-col::after { top:0; bottom:0; left:2px; width:1px; }
-.lay-split-row::after { left:0; right:0; top:2px; height:1px; background:var(--sidebar-border); }
-.lay-split-col:hover::after { left:1px; width:3px; background:var(--ring); }
-.lay-split-row:hover::after { top:1px; height:3px; background:var(--ring); }
+.lay-split-row::after { left:0; right:0; top:2px; height:1px; background:var(--line); }
+.lay-split-col:hover::after { left:1px; width:3px; background:var(--focus); }
+.lay-split-row:hover::after { top:1px; height:3px; background:var(--focus); }
 
 /* 레일의 편집 버튼. 맨 아래 접기 버튼 바로 위에 선다. */
-.rail-ico.rail-layout { width:40px; height:32px; margin-top:auto; }
-.rail-ico.rail-layout .ri svg { width:var(--ic); height:var(--ic); }
+.rail-ico.rail-layout { margin-top:auto; }
 .rail-layout + .rail-toggle { margin-top:0; }
-body.layout-editing .rail-ico.rail-layout { background:var(--accent); color:var(--fg); }
+body.layout-editing .rail-ico.rail-layout { background:var(--select); color:var(--select-fg); }
 @media (max-width:820px) { .rail-ico.rail-layout { display:none; } }
 
 /* 편집 화면 */
-.lay-ov { position:absolute; z-index:40; box-sizing:border-box; border:1px dashed var(--ring);
-  background:color-mix(in srgb, var(--bg) 72%, transparent); display:flex; flex-direction:column; align-items:flex-start; gap:6px; padding:8px; }
-.lay-ov-name { font-size:var(--fs-sm); font-weight:var(--fw-semi); color:var(--fg); background:var(--card); border:1px solid var(--border);
-  border-radius:var(--radius); padding:4px 10px; cursor:grab; user-select:none; }
-.lay-ov-name:hover { border-color:var(--ring); }
-.lay-ov-empty { font-size:var(--fs-xs); color:var(--muted-fg); }
+.lay-ov { position:absolute; z-index:40; box-sizing:border-box; border:1px dashed var(--focus);
+  background:color-mix(in srgb, var(--surface) 72%, transparent); display:flex; flex-direction:column; align-items:flex-start; gap:6px; padding:8px; }
+.lay-ov-name { font-size:var(--fs); font-weight:600; color:var(--fg); background:var(--raised); border:1px solid var(--line);
+  border-radius:var(--r); padding:4px 10px; cursor:grab; user-select:none; transition:border-color var(--t) var(--ease); }
+.lay-ov-name:hover { border-color:var(--focus); }
+.lay-ov-empty { font-size:var(--fs-s); color:var(--muted); }
 .lay-stack { position:absolute; z-index:41; display:flex; flex-wrap:wrap; align-items:center; gap:4px; max-width:260px;
-  background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:4px 6px; }
-.lay-stack-title { font-size:var(--fs-2xs); color:var(--muted-fg); margin-right:2px; }
-.lay-drop { position:absolute; z-index:45; pointer-events:none; box-sizing:border-box; border:2px solid var(--ring);
-  background:color-mix(in srgb, var(--ring) 22%, transparent); display:flex; align-items:center; justify-content:center;
-  font-size:var(--fs-sm); color:var(--fg); }
+  background:var(--raised); border:1px solid var(--line); border-radius:var(--r); padding:4px 6px; }
+.lay-stack-title { font-size:var(--fs-xs); color:var(--faint); margin-right:2px; }
+.lay-drop { position:absolute; z-index:45; pointer-events:none; box-sizing:border-box; border:2px solid var(--focus);
+  background:color-mix(in srgb, var(--focus) 22%, transparent); display:flex; align-items:center; justify-content:center;
+  font-size:var(--fs); color:var(--fg); }
 .lay-bar { position:absolute; z-index:50; bottom:14px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:6px;
-  max-width:calc(100% - 120px); background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
-  box-shadow:var(--sh-mid); padding:6px 8px 6px 12px; }
-.lay-bar-text { font-size:var(--fs-xs); color:var(--muted-fg); margin-right:6px; }
-.lay-btn { border:1px solid var(--border); background:var(--bg); color:var(--fg); border-radius:var(--radius);
-  padding:4px 10px; font-size:var(--fs-xs); cursor:pointer; white-space:nowrap; }
-.lay-btn:hover { border-color:var(--ring); }
-.lay-btn.on { border-color:var(--ring); background:var(--accent); }
-.lay-btn-primary { background:var(--primary); color:var(--primary-fg); border-color:var(--primary); }
+  max-width:calc(100% - 120px); background:var(--raised); border:1px solid var(--line-strong); border-radius:var(--r);
+  box-shadow:var(--menu-shadow); padding:6px 8px 6px 12px; }
+.lay-bar-text { font-size:var(--fs-s); color:var(--muted); margin-right:6px; }
+.lay-btn { height:24px; display:inline-flex; align-items:center; gap:5px; padding:0 8px; border:1px solid var(--line); border-radius:var(--r-s);
+  background:none; font:inherit; font-size:var(--fs-s); color:var(--fg-2); cursor:pointer; white-space:nowrap; flex:none;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.lay-btn:hover { background:var(--hover); color:var(--fg); }
+.lay-btn:active { transform:scale(.96); }
+.lay-btn.on { background:var(--select); color:var(--select-fg); }
+.lay-btn-primary { background:var(--accent); color:var(--pal-ink); border-color:var(--accent); font-weight:600; }
+.lay-btn-primary:hover { background:var(--focus); color:var(--pal-ink); border-color:var(--focus); }

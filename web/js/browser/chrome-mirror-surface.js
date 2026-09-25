@@ -6,7 +6,7 @@
 // 제공 API
 //   initCapability(ctx), URL/좌표 순수 판정, mirror.navigation·mirror.activeTab·mirror.tabUrl 훅.
 // 의존 대상
-//   core/hooks의 이름 연결, capability ctx의 acHost/$/showToast/getWebviewEntries, wv-stack DOM.
+//   core/hooks의 이름 연결, capability ctx의 acHost/$/showToast/getWebviewEntries, wv-stack DOM. acHost 가 없으면 미지원.
 // 유지 조건
 //   자동으로 webview를 가로채지 않고, 사람이 고른 host 밖으로 mirror를 넓히지 않으며,
 //   내부 about:blank park를 사용자 navigation으로 저장하지 않는다.
@@ -345,9 +345,12 @@ function showConsentNotice(state, message) {
     const result = await host.liveChromeOpenSettings();
     bar.__label.textContent = result?.message || `Chrome 주소창에 ${LIVE_SETTINGS_URL} 를 입력해 주세요.`;
   });
-  barButton(bar, "설정 주소 복사", () => {
-    try { host.writeClipboard?.(LIVE_SETTINGS_URL); } catch {}
-    bar.__label.textContent = `${LIVE_SETTINGS_URL} 를 복사했습니다. Chrome 주소창에 붙여넣으세요.`;
+  barButton(bar, "설정 주소 복사", async () => {
+    let ok = false;
+    try { ok = (await host.writeClipboard?.(LIVE_SETTINGS_URL)) === true; } catch {}
+    bar.__label.textContent = ok
+      ? `${LIVE_SETTINGS_URL} 를 복사했습니다. Chrome 주소창에 붙여넣으세요.`
+      : `복사하지 못했습니다. Chrome 주소창에 ${LIVE_SETTINGS_URL} 를 입력해 주세요.`;
   });
   barButton(bar, "다시 연결", () => {
     close();
@@ -719,7 +722,10 @@ export function initCapability(ctx = {}) {
   showToast = typeof ctx.showToast === "function" ? ctx.showToast : () => {};
   getWebviewEntries = typeof ctx.getWebviewEntries === "function" ? ctx.getWebviewEntries : () => [];
   updateWebviewMeta = typeof ctx.updateWebviewMeta === "function" ? ctx.updateWebviewMeta : () => {};
-  if (!host || !host.mirrorStart || !host.mirrorInput || !host.mirrorResize || !host.mirrorStop
+  // native bridge 자체가 없는 창(일반 브라우저·원격 접속)은 미러를 띄울 곳이 없으므로 조용히 미지원으로 둔다.
+  // bridge 는 있는데 미러 함수가 빠졌으면 preload 와 어긋난 것이라 오류로 알린다.
+  if (host == null) return {};
+  if (!host.mirrorStart || !host.mirrorInput || !host.mirrorResize || !host.mirrorStop
     || !host.onMirrorFrame || !host.onMirrorMeta) {
     throw new Error("Chrome 미러 preload bridge가 없습니다.");
   }

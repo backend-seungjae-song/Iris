@@ -123,6 +123,29 @@ try {
       setup(b) { b.onResolve({ filter: /^electron$/ }, () => ({ path: "./electron-guard.cjs", external: true })); },
     }],
   });
+  // serve-sim 0.1.40 은 Xcode 의 Developer/Library 만 찾는다. Xcode 27 의
+  // Contents/SharedFrameworks 경로를 자식 프로세스 환경에 전달한다.
+  let mainSource = readFileSync(OUT_MAIN, "utf8");
+  const simulatorOpen = 'if [ "$has_simulator_target" = "1" ]; then\n  /usr/bin/open -gj -a Simulator 2>/dev/null || /usr/bin/open "$@"\n  exit 0';
+  if (!mainSource.includes(simulatorOpen)) {
+    throw new Error("Orca 의 Simulator 실행 처리 코드가 변경되었습니다");
+  }
+  mainSource = mainSource.replace(simulatorOpen,
+    'if [ "$has_simulator_target" = "1" ]; then\n  exit 0');
+  const envFunction = /function getServeSimEnv\(executable\) \{[\s\S]*?\n\}\n__name\(getServeSimEnv, "getServeSimEnv"\);/;
+  const match = mainSource.match(envFunction);
+  if (!match || !match[0].includes("  return env;")) {
+    throw new Error("Orca 의 serve-sim 실행 환경 함수가 변경되었습니다");
+  }
+  mainSource = mainSource.replace(envFunction,
+    match[0].replace("  return env;", '  return require("./serve-sim-framework-env.cjs").withSimulatorFrameworkPath(env);'));
+  mainSource = mainSource.replace("var MAC_OPEN_SHIM = `#!/bin/sh", [
+    "// Why(Iris): serve-sim 은 부팅 뒤 `open -ga Simulator` 를 부르고 실패는 무시한다. 화면 전송은",
+    "// Simulator.app 없이 된다. Orca 는 숨겨서 띄웠지만 사용자에게는 별도 시뮬레이터가 켜진 것으로 보이고,",
+    "// 그 앱을 종료하면 기기도 함께 꺼진다. 그래서 Simulator 를 여는 요청은 아무것도 하지 않는다.",
+    "var MAC_OPEN_SHIM = `#!/bin/sh",
+  ].join("\n"));
+  writeFileSync(OUT_MAIN, mainSource);
   console.log(`  ${path.relative(ROOT, OUT_MAIN)} ← orca@${commit.slice(0, 9)}`);
 
   // 렌더러 번들: React 없는 순수 로직만. 대상 파일을 열어 React·store·i18n import 가 없는지

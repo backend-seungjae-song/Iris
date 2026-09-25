@@ -5,7 +5,7 @@
 //   어떤 확장자를 앱이 렌더링하는지는 여기서 알지 않는다. 그것은 렌더러의 등록표가 소유한다.
 //
 // 제공 API
-//   isFileUrl(url) · isLoopbackUrl(url) · isLocalPage(url).
+//   isFileUrl(url) · isLoopbackUrl(url) · isLocalPage(url) · consoleOpenTarget(target).
 //
 // 의존 대상
 //   아무것도 require 하지 않는다. Electron 도 Node API 도 사용하지 않아 검사가 그대로 호출한다.
@@ -37,4 +37,11 @@ function isLoopbackUrl(url) {
 // 로컬에서 온 페이지만 로컬 링크를 열 자격이 있다.
 function isLocalPage(url) { return isFileUrl(url) || isLoopbackUrl(url); }
 
-module.exports = { isFileUrl, isLoopbackUrl, isLocalPage };
+// 보조 창(분리 브라우저·메모)이 콘솔 창에 열어 달라고 넘기는 대상. 절대 경로와 웹 주소만 받는다.
+// file: 은 받지 않는다. 메모 창의 링크는 원격도 쓸 수 있는 글에서 온다.
+function consoleOpenTarget(target) {
+  const t = String(target || "");
+  return t.startsWith("/") || /^https?:\/\//i.test(t) ? t : null;
+}
+
+module.exports = { isFileUrl, isLoopbackUrl, isLocalPage, consoleOpenTarget };

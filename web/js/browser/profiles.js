@@ -237,7 +237,7 @@ export function profileOfTab(tabId) {
 }
 // ── 구글 계정 / 프로필 상세 제어 페이지(rail 👤) ──
 // 기존 Chrome 프로필 그대로 가져오기(쿠키+로그인) → 프로필별 자격증명 요약 → 스페이스 기본 계정 지정.
-function profileForChromeImport(cid, label) {
+export function profileForChromeImport(cid, label) {
   // 목록을 못 받았으면 "없다"가 아니라 "모른다"이다. 여기서 새로 만들면 이미 있는 계정을 두고
   // 빈 파티션을 하나 더 만드는 셈이라, 만들지 않고 물러난다.
   if (!isBrowserStateLoaded()) return { profile: null, isNew: false, unknown: true };
@@ -293,11 +293,12 @@ export async function importChromeToProfile(cid, label, withPasswords = false) {
   res.profileId = target.profile.id;
   return res;
 }
+const PROFILE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>';
 export function updateProfileBtn() {
   const btn = $("#wv-profile"); if (!btn) return;
   const id = activeBrowserId();
-  if (!id) { btn.textContent = "👤 기본"; return; }
-  btn.textContent = "👤 " + profileName(profileOfTab(id));
+  const name = id ? profileName(profileOfTab(id)) : "기본";
+  btn.innerHTML = `${PROFILE_ICON}<span>${esc(name)}</span>`;
 }
 // 탭 프로필 변경: 서버 반영 + partition은 attach 후 불변이라 webview 재생성(현재 URL 유지 재로드).
 function setTabProfile(tabId, profileId) {
@@ -375,7 +376,7 @@ export function openProfileMenu() {
     window.removeEventListener("blur", onAway);
     window.removeEventListener("resize", onAway);
   };
-  function onDoc(ev) { if (!ev.target.closest("#profile-menu") && ev.target.id !== "wv-profile") closeProfileMenu(); }
+  function onDoc(ev) { if (!ev.target.closest("#profile-menu") && !ev.target.closest("#wv-profile")) closeProfileMenu(); }
   function onEsc(ev) { if (ev.key === "Escape") closeProfileMenu(); }
   function onAway() { closeProfileMenu(); }
   setTimeout(() => {

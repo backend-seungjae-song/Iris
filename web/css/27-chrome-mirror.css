@@ -4,4 +4,4 @@
   caret-color:transparent; outline:none; }
 .wv-mirror.active { display:block; }
 .wv-wrap.sized .wv-mirror.active { inset:auto; left:var(--vleft); top:var(--vtop); width:var(--vw); height:var(--vh);
-  box-shadow:0 0 0 1px var(--border), var(--sh-mid); }
+  box-shadow:0 0 0 1px var(--line), var(--menu-shadow); }

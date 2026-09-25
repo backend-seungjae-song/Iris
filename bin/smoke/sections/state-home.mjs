@@ -51,7 +51,7 @@ export default async function run() {
         if (f === "server/env.cjs" || !/\.(js|mjs|cjs)$/.test(f)) return false;
         if (f.startsWith("test/") || f === "bin/smoke.mjs" || f.startsWith("bin/smoke/")) return false; // 검사는 값을 심어야 한다
         let text; try { text = read(f); } catch { return false; }
-        return /process\.env\.IRIS_(STATE_DIR|PORT)\b/.test(text);
+        return /process\.env\.(IRIS_(STATE_DIR|PORT|ALLOWED_ORIGIN_HOSTS)|REMOTE|HOST)\b/.test(text);
       });
       if (hand.length) console.log("       손으로 짠 자리: " + hand.join(", "));
       return hand.length === 0;
@@ -92,9 +92,14 @@ export default async function run() {
       // `open`은 현재 셸의 환경을 앱에 그대로 넘긴다. pnpm 안에서 이 경로를 실행하면 설치된 앱이
       // 개발 포트·개발 상태 폴더로 실행된다. 실제로 전달된 REMOTE=1 때문에 설치된 앱이
       // 0.0.0.0에 바인딩됐다(확인 결과, 수정 후 127.0.0.1로 복구).
+      // 앱을 여는 줄과 새 앱의 서버 준비를 보는 줄은 모두 installed_env 를 거친다. 준비 확인이 개발
+      // 포트·상태 폴더를 보면 개발 서버를 설치 앱의 서버로 여긴다.
       const sh = read("scripts/install-app.sh");
-      return /env(\s+-u\s+\w+)*\s+-u\s+IRIS_STATE_DIR(\s+-u\s+\w+)*\s+open -a/.test(sh)
-        && /-u REMOTE/.test(sh) && /-u IRIS_PORT/.test(sh);
+      const fn = sh.match(/^installed_env\(\) \{ env((?:\s+-u\s+\w+)+) "\$@"; \}$/m);
+      if (!fn || !["IRIS_STATE_DIR", "IRIS_PORT", "PORT", "REMOTE", "HOST"].every((v) => fn[1].includes("-u " + v))) return false;
+      const opens = sh.split("\n").filter((line) => !/^\s*#/.test(line) && /\bopen -a\b/.test(line));
+      return opens.length > 0 && opens.every((line) => /\binstalled_env open -a\b/.test(line))
+        && /installed_env node scripts\/wait-installed-server\.cjs/.test(sh);
     });
     check("상태 경로를 손으로 다시 짜는 파일이 없다", () => {
       // 검사할 파일 목록을 직접 관리하면 목록에 없는 파일이 빠진다. browser-state.js·

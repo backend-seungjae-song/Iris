@@ -1,17 +1,38 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
 import { read, ROOT } from "./core.mjs";
 
+// /Applications 의 Google Chrome 은 후보에 넣지 않는다. 사용자가 쓰는 앱 번들을 검사가 실행하면
+// 업데이트 대기 중일 때 시작 직후 죽어 Dock 아이콘과 "예기치 않게 종료됨" 창이 뜬다.
+export function headlessShellCandidates(home = homedir()) {
+  const found = [];
+  for (const [root, prefix] of [[path.join(home, ".cache/puppeteer/chrome-headless-shell"), ""],
+    [path.join(home, "Library/Caches/ms-playwright"), "chromium_headless_shell-"]]) {
+    let versions = [];
+    try { versions = readdirSync(root).filter((name) => name.startsWith(prefix)); } catch { continue; }
+    for (const version of versions) {
+      let platforms = [];
+      try { platforms = readdirSync(path.join(root, version)).filter((name) => name.startsWith("chrome-headless-shell-")); } catch { continue; }
+      for (const platform of platforms) {
+        const bin = path.join(root, version, platform, "chrome-headless-shell");
+        if (existsSync(bin)) found.push({ bin, mtime: statSync(bin).mtimeMs });
+      }
+    }
+  }
+  return found.sort((a, b) => b.mtime - a.mtime).map((entry) => entry.bin);
+}
+
 export async function runBrowserFileDropRuntime() {
   const executablePath = process.env.CHROME_BIN || [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    ...headlessShellCandidates(),
     "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome",
   ].find((candidate) => existsSync(candidate));
-  assert.ok(executablePath, "실제 드롭 검사에는 Chrome/Chromium 또는 CHROME_BIN이 필요합니다");
+  assert.ok(executablePath, "실제 드롭 검사에는 chrome-headless-shell 또는 CHROME_BIN이 필요합니다"
+    + " (설치: npx @puppeteer/browsers install chrome-headless-shell@stable --path ~/.cache/puppeteer)");
   const scratch = mkdtempSync(path.join(tmpdir(), "iris-browser-drop-"));
   const file = path.join(scratch, "한글 #100%.txt"), folder = path.join(scratch, "folder.txt");
   writeFileSync(file, "browser drop fixture"); mkdirSync(folder);
@@ -29,7 +50,8 @@ export async function runBrowserFileDropRuntime() {
   try {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
-    browser = await puppeteer.launch({ executablePath, headless: true, userDataDir: path.join(scratch, "profile"),
+    browser = await puppeteer.launch({ executablePath,
+      headless: path.basename(executablePath) === "chrome-headless-shell" ? "shell" : true, userDataDir: path.join(scratch, "profile"),
       args: ["--no-first-run", "--disable-background-networking"], timeout: 15000 });
     const page = await browser.newPage();
     await page.setViewport({ width: 900, height: 750 });

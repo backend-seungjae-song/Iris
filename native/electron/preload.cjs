@@ -13,7 +13,8 @@ contextBridge.exposeInMainWorld("acHost", {
   // 터미널에 파일(이미지 등)을 드래그하면 iTerm2처럼 절대경로를 삽입해 Claude Code가 로드하게 한다.
   getDroppedPath: (file) => { try { return webUtils.getPathForFile(file) || ""; } catch { return ""; } },
   // 터미널 선택 복사. 메인 프로세스 clipboard에 직접 쓴다(렌더러 navigator.clipboard 실패 우회).
-  writeClipboard: (text) => ipcRenderer.send("ac-clipboard-write", text),
+  // 썼으면 true 로 풀리는 Promise 를 돌려준다. 복사 알림은 이 결과를 보고 띄운다.
+  writeClipboard: (text) => ipcRenderer.invoke("ac-clipboard-write", text),
   // 분리 브라우저 창(?mode=browser)을 연다(기본 분리형). 이미 있으면 포커스만.
   // opts.background:true 면 창을 만들되 앞으로 내지 않는다. AI 탭 때문에 호출하는 쪽이 쓴다.
   openBrowser: (opts) => ipcRenderer.send("ac-open-browser", opts || null),
@@ -179,7 +180,8 @@ contextBridge.exposeInMainWorld("acHost", {
     getSettings: () => ipcRenderer.invoke("ac-emulator-settings-get"),
     setSettings: (patch) => ipcRenderer.invoke("ac-emulator-settings-set", patch),
     pickSdkFolder: () => ipcRenderer.invoke("ac-emulator-pick-sdk"),
-    openAndroidStudioDownload: () => ipcRenderer.invoke("ac-emulator-open-android-studio"),
+    androidAction: (action) => ipcRenderer.invoke("ac-emulator-android-action", action),
+    xcodeAction: (action) => ipcRenderer.invoke("ac-emulator-xcode-action", action),
     startFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStart", args),
     stopFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStop", args),
     startVideoStream: (args) => ipcRenderer.invoke("emulator:videoStreamStart", args),

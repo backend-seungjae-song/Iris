@@ -20,7 +20,10 @@ const PROFILE_ID_RE = /^[A-Za-z0-9%._~!*'()-]+$/;
 
 function emptyState() {
   return {
-    bookmarksBySpace: {}, // { [space]: [{url, title}] } 스페이스마다 따로 보관한다(요구사항: 스페이스별 북마크)
+    bookmarksBySpace: {}, // { [space]: [항목…] } 스페이스마다 따로 보관한다(요구사항: 스페이스별 북마크). 화면에서는 세션 북마크
+    // 모든 스페이스에서 보이는 공통 북마크. 편의 기능이 꺼져 있으면 화면에 나오지 않을 뿐 지우지 않는다.
+    // 항목은 북마크 {url, title} 이거나 폴더 {folder, title, items:[{url, title}]} 다. 폴더는 한 단계뿐이다.
+    bookmarksCommon: [],
     tabsBySpace: {},      // { [space]: [{id, url, title, profile}] } (profile=null: 스페이스 기본 상속, "": 기본 세션, 그 외: 안정 id)
     activeBySpace: {},    // { [space]: tabId }
     activeSpace: null,    // 콘솔이 현재 포커스한 스페이스(분리 창의 미러 타깃)
@@ -54,6 +57,10 @@ export function load() {
     state = Object.assign(emptyState(), parsed);
     // 방어: 필드 타입 정규화
     if (!state.bookmarksBySpace || typeof state.bookmarksBySpace !== "object") state.bookmarksBySpace = {};
+    if (!Array.isArray(state.bookmarksCommon)) state.bookmarksCommon = [];
+    for (const list of [state.bookmarksCommon, ...Object.values(state.bookmarksBySpace)]) {
+      if (Array.isArray(list)) for (const x of list) if (isFolder(x) && !Array.isArray(x.items)) x.items = [];
+    }
     if (!state.tabsBySpace || typeof state.tabsBySpace !== "object") state.tabsBySpace = {};
     if (!state.activeBySpace || typeof state.activeBySpace !== "object") state.activeBySpace = {};
     if (!state.groupsBySpace || typeof state.groupsBySpace !== "object") state.groupsBySpace = {};
@@ -174,11 +181,18 @@ export function remapSpaces(map, { preferSource = false } = {}) {
     for (const t of Array.isArray(src) ? src : []) if (t && !seen.has(t.id)) { out.push(t); seen.add(t.id); }
     return out;
   });
-  // 북마크: url 기준 합집합.
+  // 북마크: url 기준 합집합. 폴더는 id 가 같으면 안의 북마크를 합친다. 폴더 안의 url 도 목록 전체에서
+  // 하나만 남긴다. 폴더에는 url 이 없어서 url 로만 거르면 두 번째 폴더부터 모두 버려진다.
   moveOne("bookmarksBySpace", (dst, src) => {
     const out = Array.isArray(dst) ? dst.slice() : [];
-    const seen = new Set(out.map((b) => b && b.url));
-    for (const b of Array.isArray(src) ? src : []) if (b && !seen.has(b.url)) { out.push(b); seen.add(b.url); }
+    for (const b of Array.isArray(src) ? src : []) {
+      if (!b) continue;
+      if (isFolder(b)) {
+        const items = (Array.isArray(b.items) ? b.items : []).filter((x) => x && !findBm(out, x.url));
+        const same = findFolder(out, b.folder);
+        if (same) same.items = [...same.items, ...items]; else out.push({ ...b, items });
+      } else if (!findBm(out, b.url)) out.push(b);
+    }
     return out;
   });
   // 그룹: id 기준 합집합. 이름이 다르면 현재 사용 중인 이름을 남긴다.
@@ -233,6 +247,25 @@ function ensureBmSpace(sp) {
   return state.bookmarksBySpace[sp];
 }
 
+// 북마크 목록 하나. 세션 목록(스페이스별)과 공통 목록이 같은 모양이라 조작도 같은 코드가 한다.
+function bmList(scope, sp) {
+  return scope === "common" ? state.bookmarksCommon : ensureBmSpace(sp);
+}
+function isFolder(x) { return !!(x && x.folder); }
+function findFolder(list, id) { return id ? list.find((x) => isFolder(x) && x.folder === String(id)) || null : null; }
+// url 은 폴더 안까지 합쳐 한 목록에 하나만 둔다. 별표가 url 하나로 추가·삭제를 정하기 때문이다.
+function findBm(list, url) {
+  if (!url) return null;
+  const top = list.findIndex((x) => !isFolder(x) && x.url === url);
+  if (top >= 0) return { arr: list, i: top };
+  for (const f of list) {
+    if (!isFolder(f)) continue;
+    const i = f.items.findIndex((x) => x.url === url);
+    if (i >= 0) return { arr: f.items, i };
+  }
+  return null;
+}
+
 function ensureHistory(sp) {
   if (!sp) return null;
   if (!Array.isArray(state.urlHistoryBySpace[sp])) state.urlHistoryBySpace[sp] = [];
@@ -250,25 +283,27 @@ export function mutate(m) {
   if (!m || typeof m.op !== "string") return false;
   const sp = m.space;
   switch (m.op) {
+    // 북마크 조작은 scope 로 목록을 고른다. "common" 이면 공통 목록, 없으면 그 스페이스의 세션 목록이다.
     case "bookmark.add": {
-      const bm = ensureBmSpace(sp); if (!bm || !m.url) return false;
-      if (bm.some((b) => b.url === m.url)) return false;
-      bm.push({ url: String(m.url), title: String(m.title || m.url).slice(0, 60) });
+      const bm = bmList(m.scope, sp); if (!bm || !m.url) return false;
+      if (findBm(bm, m.url)) return false;
+      const f = findFolder(bm, m.folder); if (m.folder && !f) return false;
+      (f ? f.items : bm).push({ url: String(m.url), title: String(m.title || m.url).slice(0, 60) });
       break;
     }
     case "bookmark.remove": {
-      const bm = ensureBmSpace(sp); if (!bm) return false;
-      const before = bm.length;
-      state.bookmarksBySpace[sp] = bm.filter((b) => b.url !== m.url);
-      if (state.bookmarksBySpace[sp].length === before) return false;
+      const bm = bmList(m.scope, sp); if (!bm) return false;
+      const at = findBm(bm, m.url); if (!at) return false;
+      at.arr.splice(at.i, 1);
       break;
     }
     case "bookmark.edit": {
-      const bm = ensureBmSpace(sp); if (!bm || !m.url) return false;
-      const b = bm.find((x) => x.url === m.url); if (!b) return false;
+      const bm = bmList(m.scope, sp); if (!bm || !m.url) return false;
+      const at = findBm(bm, m.url); if (!at) return false;
+      const b = at.arr[at.i];
       let changed = false;
       if (m.newUrl != null && String(m.newUrl) && b.url !== String(m.newUrl)) {
-        if (bm.some((x) => x !== b && x.url === String(m.newUrl))) return false; // 중복 URL 금지
+        if (findBm(bm, String(m.newUrl))) return false; // 중복 URL 금지
         b.url = String(m.newUrl); changed = true;
       }
       if (m.title != null) { const t = String(m.title).slice(0, 60); if (b.title !== t) { b.title = t; changed = true; } }
@@ -310,13 +345,52 @@ export function mutate(m) {
       if (tabs.findIndex((t) => t.id === m.id) === from && before < 0) return false; // 제자리
       break;
     }
+    // 옮길 것은 url(북마크) 또는 folder(폴더)다. 갈 곳은 toScope 목록(없으면 같은 목록)의 맨 위 단계에서
+    // before(url)·beforeFolder 앞이고, 둘 다 없으면 맨 끝이다. into 가 있으면 그 폴더의 끝으로 들어간다.
     case "bookmark.move": {
-      const bm = ensureBmSpace(sp); if (!bm || !m.url) return false;
-      const from = bm.findIndex((b) => b.url === m.url); if (from < 0) return false;
-      const [moved] = bm.splice(from, 1);
-      const before = m.before ? bm.findIndex((b) => b.url === m.before) : -1;
-      if (before < 0) bm.push(moved); else bm.splice(before, 0, moved);
-      if (bm.findIndex((b) => b.url === m.url) === from && before < 0) return false;
+      const src = bmList(m.scope, sp); if (!src) return false;
+      const dst = Object.prototype.hasOwnProperty.call(m, "toScope") ? bmList(m.toScope, sp) : src;
+      if (!dst) return false;
+      const snap = JSON.stringify([src, dst]);
+      let from = null;
+      if (m.folder) { const i = src.findIndex((x) => isFolder(x) && x.folder === String(m.folder)); if (i >= 0) from = { arr: src, i }; }
+      else from = findBm(src, m.url);
+      if (!from) return false;
+      const moved = from.arr[from.i];
+      // 다른 목록으로 옮길 때 그쪽에 같은 주소나 같은 폴더가 있으면 거절한다. 합치면 한쪽 제목이 사라진다.
+      if (dst !== src && ((isFolder(moved) ? moved.items.map((x) => x.url) : [moved.url]).some((u) => findBm(dst, u))
+        || (isFolder(moved) && findFolder(dst, moved.folder)))) return false;
+      const into = m.into ? findFolder(dst, m.into) : null;
+      if (m.into && (!into || isFolder(moved))) return false; // 폴더 안에 폴더는 두지 않는다
+      from.arr.splice(from.i, 1);
+      if (into) into.items.push(moved);
+      else {
+        const before = m.beforeFolder ? dst.findIndex((x) => isFolder(x) && x.folder === String(m.beforeFolder))
+          : m.before ? dst.findIndex((x) => !isFolder(x) && x.url === m.before) : -1;
+        if (before < 0) dst.push(moved); else dst.splice(before, 0, moved);
+      }
+      if (JSON.stringify([src, dst]) === snap) return false;
+      break;
+    }
+    case "bookmark.folder.add": {
+      const bm = bmList(m.scope, sp); if (!bm || !m.folder) return false;
+      const id = String(m.folder).slice(0, 40); if (findFolder(bm, id)) return false;
+      bm.push({ folder: id, title: String(m.title || "새 폴더").slice(0, 60).trim() || "새 폴더", items: [] });
+      break;
+    }
+    case "bookmark.folder.rename": {
+      const bm = bmList(m.scope, sp); if (!bm) return false;
+      const f = findFolder(bm, m.folder); if (!f) return false;
+      const t = String(m.title || "").slice(0, 60).trim(); if (!t || f.title === t) return false;
+      f.title = t;
+      break;
+    }
+    // 폴더만 없애고 안의 북마크는 폴더가 있던 자리에 꺼내 둔다. 폴더 삭제로 북마크를 잃지 않게 한다.
+    case "bookmark.folder.remove": {
+      const bm = bmList(m.scope, sp); if (!bm) return false;
+      const i = bm.findIndex((x) => isFolder(x) && x.folder === String(m.folder)); if (i < 0) return false;
+      const [f] = bm.splice(i, 1);
+      bm.splice(i, 0, ...f.items);
       break;
     }
     case "tab.profile": {
@@ -425,7 +499,8 @@ export function mutate(m) {
       // 스페이스(북마크 없는 곳)로 옮겨 UI에서 접근 가능하게 한다(리뷰 지적: __legacy__ 접근 불가).
       let migrated = false;
       const legacy = state.bookmarksBySpace && state.bookmarksBySpace.__legacy__;
-      if (m.space && Array.isArray(legacy) && legacy.length && !(state.bookmarksBySpace[m.space] && state.bookmarksBySpace[m.space].length)) {
+      // 원격 창의 전환은 열람이라 북마크 소속을 정하지 않는다(원격 전환이면 서버 핸들러가 skipLegacyMigrate 를 붙인다).
+      if (m.space && !m.skipLegacyMigrate && Array.isArray(legacy) && legacy.length && !(state.bookmarksBySpace[m.space] && state.bookmarksBySpace[m.space].length)) {
         state.bookmarksBySpace[m.space] = legacy.slice();
         delete state.bookmarksBySpace.__legacy__;
         migrated = true;

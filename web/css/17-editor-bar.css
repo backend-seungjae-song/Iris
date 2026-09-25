@@ -9,15 +9,15 @@
  좁아지면 손잡이가 밖으로 밀려 누를 수 없다.
  글이 이 상자 밑으로 들어가지 않게 편집기 위쪽에 그만큼 여백을 준다(Monaco padding.top).*/
 .editor-float { position:absolute; top:8px; right:16px; z-index:6; display:inline-flex; align-items:center; gap:5px;
-  padding:3px 5px; border:1px solid var(--border); border-radius:var(--r-card);
-  background:color-mix(in srgb, var(--card) 88%, transparent); backdrop-filter:blur(8px);
-  box-shadow:var(--sh-mid); opacity:.75; transition:opacity var(--t-fade) var(--ease); }
+  padding:3px 5px; border:1px solid var(--line); border-radius:var(--r);
+  background:color-mix(in srgb, var(--raised) 88%, transparent); backdrop-filter:blur(8px);
+  box-shadow:var(--menu-shadow); opacity:.75; transition:opacity var(--t) var(--ease); }
 .editor-float:hover, .editor-float:focus-within { opacity:1; }
 .editor-float .editor-controls { flex:none; }
 /* 서식과 표시 옵션 사이 얇은 구분선. 성격이 다른 두 그룹이다.*/
 .editor-float .editor-view-opts { position:relative; padding-left:6px; }
 .editor-float .editor-view-opts::before { content:""; position:absolute; left:0; top:50%; transform:translateY(-50%);
-  width:1px; height:14px; background:var(--border); }
+  width:1px; height:14px; background:var(--line); }
 .editor-float .editor-controls:empty { display:none; }
 .editor-float .editor-controls:empty + .editor-view-opts { padding-left:0; }
 .editor-float .editor-controls:empty + .editor-view-opts::before { display:none; }
@@ -26,13 +26,13 @@
  탭에 이미 같은 이름이 있으므로 여기서 잃는 정보가 적다. 반대로 하면 좁은 창에서
  손잡이가 화면 밖으로 밀려 누를 수 없다.*/
 .fv-bar .fv-name { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  padding:0 10px; align-self:center; color:var(--muted-fg); font-size:var(--fs-xs); }
+  padding:0 10px; align-self:center; color:var(--muted); font-size:var(--fs-s); }
 .fv-bar .fv-tools { display:inline-flex; align-items:center; gap:5px; flex:0 1 auto; min-width:0;
   margin-left:auto; padding:0 6px 0 0; }
 /* 도구 묶음 둘 사이에 얇은 구분선. 서식과 표시 옵션은 다른 그룹이다.*/
 .fv-tools .editor-view-opts { position:relative; padding-left:7px; }
 .fv-tools .editor-view-opts::before { content:""; position:absolute; left:0; top:50%; transform:translateY(-50%);
-  width:1px; height:15px; background:var(--border); }
+  width:1px; height:15px; background:var(--line); }
 .fv-tools .editor-controls:empty { display:none; }
 .fv-tools .editor-controls:empty + .editor-view-opts { padding-left:0; }
 .fv-tools .editor-controls:empty + .editor-view-opts::before { display:none; }
@@ -49,17 +49,17 @@
 /* flex:none 이 없으면 막대가 좁을 때 손잡이와 그 안의 그림이 0 폭으로 줄어든다. 글자
  라벨(B·I·S)만 남고 선 그림은 사라진다(확인 결과: svg 실제 너비 0).*/
 .etool { flex:none; display:inline-flex; align-items:center; justify-content:center; width:21px; height:21px;
-  padding:0; border:none; border-radius:var(--r-ctl); background:none; color:var(--fg); opacity:.62; cursor:pointer;
-  transition:background var(--t-fade) var(--ease), opacity var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.etool:hover { background:var(--muted); opacity:1; }
-.etool:active { background:var(--accent); }
+  padding:0; border:none; border-radius:var(--r); background:none; color:var(--fg); opacity:.62; cursor:pointer;
+  transition:background var(--t) var(--ease), opacity var(--t) var(--ease), color var(--t) var(--ease); }
+.etool:hover { background:var(--hover); opacity:1; }
+.etool:active { background:var(--select); }
 .etool:focus-visible { opacity:1; }
 /* 모드 단추(원문·미리보기)는 밑줄로 현재 상태를 표시한다. 그 규칙(.fv-bar button.on)이
  구체성에서 앞서 손잡이에도 분홍 밑줄이 그려진다. 손잡이의 켜짐은 밑줄이 아니라 색과
  바탕으로 표시한다. 같은 막대에서 두 요소가 같은 신호를 쓰면 상태 구분이 어려워진다.*/
 .etool, .fv-bar .etool, .fv-bar .etool.on { border:none; }
-.etool.on, .fv-bar .etool.on { color:var(--primary); opacity:1;
-  background:color-mix(in srgb, var(--primary) 20%, transparent); }
+.etool.on, .fv-bar .etool.on { color:var(--accent); opacity:1;
+  background:color-mix(in srgb, var(--accent) 20%, transparent); }
 /* 선을 얇게 두면 다크 배경에서 보이지 않는다. 흐린 회색 1.4px 선은 캡처에서 확인되지 않았다.*/
 .etool svg { flex:none; width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.5;
   stroke-linecap:round; stroke-linejoin:round; }
@@ -80,23 +80,19 @@
 .etool { pointer-events:auto; }
 .etool[data-tip]::after { content:attr(data-tip); position:absolute; top:calc(100% + 7px);
   left:50%; margin-left:0;
-  padding:4px 8px; border:1px solid var(--border); border-radius:var(--r-blk); background:var(--card); color:var(--fg);
-  font-size:var(--fs-xs); line-height:1.25; white-space:pre; letter-spacing:var(--ls); z-index:30;
-  box-shadow:var(--sh-mid);
+  padding:4px 8px; border:1px solid var(--line); border-radius:var(--r); background:var(--raised); color:var(--fg);
+  font-size:var(--fs-s); line-height:1.25; white-space:pre; letter-spacing:var(--ls); z-index:30;
+  box-shadow:var(--menu-shadow);
   opacity:0; transform:translate(-50%,-3px); pointer-events:none;
-  transition:opacity var(--t-fade) var(--ease) .22s, transform var(--t-fade) var(--ease) .22s; }
+  transition:opacity var(--t) var(--ease) .22s, transform var(--t) var(--ease) .22s; }
 .etool[data-tip]:hover::after, .etool[data-tip]:focus-visible::after { opacity:1; transform:translate(-50%,0); }
 /* 굵게·기울임·취소선은 글자가 곧 그 서식의 모습이다.*/
-.etool .mdf-ch { font-weight:var(--fw-semi); font-size:var(--fs-sm); line-height:1; }
-[data-mdformat="italic"] .mdf-ch { font-style:italic; font-weight:var(--fw-med); font-family:Georgia,'Times New Roman',serif; }
+.etool .mdf-ch { font-weight:600; font-size:var(--fs); line-height:1; }
+[data-mdformat="italic"] .mdf-ch { font-style:italic; font-weight:500; font-family:Georgia,'Times New Roman',serif; }
 [data-mdformat="strike"] .mdf-ch { text-decoration:line-through; text-decoration-thickness:1.2px; }
-/* 저장되지 않은 편집. VSCode 처럼 탭 앞의 원 하나로 표시한다.*/
-.ctab .cdirty { flex:0 0 auto; width:7px; height:7px; border-radius:50%; background:var(--ai); }
-.ctab.dirty .cclose { opacity:.45; }
-.ctab.dirty:hover .cclose { opacity:1; }
 /* 항상 편집 가능 + 구문 하이라이트: 투명 textarea를 하이라이트된 pre 위에 정렬(둘의 박스 메트릭 동일).*/
 /* 편집기는 VSCode 의 엔진(Monaco)을 그대로 쓴다. 자체 하이라이터와 투명 textarea 겹침은 쓰지 않는다.*/
-.editor-wrap { flex:1 1 auto; position:relative; overflow:hidden; background:var(--bg); }
+.editor-wrap { flex:1 1 auto; position:relative; overflow:hidden; background:var(--surface); }
 /* 미니맵이 떠 있는 손잡이 아래에서 시작하게 내린다. Monaco 내부 클래스 이름을 참조하므로 엔진을 올릴 때 함께 확인한다.
  .minimap 이 사라지면 이 규칙은 아무 효과도 내지 않는다.*/
 .editor-wrap .monaco-editor .minimap { margin-top:44px; }
@@ -105,51 +101,100 @@
 /* 읽는 글은 본문보다 한 단계 크고 줄 간격도 넓다. 훑는 화면과 읽는 화면은 목적이 다르다.*/
 .md-body { flex:1 1 auto; overflow:auto; padding:8px 22px 40px; font-size:var(--fs-md); line-height:var(--lh); color:var(--fg); }
 .md-body > * { max-width:820px; }
-.md-body h1,.md-body h2,.md-body h3,.md-body h4 { font-weight:var(--fw-semi); letter-spacing:var(--ls-title); line-height:1.3; margin:1.4em 0 .5em; }
-.md-body h1 { font-size:1.7em; border-bottom:1px solid var(--border); padding-bottom:.3em; } .md-body h2 { font-size:1.4em; border-bottom:1px solid var(--border); padding-bottom:.25em; } .md-body h3 { font-size:1.18em; } .md-body h4 { font-size:1em; }
+.md-body h1,.md-body h2,.md-body h3,.md-body h4 { font-weight:600; letter-spacing:var(--ls-title); line-height:1.3; margin:1.4em 0 .5em; }
+.md-body h1 { font-size:1.7em; border-bottom:1px solid var(--line); padding-bottom:.3em; } .md-body h2 { font-size:1.4em; border-bottom:1px solid var(--line); padding-bottom:.25em; } .md-body h3 { font-size:1.18em; } .md-body h4 { font-size:1em; }
 .md-body p { margin:.6em 0; } .md-body ul,.md-body ol { margin:.5em 0; padding-left:1.6em; } .md-body li { margin:.2em 0; }
 .md-body del { text-decoration:line-through; }
 .md-body li.md-task { list-style:none; display:flex; align-items:baseline; gap:.5em; }
 .md-body .md-task input { flex:none; accent-color:var(--ai); }
-.md-body code { font-family:var(--mono); font-size:.86em; background:var(--muted); padding:.12em .38em; border-radius:var(--r-ctl); }
-.md-body pre.md-code { background:var(--muted); padding:12px 14px; border-radius:var(--r-blk); overflow-x:auto; font:var(--fs-xs)/1.5 var(--mono); }
+.md-body code { font-family:var(--mono); font-size:.86em; background:var(--raised); padding:.12em .38em; border-radius:var(--r); }
+.md-body pre.md-code { background:var(--raised); padding:12px 14px; border-radius:var(--r); overflow-x:auto; font:var(--fs-s)/1.5 var(--mono); }
 .md-body pre.md-code code { background:none; padding:0; }
-.md-body blockquote { margin:.6em 0; padding:.2em 1em; border-left:2px solid var(--border); color:var(--muted-fg); }
+.md-body blockquote { margin:.6em 0; padding:.2em 1em; border-left:2px solid var(--line); color:var(--muted); }
 .md-body a { color:var(--ai); text-decoration:none; } .md-body a:hover { text-decoration:underline; }
-.md-body hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
-.md-body table { border-collapse:collapse; } .md-body th,.md-body td { border:1px solid var(--border); padding:5px 10px; }
-.browserview { position:absolute; inset:0; display:flex; flex-direction:column; padding:8px; gap:8px; }
-.btn.nav { padding:0 10px; background:var(--muted); color:var(--fg); }
-#wv-bookmark.on { color:var(--pal-yellow-pop); }
-.bookmark-line { display:flex; align-items:center; gap:6px; min-height:0; }
-.bmk-add { flex:none; width:22px; height:22px; border:1px solid var(--border); background:var(--card); color:var(--muted-fg); border-radius:var(--r-blk); cursor:pointer; font-size:var(--fs-md); line-height:1; display:flex; align-items:center; justify-content:center;
-  transition:color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.bmk-add:hover { color:var(--ai); border-color:var(--ai); }
-.bookmark-bar { display:flex; gap:6px; overflow-x:auto; min-height:0; flex:1 1 auto; }
-.bmk { display:inline-flex; align-items:center; gap:5px; background:var(--muted); border:1px solid var(--border); border-radius:var(--r-blk); padding:3px 8px; font-size:var(--fs-xs); color:var(--fg); cursor:pointer; white-space:nowrap; flex:none; max-width:180px; }
+.md-body hr { border:none; border-top:1px solid var(--line); margin:1.4em 0; }
+.md-body table { border-collapse:collapse; } .md-body th,.md-body td { border:1px solid var(--line); padding:5px 10px; }
+/* 주소 줄·북마크 줄·페이지를 선 하나씩으로 나눈다. 페이지는 가운데 영역 끝까지 채운다. */
+.browserview { position:absolute; inset:0; display:flex; flex-direction:column; padding:0; gap:0; }
+.bookmark-line { display:flex; align-items:center; gap:2px; height:30px; flex:none; padding:0 8px; border-bottom:1px solid var(--line);
+  font-size:var(--fs-s); overflow:hidden; white-space:nowrap; }
+.bmk-add { width:22px; height:22px; display:grid; place-items:center; flex:none; padding:1px 6px; border:0; border-radius:var(--r-s);
+  background:none; font:inherit; color:var(--muted); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.bmk-add:hover { background:var(--hover); color:var(--fg); }
+.bmk-add svg { width:13px; height:13px; display:block; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.bmk-line-sep { width:1px; height:14px; background:var(--line); margin:0 4px; flex:none; }
+.bookmark-bar { display:flex; align-items:center; gap:2px; overflow-x:auto; min-height:0; flex:1 1 auto; }
+/* 줄 높이가 30px 라 가로 스크롤바가 북마크를 가린다. 넘치면 휠·끌기로 옮긴다. */
+.bookmark-bar::-webkit-scrollbar { display:none; }
+/* 북마크는 글자만 둔다. 고치기·지우기 표시는 가리킬 때만 나온다. */
+.bmk { height:22px; display:flex; align-items:center; gap:5px; padding:0 7px; border-radius:var(--r-s); color:var(--fg-2);
+  white-space:nowrap; flex:none; max-width:180px;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.bmk:hover { background:var(--hover); color:var(--fg); }
 .bmk span { overflow:hidden; text-overflow:ellipsis; }
-.bmk .bmk-x, .bmk .bmk-e { color:var(--muted-fg); font-size:var(--fs-sm); flex:none; }
+.bmk .bmk-x, .bmk .bmk-e { display:none; color:var(--faint); flex:none; }
+.bmk:hover .bmk-x, .bmk:hover .bmk-e, .bmk:focus-within .bmk-x, .bmk:focus-within .bmk-e { display:inline; }
 .bmk .bmk-e:hover, .bmk .bmk-x:hover { color:var(--fg); }
-.bmk .bmk-ok { color:var(--on-accent); font-size:var(--fs-md); flex:none; cursor:pointer; }
-.bmk .bmk-in { font:inherit; font-size:var(--fs-xs); background:var(--card); border:1px solid var(--ring); border-radius:var(--r-ctl); color:var(--fg); padding:1px 4px; outline:none; }
+.bmk .bmk-ok { color:var(--focus); flex:none; cursor:pointer; }
+.bmk .bmk-in { height:18px; font:inherit; background:var(--raised); border:1px solid var(--focus); border-radius:var(--r-s); color:var(--fg); padding:0 4px; outline:none; }
+.bmk .bmk-in:focus-visible { box-shadow:none; }
 .bmk .bmk-in-t { width:80px; }
 .bmk .bmk-in-u { width:150px; }
 .bmk:has(.bmk-in) { max-width:none; }
-#wv-profile { max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.profile-menu { position:fixed; z-index:9999; background:var(--card); border:1px solid var(--ring); border-radius:var(--r-card); box-shadow:var(--sh-high); padding:5px; min-width:180px; font-size:var(--fs-sm); }
+.bmk:active, .bmk-add:active, .bmk-sec-h:active { transform:scale(.96); }
+/* 구역: 세션 하나이거나, 공통 북마크를 켜면 공통·세션 둘이다. 둘일 때만 이름표와 세로선이 보인다. */
+.bmk-sec { display:flex; align-items:center; gap:2px; flex:none; }
+.bmk-sec + .bmk-sec::before { content:""; width:1px; height:14px; background:var(--line); margin:0 4px; flex:none; }
+.bmk-sec-h { height:22px; padding:0 6px; border:0; border-radius:var(--r-s); background:none; font:inherit; font-size:var(--fs-xs); color:var(--faint); flex:none; cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.bmk-sec-h:hover, .bmk-sec-h[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
+/* 끝 표시: 구역 끝에 놓는 자리. 보이지 않고 끌어 놓을 때만 쓴다. */
+.bmk-end { flex:none; width:10px; align-self:stretch; }
+.bmk-end.drop-before { box-shadow:inset 2px 0 0 var(--focus); }
+.bmk-folder .bmk-fi { width:12px; height:12px; flex:none; fill:none; stroke:currentColor; color:var(--faint); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.bmk-folder .bmk-n { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); flex:none; }
+.bmk-folder[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
+.bmk-folder.drop-into { box-shadow:inset 0 0 0 1px var(--ai); }
+/* 폴더·구역 메뉴. 누른 칩 아래에서 열리므로 왼쪽 위를 기준으로 커진다. */
+.bmf-menu { position:fixed; z-index:9999; min-width:220px; max-width:340px; max-height:360px; overflow:auto;
+  background:var(--raised); border:1px solid var(--line-strong); border-radius:var(--r); padding:4px; box-shadow:var(--menu-shadow);
+  font-size:var(--fs); outline:none; transform-origin:top left;
+  transition:opacity var(--t) var(--ease), transform var(--t) var(--ease); }
+@starting-style { .bmf-menu { opacity:0; transform:scale(.97); } }
+.bmf-h { font:600 var(--fs-s)/1 var(--sans); color:var(--fg-2); padding:8px 8px 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bmf-row { display:flex; align-items:center; gap:2px; border-radius:var(--r-s); }
+.bmf-row:hover { background:var(--hover); }
+.bmf-open, .bmf-act, .bmf-ic { font:inherit; background:none; border:none; color:var(--fg-2); cursor:pointer; border-radius:var(--r-s);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.bmf-open { flex:1; min-width:0; height:var(--row); text-align:left; padding:0 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bmf-row:hover .bmf-open { color:var(--fg); }
+.bmf-ic { flex:none; width:22px; height:22px; display:grid; place-items:center; color:var(--muted); }
+.bmf-ic:hover { color:var(--fg); background:var(--hover); }
+.bmf-act { display:flex; align-items:center; width:100%; height:var(--row); text-align:left; padding:0 8px; }
+.bmf-act:hover:not([disabled]) { background:var(--hover); color:var(--fg); }
+.bmf-act[disabled] { color:var(--faint); cursor:default; }
+.bmf-sep { height:1px; background:var(--line); margin:4px 2px; }
+.bmf-empty { font-size:var(--fs-s); color:var(--faint); padding:6px 8px; }
+#wv-profile { max-width:160px; }
+.profile-menu { position:fixed; z-index:9999; background:var(--raised); border:1px solid var(--line-strong); border-radius:var(--r); box-shadow:var(--menu-shadow); padding:4px; min-width:180px; font-size:var(--fs); }
 /* 버튼이 툴바 오른쪽 끝에 있어 메뉴는 왼쪽으로 펼친다(오른쪽 모서리를 버튼에 맞춤).
  그래서 글도 오른쪽으로 정렬한다. 펼쳐지는 방향과 글이 시작하는 쪽이 같아야 읽기 쉽다.*/
 .profile-menu { text-align:right; }
-.profile-menu .pm-item { padding:5px 9px; border-radius:var(--r-ctl); cursor:pointer; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.profile-menu .pm-item:hover { background:var(--muted); }
-.profile-menu .pm-item.on { color:var(--on-accent); }
-.profile-menu .pm-sep { height:1px; background:var(--border); margin:5px 2px; }
-.profile-menu .pm-head { padding:3px 9px; font-size:var(--fs-2xs); color:var(--muted-fg); text-transform:uppercase; letter-spacing:var(--ls-caps); }
+.profile-menu .pm-item { height:var(--row); line-height:var(--row); padding:0 8px; border-radius:var(--r-s); cursor:pointer; color:var(--fg-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.profile-menu .pm-item:hover { background:var(--hover); color:var(--fg); }
+.profile-menu .pm-item.on { background:var(--select); color:var(--select-fg); }
+.profile-menu .pm-sep { height:1px; background:var(--line); margin:4px 2px; }
+.profile-menu .pm-head { padding:8px 8px 6px; font:600 var(--fs-s)/1 var(--sans); color:var(--fg-2); }
 .profile-menu .pm-import { color:var(--fg); }
-.profile-menu .pm-empty { padding:5px 9px; font-size:var(--fs-xs); color:var(--muted-fg); }
+.profile-menu .pm-empty { padding:0 8px; height:var(--row); line-height:var(--row); font-size:var(--fs-s); color:var(--faint); }
 .profile-menu .pm-chrome { max-height:200px; overflow-y:auto; }
-.profile-menu .pm-new { display:flex; gap:5px; padding:2px; }
+.profile-menu .pm-new { display:flex; gap:4px; padding:2px; }
 /* 입력칸만 왼쪽 정렬한다. 이름을 입력하는 칸까지 오른쪽으로 밀면 커서 위치를 찾기 어렵다.*/
-.profile-menu .pm-in { flex:1; min-width:0; font:inherit; font-size:var(--fs-sm); background:var(--bg); border:1px solid var(--ring); border-radius:var(--r-ctl); color:var(--fg); padding:3px 6px; outline:none; text-align:left; }
-.profile-menu .pm-add { flex:none; background:var(--muted); border:1px solid var(--border); border-radius:var(--r-ctl); color:var(--fg); cursor:pointer; padding:0 9px; }
-.wv-wrap { flex:1 1 auto; min-height:0; background:var(--pal-paper); border:1px solid var(--border); border-radius:0 0 var(--r-card) var(--r-card); overflow:hidden; position:relative; }
+.profile-menu .pm-in { flex:1; min-width:0; height:24px; font:inherit; background:var(--surface); border:1px solid var(--line-strong); border-radius:var(--r-s); color:var(--fg); padding:0 6px; outline:none; text-align:left; }
+.profile-menu .pm-in:focus { border-color:var(--focus); }
+.profile-menu .pm-in:focus-visible { box-shadow:none; }
+.profile-menu .pm-add { flex:none; height:24px; background:none; border:1px solid var(--line); border-radius:var(--r-s); font:inherit; font-size:var(--fs-s); color:var(--fg-2); cursor:pointer; padding:0 8px; }
+.profile-menu .pm-add:hover { background:var(--hover); color:var(--fg); }
+.wv-wrap { flex:1 1 auto; min-height:0; background:var(--pal-paper); border:0; overflow:hidden; position:relative; }

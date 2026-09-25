@@ -1,29 +1,125 @@
-/* AI 자동완성 로그인 허용 목록 */
+/* AI 자동완성 로그인 허용 목록: 왼쪽 사이트 목록 + 오른쪽 상세 */
 /* 이 이름을 만드는 곳: browser/autofill-allowlist.js */
-.af-note-min { margin-top:8px; font-size:var(--fs-2xs); color:var(--muted-fg); line-height:var(--lh); }
-/* 사이트 한 장 = 카드 하나. 계정이 여럿이어도 사이트 이름은 한 번만 나온다. */
-.af-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px; align-items:start; }
-.af-site { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden;
-  transition:border-color var(--t-fade) var(--ease); }
-.af-site.open { border-color:color-mix(in srgb, var(--primary) 45%, var(--border)); }
-.af-site-h { display:flex; align-items:center; gap:7px; padding:9px 11px; border-bottom:1px solid var(--border); }
-.af-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--border); }
-.af-site.open .af-dot { background:var(--primary); }
-.af-site-n { flex:1; min-width:0; font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.af-site-c { flex:none; font-size:var(--fs-2xs); color:var(--muted-fg); font-variant-numeric:tabular-nums; }
-.af-row { display:flex; align-items:center; gap:10px; padding:7px 11px; }
-.af-row + .af-row { border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
-.af-u { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted-fg); }
-.af-site.open .af-u { color:var(--fg); }
-/* 켜짐/꺼짐은 글자보다 형태로 구분하는 편이 여러 줄을 훑을 때 읽기 쉽다. */
-.af-sw { flex:none; width:34px; height:19px; padding:0; border:1px solid var(--border); border-radius:var(--r-pill);
-  background:var(--bg); cursor:pointer; position:relative;
-  transition:background var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.af-sw i { position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%;
-  background:var(--muted-fg); transition:left var(--t-fade) var(--ease), background var(--t-fade) var(--ease); }
-.af-sw:hover { border-color:var(--ring); }
-.af-sw.on { background:var(--primary); border-color:var(--primary); }
-.af-sw.on i { left:16px; background:var(--primary-fg); }
+/* 앱에는 button·제목의 기본 모양을 지우는 전역 규칙이 없어서 단추와 제목은 여백·글꼴·테두리를 스스로 정한다. */
 
 /* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
 .af-panel { width:360px; }
+
+/* ---- 머리 ---- */
+.af-head { height:36px; flex:none; display:flex; align-items:center; gap:10px; padding:0 8px 0 16px; background:var(--chrome); border-bottom:1px solid var(--line); }
+.af-head h1 { margin:0; font:600 var(--fs-h)/1 var(--sans); letter-spacing:-.01em; }
+.af-sum { color:var(--muted); font-size:var(--fs-s); }
+.af-sum b { color:var(--fg-2); font:600 var(--fs-s)/1 var(--mono); }
+.af-sp { flex:1; }
+
+/* ---- 부품: 아이콘 단추 · 단추 · 입력칸 · 세그먼트 · 스위치 · 점 ---- */
+.af-ib, .af-btn, .af-seg button, .af-sw { font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
+.af-ib { width:24px; height:24px; display:grid; place-items:center; border-radius:var(--r-s); color:var(--muted); flex:none; }
+.af-ib:hover { background:var(--hover); color:var(--fg); }
+.af-ib:active { transform:scale(.94); }
+
+.af-btn { height:24px; padding:0 9px; display:inline-flex; align-items:center; gap:6px; flex:none; border:1px solid var(--line-strong); border-radius:var(--r-s); color:var(--fg-2); font-size:var(--fs-s); white-space:nowrap; }
+.af-btn svg.i { width:12px; height:12px; }
+.af-btn:hover { background:var(--hover); color:var(--fg); }
+.af-btn:active { transform:scale(.97); }
+.af-btn.af-btn-danger { color:var(--pal-danger); border-color:color-mix(in srgb, var(--pal-danger) 35%, transparent); }
+.af-btn.af-btn-danger:hover { background:color-mix(in srgb, var(--pal-danger) 10%, transparent); }
+
+.af-search { position:relative; display:flex; align-items:center; width:100%; }
+.af-search svg.i { position:absolute; left:7px; width:12px; height:12px; color:var(--faint); }
+.af-inp { height:24px; width:100%; padding:0 8px 0 24px; border:1px solid var(--line-strong); border-radius:var(--r-s); background:var(--raised); color:var(--fg); font:inherit; font-size:var(--fs); outline:none; min-width:0; }
+.af-inp::placeholder { color:var(--faint); }
+.af-inp:focus { border-color:var(--focus); }
+/* 칸 테두리가 포커스를 보이므로 01-base 의 :focus-visible 링을 또 그리지 않는다. */
+.af-inp:focus-visible { box-shadow:none; }
+
+.af-seg { display:flex; border:1px solid var(--line-strong); border-radius:var(--r-s); overflow:hidden; height:24px; }
+.af-seg button { flex:1; padding:0 9px; font-size:var(--fs-s); color:var(--muted); border-right:1px solid var(--line); }
+.af-seg button:last-child { border-right:0; }
+.af-seg button:hover { background:var(--hover); color:var(--fg); }
+.af-seg button.on { background:var(--select); color:var(--select-fg); }
+
+/* 켜짐/꺼짐은 글자보다 형태로 구분하는 편이 여러 줄을 훑을 때 읽기 쉽다. */
+.af-sw { width:28px; height:16px; border-radius:8px; border:1px solid var(--line-strong); background:var(--raised); position:relative; flex:none; display:inline-block; vertical-align:middle; }
+.af-sw i { position:absolute; top:2px; left:2px; width:10px; height:10px; border-radius:50%; background:var(--faint); transition:left var(--t) var(--ease), background var(--t) var(--ease); }
+.af-sw:hover { border-color:var(--focus); }
+.af-sw.on { background:var(--accent); border-color:transparent; }
+.af-sw.on i { left:14px; background:var(--pal-ink); }
+
+.af-dot { width:6px; height:6px; border-radius:50%; background:var(--line-strong); flex:none; margin-right:2px; }
+.af-dot.on { background:var(--accent); }
+.af-mono { font-family:var(--mono); color:var(--muted); }
+
+/* ---- 본문: 두 단 ---- */
+.af-body { flex:1; min-height:0; display:flex; flex-direction:column; background:var(--surface); }
+.af-split { flex:1; min-height:0; display:grid; grid-template-columns:280px 1fr; }
+
+/* ---- 왼쪽: 검색·거르기와 두 목록. 열린 사이트가 위에 온다. ---- */
+.af-nav { background:var(--chrome); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+.af-navtools { padding:10px; display:flex; flex-direction:column; gap:6px; }
+.af-sec { border-top:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+/* 열린 사이트는 늘 보이고, 저장된 전체 목록만 남은 높이 안에서 스크롤한다. */
+.af-sec-open { flex:none; }
+.af-sec-all { flex:1; }
+.af-sec-all .af-list { overflow-y:auto; min-height:0; }
+.af-sec-h { display:flex; align-items:center; gap:6px; padding:8px 10px 6px; color:var(--muted); }
+.af-sec-h h3 { margin:0; font:600 11px/1 var(--sans); text-transform:none; letter-spacing:0; color:var(--fg-2); }
+.af-n { font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); }
+.af-list { padding:0 6px 8px; overflow:hidden; }
+.af-row { width:100%; height:var(--row); display:flex; align-items:center; gap:6px; padding:0 8px; border:0; border-radius:var(--r-s); background:none;
+  color:var(--fg-2); font:inherit; letter-spacing:inherit; text-align:left; white-space:nowrap; position:relative; cursor:auto; }
+.af-row:hover { background:var(--hover); color:var(--fg); }
+.af-row.on { background:var(--select); color:var(--select-fg); }
+.af-row.on::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background:var(--accent); }
+.af-h { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.af-end { margin-left:auto; font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); }
+.af-row.on .af-end { color:inherit; opacity:.8; }
+/* 목록 아래 한 줄 안내. 열린 탭이 많으면 로그인 없이 열린 사이트 줄이 목록을 밀어내므로 두 줄까지만 보이고 전체는 title 에 둔다.
+   자르기를 안쪽 span 에 거는 이유: 바깥에 걸면 셋째 줄이 아래 여백(padding) 안에 비친다. */
+.af-note { padding:0 14px 10px; font-size:var(--fs-xs); color:var(--faint); line-height:1.5; }
+.af-clamp { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+/* ---- 오른쪽: 고른 사이트 하나. 경고는 위, 설명과 전체 잠금은 아래에 붙는다. ---- */
+.af-detail { min-width:0; display:flex; flex-direction:column; min-height:0; overflow-y:auto; }
+.af-warn { display:flex; align-items:center; gap:10px; padding:6px 10px 6px 18px; border:0; border-bottom:1px solid var(--line); border-left:2px solid var(--pal-yellow-pop);
+  border-radius:0; color:var(--fg-2); font-size:var(--fs-s); background:var(--raised); }
+.af-warn > svg.i { color:var(--pal-yellow-pop); width:13px; height:13px; }
+.af-warn b { font:500 var(--fs-s)/1 var(--mono); color:var(--fg); }
+.af-warn .af-btn { margin-left:auto; }
+.af-warn .af-btn svg.i { width:11px; height:11px; }
+.af-dh { display:flex; align-items:center; gap:10px; padding:16px 20px 14px; border-bottom:1px solid var(--line); }
+.af-dh-main { min-width:0; }
+.af-dh-t { font:650 var(--fs-h)/1.2 var(--sans); display:flex; align-items:center; gap:10px; }
+.af-dh-sub { color:var(--faint); font-size:var(--fs-s); font-family:var(--mono); margin-top:5px; }
+.af-dh-acts { margin-left:auto; }
+.af-dh-n { color:var(--muted); font-size:var(--fs-s); }
+.af-badge-open { display:inline-flex; align-items:center; gap:5px; font:500 var(--fs-xs)/1 var(--sans); color:var(--accent); padding:3px 6px; border-radius:var(--r-s); background:rgb(var(--pal-babyblue-rgb) / .08); }
+.af-badge-open svg.i { width:11px; height:11px; }
+.af-dsec { padding:14px 20px; border-bottom:1px solid var(--line); }
+.af-dsec h3 { margin:0 0 8px; font:600 var(--fs-s)/1 var(--sans); color:var(--fg-2); }
+.af-acc { height:36px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--line); }
+.af-acc:last-child { border-bottom:0; }
+.af-acc-ic { color:var(--faint); }
+/* 아이디가 길면 줄을 넘기지 않고 끝을 줄인다. 줄 높이가 36px 로 고정이라 넘기면 다음 줄과 겹친다. */
+.af-u { font:400 var(--fs)/1 var(--mono); color:var(--muted); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.af-acc.on .af-u { color:var(--fg); }
+.af-st { font-size:var(--fs-s); color:var(--faint); width:100px; text-align:right; }
+.af-acc.on .af-st { color:var(--ok); }
+/* 거르기 결과 고를 사이트가 없을 때 상세 자리에 한 줄로 알린다. */
+.af-none { margin:0; padding:14px 20px; color:var(--muted); font-size:var(--fs-s); line-height:1.6; }
+.af-foot { margin-top:auto; padding:14px 20px; border-top:1px solid var(--line); display:flex; align-items:center; gap:16px; }
+.af-foot .af-btn { margin-left:auto; }
+.af-why { margin:0; color:var(--muted); font-size:var(--fs-s); line-height:1.6; max-width:640px; }
+.af-why code { font:500 var(--fs-s)/1 var(--mono); color:var(--fg-2); background:var(--raised); border:1px solid var(--line); border-radius:var(--r-s); padding:1px 4px; }
+
+/* ---- 빈 상태. 저장된 로그인이 하나도 없으면 목록 대신 계정 화면으로 가는 단추 하나를 둔다. ---- */
+.af-empty { flex:1; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:10px; padding:0 64px 80px; max-width:560px; }
+.af-empty-ic { width:36px; height:36px; border-radius:var(--r); border:1px solid var(--line-strong); display:grid; place-items:center; color:var(--muted); margin-bottom:4px; }
+.af-empty h2 { margin:0; font:600 var(--fs-h)/1.3 var(--sans); }
+.af-empty p { margin:0; color:var(--muted); font-size:var(--fs); line-height:1.6; }
+.af-empty .af-btn { margin-top:4px; }
+
+/* 누르는 요소만 움직인다. body.motion-off 는 01-base.css 가 끈다. */
+.af-ib, .af-btn, .af-seg button, .af-row, .af-sw, .af-inp {
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease),
+    transform .12s var(--ease), opacity var(--t) var(--ease); }

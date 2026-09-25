@@ -1,132 +1,237 @@
-/* 모바일 에뮬레이터. web/js/emulator/pane.js(탭 화면) · devices-panel.js(rail 기기·설정 화면) ·
-   boot.js(탭 수명·분리 창)가 함께 쓴다. class 이름은 모두 emu- 로 시작한다. */
+/* 모바일 에뮬레이터. web/js/emulator/pane.js(기기 화면) · devices-panel.js(rail 왼쪽 패널) ·
+   boot.js(rail 머리·무대·세로 열) · launch-button.js(채팅 머리의 기기 목록)가 함께 쓴다.
+   class 이름은 모두 emu- 로 시작한다. 앱에는 button 기본 모양을 지우는 전역 규칙이 없어서 단추는
+   글꼴·색·테두리를 스스로 정한다. [hidden] 은 01-base.css(분리 창은 window.css)가 숨긴다. */
 
-/* ---- boot.js: rail 패널 머리·몸통, 탭 안 화면 그릇, 분리 안내 ---- */
-/* 폭은 배치 계약(rail-items.js panel: "emu-panel")이 아니라 이 화면 자신이 갖는다. */
-.emu-panel { width: 320px; }
-.emu-rail-head { display: flex; align-items: center; padding: 10px 12px 6px; }
-.emu-rail-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
-.emu-rail-body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: auto; }
-.emu-tab-host { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
-/* 세로 열(boot.js). 배치 엔진이 켜져 있을 때만 보이고, 자리와 크기는 엔진이 인라인으로 준다. */
-.emu-column { display: none; }
-body.layout-on .emu-column { display: flex; flex-direction: column; min-height: 0; background: var(--bg); border-left: 1px solid var(--border); }
+/* ---- 공통 부품: 아이콘 · 단추 · 알약 · 상태 점 ---- */
+.emu-ic { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 
-/* ---- pane.js: 탭 화면 ---- */
-.emu-pane { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--bg); color: var(--fg); font-size: var(--fs-sm); }
-
-.emu-toolbar {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; flex: 0 0 auto;
-  padding: 6px 10px; border-bottom: 1px solid var(--border);
-}
-.emu-toolbar-icon { font-size: var(--fs-md); }
-.emu-toolbar-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
-.emu-toolbar-status { white-space: nowrap; font-size: var(--fs-xs); color: var(--muted-fg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
-.emu-toolbar-status-subtle { border-color: transparent; padding: 0; }
-.emu-toolbar-spacer { flex: 1 1 auto; }
-.emu-device-select {
-  height: 26px; font-size: var(--fs-xs); background: var(--card); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; max-width: 180px;
-}
 .emu-btn {
-  flex: 0 0 auto; white-space: nowrap; height: 26px; padding: 0 10px; font-size: var(--fs-xs); border-radius: 6px;
-  border: 1px solid var(--border); background: var(--card); color: var(--fg); cursor: pointer;
+  height: 24px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; flex: none;
+  border: 1px solid var(--line-strong); border-radius: var(--r-s); background: none; color: var(--fg-2);
+  font: inherit; font-size: var(--fs-s); white-space: nowrap; cursor: pointer;
 }
-.emu-btn:hover:not(:disabled) { background: var(--accent); }
-.emu-btn:disabled { opacity: 0.5; cursor: default; }
-.emu-btn-primary { background: var(--primary); color: var(--primary-fg); border-color: transparent; }
-.emu-btn-danger { color: var(--destructive); }
+.emu-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); border-color: var(--focus); }
+.emu-btn:active:not(:disabled) { transform: scale(.97); }
+.emu-btn:disabled { opacity: .45; cursor: default; }
+.emu-btn .emu-ic { width: 13px; height: 13px; }
+.emu-btn-ghost { border-color: transparent; color: var(--muted); }
+.emu-btn-ghost:hover:not(:disabled) { border-color: var(--line); }
+.emu-btn-danger { color: var(--pal-danger); border-color: color-mix(in srgb, var(--pal-danger) 40%, transparent); }
+.emu-btn-danger:hover:not(:disabled) { border-color: var(--pal-danger); color: var(--pal-danger); }
+/* 기기에 붙기 전의 [연결]. 화면에서 가장 앞선 동작이라 채운 단추로 둔다. */
+.emu-btn-pri { background: var(--accent); border-color: transparent; color: var(--pal-ink); font-weight: 600; }
+.emu-btn-pri:hover:not(:disabled) { background: var(--focus); border-color: transparent; color: var(--pal-ink); }
 
+.emu-ib {
+  width: 26px; height: 26px; padding: 1px 6px; display: grid; place-items: center; flex: none;
+  border: 0; border-radius: var(--r-s); background: none; color: var(--muted); font: inherit; cursor: pointer;
+}
+.emu-ib:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.emu-ib:active:not(:disabled) { transform: scale(.96); }
+.emu-ib:disabled { opacity: .45; cursor: default; }
+
+.emu-pill { flex: none; font-size: var(--fs-xs); line-height: 1; padding: 3px 6px; border-radius: 3px; border: 1px solid var(--line);
+  color: var(--muted); white-space: nowrap; }
+.emu-pill-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.emu-pill-warn { color: var(--pal-yellow-pop); border-color: color-mix(in srgb, var(--pal-yellow-pop) 40%, transparent); }
+
+.emu-dotst { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.emu-dotst-work { background: var(--ok); box-shadow: 0 0 0 3px rgb(139 251 194 / .12); }
+.emu-dotst-idle { background: var(--faint); }
+
+/* 누르는 요소만 움직인다. body.motion-off 는 01-base.css 가 끈다. */
+.emu-btn, .emu-ib, .emu-dp-row, .emu-launch-item, .emu-dp-dd .cc-dd-trigger, .emu-tb-dd .cc-dd-trigger {
+  transition: background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease),
+    transform .12s var(--ease), opacity var(--t) var(--ease);
+}
+
+/* ---- boot.js: rail 패널 머리 ---- */
+/* 폭은 배치 계약(rail-items.js panel: "emu-panel")이 아니라 이 화면 자신이 갖는다. */
+.emu-panel { width: 288px; }
+.emu-rail-head { height: 44px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 var(--pad); }
+.emu-rail-title { font: 600 var(--fs-h)/1 var(--sans); letter-spacing: -.015em; color: var(--fg); white-space: nowrap; }
+.emu-rail-body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+
+/* ---- devices-panel.js: 위에서부터 기본 기기 · 플랫폼별 기기 · 필요한 도구 ---- */
+/* 도구 칸은 맨 아래에 붙고 위 두 칸이 스크롤한다. */
+.emu-dp { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.emu-dp-scroll { flex: 1 1 auto; min-height: 8px; overflow-y: auto; display: flex; flex-direction: column; }
+.emu-dp-groups { display: contents; }
+.emu-sp { flex: 1; }
+.emu-dp-count { font-size: var(--fs-s); color: var(--faint); white-space: nowrap; }
+.emu-dp-blk { border-top: 1px solid var(--line); flex: none; }
+.emu-dp-blk-h { display: flex; align-items: center; gap: 6px; padding: 9px var(--pad) 6px; }
+.emu-dp-h3 { margin: 0; font: 600 var(--fs-s)/1 var(--sans); color: var(--fg-2); white-space: nowrap; }
+.emu-dp-n { font: 500 var(--fs-xs)/1 var(--mono); color: var(--faint); }
+.emu-dp-plat-ic { color: var(--muted); }
+.emu-dp-def { padding: 0 var(--pad) 10px; display: flex; flex-direction: column; gap: 6px; }
+.emu-dp-desc { font-size: var(--fs-s); color: var(--faint); line-height: 1.45; }
+/* 목록을 부를 수 없었거나 Xcode 작업이 실패했을 때 목록 위에 뜨는 알림. 모양은 오류 줄(.emu-error-bar)과 같다. */
+.emu-dp-note { margin: 8px 6px; padding: 6px 8px; border-radius: var(--r-s); font-size: var(--fs-s); line-height: 1.45;
+  color: var(--pal-danger); background: color-mix(in srgb, var(--pal-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pal-danger) 40%, transparent); overflow-wrap: anywhere; }
+.emu-dp-note.busy { color: var(--fg-2); background: var(--raised); border-color: var(--line); }
+.emu-dp-note.busy::before, .emu-screen-status-loading::before, .emu-pill-loading::before {
+  content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
+  border: 1.5px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%;
+  animation: emu-check-spin .7s linear infinite;
+}
+@keyframes emu-check-spin { to { transform: rotate(360deg); } }
+
+/* 드롭다운(core/dropdown.js)의 트리거를 이 화면의 드롭다운 모양으로 그린다. */
+.emu-dp-dd { display: flex; flex-direction: column; }
+.emu-dp-dd .cc-dd-trigger {
+  width: 100%; height: 26px; display: inline-flex; align-items: center; gap: 7px; padding: 0 6px 0 9px; min-width: 0;
+  border: 1px solid var(--line-strong); border-radius: var(--r-s); background: var(--raised); color: var(--fg);
+  font: inherit; font-size: var(--fs); white-space: nowrap;
+}
+.emu-dp-dd .cc-dd-trigger:hover { border-color: var(--focus); }
+.emu-dp-dd .cc-dd-trigger:active { transform: scale(.98); }
+.emu-dp-dd .cc-dd-value { flex: 0 1 auto; }
+.emu-dp-dd .cc-dd-sub { color: var(--faint); font-size: var(--fs-s); }
+.emu-dp-dd .cc-dd-trigger svg { margin-left: auto; }
+
+.emu-dp-list { padding: 0 6px 8px; overflow: hidden; }
+.emu-dp-row {
+  width: 100%; height: var(--row); display: flex; align-items: center; gap: 6px; padding: 0 8px; position: relative;
+  border: 0; border-radius: var(--r-s); background: none; color: var(--fg-2); font: inherit; white-space: nowrap; cursor: pointer;
+}
+.emu-dp-row:hover { background: var(--hover); color: var(--fg); }
+.emu-dp-row.on { background: var(--select); color: var(--select-fg); }
+.emu-dp-row.on::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px; border-radius: 2px; background: var(--accent); }
+.emu-dp-row:disabled { opacity: .45; cursor: default; }
+.emu-dp-row:disabled:hover { background: none; color: var(--fg-2); }
+.emu-dp-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.emu-dp-rt { margin-left: auto; font-size: var(--fs-xs); color: var(--faint); font-family: var(--mono); }
+.emu-dp-row.on .emu-dp-rt { color: inherit; opacity: .8; }
+.emu-dp-empty { margin: 0 6px 8px; padding: 8px 8px; border-radius: var(--r-s); border: 1px dashed var(--line-strong);
+  font-size: var(--fs-s); color: var(--muted); line-height: 1.45; word-break: keep-all; }
+
+.emu-dp-tools { flex: none; border-top: 1px solid var(--line); background: var(--chrome); }
+.emu-dp-tools.need { box-shadow: inset 2px 0 0 var(--pal-yellow-pop); }
+.emu-dp-trow { display: flex; gap: 8px; padding: 4px var(--pad) 10px; align-items: flex-start; }
+.emu-dp-st { width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; flex: none; background: var(--ok); }
+.emu-dp-st.miss { background: none; border: 1.5px solid var(--pal-yellow-pop); }
+.emu-dp-tbody { min-width: 0; flex: 1; }
+.emu-dp-tt { color: var(--fg); font-weight: 600; font-size: var(--fs); display: flex; align-items: center; gap: 6px; }
+.emu-dp-td { font-size: var(--fs-s); color: var(--muted); line-height: 1.45; margin-top: 2px; word-break: keep-all; }
+.emu-dp-path { word-break: break-all; font-family: var(--mono); color: var(--fg-2); font-size: var(--fs-xs); }
+.emu-dp-tacts { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+
+/* ---- boot.js: rail 기기 화면의 무대, 탭 안 화면 그릇, 세로 열 ---- */
+/* rail 기기 화면은 기기만 보인다. 가운데의 탭 띠·본문·dock 을 내리고 무대(boot.js 가 #center 에 붙인다)만 남긴다.
+   같은 기기를 두 곳에 붙일 수 없어 그동안 세로 열도 내린다. */
+.emu-stage { display: none; }
+body.emu-active .emu-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
+body.emu-active #center > :not(.emu-stage) { display: none !important; }
+body.emu-active .emu-column { display: none !important; }
+.emu-stage-host { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+/* 무대에 띄운 기기가 없을 때. 기기가 놓일 자리와 같은 바탕에 안내와 단추를 둔다. */
+.emu-stage-empty { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 24px; background: var(--chrome); }
+.emu-stage-empty-box { width: 320px; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.emu-stage-title { font: 600 var(--fs-h)/1 var(--sans); letter-spacing: -.015em; color: var(--fg); }
+.emu-stage-desc { font-size: var(--fs-s); color: var(--muted); line-height: 1.45; }
+.emu-stage-show { margin-top: 6px; }
+
+.emu-tab-host { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+/* 세로 열(boot.js). 배치 엔진이 켜져 있을 때만 보이고, 자리와 크기는 엔진이 인라인으로 준다.
+   열 폭을 넘는 내용(긴 오류 문장 등)은 열 안에서 잘라 옆 영역을 덮지 않게 한다. */
+.emu-column { display: none; }
+body.layout-on .emu-column { display: flex; flex-direction: column; position: relative; overflow: hidden;
+  border-left: 1px solid var(--line-strong); background: var(--chrome); }
+
+/* ---- pane.js: 기기 화면(도구 막대 + 기기) ---- */
+/* 도구 막대는 화면 폭을 보고 글자를 뺀다. 창 폭이 아니라 이 화면이 놓인 자리(세로 열 360px)의 폭이 기준이다. */
+.emu-pane { flex: 1; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); color: var(--fg); container-type: inline-size; }
+
+.emu-toolbar { height: 40px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px; min-width: 0;
+  border-bottom: 1px solid var(--line); background: var(--chrome); }
+.emu-toolbar .emu-sp { min-width: 0; }
+.emu-tb-dd { display: flex; min-width: 0; flex: 0 1 auto; }
+.emu-tb-dd .cc-dd-trigger {
+  width: auto; height: 26px; display: inline-flex; align-items: center; gap: 7px; padding: 0 6px; min-width: 0;
+  border: 1px solid transparent; border-radius: var(--r-s); background: none; color: var(--fg);
+  font: inherit; font-size: var(--fs); font-weight: 600; white-space: nowrap;
+}
+.emu-tb-dd .cc-dd-trigger:hover:not(:disabled) { border-color: var(--line-strong); background: var(--raised); }
+.emu-tb-dd .cc-dd-trigger:active:not(:disabled) { transform: scale(.98); }
+.emu-tb-dd .cc-dd-trigger:disabled { cursor: default; }
+.emu-tb-dd .cc-dd-menu { right: auto; min-width: 240px; }
+.emu-tb-rt { font-size: var(--fs-s); color: var(--faint); white-space: nowrap; margin: 0 6px 0 2px; }
+.emu-tb-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-s); color: var(--muted); white-space: nowrap; }
+.emu-tb-status.live { color: var(--ok); }
+.emu-tb-live { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--muted); }
+.emu-tb-live.live, .emu-tb-status.live .emu-tb-live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 12%, transparent); }
+/* 트리거 안의 연결 점은 글자를 뺀 좁은 막대에서만 보인다. 넓을 때는 옆의 연결 상태 글자가 같은 것을 알린다. */
+.emu-tb-dd .emu-tb-live { display: none; }
+.emu-toolbar .emu-btn { border-color: transparent; }
+.emu-toolbar .emu-btn:hover:not(:disabled) { border-color: var(--line-strong); }
+.emu-toolbar .emu-btn-danger { border-color: color-mix(in srgb, var(--pal-danger) 40%, transparent); }
+.emu-tb-sep { width: 1px; height: 16px; background: var(--line-strong); flex: none; margin: 0 2px; }
+@container (max-width: 560px) {
+  .emu-toolbar { padding: 0 6px; gap: 2px; }
+  .emu-tb-label, .emu-tb-rt, .emu-tb-status { display: none; }
+  .emu-tb-dd .emu-tb-live { display: block; }
+  .emu-tb-dd .cc-dd-trigger { max-width: 150px; }
+  .emu-tb-dd .cc-dd-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* 아이콘 단추(.emu-ib)와 같은 모양. 테두리 대신 바탕으로 누를 수 있음을 보인다. */
+  .emu-toolbar .emu-btn { width: 26px; height: 26px; padding: 1px 6px; display: grid; place-items: center; gap: normal; border: 0;
+    color: var(--muted); font-size: var(--fs); white-space: normal; }
+  .emu-toolbar .emu-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); border-color: currentColor; }
+  .emu-toolbar .emu-btn:active:not(:disabled) { transform: scale(.96); }
+  .emu-toolbar .emu-btn .emu-ic { width: 14px; height: 14px; }
+  .emu-toolbar .emu-btn-danger, .emu-toolbar .emu-btn-danger:hover:not(:disabled) { color: var(--pal-danger); }
+  .emu-toolbar .emu-btn-pri { color: var(--pal-ink); }
+  .emu-toolbar .emu-btn-pri:hover:not(:disabled) { background: var(--focus); color: var(--pal-ink); }
+}
+
+/* 붙기·종료·목록 실패 문장. 공백 없는 긴 경로도 줄 안에서 끊고, 아주 길면 이 줄 안에서 스크롤한다.
+   최대 높이는 목록 줄 넷(96px)으로, 11px 글자 다섯 줄과 위아래 여백이 들어간다. */
 .emu-error-bar {
-  flex: 0 0 auto; padding: 6px 10px; font-size: var(--fs-xs); color: var(--destructive);
-  background: rgb(255 122 114 / .1); border-bottom: 1px solid var(--border);
+  flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px var(--pad);
+  max-height: calc(var(--row) * 4); overflow-y: auto;
+  font-size: var(--fs-s); line-height: 1.45; color: var(--pal-danger); overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--pal-danger) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--pal-danger) 40%, transparent);
 }
+.emu-error-text { flex: 1 1 auto; min-width: 0; }
 
-.emu-frame-wrap {
-  flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center;
-  overflow: hidden; background: var(--muted); padding: 20px 12px;
-}
-.emu-frame-shell { position: relative; }
-.emu-hw-btn { position: absolute; border-radius: 2px 0 0 2px; background: rgb(0 0 0 / .8); }
+/* 기기 틀은 이 칸의 안쪽 크기에 맞춰 커진다(pane.js scheduleSizeUpdate). 위아래 여백이 없으면 틀이 칸 끝에 붙고 그림자가 잘린다. */
+.emu-frame-wrap { flex: 1; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden;
+  padding: 20px 0; background: var(--chrome); }
+body.layout-on .emu-column .emu-frame-wrap { padding: 20px 12px; }
+.emu-frame-shell { position: relative; flex: none; }
+.emu-hw-btn { position: absolute; border-radius: 2px 0 0 2px; background: var(--pal-ink-5); }
 .emu-hw-btn-right { border-radius: 0 2px 2px 0; }
-.emu-frame-screen {
-  position: relative; overflow: hidden; background: #000;
-  box-shadow: 0 8px 24px rgb(0 0 0 / .35); outline: 1px solid rgb(255 255 255 / .1);
-}
-.emu-screen-surface {
-  position: absolute; overflow: hidden; background: #000; outline: 1px solid rgb(255 255 255 / .1);
-}
-.emu-screen-surface:focus-visible { outline: 2px solid var(--ring); }
-.emu-screen-capturing { outline: 2px solid var(--primary); }
-.emu-screen-media { display: block; width: 100%; height: 100%; background: #000; object-fit: contain; touch-action: none; }
+.emu-frame-screen { position: relative; background: var(--pal-ink); box-shadow: 0 0 0 1px var(--line-strong), 0 18px 40px rgb(0 0 0 / .45); }
+.emu-screen-surface { position: absolute; overflow: hidden; background: var(--pal-ink); }
+.emu-screen-surface:focus-visible { outline: 2px solid var(--focus); }
+.emu-screen-capturing { outline: 2px solid var(--accent); }
+.emu-screen-media { display: block; width: 100%; height: 100%; background: var(--pal-ink); object-fit: contain; touch-action: none; }
 .emu-screen-media-rotated { position: absolute; left: 50%; top: 50%; max-width: none; }
+/* 기기 화면 위의 연결 중·끊김 문구 */
 .emu-screen-status {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  text-align: center; padding: 0 24px; font-size: var(--fs-xs); color: var(--muted-fg);
-  background: rgb(0 0 0 / .15);
+  text-align: center; padding: 0 24px; font-size: var(--fs-s); line-height: 1.45; color: var(--muted); overflow-wrap: anywhere;
 }
-/* 둘 다 display 를 정해서 hidden 속성만으로는 사라지지 않는다. */
-.emu-tab-host[hidden], .emu-screen-status[hidden] { display: none; }
 .emu-screen-status-loading { color: var(--fg); }
-.emu-screen-status-error { color: var(--destructive); }
+.emu-screen-status-error { color: var(--pal-danger); }
 
-/* ---- devices-panel.js: rail 기기·설정 화면 ---- */
-.emu-devices { display: flex; flex-direction: column; gap: 14px; padding: 0 12px 16px; font-size: var(--fs-sm); }
-.emu-devices-status-row { display: flex; align-items: flex-start; gap: 8px; }
-.emu-devices-status-main { flex: 1 1 auto; min-width: 0; }
-.emu-devices-status-detail { font-size: var(--fs-xs); color: var(--muted-fg); }
-.emu-devices-badge {
-  flex: 0 0 auto; font-size: var(--fs-2xs); border: 1px solid var(--border); border-radius: 4px;
-  padding: 2px 6px; color: var(--muted-fg); white-space: nowrap;
-}
-.emu-devices-badge-ok { color: var(--success); border-color: var(--success); }
-.emu-devices-badge-err { color: var(--destructive); border-color: var(--destructive); }
-.emu-devices-refresh { flex: 0 0 auto; }
-
-.emu-devices-toolchain { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.emu-devices-toolchain-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.emu-devices-toolchain-row:last-child { border-bottom: none; }
-.emu-devices-toolchain-icon { color: var(--muted-fg); }
-.emu-devices-toolchain-ok .emu-devices-toolchain-icon { color: var(--success); }
-.emu-devices-toolchain-body { flex: 1 1 auto; min-width: 0; }
-.emu-devices-toolchain-title { font-weight: 600; }
-.emu-devices-toolchain-detail { font-size: var(--fs-xs); color: var(--muted-fg); word-break: break-word; }
-.emu-devices-toolchain-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-
-.emu-devices-default-row { display: flex; align-items: flex-start; gap: 10px; }
-.emu-devices-default-text { flex: 1 1 auto; min-width: 0; }
-.emu-devices-default-label { font-weight: 600; }
-.emu-devices-default-desc { font-size: var(--fs-xs); color: var(--muted-fg); }
-.emu-devices-default-select {
-  flex: 0 0 auto; height: 26px; font-size: var(--fs-xs); background: var(--card); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; max-width: 190px;
-}
-
-.emu-devices-list-title { font-weight: 600; }
-.emu-devices-list { display: flex; flex-direction: column; gap: 4px; }
-.emu-devices-list-empty { font-size: var(--fs-xs); color: var(--muted-fg); }
-.emu-devices-list-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg);
-  padding: 6px 10px; font-size: var(--fs-xs); cursor: pointer; text-align: left;
-}
-.emu-devices-list-item:hover:not(:disabled) { background: var(--accent); }
-.emu-devices-list-item:disabled { opacity: 0.5; cursor: default; }
-.emu-devices-list-runtime { color: var(--muted-fg); }
-
-/* 채팅 패널 머리의 에뮬레이터 버튼이 여는 기기 목록 */
+/* ---- launch-button.js: 채팅 패널 머리의 에뮬레이터 단추가 여는 기기 목록 ---- */
+/* 이 화면의 드롭다운 목록(.cc-dd-menu)과 같은 바탕, 목록 줄과 같은 줄. */
 .emu-launch-menu {
   position: fixed; z-index: 60; min-width: 240px; max-width: min(360px, calc(100vw - 16px));
   max-height: min(420px, calc(100vh - 80px)); overflow-y: auto; padding: 4px;
-  background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  background: var(--raised); color: var(--fg); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--menu-shadow);
 }
 .emu-launch-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
-  padding: 6px 10px; border: 0; border-radius: var(--radius); background: transparent; color: inherit;
-  font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
+  width: 100%; height: var(--row); display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  border: 0; border-radius: var(--r-s); background: none; color: var(--fg-2);
+  font: inherit; font-size: var(--fs); text-align: left; white-space: nowrap; cursor: pointer;
 }
-.emu-launch-item:hover:not(:disabled), .emu-launch-item:focus-visible { background: var(--accent); outline: none; }
-.emu-launch-item:disabled { color: var(--muted-fg); cursor: default; }
-.emu-launch-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.emu-launch-runtime { flex: none; color: var(--muted-fg); font-size: var(--fs-xs); }
+.emu-launch-item:hover:not(:disabled), .emu-launch-item:focus-visible { background: var(--hover); color: var(--fg); outline: none; }
+.emu-launch-item:disabled { opacity: .45; cursor: default; }
+.emu-launch-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.emu-launch-runtime { margin-left: auto; flex: none; font-size: var(--fs-xs); color: var(--faint); font-family: var(--mono); }

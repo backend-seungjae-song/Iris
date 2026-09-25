@@ -34,6 +34,22 @@ function portWithLegacy() {
   return DEFAULT_PORT;
 }
 
+// Origin 검사에서 이 서버 자신의 주소 말고 더 받을 호스트 이름(MagicDNS 이름 등). 쉼표로 나눈다.
+// 호출할 때마다 읽는다. 검사가 값을 바꿔 가며 부른다.
+function allowedOriginHosts() {
+  return (process.env.IRIS_ALLOWED_ORIGIN_HOSTS || "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+// 원격(tailnet) 접속을 받는지. REMOTE=1 이면 모든 인터페이스에서 받는다.
+function remote() {
+  return process.env.REMOTE === "1";
+}
+
+// 서버가 받을 주소. 지정하지 않으면 원격 모드는 0.0.0.0, 아니면 루프백만.
+function host() {
+  return process.env.HOST || (remote() ? "0.0.0.0" : "127.0.0.1");
+}
+
 // 앱이 자식 서버를 실행할 때 전달하는 설정. 읽는 위치와 쓰는 위치가 갈라지면 한쪽만
 // 이름이 바뀌고 자식 프로세스는 기본값으로 실행된다. 그러면 개발 앱이 실행한 서버가 설치 앱의
 // 상태 폴더를 쓴다.
@@ -41,4 +57,4 @@ function childEnv({ port, stateDir }) {
   return { IRIS_PORT: String(port), IRIS_STATE_DIR: stateDir };
 }
 
-module.exports = { stateDirOverride, port, portWithLegacy, DEFAULT_PORT, childEnv };
+module.exports = { stateDirOverride, port, portWithLegacy, allowedOriginHosts, remote, host, DEFAULT_PORT, childEnv };

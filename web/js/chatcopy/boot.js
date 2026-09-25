@@ -32,14 +32,13 @@ import { fileDragHotNext, insertDroppedPaths, setDragHot } from "./drop-path.js"
 const COPY_TOAST_DELAY_MS = 250;
 
 export function initCapability(ctx) {
-  const { blog, wsSend, showToast, getLastAgents, getCurTarget, wsIsOpen, acHost } = ctx;
+  const { blog, wsSend, showToast, getLastAgents, getCurTarget, wsIsOpen, acHost, copyText } = ctx;
   initEdgeDrag({ blog, wsSend, wsIsOpen, getCurTarget, getLastAgents });
 
-  const writeClipboard = (text) => {
-    // 메인 프로세스 clipboard 를 먼저 쓴다. 렌더러 navigator.clipboard 는 Electron webview 에서
-    // 실패해 빈 값이 복사된다(붙여넣기는 이미 메인 경유라 영향이 없다).
-    if (acHost && acHost.writeClipboard) acHost.writeClipboard(text);
-    else (navigator.clipboard?.writeText(text) || Promise.reject()).catch(() => {});
+  // 앱 셸의 copyText 는 메인 프로세스 clipboard 를 먼저 쓰고 복사했는지를 돌려준다. 렌더러
+  // navigator.clipboard 는 Electron webview 에서 실패해 빈 값이 복사된다.
+  const writeClipboard = async (text) => {
+    try { return (await copyText(text)) === true; } catch { return false; }
   };
 
   provide("chatcopy.wheel", (spec) => edgeWheel(spec));
@@ -53,13 +52,17 @@ export function initCapability(ctx) {
   // 됐는지 붙여넣기 전에는 알 수 없다.
   // 고르는 동안 선택 변경이 여러 번 오므로 마지막 한 번만 알린다. 선택이 풀리면 예약도 취소한다.
   // 취소하지 않으면 지워진 선택을 두고 "복사됨"이 뜬다.
-  let copiedTimer = null;
-  const noteCopied = (text) => {
+  // 알림은 복사 결과가 온 뒤에 띄운다. 복사하지 못했으면 그 사실을 알린다.
+  let copiedTimer = null, copiedGen = 0;
+  const noteCopied = (text, written) => {
+    const gen = ++copiedGen;
     if (copiedTimer) { clearTimeout(copiedTimer); copiedTimer = null; }
     if (!text) return;
-    copiedTimer = setTimeout(() => {
+    copiedTimer = setTimeout(async () => {
       copiedTimer = null;
-      showToast(`${String(text).split("\n").length}줄 복사됨`);
+      const ok = await written;
+      if (gen !== copiedGen) return;
+      showToast(ok ? `${String(text).split("\n").length}줄 복사됨` : "복사하지 못했습니다");
     }, COPY_TOAST_DELAY_MS);
   };
 
@@ -69,8 +72,7 @@ export function initCapability(ctx) {
     if (edgeAutoCopyBlocked()) return;
     const s = cropAwareSelection();
     if (!s) { noteCopied(""); return; }
-    writeClipboard(s);
-    noteCopied(s);
+    noteCopied(s, writeClipboard(s));
   });
   provide("chatcopy.dragHint", (kind, overTerminal) => setDragHot(fileDragHotNext(kind, overTerminal)));
   provide("chatcopy.dropFiles", (files) => insertDroppedPaths(files, { acHost, showToast }));
@@ -85,7 +87,7 @@ export function initCapability(ctx) {
     }
     if (!got || !got.text) return;
     const text = got.text;
-    writeClipboard(text);
+    if (!(await writeClipboard(text))) { showToast("범위 복사를 만들었지만 클립보드에 쓰지 못했습니다"); return; }
     const lines = text.split("\n").length;
     // 잘렸을 수 있다는 사실을 감추면 모르고 붙여넣게 된다. 완전본과 다른 문구를 쓰고, 어느 대조가
     // 일치하지 않았는지 함께 남긴다. 이 정보가 없으면 원인을 찾을 수 없다.

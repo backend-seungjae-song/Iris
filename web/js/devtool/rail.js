@@ -143,6 +143,8 @@ export function railSelect(view) {
   // 파일 섹션은 전용 영역이 있는 화면이 열릴 때만 내려간다(작업 화면은 그 섹션이 본체다).
   document.body.classList.toggle("screen-open", !!railItemById(view)?.panel);
   document.body.classList.toggle("util-full", RAIL_FULL.has(view));
+  // 좁은 폭에서 파일·브라우저를 열면 가운데가 터미널을 덮는다. 작업을 누르는 것은 터미널로 돌아가는 길이다.
+  if (view === "workspace" && globalThis.innerWidth <= 820) document.getElementById("center")?.classList.remove("mobile-show");
   screens[view]?.enter?.();
   for (const [name, screen] of Object.entries(screens)) if (name !== view) screen.leave?.();
 }

@@ -6,9 +6,12 @@
  여기에는 화면 이름이 없다. 폭은 배치 규칙이 아니라 그 화면의 값이라 각 화면의 CSS 가 갖는다.
  설정 화면 몫도 20-keymap.css 에서 여기로 옮겼다. 배치를 정하는 규칙은 이 파일에만 있다.*/
 
-.rail-panel { flex:none; background:var(--sidebar); border-right:1px solid var(--sidebar-border);
+.rail-panel { flex:none; background:var(--chrome); border-right:1px solid var(--line);
   display:none; flex-direction:column; min-height:0; }
 .rail-panel.is-open { display:flex; }
+/* 전체형 화면은 오른쪽 판과의 경계를 배치 엔진의 나눔선이 같은 픽셀에 그린다. 판에도 선을 두면 안쪽 폭만
+   1px 준다. 패널형 도구판은 자기 오른쪽 선이 있는 모양이라 그대로 둔다. */
+body.layout-on.util-full .rail-panel { border-right:0; }
 /* 화면이 열리면 파일 섹션은 그 자리를 내준다.*/
 body.screen-open .sidebar { display:none; }
 /* 전체형: 파일 섹션까지 덮는다(계정·서버·로그인처럼 볼 파일이 없는 화면. 300px 로는 좁다).

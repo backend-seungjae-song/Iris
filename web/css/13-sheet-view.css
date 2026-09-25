@@ -3,14 +3,14 @@
 /* 표 뷰어(엑셀·CSV). 구글 시트와 같은 구조. 머리글은 늘 붙어 있고, 원본에 걸린 고정도 따른다.*/
 /* 격자와 그 안의 값은 구글 시트를 픽셀로 재서 옮긴 것이라 앱의 형태 토큰을 쓰지 않는다.
  토큰을 쓰는 것은 이 표를 감싸는 앱 쪽 띠(찾기·도구·아래 줄)뿐이다.*/
-.sv-addr { margin-left:auto; padding:0 12px; align-self:center; font-size:var(--fs-xs); color:var(--muted-fg);
+.sv-addr { margin-left:auto; padding:0 12px; align-self:center; font-size:var(--fs-s); color:var(--muted);
            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:52%; font-variant-numeric:tabular-nums; }
-.sv-cut { flex:none; padding:5px 10px; font-size:var(--fs-xs); color:var(--muted-fg); background:var(--muted); border-bottom:1px solid var(--border); }
-.sv-msg { padding:20px; font-size:var(--fs-sm); color:var(--fg); }
-.sv-why { margin:8px 0 12px; font-size:var(--fs-xs); color:var(--muted-fg); word-break:break-all; }
-.sv-msg button { font:inherit; font-size:var(--fs-xs); padding:5px 12px; border:1px solid var(--ring); border-radius:var(--r-blk);
-                 background:var(--card); color:var(--fg); cursor:pointer; }
-.sv-msg button:hover { background:var(--input); }
+.sv-cut { flex:none; padding:5px 10px; font-size:var(--fs-s); color:var(--muted); background:var(--raised); border-bottom:1px solid var(--line); }
+.sv-msg { padding:20px; font-size:var(--fs); color:var(--fg); }
+.sv-why { margin:8px 0 12px; font-size:var(--fs-s); color:var(--muted); word-break:break-all; }
+.sv-msg button { font:inherit; font-size:var(--fs-s); padding:5px 12px; border:1px solid var(--focus); border-radius:var(--r-blk);
+                 background:var(--raised); color:var(--fg); cursor:pointer; }
+.sv-msg button:hover { background:var(--hover); }
 /* 표는 늘 흰 종이 위에 그린다. 엑셀·구글 시트가 그렇고, 무엇보다 원본이 칸에 지정한 배경색은
  흰 종이를 전제로 고른 색이다. 앱 테마(다크)를 그대로 쓰면 원본이 연회색을 칠한 칸에 밝은
  글자가 얹혀 읽을 수 없다(확인 결과: 교차 줄을 전혀 읽을 수 없었다).*/
@@ -99,29 +99,29 @@
 .gs .sv-cut { background:#fef7e0; color:#7f5b00; border-bottom:1px solid #e3e3e3; }
 /* 위 도구. 찾기·확대.*/
 .sv-tools { display:flex; align-items:center; gap:2px; padding-right:6px; }
-.sv-tools button { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs);
-                   padding:4px 8px; border-radius:var(--r-ctl); cursor:pointer;
+.sv-tools button { border:none; background:none; color:var(--muted); font:inherit; font-size:var(--fs-s);
+                   padding:4px 8px; border-radius:var(--r); cursor:pointer;
                    transition:background var(--t-quick) var(--ease), color var(--t-quick) var(--ease); }
-.sv-tools button:hover { background:var(--sidebar-accent); color:var(--fg); }
+.sv-tools button:hover { background:var(--select); color:var(--fg); }
 .sv-findbar { flex:none; display:flex; align-items:center; gap:4px; padding:5px 8px;
-              background:var(--sidebar); border-bottom:1px solid var(--border); }
-.sv-findbar input { flex:0 1 240px; font:inherit; font-size:var(--fs-sm); padding:3px 8px; border-radius:var(--r-ctl);
-                    border:1px solid var(--border); background:var(--input); color:var(--fg); }
-.sv-findbar button { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs);
-                     padding:3px 8px; border-radius:var(--r-ctl); cursor:pointer; }
-.sv-findbar button:hover { background:var(--sidebar-accent); color:var(--fg); }
-.sv-fstat { font-size:var(--fs-2xs); color:var(--muted-fg); min-width:56px; }
+              background:var(--chrome); border-bottom:1px solid var(--line); }
+.sv-findbar input { flex:0 1 240px; font:inherit; font-size:var(--fs); padding:3px 8px; border-radius:var(--r);
+                    border:1px solid var(--line); background:var(--raised); color:var(--fg); }
+.sv-findbar button { border:none; background:none; color:var(--muted); font:inherit; font-size:var(--fs-s);
+                     padding:3px 8px; border-radius:var(--r); cursor:pointer; }
+.sv-findbar button:hover { background:var(--select); color:var(--fg); }
+.sv-fstat { font-size:var(--fs-xs); color:var(--muted); min-width:56px; }
 /* 아래 줄. 시트 탭과 고른 것 요약. 구글 시트처럼 파일 맨 밑에 붙는다.*/
-.sv-foot { flex:none; display:flex; align-items:center; gap:8px; background:var(--sidebar);
-           border-top:1px solid var(--border); }
+.sv-foot { flex:none; display:flex; align-items:center; gap:8px; background:var(--chrome);
+           border-top:1px solid var(--line); }
 .sv-foot .sv-tabs { flex:1 1 auto; border-top:none; background:none; }
-.sv-only { padding:6px 10px; font-size:var(--fs-xs); color:var(--muted-fg); }
-.sv-stat { margin-left:auto; padding:0 12px; font-size:var(--fs-xs); color:var(--muted-fg); white-space:nowrap;
+.sv-only { padding:6px 10px; font-size:var(--fs-s); color:var(--muted); }
+.sv-stat { margin-left:auto; padding:0 12px; font-size:var(--fs-s); color:var(--muted); white-space:nowrap;
            font-variant-numeric:tabular-nums; }
-.sv-tabs { flex:none; display:flex; gap:2px; padding:4px 6px; background:var(--sidebar);
-           border-top:1px solid var(--border); overflow-x:auto; }
-.sv-tab { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs); padding:4px 12px;
-          border-radius:var(--r-ctl); cursor:pointer; white-space:nowrap;
+.sv-tabs { flex:none; display:flex; gap:2px; padding:4px 6px; background:var(--chrome);
+           border-top:1px solid var(--line); overflow-x:auto; }
+.sv-tab { border:none; background:none; color:var(--muted); font:inherit; font-size:var(--fs-s); padding:4px 12px;
+          border-radius:var(--r); cursor:pointer; white-space:nowrap;
           transition:background var(--t-quick) var(--ease), color var(--t-quick) var(--ease); }
-.sv-tab:hover { background:var(--sidebar-accent); color:var(--fg); }
-.sv-tab.on { background:var(--card); color:var(--fg); font-weight:var(--fw-semi); }
+.sv-tab:hover { background:var(--select); color:var(--fg); }
+.sv-tab.on { background:var(--raised); color:var(--fg); font-weight:var(--fw-semi); }

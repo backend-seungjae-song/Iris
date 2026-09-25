@@ -28,6 +28,7 @@ import {
 import { artifactsClick, artifactsModel, enterArtifacts, initArtifacts } from "./artifacts-page.js";
 import { optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
 import { CAPABILITIES } from "../core/capabilities.js";
+import { motionOn, setMotion } from "../core/motion.js";
 
 let $ = null, wsSend = null, showToast = null, getSecurityToggles = null, setSecurityToggle = null;
 let getRailScreens = null, setRailScreen = null, enableCapability = null, refreshRail = null;
@@ -170,6 +171,8 @@ export function initKeymapPage(deps) {
         .then(() => renderKeymapPage());
       return;
     }
+    const mo = e.target.closest("[data-set-motion]");
+    if (mo) { setMotion(!motionOn()); renderKeymapPage(); return; }
   });
 
   // 녹음 중에는 이 화면이 먼저 받는다. 캡처 단계여야 keynav 의 캡처 핸들러보다 앞선다.
@@ -261,6 +264,7 @@ export function renderKeymapPage() {
     conflicts: findConflicts(all).filter((c) => c.overlaps),
     toggles: (getSecurityToggles && getSecurityToggles()) || [],
     screens: (getRailScreens && getRailScreens()) || [],
+    motion: motionOn(),
     switcher,
     artifacts: artifactsModel(),
   });

@@ -8,14 +8,15 @@
 //   mountEmulatorPane(container, opts) → { dispose(), close(), setVisible(visible), snapshot(), current() }.
 //   opts: host(window.acHost.emulator) · workspaceId(스페이스 id) · deviceId(처음 붙일 udid, 없으면 기본 기기) ·
 //   onDeviceChange(udid) · onRequestDetach() · detachable(분리 버튼 표시) · onSketch(있으면 스케치 버튼 표시) ·
-//   actions([{ label, title, onClick }], 도구 줄 끝에 붙는 버튼).
+//   actions([{ label, icon, title, onClick }], 창으로 분리 자리에 붙는 버튼. icon 은 TB_ICON 의 이름).
 //   snapshot() 은 지금 보이는 프레임을 { bytes(PNG), title } 로 주고, 그릴 프레임이 없으면 null 이다.
 //   dispose() 는 화면만 떼고 세션을 남기며, close() 는 이 화면이 켠 기기와 헬퍼까지 끈다.
 //
 // 의존 대상
-//   /vendor/orca-emulator-pane.esm.js(Orca 순수 로직 번들)만. Iris 앱 셸 모듈은 import 하지
-//   않는다(분리 창에서도 같은 모듈을 쓴다). 이 번들은 계산한 URL 로 동적 import 한다(정적
-//   import 는 web/js 그래프 소유 검사 두 개를 깬다 — buildPane 위 주석 참고).
+//   /vendor/orca-emulator-pane.esm.js(Orca 순수 로직 번들), 공용 드롭다운(core/dropdown.js), 런타임 표기
+//   (devices-panel.js). 드롭다운 말고는 앱 셸 모듈을 import 하지 않는다(분리 창에서도 같은 모듈을 쓰고,
+//   분리 창은 앱 셸을 싣지 않는다). 드롭다운 모양은 분리 창도 01c-components.css 를 싣는다. 번들은 계산한
+//   URL 로 동적 import 한다(정적 import 는 web/js 그래프 소유 검사 두 개를 깬다 — buildPane 위 주석 참고).
 //
 // 유지 조건
 //   dispose() 는 DOM·구독·스트림만 정리하고 에뮬레이터 세션은 남긴다(창으로 옮길 때 다시 붙일
@@ -38,6 +39,11 @@
 // 권한이 없으므로, import() 인자를 리터럴이 아니라 계산한 URL 로 두어 같은 회피를 이 파일
 // 안에서 한다(브라우저는 계산한 문자열도 그대로 동적 import 한다. esbuild 는 리터럴이 아닌
 // import() 인자를 그래프에 안 넣는다 — 확인 완료).
+import { createDropdown } from "../core/dropdown.js";
+import { runtimeLabel } from "./devices-panel.js";
+import { xcodeGuidance } from "./xcode-guidance.js";
+import { androidGuidance } from "./android-guidance.js";
+
 const VENDOR_URL = new URL("../../vendor/orca-emulator-pane.esm.js", import.meta.url).href;
 const vendorReady = import(VENDOR_URL);
 
@@ -51,6 +57,18 @@ const MAX_GESTURE_SAMPLES = 32;
 const DRAG_THRESHOLD_PX = 8;
 const SCRCPY_PREFIX = "scrcpy://";
 const H264_CODEC = "avc1.640028";
+
+const TB_SVG = (inner) => `<svg class="emu-ic" viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+const TB_ICON = {
+  rotate: TB_SVG('<rect x="4" y="9" width="11" height="11" rx="2"/><path d="M12 3h3a5 5 0 0 1 5 5v2"/><path d="m17 8 3 3 3-3"/>'),
+  home: TB_SVG('<circle cx="12" cy="12" r="7"/>'),
+  sketch: TB_SVG('<path d="m15 5 4 4L8 20H4v-4z"/>'),
+  detach: TB_SVG('<rect x="3" y="7" width="13" height="13" rx="2"/><path d="M11 3h10v10"/><path d="m21 3-8 8"/>'),
+  totab: TB_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 4v5"/>'),
+  tocolumn: TB_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
+  power: TB_SVG('<path d="M12 3v8"/><path d="M6.3 7.5a8 8 0 1 0 11.4 0"/>'),
+  close: TB_SVG('<path d="M6 6l12 12M18 6 6 18"/>'),
+};
 
 // Orca callRuntimeRpc 와 같은 모양: 성공하면 result 를 돌려주고, 실패하면 던진다.
 async function rpcCall(host, method, params) {
@@ -90,7 +108,9 @@ function buildPane(container, opts, vendor) {
     selectedUdid: opts.deviceId || null,
     session: null,
     loading: false,
+    loadingStage: "",
     error: null,
+    setupGuidance: null,
     streamKey: null,
     liveTarget: null,
     deviceRefreshError: null,
@@ -115,51 +135,68 @@ function buildPane(container, opts, vendor) {
   container.append(root);
 
   // ---- 툴바 ----
-  const tbIcon = el("span", "emu-toolbar-icon", "📱");
-  const tbTitle = el("span", "emu-toolbar-title");
-  const tbStatus = el("span", "emu-toolbar-status");
-  const tbSpacer = el("div", "emu-toolbar-spacer");
-  const tbSelect = el("select", "emu-device-select");
-  tbSelect.addEventListener("change", () => {
-    const udid = tbSelect.value;
-    state.selectedUdid = udid || null;
-    onDeviceChange && onDeviceChange(udid || null);
-    void attach(udid || undefined);
+  // 한 줄: 기기 고르기 · 런타임 · 연결 상태 | 회전 · 홈 · 스케치 | 창으로 분리(또는 옮기기) | 종료.
+  // 폭이 좁으면(세로 열) CSS 컨테이너 조건이 글자를 빼고 아이콘만 남긴다. 그래서 단추마다 title 을 둔다.
+  const tbDevice = createDropdown({
+    items: [],
+    value: null,
+    ariaLabel: "기기 바꾸기",
+    className: "emu-tb-dd",
+    onChange: (udid) => {
+      state.selectedUdid = udid || null;
+      onDeviceChange && onDeviceChange(udid || null);
+      void attach(udid || undefined);
+    },
   });
-  const tbRotate = el("button", "emu-btn", "회전");
-  tbRotate.type = "button";
+  const tbDeviceTrigger = tbDevice.el.querySelector("button");
+  if (tbDeviceTrigger) tbDeviceTrigger.title = "기기 바꾸기";
+  let tbDeviceKey = "";
+  const tbLiveDot = el("i", "emu-tb-live");
+  (tbDeviceTrigger || tbDevice.el).prepend(tbLiveDot);
+  const tbRuntime = el("span", "emu-tb-rt");
+  const tbStatus = el("span", "emu-tb-status");
+  const tbStatusText = el("span");
+  tbStatus.append(el("i", "emu-tb-live"), tbStatusText);
+  const tbSpacer = el("span", "emu-sp");
+  const tbButton = (label, icon, title, extra) => {
+    const b = el("button", "emu-btn" + (extra ? " " + extra : ""));
+    b.type = "button";
+    b.title = title || label;
+    b.setAttribute("aria-label", label);
+    b.innerHTML = TB_ICON[icon] || "";
+    b.append(el("span", "emu-tb-label", label));
+    return b;
+  };
+  const tbSep = () => el("span", "emu-tb-sep");
+  const tbRotate = tbButton("회전", "rotate");
   tbRotate.addEventListener("click", () => { void sendRotate(); });
-  const tbHome = el("button", "emu-btn", "홈");
-  tbHome.type = "button";
+  const tbHome = tbButton("홈", "home");
   tbHome.addEventListener("click", () => { void sendButton("home"); });
-  const tbPrimary = el("button", "emu-btn emu-btn-primary", "연결");
-  tbPrimary.type = "button";
+  const tbPrimary = tbButton("연결", "power", "기기에 연결합니다");
+  const tbPrimaryLabel = tbPrimary.querySelector(".emu-tb-label");
   tbPrimary.addEventListener("click", () => {
     if (isLiveNow()) void shutdown(state.selectedUdid || undefined);
     else void attach(state.selectedUdid || undefined);
   });
-  toolbar.append(tbIcon, tbTitle, tbStatus, tbSpacer, tbSelect, tbRotate, tbHome, tbPrimary);
+  toolbar.append(tbDevice.el, tbRuntime, tbStatus, tbSpacer, tbRotate, tbHome);
   if (opts.onSketch) {
-    const tbSketch = el("button", "emu-btn", "스케치");
-    tbSketch.type = "button";
-    tbSketch.title = "지금 앱 화면을 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다";
+    const tbSketch = tbButton("스케치", "sketch", "지금 앱 화면을 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다");
     tbSketch.addEventListener("click", () => { opts.onSketch(); });
     toolbar.append(tbSketch);
   }
+  const placeButtons = [];
   if (detachable) {
-    const tbDetach = el("button", "emu-btn", "창으로 분리");
-    tbDetach.type = "button";
-    tbDetach.title = "이 화면을 별도 창으로 옮깁니다";
+    const tbDetach = tbButton("창으로 분리", "detach", "이 화면을 별도 창으로 옮깁니다");
     tbDetach.addEventListener("click", () => { onRequestDetach && onRequestDetach(); });
-    toolbar.append(tbDetach);
+    placeButtons.push(tbDetach);
   }
   for (const a of opts.actions || []) {
-    const b = el("button", "emu-btn", a.label);
-    b.type = "button";
-    if (a.title) b.title = a.title;
+    const b = tbButton(a.label, a.icon, a.title);
     b.addEventListener("click", () => { a.onClick(); });
-    toolbar.append(b);
+    placeButtons.push(b);
   }
+  if (placeButtons.length) toolbar.append(tbSep(), ...placeButtons);
+  toolbar.append(tbSep(), tbPrimary);
 
   // ---- 기기 프레임 ----
   const frameShell = el("div", "emu-frame-shell");
@@ -242,7 +279,9 @@ function buildPane(container, opts, vendor) {
     if (state.loading) return;
     state.suppressAutoAttach = false;
     state.loading = true;
+    state.loadingStage = "기기 목록 확인 중…";
     state.error = null;
+    state.setupGuidance = null;
     render();
     let requestedTarget;
     try {
@@ -254,6 +293,8 @@ function buildPane(container, opts, vendor) {
       });
       if (!target) throw new Error("에뮬레이터 기기를 찾을 수 없습니다. Xcode 에서 iOS 시뮬레이터를 추가하거나 Android Studio 에서 AVD 를 만드세요.");
       requestedTarget = target;
+      state.loadingStage = "가상 기기 시작 중…";
+      render();
       if (target !== state.selectedUdid) { state.selectedUdid = target; onDeviceChange && onDeviceChange(target); }
       if (target !== state.liveTarget) {
         state.session = null; state.streamKey = null; state.liveTarget = null; resetVisualOrientation();
@@ -273,16 +314,28 @@ function buildPane(container, opts, vendor) {
     } catch (e) {
       if (requestedTarget && state.liveTarget === requestedTarget) return;
       state.suppressAutoAttach = true;
-      state.error = emulatorPaneErrorMessage(e, "에뮬레이터를 시작하지 못했습니다. Xcode(iOS) 또는 Android Studio(Android) 설정을 확인한 뒤 다른 기기를 시도하세요.");
+      const targetRow = state.devices.find((device) => device.udid === requestedTarget);
+      const availability = await host.rpc("emulator.availability", {}).catch(() => null);
+      if (availability?.ok) {
+        if (targetRow?.runtime === "Android") {
+          const guidance = androidGuidance(availability.result);
+          if (guidance) state.setupGuidance = { ...guidance, platform: "android" };
+        } else if (availability.result?.platform === "darwin") {
+          state.setupGuidance = xcodeGuidance(availability.result);
+        }
+      }
+      if (disposed) return;
+      state.error = state.setupGuidance?.message || emulatorPaneErrorMessage(e, "에뮬레이터를 시작하지 못했습니다. 기기 설정을 확인한 뒤 다시 시도하세요.");
       render();
     } finally {
-      if (!disposed) { state.loading = false; render(); }
+      if (!disposed) { state.loading = false; state.loadingStage = ""; render(); }
     }
   }
 
   async function shutdown(deviceTarget) {
     if (state.loading) return;
     state.loading = true; state.error = null; render();
+    state.loadingStage = "가상 기기 종료 중…"; render();
     try {
       const res = await rpcCall(host, "emulator.shutdown", Object.assign(deviceTarget ? { device: deviceTarget } : {}, { worktree: workspaceId }));
       const shutdownTarget = (res && res.deviceUdid) || deviceTarget;
@@ -291,7 +344,7 @@ function buildPane(container, opts, vendor) {
     } catch (e) {
       state.error = emulatorPaneErrorMessage(e, "에뮬레이터를 종료하지 못했습니다. 다시 시도하거나 에뮬레이터 관리자에서 직접 끄세요.");
     } finally {
-      if (!disposed) { state.loading = false; render(); }
+      if (!disposed) { state.loading = false; state.loadingStage = ""; render(); }
     }
   }
 
@@ -344,8 +397,11 @@ function buildPane(container, opts, vendor) {
     if (sizeFrameId) cancelAnimationFrame(sizeFrameId);
     sizeFrameId = requestAnimationFrame(() => {
       sizeFrameId = 0;
+      // 틀은 여백(padding) 안쪽에 들어가야 한다. 바깥 크기로 맞추면 세로 열(360px)에서 틀이 오른쪽으로 잘린다.
       const r = frameWrap.getBoundingClientRect();
-      const w = Math.floor(r.width), h = Math.floor(r.height);
+      const cs = getComputedStyle(frameWrap);
+      const w = Math.floor(r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+      const h = Math.floor(r.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom));
       if (!paneSize || paneSize.width !== w || paneSize.height !== h) { paneSize = { width: w, height: h }; renderFrameLayout(); }
     });
   }
@@ -622,7 +678,7 @@ function buildPane(container, opts, vendor) {
   function teardownVideoStream() { if (videoStreamCleanup) { videoStreamCleanup(); videoStreamCleanup = null; } }
   function startVideoStreamFor(deviceId) {
     teardownVideoStream();
-    videoStreamState = { error: null };
+    videoStreamState = { error: null, hasFrame: false };
     if (!host.startVideoStream) return;
     const DecoderCtor = globalThis.VideoDecoder, ChunkCtor = globalThis.EncodedVideoChunk;
     if (!DecoderCtor || !ChunkCtor) { videoStreamState = { error: "이 빌드는 WebCodecs H.264 디코딩을 지원하지 않습니다." }; handleStreamError(); return; }
@@ -640,6 +696,7 @@ function buildPane(container, opts, vendor) {
           clearFirstFrameTimeout();
           if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
           ctx2d.drawImage(frame, 0, 0);
+          if (!videoStreamState.hasFrame) { videoStreamState.hasFrame = true; renderScreenContent(); }
         }
         frame.close();
       },
@@ -727,7 +784,11 @@ function buildPane(container, opts, vendor) {
     if (androidDeviceId && showStream && !videoStreamState.error) {
       if (!(mediaEl instanceof HTMLCanvasElement)) return; // startVideoStreamFor 가 이미 canvas 를 붙였다
       applyMediaStyle(mediaEl, rotation, aspect);
-      screenStatus.hidden = true;
+      screenStatus.hidden = Boolean(videoStreamState.hasFrame);
+      screenStatus.classList.toggle("emu-screen-status-loading", !videoStreamState.hasFrame);
+      screenStatus.classList.remove("emu-screen-status-error");
+      screenStatus.setAttribute("role", videoStreamState.hasFrame ? "presentation" : "status");
+      screenStatus.textContent = videoStreamState.hasFrame ? "" : "화면 불러오는 중…";
       return;
     }
     if (showStream && frameStreamState.frameUrl) {
@@ -753,7 +814,8 @@ function buildPane(container, opts, vendor) {
     const displayError = streamError || Boolean(frameStreamState.error) || Boolean(videoStreamState.error);
     screenStatus.classList.toggle("emu-screen-status-loading", Boolean(state.loading || waitingForFrame));
     screenStatus.classList.toggle("emu-screen-status-error", Boolean(!state.loading && !waitingForFrame && displayError));
-    screenStatus.textContent = (state.loading || waitingForFrame) ? "에뮬레이터 연결 중…"
+    screenStatus.setAttribute("role", (state.loading || waitingForFrame) ? "status" : "presentation");
+    screenStatus.textContent = state.loading ? (state.loadingStage || "가상 기기 연결 중…") : waitingForFrame ? "화면 불러오는 중…"
       : displayError ? "스트림 연결이 끊겼습니다" : "에뮬레이터 미리 보기";
   }
 
@@ -817,29 +879,67 @@ function buildPane(container, opts, vendor) {
   // ================= 렌더 =================
   function render() {
     const view = buildEmulatorPaneSessionView({ devices: state.devices, selectedUdid: state.selectedUdid, session: state.session });
-    tbTitle.textContent = view.displayName;
-    const statusLabel = view.isLive ? "연결됨" : state.loading ? "작업 중…" : "연결 안 됨";
-    tbStatus.textContent = statusLabel;
-    tbStatus.classList.toggle("emu-toolbar-status-subtle", view.isLive || state.loading);
-    tbSelect.replaceChildren();
-    for (const d of state.devices) {
-      const o = document.createElement("option");
-      o.value = d.udid; o.textContent = d.name;
-      if (d.udid === state.selectedUdid) o.selected = true;
-      tbSelect.append(o);
-    }
-    tbSelect.disabled = state.loading || state.devices.length === 0;
+    const statusLabel = view.isLive ? "연결됨" : state.loading ? (state.loadingStage || "연결 중…") : "연결 안 됨";
+    tbStatusText.textContent = statusLabel;
+    tbStatus.classList.toggle("live", view.isLive);
+    tbLiveDot.classList.toggle("live", view.isLive);
+    tbLiveDot.title = statusLabel;
+    // 목록에 없는 기기(아직 목록을 못 받았거나 붙는 중)를 보고 있어도 트리거에는 그 이름이 보여야 한다.
+    const items = state.devices.map((d) => ({ value: d.udid, label: d.name, sub: runtimeLabel(d.runtime) }));
+    if (!items.some((it) => it.value === state.selectedUdid)) items.unshift({ value: state.selectedUdid, label: view.displayName || "기기 없음" });
+    const key = JSON.stringify(items) + "\n" + state.selectedUdid;
+    if (key !== tbDeviceKey) { tbDeviceKey = key; tbDevice.setItems(items); tbDevice.setValue(state.selectedUdid); }
+    const row = state.devices.find((d) => d.udid === state.selectedUdid);
+    tbRuntime.textContent = row ? runtimeLabel(row.runtime) : "";
+    if (tbDeviceTrigger) tbDeviceTrigger.disabled = state.loading || state.devices.length === 0;
     tbRotate.disabled = !view.isLive || state.loading;
     tbHome.disabled = !view.isLive || state.loading;
     if (view.isLive) {
-      tbPrimary.textContent = "종료"; tbPrimary.classList.add("emu-btn-danger"); tbPrimary.classList.remove("emu-btn-primary");
+      tbPrimaryLabel.textContent = "종료"; tbPrimary.setAttribute("aria-label", "종료"); tbPrimary.title = "기기와의 연결을 끊고 끕니다";
+      tbPrimary.classList.add("emu-btn-danger"); tbPrimary.classList.remove("emu-btn-pri");
       tbPrimary.disabled = state.loading;
     } else {
-      tbPrimary.textContent = state.loading ? "작업 중…" : "연결"; tbPrimary.classList.remove("emu-btn-danger"); tbPrimary.classList.add("emu-btn-primary");
+      const label = state.loading ? "연결 중…" : "연결";
+      tbPrimaryLabel.textContent = label; tbPrimary.setAttribute("aria-label", label); tbPrimary.title = "기기에 연결합니다";
+      tbPrimary.classList.remove("emu-btn-danger"); tbPrimary.classList.add("emu-btn-pri");
       tbPrimary.disabled = state.loading || state.devices.length === 0;
     }
     errorBar.hidden = !state.error;
-    errorBar.textContent = state.error || "";
+    errorBar.replaceChildren(el("span", "emu-error-text", state.error || ""));
+    if (state.setupGuidance) {
+      const guidance = state.setupGuidance;
+      const actions = [[guidance.action, guidance.label]];
+      if (guidance.secondaryAction) actions.push([guidance.secondaryAction, guidance.secondaryLabel]);
+      for (const [name, label] of actions) {
+        const action = el("button", "emu-btn", label);
+        action.type = "button";
+        action.addEventListener("click", async () => {
+          action.disabled = true;
+          let result;
+          if (guidance.platform === "android" && name === "locate") {
+            const picked = await host.pickSdkFolder().catch((error) => ({ ok: false, error: error?.message }));
+            result = picked?.ok && picked.path
+              ? await host.setSettings({ androidSdkPath: picked.path }).catch((error) => ({ ok: false, error: error?.message }))
+              : picked?.ok ? { ok: false, canceled: true } : picked;
+          } else {
+            result = await (guidance.platform === "android" ? host.androidAction(name) : host.xcodeAction(name))
+              .catch((error) => ({ ok: false, error: error?.message }));
+          }
+          if (!result?.ok && !result?.canceled) {
+            state.error = result?.error || "설정 작업을 마치지 못했습니다.";
+            render();
+          } else if (result?.ok && (name === "select" || name === "locate")) {
+            await refreshDevices();
+            if (!disposed) void attach(state.selectedUdid || undefined);
+          } else action.disabled = false;
+        });
+        errorBar.append(action);
+      }
+      const retry = el("button", "emu-btn emu-btn-ghost", "다시 확인");
+      retry.type = "button";
+      retry.addEventListener("click", () => { void attach(state.selectedUdid || undefined); });
+      errorBar.append(retry);
+    }
     canInteractNow = view.isLive && !state.loading && !streamError;
     updateScreenAria();
     if (!canInteractNow) { screenSurface.classList.remove("emu-screen-capturing"); keyboardCaptureActive = false; }

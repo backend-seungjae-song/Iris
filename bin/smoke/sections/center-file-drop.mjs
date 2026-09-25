@@ -235,7 +235,7 @@ export const cases = {
     assert.equal(calls.length, 2); assert.equal(calls[1].browserWindow, true);
     assert.equal(calls[1].openDroppedLocal, context.openDroppedLocal);
     assert.match(css, /\.tabstrip\.center-drop-hot::after, \.center-body\.center-drop-hot::after\s*\{[^}]*content:"파일 열기"[^}]*pointer-events:none/);
-    assert.match(css, /\.tabstrip\.center-drop-hot\s*\{[^}]*outline:2px dashed var\(--primary\);[^}]*outline-offset:-2px/);
+    assert.match(css, /\.tabstrip\.center-drop-hot\s*\{[^}]*outline:2px dashed var\(--accent\);[^}]*outline-offset:-2px/);
     assert.ok(!read("web/js/core/capabilities.js").includes("center/file-drop.js"));
   },
 };

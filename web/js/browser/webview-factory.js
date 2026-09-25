@@ -36,7 +36,7 @@ import {
 } from "./webview-store.js";
 import {
   activeBrowserId, activeWv, markWebviewUsed, normalizeUrl, renderTabDialog,
-  scheduleWebviewThrottling, setTabStatus, wakeWebview,
+  scheduleWebviewThrottling, setTabStatus, syncNavButtons, wakeWebview,
 } from "./webview.js";
 import { takeReopenedBrowserHistory } from "../center/closed-tabs.js";
 import { consoleSpace, openDroppedLocal } from "../center/file-routing.js";
@@ -194,6 +194,7 @@ export function createWebview(tabId, profileOverride, initialUrl) {
     rec.navs = (rec.navs || 0) + 1; // 첫 이동 = 새 탭이 기본 페이지를 여는 것
     // 주소창을 편집 중이면 건드리지 않는다. 그러지 않으면 붙여넣던 값이 이동 완료 시점에 지워진다.
     if (activeBrowserId() === tabId && document.activeElement !== urlInput) { urlInput.value = isNewTab(e.url, rec) ? "" : (e.url || ""); syncBookmarkStar(); }
+    if (activeBrowserId() === tabId) syncNavButtons();
     pushHistory(e.url);
     const navSp = spaceOfTabId(tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace()); if (navSp) bsMutate({ op: "tab.navigate", space: navSp, id: tabId, url: e.url }); }); // 서버 반영(멱등 가드)
   // SPA 라우팅. Vue/React 화면 전환은 여기로만 온다.
@@ -206,6 +207,7 @@ export function createWebview(tabId, profileOverride, initialUrl) {
     if (e.isMainFrame === false) return;
     rec.url = e.url;
     if (activeBrowserId() === tabId && document.activeElement !== urlInput) urlInput.value = isNewTab(e.url, rec) ? "" : (e.url || "");
+    if (activeBrowserId() === tabId) syncNavButtons();
     if (callHook("record.tracked", tabId)) callHook("record.push", { k: "nav", url: e.url, spa: true });
   });
   // 로드가 끝난 시점의 주소·제목을 한 번 더 보고한다. did-navigate가 안 오는 이동(about:blank 등)이
@@ -379,6 +381,7 @@ export function updateActiveWebview() {
     showNavigationFeedback(active);
     syncBookmarkStar(); if (callHook("pick.mode")) injectPick(active.el);
   }
+  syncNavButtons();
   updateProfileBtn();
   updateSizeBtn(); viewportLayout(); syncTouchDrag(false);   // 탭이 바뀌면 터치 변환은 무조건 끈다
   syncAiGlow();                                              // 이너 글로우는 조작 대상 탭에 있을 때만

@@ -7,12 +7,12 @@
 .hoff-bar { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:9999;
   display:flex; align-items:center; gap:14px; max-width:min(620px,92vw); padding:12px 14px;
   background:#16181d; color:#e8e8ea; border:1px solid #343841; border-radius:var(--r-panel);
-  box-shadow:0 8px 28px rgba(0,0,0,.45); font-size:var(--fs-sm); line-height:1.5; }
+  box-shadow:0 8px 28px rgba(0,0,0,.45); font-size:var(--fs); line-height:1.5; }
 /* 회전 표시. 회전은 앱 셸의 scr-spin 을 그대로 쓴다. 같은 애니메이션을 두 번 정의하지 않는다. */
 .hoff-spin { flex:none; width:14px; height:14px; border-radius:50%; border:2px solid #3a3e47;
   border-top-color:#7fb3ea; animation:scr-spin .8s linear infinite; }
 .hoff-text { flex:1; min-width:0; }
 .hoff-go { flex:none; padding:7px 12px; border-radius:var(--r-blk); border:1px solid #4a90d9;
-  background:#2b5f96; color:#fff; font-size:var(--fs-sm); cursor:pointer; }
+  background:#2b5f96; color:#fff; font-size:var(--fs); cursor:pointer; }
 .hoff-close { flex:none; padding:7px 10px; border-radius:var(--r-blk); border:1px solid #3a3e47;
-  background:transparent; color:#a8adb8; font-size:var(--fs-sm); cursor:pointer; }
+  background:transparent; color:#a8adb8; font-size:var(--fs); cursor:pointer; }

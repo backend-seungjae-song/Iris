@@ -301,6 +301,9 @@ function createTabForSession(args, session) {
       resolve({ ok: false, error: "탭 상태 반영 실패(space=" + mine + ")." }); return;
     }
     broadcast({ type: "browser-state", state: bsWire() });
+    // 창은 보고 있는 활성 탭과 AI 가 최근 명령을 보낸 탭만 띄운다. 방금 만든 탭은 둘 다 아니라서
+    // 사용자가 다른 스페이스를 보고 있으면 아무도 띄우지 않는다. 잠든 탭과 같은 경로로 깨운다.
+    wakeSleepingTab(id);
     waitForTabWc(id, 12000).then((wc) => {
       if (!wc) {
         resolve({ ok: false, error: "탭은 만들었지만 브라우저 창이 그것을 띄우지 못했습니다 — 앱에서 이 스페이스의 브라우저를 열어 주세요. (탭 id " + id + ")",
@@ -640,7 +643,14 @@ export function runBrowserCmd(cmd, args, session, noAutoTab, runId) {
       : (tg.tabId && !wcOfTabId(tg.tabId) ? tg.tabId : (tg.notReady ? tg.waitTab : null));
     if (asleep && tabExistsInState(asleep)) {
       wakeSleepingTab(asleep);
-      waitForTabWc(asleep, 12000).then(() => { runBrowserCmd(cmd, args, session, true, runId).then(resolve); });
+      waitForTabWc(asleep, 12000).then((wc) => {
+        // 다시 태우면 wc 없는 대상으로 떨어져 "탭이 없다"는 오류가 난다. 탭은 있고 깨우지 못한 것이다.
+        if (!wc) {
+          resolve({ ok: false, error: `잠든 탭 @${handleFor(asleep) || asleep}을(를) 깨우지 못했습니다 — 이 탭을 띄울 브라우저 창(공유 탭이면 공유 브라우저 창)이 열려 있는지 확인하세요.`, data: { tab: handleFor(asleep) || asleep, sleeping: true } });
+          return;
+        }
+        runBrowserCmd(cmd, args, session, true, runId).then(resolve);
+      });
       return;
     }
     // 여기서 한 번만 정체성을 실행 핸들로 변환한다. 이 아래로만 wc가 전달된다.

@@ -126,6 +126,25 @@ const BOTCHECK_SCRIPT = `(function(){try{
   var t = setInterval(function(){ scanDom(); if (++tries > 6) clearInterval(t); }, 700);
 } catch(e){}})();`;
 
+// 스크립트가 연 새 창을 팝업 창으로 받게 한다. 크기 없는 window.open(url) 은 target=_blank 링크와
+// 같은 foreground-tab 요청으로 와서 메인은 둘을 구분하지 못한다(확인 결과: disposition·features·
+// frameName·referrer 가 모두 같다). 탭으로 열면 사이트는 null 을 받아 팝업 차단 알림을 띄우고 결제·
+// 본인인증 창을 쓰지 못한다. features 에 표식을 붙이면 크롬이 팝업으로 분류해 new-window 로 오고,
+// 메인은 이미 그 요청을 opener 를 유지한 자식 창으로 연다. 반환값을 버리겠다는 noopener·noreferrer 와
+// 현재 창을 바꾸는 _self·_parent·_top 은 그대로 둔다.
+const OPENER_SCRIPT = `(function(){try{
+  if (window.__acOpen) return; window.__acOpen = 1;
+  var o = window.open; if (typeof o !== 'function') return;
+  window.open = function(url, target, features){
+    var f = features == null ? '' : String(features);
+    var t = target == null ? '' : String(target).toLowerCase();
+    if (/(^|[\\s,])no(opener|referrer)([\\s,=]|$)/i.test(f) || t === '_self' || t === '_parent' || t === '_top') {
+      return o.apply(this, arguments);
+    }
+    return o.call(this, url, target, f ? f + ',iris-opener' : 'iris-opener');
+  };
+} catch(e){}})();`;
+
 // 페이지의 alert/confirm/prompt를 우리 것으로 바꾼다.
 //
 // 설계 이유: 이 대화상자는 Electron에서 창에 붙는 시트로 뜬다. 그래서 다른 탭이 물어도 지금
@@ -164,4 +183,4 @@ function dialogScript(wcId, port) {
 } catch(e){}})();`;
 }
 
-module.exports = { cleanUserAgent, setupClientHints, applyHardening, isAudioInputPermission, setNativeUserAgent, WEBAUTHN_SCRIPT, BOTCHECK_SCRIPT, dialogScript };
+module.exports = { cleanUserAgent, setupClientHints, applyHardening, isAudioInputPermission, setNativeUserAgent, WEBAUTHN_SCRIPT, BOTCHECK_SCRIPT, OPENER_SCRIPT, dialogScript };

@@ -5,7 +5,7 @@
 // 영향 범위: 주입받는 $·esc·cssEsc·extOf·fileview·tabstrip·withFileViewTransition·bindAgentKeys·wsSend·isFileLikeKind·showToast와 tab-store·렌더 소유 상태 접근자.
 
 import { fileKindOf } from "../core/file-kinds.js";
-import { isMarkdownExtension } from "../core/markdown.js";
+import { isMarkdownExtension, markdownWebLink } from "../core/markdown.js";
 import { callHook } from "../core/hooks.js";
 import { editorPref, toggleEditorPref, subscribeEditorPrefs, monacoPrefOpts } from "../core/editor-prefs.js";
 import { registerEditorHost, updateEditorHost } from "../core/editor-hosts.js";
@@ -16,7 +16,7 @@ import { getActiveTabId, getCenterSpace, getCurrentTabs } from "./tab-store.js";
 
 let $, esc, cssEsc, extOf, fileview, tabstrip;
 let withFileViewTransition, bindAgentKeys, wsSend, isFileLikeKind, showToast;
-let getRenderedFileOwner, getRenderedFileToken;
+let getRenderedFileOwner, getRenderedFileToken, openWebLink;
 let initialized = false;
 let fileHostTab = null, fileHostToken = null;
 
@@ -109,7 +109,7 @@ export function resetModelTextExternally(path, text) {
 export function initTextEditor(deps) {
   ({ $, esc, cssEsc, extOf, fileview, tabstrip,
     withFileViewTransition, bindAgentKeys, wsSend, isFileLikeKind, showToast,
-    getRenderedFileOwner, getRenderedFileToken } = deps);
+    getRenderedFileOwner, getRenderedFileToken, openWebLink } = deps);
   bindTabCloseTextEditor({
     isTextTabDirty, saveFileTab, renderFileView, monacoLangFor, disposeClosedFileModel,
     resetModelTextExternally,
@@ -145,7 +145,7 @@ export function monacoTheme() {
   monaco.editor.defineTheme("ac", {
     base: light ? "vs" : "vs-dark", inherit: true, rules: [],
     colors: {
-      "editor.background": pick("--bg", light ? "#ffffff" : "#0e1319"),
+      "editor.background": pick("--surface", light ? "#ffffff" : "#0e1319"),
       // Monaco 기본 슬라이더는 거의 투명하므로 앱의 다른 스크롤바와 같은 농도로 맞춘다.
       "scrollbarSlider.background": light ? "#3F5E6C66" : "#B9DCF066",
       "scrollbarSlider.hoverBackground": light ? "#3F5E6C99" : "#B9DCF099",
@@ -167,6 +167,20 @@ export function monacoLangFor(filePath) {
 }
 // 라이브러리 로드와 "파일 편집기 만들기"는 다른 일이다. 메모처럼 Monaco만 필요한 쪽이 이걸 부르면
 // 파일 편집기까지 딸려 만들어져 그 호스트가 화면을 덮는다(위 monacoHostEl 주석). 그래서 나눈다.
+// 편집기 안 링크를 누르면 Monaco 는 window.open 으로 열고, 창의 열기 처리기는 그 주소를 외부 브라우저로
+// 보낸다. 메모와 파일 편집기가 이 로더를 함께 쓰므로 여기서 한 번 등록해 웹 주소를 미리보기 링크와 같은
+// 길(Iris 안)로 연다. 웹 주소가 아니면 Monaco 기본 동작에 맡긴다.
+function registerWebLinkOpener() {
+  window.monaco?.editor?.registerLinkOpener?.({
+    open(uri) {
+      const href = markdownWebLink(uri.toString(true));
+      if (!href || !openWebLink) return false;
+      openWebLink(href);
+      return true;
+    },
+  });
+}
+
 export function ensureMonacoLib() {
   if (monacoLibReady) return monacoLibReady;
   monacoLibReady = new Promise((resolve) => {
@@ -177,7 +191,7 @@ export function ensureMonacoLib() {
       require.config({ paths: { vs: "/vendor/monaco/vs" } });
     // 워커는 같은 origin이라 그대로 띄운다. 워커가 있어야 TS·JSON 언어 서비스가 동작한다.
     window.MonacoEnvironment = { getWorkerUrl: () => "/vendor/monaco/vs/base/worker/workerMain.js" };
-      require(["vs/editor/editor.main"], () => resolve());
+      require(["vs/editor/editor.main"], () => { registerWebLinkOpener(); resolve(); });
     };
     if (window.require && window.require.config) { boot(); return; }
     const sc = document.createElement("script");
@@ -254,7 +268,7 @@ export function markTabDirty(tabId, d) {
   if (!chip) return;
   chip.classList.toggle("dirty", !!d);
   let dot = chip.querySelector(".cdirty");
-  if (d && !dot) { dot = document.createElement("span"); dot.className = "cdirty"; chip.insertBefore(dot, chip.firstChild); }
+  if (d && !dot) { dot = document.createElement("span"); dot.className = "cdirty"; dot.title = "저장 안 됨"; chip.insertBefore(dot, chip.querySelector(".ckind")?.nextSibling || chip.firstChild); }
   else if (!d && dot) dot.remove();
 }
 function modelFor(t) {

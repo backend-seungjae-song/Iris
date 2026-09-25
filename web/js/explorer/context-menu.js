@@ -52,6 +52,10 @@ export function initContextMenu(deps) {
 }
 
 export function registerAgentRenderer(renderer) { renderAgents = renderer; }
+// 스페이스 줄을 눌렀을 때 그 아래 에이전트 줄을 접고 펴는 것은 접힘 상태를 가진 herdr/agents 가 한다.
+// 포커스 이동이 접힌 그룹을 펴므로, 누르기 전 상태를 알고 포커스를 옮긴 뒤 뒤집어야 한다.
+let spaceRowClick = null;
+export function registerSpaceRowClick(fn) { spaceRowClick = fn; }
 
 function spaceRoot() {
   const s = orderedSpaces().find((x) => x.id === getSelectedSpaceId());
@@ -73,7 +77,7 @@ export function spaceCtxItems(id) {
     { label: "이 스페이스로 이동", act: () => focusSpace(id) },
     ...(getIsLocal() ? createItems(id) : []),
     { sep: true },
-    { label: "폴더 경로 복사", disabled: !s?.folder, act: () => { copyText(s.folder); showToast("경로를 복사했습니다"); } },
+    { label: "폴더 경로 복사", disabled: !s?.folder, act: () => { copyText(s.folder).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다")); } },
     callHook("archive.spaceItem", id, name),
     { sep: true },
     { label: "이 스페이스 닫기", danger: true, disabled: !getIsLocal(), act: () => {
@@ -154,8 +158,8 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
   items.push({ sep: true });
   items.push({ label: "Finder에서 보기", act: () => window.acHost?.revealInFinder(absPath) });
   items.push({ sep: true });
-  items.push({ label: "상대 경로 복사", act: () => { copyText(relPath(absPath)); showToast("상대 경로 복사됨"); } });
-  items.push({ label: "경로 복사", act: () => { copyText(absPath); showToast("경로 복사됨"); } });
+  items.push({ label: "상대 경로 복사", act: () => { copyText(relPath(absPath)).then((ok) => showToast(ok ? "상대 경로 복사됨" : "상대 경로를 복사하지 못했습니다")); } });
+  items.push({ label: "경로 복사", act: () => { copyText(absPath).then((ok) => showToast(ok ? "경로 복사됨" : "경로를 복사하지 못했습니다")); } });
   items.push({ sep: true });
   items.push({ label: "잘라내기", act: () => { fileClip = { path: absPath, mode: "cut" }; showToast("잘라내기: " + relPath(absPath)); } });
   items.push({ label: "복사", act: () => { fileClip = { path: absPath, mode: "copy" }; showToast("복사: " + relPath(absPath)); } });
@@ -352,10 +356,14 @@ function wireContextMenu() {
     if (file) openFileCtx(e.clientX, e.clientY, file.dataset.file, false);
     else openFileCtx(e.clientX, e.clientY, dir.dataset.dir, true);
   });
-  // Spaces 목록 클릭: 스페이스 포커싱(Explorer·Agents·센터 연동)
+  // Spaces 목록 클릭: 스페이스 포커싱(Explorer·Agents·센터 연동)과 그 에이전트 줄 접기·펴기.
+  // 줄 앞 삼각형은 접기만 하고 포커스를 옮기지 않으므로 herdr/agents 가 따로 받는다.
   spaceList.addEventListener("click", (e) => {
+    if (e.target.closest("[data-space-tog]")) return;
     const row = e.target.closest(".space-row");
-    if (row) focusSpace(row.dataset.space);
+    if (!row) return;
+    if (spaceRowClick) spaceRowClick(row.dataset.space, focusSpace);
+    else focusSpace(row.dataset.space);
   });
 
   // ＋ 새 스페이스: herdr와 같게 경로를 직접 지정한다. cwd 없이 만들면 herdr가 호출자(=서버)의 cwd를
@@ -369,6 +377,8 @@ function wireContextMenu() {
   // 일어나지 않으면 기능이 없는 것으로 읽힌다.
   spaceList.addEventListener("contextmenu", (e) => {
     if (e.target.closest("input, textarea")) return;
+    // 에이전트 줄은 같은 목록 안에 있지만 메뉴는 그 줄을 그린 쪽이 띄운다.
+    if (e.target.closest(".srow, .agent-info-row, .agent-add-row")) return;
     e.preventDefault();
     const row = e.target.closest(".space-row");
     if (!row) {
@@ -381,8 +391,9 @@ function wireContextMenu() {
   });
   // 드래그로 Space 순서 변경
   spaceList.addEventListener("dragstart", (e) => { const r = e.target.closest(".space-row"); if (!r) return; dragId = r.dataset.space; r.classList.add("dragging"); });
-  spaceList.addEventListener("dragend", (e) => { e.target.closest(".space-row")?.classList.remove("dragging"); spaceList.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover")); });
-  spaceList.addEventListener("dragover", (e) => { e.preventDefault(); const r = e.target.closest(".space-row"); spaceList.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover")); if (r && r.dataset.space !== dragId) r.classList.add("dragover"); });
+  // 에이전트 줄 끌기도 같은 목록에서 일어나므로 스페이스를 끄는 중(dragId)일 때만 표시를 만진다.
+  spaceList.addEventListener("dragend", (e) => { e.target.closest(".space-row")?.classList.remove("dragging"); spaceList.querySelectorAll(".space-row.dragover").forEach((x) => x.classList.remove("dragover")); dragId = null; });
+  spaceList.addEventListener("dragover", (e) => { if (!dragId) return; e.preventDefault(); const r = e.target.closest(".space-row"); spaceList.querySelectorAll(".space-row.dragover").forEach((x) => x.classList.remove("dragover")); if (r && r.dataset.space !== dragId) r.classList.add("dragover"); });
   spaceList.addEventListener("drop", (e) => {
     e.preventDefault();
     const r = e.target.closest(".space-row"); if (!r || !dragId) return;

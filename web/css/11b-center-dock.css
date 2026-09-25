@@ -1,11 +1,19 @@
 /* 가운데 아래에 붙는 접이식 도크. 앱 셸이 갖는다 */
 /* 이 이름을 쓰는 곳: index.html 의 #panel-memo · #panel-run */
-/* 메모와 실행이 같은 도크를 쓴다. 이름이 .center-run 이라 실행 전용으로 보였고 규칙도 메모
-   CSS 에 있어서, 실행을 수정하는 사람이 메모 도크까지 바꾸게 된다. collapsed 면
-   머리 바만 남는다. */
-.center-dock { flex:0 0 auto; border-top:1px solid var(--border); background:var(--sidebar); }
-.center-dock .panel-head { background:var(--sidebar); }
-.center-dock .panel-head:hover { background:var(--sidebar-accent); }
+/* 메모와 실행이 같은 도크를 쓴다. 접으면 머리 한 줄(30px)만 남고, 두 줄 사이의 선은 실행 머리의
+   위쪽 선이다. 도크 전체의 위쪽 선은 메모 칸이 긋는다. */
+.center-dock { flex:0 0 auto; background:var(--chrome); }
+#panel-memo { border-top:1px solid var(--line); }
+#panel-run > .panel-head { border-top:1px solid var(--line); }
+.center-dock .panel-head { height:30px; padding:0 12px;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.center-dock .panel-head:hover { background:var(--hover); }
+.center-dock .panel-head .meta { font:500 var(--fs-s)/1 var(--mono); color:var(--faint); }
+/* 실행 머리의 값 칸은 남은 폭을 모두 차지한다. 안의 값 배치는 실행 기능의 CSS 가 정한다. */
+#run-meta { flex:1 1 auto; display:flex; align-items:center; gap:6px; min-width:0; }
+/* 실행 본문은 목록과 출력을 두 단으로 채우므로 도크의 안쪽 여백을 두지 않는다. */
+#panel-run .panel-body { padding:0; overflow:hidden; }
+#panel-run .panel-body > .fempty { padding:0 12px; }
 .center-dock .panel-body { max-height:32vh; }
 /* 분리 브라우저 창엔 도크가 필요 없다. */
 body.browser-mode .center-dock { display:none; }

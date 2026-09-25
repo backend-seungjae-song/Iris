@@ -3,7 +3,7 @@
 // 소유 범위
 //   마지막 스냅샷 하나, 표시 취향(사용/남음 · 상세/간결)과 쿠키 설정, 그것을 담는 파일
 //   (stateHome()/usage.json), 그리고 언제 다시 물어볼지의 판단.
-//   Codex 초기화권 사용 지시를 수집기로 전달하는 것도 여기서 맡는다.
+//   Codex·Claude 초기화권 사용 지시를 수집기로 전달하는 것도 여기서 맡는다.
 //
 // 제공 API
 //   initUsageHandlers({ broadcastLocal }) · handleUsage(ws, msg) · usageWire().
@@ -28,7 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { stateHome } from "./state-home.cjs";
-import { consumeCodexReset, fetchAllUsage } from "./usage.js";
+import { consumeClaudeReset, consumeCodexReset, fetchAllUsage } from "./usage.js";
 
 // 5분. 집계 창(5시간·7일)에 비해 충분히 촘촘하고, 제공자 여덟 곳을 호출하기에는 충분히 길다.
 const POLL_MS = 5 * 60 * 1000;
@@ -141,8 +141,12 @@ function backoffMap() {
   return out;
 }
 
+// 수집 중에 들어온 강제 조회. 버리면 초기화권을 쓴 직후의 조회가 사용 전 응답에 묻혀, 차감 전
+// 개수와 잠기지 않은 버튼이 다음 주기(5분)까지 남는다. 끝난 뒤 한 번 더 조회한다.
+let refreshAgain = false;
+
 async function refresh(force) {
-  if (fetching) return;
+  if (fetching) { if (force) refreshAgain = true; return; }
   if (!force && Date.now() - lastFetchAt < MIN_GAP_MS) return;
   fetching = true;
   broadcastLocal(usageWire());
@@ -155,6 +159,7 @@ async function refresh(force) {
   lastFetchAt = Date.now();
   fetching = false;
   broadcastLocal(usageWire());
+  if (refreshAgain) { refreshAgain = false; refresh(true); }
 }
 
 export function initUsageHandlers(deps) {
@@ -196,6 +201,17 @@ export function handleUsage(ws, msg) {
     consumeCodexReset(requestId).then((result) => {
       try { ws.send(JSON.stringify({ type: "usage.codexReset", ok: !!result.ok, outcome: result.outcome })); } catch { /* 창이 닫혔다 */ }
       // 사용 직후의 값이 화면에 반영돼야 한다. 그렇지 않으면 눌러도 아무것도 바뀌지 않은 것으로 보인다.
+      refresh(true);
+    });
+    return;
+  }
+  // Claude 초기화권. 제한은 Codex 와 같다. grant id 도 화면이 보낸 값을 그대로 쓴다. 다시 보낼 때
+  // 서버가 grant 를 새로 고르면 같은 요청 id 가 다른 grant 로 나가 중복 차감을 막지 못할 수 있다.
+  if (msg.type === "usage.claudeReset") {
+    const grantId = typeof msg.grantId === "string" ? msg.grantId.slice(0, 100) : "";
+    const requestId = typeof msg.requestId === "string" ? msg.requestId.slice(0, 100) : "";
+    consumeClaudeReset(grantId, requestId).then((result) => {
+      try { ws.send(JSON.stringify({ type: "usage.claudeReset", ok: !!result.ok, outcome: result.outcome })); } catch { /* 창이 닫혔다 */ }
       refresh(true);
     });
     return;

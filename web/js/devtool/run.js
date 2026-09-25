@@ -11,7 +11,7 @@
 //   handleRunMessage(message): run-* 메시지를 처리했으면 true를 돌려준다.
 //
 // 의존 대상
-//   $, esc, wsSend 와 현재 스페이스 root/getter, 브라우저 탭 생성 경로를 init 에서 주입받는다.
+//   $, esc, wsSend 와 현재 스페이스 root/getter·스페이스 목록, 브라우저 탭 생성 경로를 init 에서 주입받는다.
 //   center/browser/core 를 import 하지 않는다. 스페이스와 탭 상태는 아직 main 이 소유한다.
 //
 // 유지 조건
@@ -33,6 +33,7 @@ let send = null;
 let browserMode = false;
 let spaceRootFor = null;
 let getSelectedSpaceId = null;
+let getSpaces = null;
 let openBrowser = null;
 let consoleSpace = null;
 let newTabId = null;
@@ -48,6 +49,7 @@ export function initRun(deps) {
   browserMode = !!deps.browserMode;
   spaceRootFor = deps.spaceRootFor;
   getSelectedSpaceId = deps.getSelectedSpaceId;
+  getSpaces = deps.getSpaces;
   openBrowser = deps.openBrowser;
   consoleSpace = deps.consoleSpace;
   newTabId = deps.newTabId;
@@ -62,7 +64,14 @@ export function initRun(deps) {
   });
 }
 
-function curRunPath() { return spaceRootFor(getSelectedSpaceId()) || spaceRootFor(getCenterSpace()) || null; }
+// 경로는 고른 스페이스 하나에서만 찾는다. 에이전트가 없는 스페이스(홈 등)는 그 스페이스의 폴더를 쓰고,
+// 다른 스페이스 경로로 대신하지 않는다. 대신하면 패널과 실행 보호가 둘 다 남의 프로젝트를 가리킨다.
+function curRunPath() {
+  const sp = getSelectedSpaceId() || getCenterSpace();
+  if (!sp) return null;
+  const s = (getSpaces?.() || []).find((x) => x.id === sp);
+  return spaceRootFor(sp) || (s && s.folder) || null;
+}
 function runRec(p) { if (!runByPath[p]) runByPath[p] = { scripts: {}, pkgmgr: "npm", running: false, script: null, url: null, tail: [], autoOpened: false }; return runByPath[p]; }
 export function requestRunList() { const p = curRunPath(); if (!p) { renderRun(); return; } send({ type: "run.list", path: p }); send({ type: "run.status", path: p }); }
 function renderRunThrottled() { if (runRenderT) return; runRenderT = setTimeout(() => { runRenderT = null; renderRun(); }, 200); }
@@ -74,18 +83,30 @@ function renderRun() {
   let html = "";
   if (!names.length) html = '<div class="fempty">package.json 스크립트 없음.</div>';
   else {
-    html = names.map((n) => {
+    // 왼쪽은 스크립트 목록, 오른쪽은 열린 주소와 출력이다.
+    const items = names.map((n) => {
       const isRun = r.running && r.script === n;
-      return `<div class="run-item${isRun ? " running" : ""}" data-script="${escapeHtml(n)}"><span class="run-dot${isRun ? " on" : ""}"></span><span class="r-name" title="${escapeHtml(r.scripts[n] || "")}">${escapeHtml(n)}</span><button class="r-btn" data-run-act="${isRun ? "stop" : "start"}" data-script="${escapeHtml(n)}" title="${isRun ? "중지" : "실행"}">${isRun ? "⏹" : "▶"}</button></div>`;
+      return `<div class="run-item${isRun ? " running" : ""}" data-script="${escapeHtml(n)}"><span class="run-dot${isRun ? " on" : ""}"></span><span class="r-name" title="${escapeHtml(r.scripts[n] || "")}">${escapeHtml(n)}</span><button class="r-btn" data-run-act="${isRun ? "stop" : "start"}" data-script="${escapeHtml(n)}" title="${isRun ? "중지" : "실행"}" aria-label="${escapeHtml(n)} ${isRun ? "중지" : "실행"}">${isRun ? RUN_ICON.stop : RUN_ICON.play}</button></div>`;
     }).join("");
-    if (r.url) html += `<div class="run-url-chip" data-open-url="${escapeHtml(r.url)}" title="브라우저에서 열기">🌐 ${escapeHtml(r.url)}</div>`;
-    if (r.tail && r.tail.length) html += `<div class="run-out" id="run-out">${escapeHtml(r.tail.slice(-60).join("\n"))}</div>`;
+    const url = r.url ? `<div class="run-url-chip" data-open-url="${escapeHtml(r.url)}" title="브라우저에서 열기">${RUN_ICON.globe}<span class="run-url">${escapeHtml(r.url)}</span><span class="run-url-go">브라우저에서 열기</span></div>` : "";
+    const out = r.tail && r.tail.length
+      ? `<div class="run-out" id="run-out">${escapeHtml(r.tail.slice(-60).join("\n"))}</div>`
+      : `<div class="run-out run-out-empty">${r.running ? "출력을 기다리는 중…" : "스크립트를 실행하면 출력이 여기에 나옵니다."}</div>`;
+    html = `<div class="run-grid"><div class="run-scripts">${items}</div><div class="run-side">${url}${out}</div></div>`;
   }
   body.innerHTML = html;
   body.dataset.path = p; // 이 패널이 어느 프로젝트로 렌더됐는지: 클릭 시 현재 스페이스와 대조(M3)
   const out = dom("#run-out"); if (out) out.scrollTop = out.scrollHeight;
-  const mt = dom("#run-meta"); if (mt) mt.textContent = r.running ? ("▶ " + r.script) : (names.length ? r.pkgmgr : "");
+  // 접힌 머리 줄에도 지금 도는 스크립트와 패키지 관리자를 함께 보인다.
+  const mt = dom("#run-meta");
+  if (mt) mt.innerHTML = (r.running ? `<span class="run-meta-on">▶ ${escapeHtml(r.script || "")}</span>` : "")
+    + (names.length ? `<span class="run-meta-pm">${escapeHtml(r.pkgmgr)}</span>` : "");
 }
+const RUN_ICON = {
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+};
 function runAutoOpenUrl(u) {
   try { openBrowser(); const sp = consoleSpace(); const id = newTabId(); mutateBrowserState({ op: "tab.open", space: sp, id, url: u, title: "실행" }); } catch {}
 }
@@ -120,7 +141,7 @@ export function handleRunMessage(m) {
 export function initCapability(ctx) {
   initRun({
     $: ctx.$, esc: ctx.esc, wsSend: ctx.wsSend, browserMode: ctx.browserMode,
-    spaceRootFor: ctx.spaceRootFor, getSelectedSpaceId: ctx.getSelectedSpaceId,
+    spaceRootFor: ctx.spaceRootFor, getSelectedSpaceId: ctx.getSelectedSpaceId, getSpaces: ctx.getSpaces,
     openBrowser: ctx.openBrowser, consoleSpace: ctx.consoleSpace, newTabId: ctx.newTabId,
   });
   const on = handleRunMessage;

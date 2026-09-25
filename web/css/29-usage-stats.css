@@ -4,108 +4,145 @@
 /* 폭은 이 화면의 값이라 여기서 갖는다(전체형이라 열리면 늘어난다). */
 .usage-panel { width:100%; }
 
-.ust-page { flex:1 1 auto; overflow:auto; padding:18px 22px 40px; }
-.ust-boot { color:var(--muted-fg); padding:20px 2px; }
+/* 머리 줄은 고정하고 아래만 스크롤한다. */
+.ust-page { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; }
+.ust-scroll { flex:1; min-height:0; overflow:auto; }
 
-.ust-head { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
-.ust-h { margin:0; font-size:var(--fs-md); font-weight:var(--fw-semi); letter-spacing:var(--ls-title); color:var(--fg); }
+.ust-head { height:44px; flex:none; display:flex; align-items:center; gap:18px; padding:0 20px 0 24px; border-bottom:1px solid var(--line); }
+.ust-h { margin:0; font:600 var(--fs-h)/1 var(--sans); letter-spacing:-.015em; color:var(--fg); white-space:nowrap; }
 
-.ust-tabs { display:flex; gap:2px; background:var(--bg); border:1px solid var(--border); border-radius:var(--r-card); padding:2px; }
-.ust-tab { appearance:none; border:0; background:transparent; color:var(--muted-fg);
-  font:inherit; font-size:var(--fs-xs); padding:4px 12px; border-radius:var(--r-blk); cursor:pointer;
-  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.ust-tab:hover { color:var(--fg); }
-.ust-tab.on { background:var(--sidebar-accent); color:var(--fg); }
+/* 페이지 안 탭. 선택은 밑줄 2px 로 표시한다. */
+.ust-tabs { display:flex; align-items:stretch; gap:2px; height:44px; }
+.ust-tab { display:flex; align-items:center; padding:0 10px; color:var(--muted); font:inherit; font-size:var(--fs); position:relative;
+  border:0; background:none; cursor:pointer; border-radius:var(--r-s) var(--r-s) 0 0;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.ust-tab:hover { color:var(--fg); background:var(--hover); }
+.ust-tab:active { transform:scale(.97); }
+.ust-tab.on { color:var(--fg); font-weight:600; }
+.ust-tab.on::after { content:""; position:absolute; left:8px; right:8px; bottom:0; height:2px; border-radius:2px; background:var(--accent); }
 
-/* 수집 상태. 처음 여는 사람은 이 줄만 보고 몇 분을 기다리므로 무엇을 하는 중인지 적는다. */
-.ust-scan-wrap { display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
-.ust-scan { display:flex; align-items:center; gap:12px; margin-bottom:16px;
-  padding:9px 12px; background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); }
-.ust-scan-wrap .ust-scan { margin-bottom:0; }
-.ust-scan-l { display:flex; flex-direction:column; gap:2px; flex:1 1 auto; min-width:0; }
-.ust-scan-t { font-size:var(--fs-xs); color:var(--fg); }
-.ust-scan-n { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.ust-err { font-size:var(--fs-2xs); color:var(--destructive); padding:0 2px; }
-
-.ust-btn { appearance:none; font:inherit; font-size:var(--fs-xs); cursor:pointer;
-  padding:5px 12px; border-radius:var(--r-blk); border:1px solid var(--border);
-  background:var(--sidebar-accent); color:var(--fg);
-  transition:border-color var(--t-fade) var(--ease); }
-.ust-btn:hover:not(:disabled) { border-color:var(--ring); }
+/* 버튼 */
+.ust-btn { height:24px; padding:0 10px; display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line-strong); border-radius:var(--r-s);
+  background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-s); white-space:nowrap; cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.ust-btn:hover:not(:disabled) { background:var(--hover); color:var(--fg); border-color:var(--focus); }
+.ust-btn:active:not(:disabled) { transform:scale(.97); }
 .ust-btn:disabled { opacity:.5; cursor:default; }
-.ust-btn.ghost { background:transparent; color:var(--muted-fg); }
+.ust-btn-ghost { border-color:transparent; color:var(--muted); }
+.ust-btn.ust-btn-ghost:hover:not(:disabled) { border-color:var(--line); }
 
-.ust-pane { display:flex; flex-direction:column; }
+/* 훑기 상태. 머리 줄 오른쪽 끝. */
+.ust-scan { margin-left:auto; display:flex; align-items:center; gap:10px; font-size:var(--fs-s); color:var(--muted); white-space:nowrap; }
+.ust-scan b { font-weight:600; color:var(--fg-2); }
+.ust-scan-n { font-family:var(--mono); }
+.ust-scan-n.faint { color:var(--faint); }
+.ust-pulse { width:7px; height:7px; border-radius:50%; background:var(--focus); box-shadow:0 0 0 3px rgb(var(--pal-sky-pop-rgb) / .14); flex:none; }
+.ust-prog { width:88px; height:4px; border-radius:2px; background:var(--line-strong); overflow:hidden; flex:none; }
+.ust-prog i { display:block; height:100%; background:var(--focus); border-radius:2px; }
 
-.ust-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:6px; }
-.ust-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); padding:10px 12px; min-width:0; }
-.ust-card-l { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.ust-card-v { font-size:var(--fs-t3); font-weight:var(--fw-semi); letter-spacing:var(--ls-title); color:var(--fg); line-height:1.3; font-variant-numeric:tabular-nums; }
-.ust-card-n { font-size:var(--fs-2xs); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 훑기 오류. 머리 줄 바로 아래 한 줄. 점과 색은 계정 표의 실패 상태와 같다. */
+.ust-err { flex:none; display:flex; align-items:center; gap:6px; height:32px; padding:0 24px; border-bottom:1px solid var(--line);
+  font-size:var(--fs-s); color:var(--pal-danger); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ust-err::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--pal-danger); flex:none; }
 
-.ust-sec { display:flex; align-items:baseline; gap:8px; margin:20px 0 8px; }
-.ust-sec-t { font-size:var(--fs-xs); font-weight:var(--fw-semi); color:var(--fg); }
-.ust-sec-n { font-size:var(--fs-2xs); color:var(--muted-fg); }
+/* 요약 한 줄. 카드 대신 선 하나로 칸을 나눈다. */
+.ust-strip { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); border-bottom:1px solid var(--line); }
+.ust-strip.seven { grid-template-columns:repeat(7, minmax(0,1fr)); }
+.ust-cell { padding:14px 16px 12px 24px; display:flex; flex-direction:column; gap:5px; min-width:0; }
+.ust-cell + .ust-cell { border-left:1px solid var(--line); padding-left:16px; }
+.ust-cell-l { font-size:var(--fs-s); color:var(--muted); display:flex; align-items:center; gap:6px; white-space:nowrap; }
+.ust-cell-v { font:600 20px/1.15 var(--sans); letter-spacing:-.02em; color:var(--fg); font-variant-numeric:tabular-nums; }
+.ust-strip.seven .ust-cell-v { font-size:17px; }
+.ust-cell-n { font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ust-sw { width:8px; height:8px; border-radius:2px; flex:none; display:inline-block; }
 
-.ust-legend { display:flex; gap:14px; margin-bottom:6px; }
-.ust-leg { display:inline-flex; align-items:center; gap:5px; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.ust-dot { width:8px; height:8px; border-radius:var(--r-ctl); display:inline-block; }
+.ust-body { padding:18px 24px 20px; display:flex; flex-direction:column; gap:22px; }
+.ust-two { display:grid; grid-template-columns:1fr 1fr; gap:28px; }
 
-/* 막대는 날마다 한 칸이다. 칸을 고정 폭으로 두면 기간이 늘어날 때 넘치므로 균등 분배한다. */
-.ust-chart { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); padding:10px 12px 8px; }
-.ust-bars { display:flex; align-items:flex-end; gap:2px; height:132px; }
+/* 소제목은 한글 문장형. 오른쪽 끝에 값 하나를 둘 수 있다. */
+.ust-sec { display:flex; align-items:baseline; gap:8px; padding:0 0 8px; }
+.ust-sec-t { margin:0; font:600 11px/1 var(--sans); color:var(--fg-2); }
+.ust-sec-n { font-size:var(--fs-xs); color:var(--faint); }
+.ust-sec-r { margin-left:auto; font-size:var(--fs-xs); color:var(--muted); font-family:var(--mono); }
+
+.ust-legend { display:flex; gap:12px; margin:-2px 0 10px; font-size:var(--fs-s); color:var(--muted); }
+.ust-legend span { display:inline-flex; align-items:center; gap:5px; }
+
+/* 날짜별 막대. 막대는 날마다 한 칸이다. 칸을 고정 폭으로 두면 기간이 늘어날 때 넘치므로 균등 분배한다.
+   전체 탭은 차트만 있어 높게 두고, 제공자 탭은 아래 목록을 위해 낮게 둔다. */
+.ust-chart { position:relative; display:grid; grid-template-columns:1fr 40px; grid-template-rows:150px 18px; }
+.ust-chart.tall { grid-template-rows:440px 18px; }
+/* 전체 탭은 차트 하나뿐이라 남는 높이를 차트가 쓴다. 창이 낮으면 440 아래로 줄이지 않고 스크롤한다. */
+.ust-scroll:has(.ust-grow) { display:flex; flex-direction:column; }
+.ust-scroll:has(.ust-grow) > * { flex:none; }
+.ust-scroll:has(.ust-grow) > .ust-body { flex:1 0 auto; }
+.ust-grow { flex:1 0 auto; display:flex; flex-direction:column; }
+.ust-grow .ust-chart.tall { flex:1 0 auto; grid-template-rows:minmax(440px, 1fr) 18px; }
+.ust-plot { position:relative; border-bottom:1px solid var(--line-strong); }
+.ust-grid { position:absolute; left:0; right:0; border-top:1px dashed var(--line); }
+.ust-bars { position:absolute; inset:0; display:flex; align-items:flex-end; gap:3px; padding:0 2px; }
 .ust-bar { flex:1 1 0; height:100%; display:flex; align-items:flex-end; min-width:0; }
-.ust-stack { width:100%; display:flex; flex-direction:column-reverse; border-radius:var(--r-ctl); overflow:hidden; min-height:1px; }
+.ust-stack { width:100%; display:flex; flex-direction:column-reverse; border-radius:2px 2px 0 0; overflow:hidden; min-height:1px;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
 .ust-seg { width:100%; flex-basis:0; min-height:1px; }
-.ust-axis { display:flex; justify-content:space-between; margin-top:6px; font-size:var(--fs-2xs); color:var(--muted-fg); }
-
-.ust-two { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px; }
-.ust-rank { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); padding:10px 12px; min-width:0; }
-.ust-rank-t { font-size:var(--fs-2xs); color:var(--muted-fg); margin-bottom:6px; }
-.ust-rank-r { display:flex; align-items:center; gap:8px; padding:3px 0; font-size:var(--fs-xs); }
-.ust-rank-n { flex:0 0 40%; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ust-rank-bar { flex:1 1 auto; height:6px; background:var(--muted); border-radius:var(--r-pill); overflow:hidden; }
-.ust-rank-fill { display:block; height:100%; background:var(--primary); }
-.ust-rank-v { flex:0 0 54px; text-align:right; color:var(--muted-fg); font-variant-numeric:tabular-nums; }
-
-.ust-table { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); overflow:hidden; }
-.ust-tr { display:flex; align-items:center; gap:10px; padding:6px 12px; font-size:var(--fs-xs); border-top:1px solid var(--border); }
-.ust-tr:first-child { border-top:0; }
-.ust-tr.ust-th { color:var(--muted-fg); font-size:var(--fs-2xs); background:var(--muted); }
-.ust-td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ust-td.w-time { flex:0 0 118px; color:var(--muted-fg); font-variant-numeric:tabular-nums; }
-.ust-td.w-proj { flex:1 1 auto; min-width:0; }
-.ust-td.w-model { flex:0 0 150px; color:var(--muted-fg); }
-.ust-td.w-num { flex:0 0 66px; text-align:right; font-variant-numeric:tabular-nums; }
-
-.ust-empty { padding:14px 2px; font-size:var(--fs-xs); color:var(--muted-fg); }
-.ust-note { font-size:var(--fs-2xs); color:var(--muted-fg); margin-bottom:8px; }
-.ust-foot { margin-top:22px; font-size:var(--fs-2xs); color:var(--muted-fg); }
-
-/* 계정 */
-.ust-accounts { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); overflow:hidden; }
-.ust-acct { display:flex; align-items:center; gap:10px; padding:7px 12px; font-size:var(--fs-xs); border-top:1px solid var(--border); }
-.ust-acct:first-child { border-top:0; }
-.ust-acct-n { flex:0 0 120px; color:var(--fg); }
-.ust-acct-s { flex:0 0 150px; color:var(--muted-fg); }
-.ust-acct-s.ok { color:var(--success); }
-.ust-acct-s.warn { color:var(--pal-yellow-pop); }
-.ust-acct-s.bad { color:var(--destructive); }
-.ust-acct-p { flex:1 1 auto; min-width:0; color:var(--muted-fg); font-size:var(--fs-2xs);
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-.ust-secrets { display:flex; flex-direction:column; gap:8px; }
-.ust-secret { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.ust-secret-l { display:flex; align-items:baseline; gap:6px; flex:0 0 190px; }
-.ust-secret-n { font-size:var(--fs-xs); color:var(--fg); }
-.ust-secret-f { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.ust-secret-f.on { color:var(--success); }
-.ust-input { flex:1 1 220px; min-width:0; font:inherit; font-size:var(--fs-sm);
-  padding:5px 9px; border-radius:var(--r-blk); border:1px solid var(--border);
-  background:var(--input); color:var(--fg);
-  transition:border-color var(--t-fade) var(--ease); }
-.ust-input:focus { outline:none; border-color:var(--ring); }
-
 /* 기준보다 높은 날. 꼭대기에 선을 그어 잘렸음을 표시한다. 그러지 않으면 기준을
    넘긴 날과 기준에 딱 맞은 날이 화면에서 같아 보인다. */
 .ust-bar.clip .ust-stack { box-shadow:inset 0 2px 0 0 var(--fg); }
+.ust-bar:hover .ust-stack { filter:brightness(1.12); }
+.ust-bars:hover .ust-bar:not(:hover) .ust-stack { opacity:.55; }
+.ust-yax, .ust-xax { position:relative; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.ust-yax span { position:absolute; left:8px; transform:translateY(-50%); }
+.ust-xax span { position:absolute; top:6px; transform:translateX(-50%); white-space:nowrap; }
+.ust-xax span:first-child { transform:none; }
+.ust-xax span:last-child { transform:translateX(-100%); }
+
+/* 많이 쓴 곳. 이름 · 비율 막대 · 값 세 칸. */
+.ust-rank-r { display:grid; grid-template-columns:minmax(0,1fr) 90px 52px; align-items:center; column-gap:10px; height:var(--row);
+  padding:0 8px; border-radius:var(--r-s); font-size:var(--fs); color:var(--fg-2);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.ust-rank-r:hover { background:var(--hover); color:var(--fg); }
+.ust-rank-n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ust-rank-bar { height:4px; border-radius:2px; background:var(--line); overflow:hidden; }
+.ust-rank-fill { display:block; height:100%; border-radius:2px; }
+.ust-rank-v { text-align:right; font:500 var(--fs-s)/1 var(--mono); color:var(--muted); }
+
+/* 표. 줄 높이 24, 줄 사이는 선 하나. */
+.ust-tbl { width:100%; border-collapse:collapse; font-size:var(--fs); }
+.ust-tbl th { text-align:left; font-weight:500; font-size:var(--fs-s); color:var(--muted); height:var(--row); padding:0 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+.ust-tbl td { height:var(--row); padding:0 8px; color:var(--fg-2); border-bottom:1px solid var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:0;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.ust-tbl tr:last-child td { border-bottom:0; }
+.ust-tbl tbody tr:hover td { background:var(--hover); color:var(--fg); }
+.ust-tbl .ust-num { text-align:right; font-variant-numeric:tabular-nums; }
+.ust-tbl .ust-mono { color:var(--muted); font-family:var(--mono); font-size:var(--fs-s); }
+.ust-tbl td.ust-name { color:var(--fg); }
+.ust-tbl .w-time { width:130px; }
+.ust-tbl .w-model { width:150px; }
+.ust-tbl .w-num { width:70px; }
+.ust-tbl .w-prov { width:150px; }
+.ust-tbl .w-state { width:210px; }
+
+/* 아직 없는 목록. 목록의 빈 줄 하나로 보인다. */
+.ust-empty { height:var(--row); display:flex; align-items:center; padding:0 8px; font-size:var(--fs-s); color:var(--faint); white-space:nowrap; }
+/* 첫 그리기 전 안내. 본문 여백에 맞춘다. */
+.ust-boot { padding:18px 24px 20px; font-size:var(--fs-s); color:var(--muted); }
+.ust-note { margin:0 0 10px; font-size:var(--fs-s); color:var(--muted); line-height:1.5; max-width:640px; }
+.ust-foot { font-size:var(--fs-s); color:var(--faint); }
+
+/* 계정 */
+.ust-st { display:inline-flex; align-items:center; gap:6px; }
+.ust-st i { width:6px; height:6px; border-radius:50%; background:var(--faint); flex:none; }
+.ust-st.ok { color:var(--ok); } .ust-st.ok i { background:var(--ok); }
+.ust-st.warn { color:var(--pal-yellow-pop); } .ust-st.warn i { background:var(--pal-yellow-pop); }
+.ust-st.bad { color:var(--pal-danger); } .ust-st.bad i { background:var(--pal-danger); }
+
+.ust-secret { display:grid; grid-template-columns:170px 64px minmax(0,1fr) auto auto; align-items:center; gap:8px; height:32px;
+  padding:0 8px; border-bottom:1px solid var(--line); font-size:var(--fs); color:var(--fg-2); }
+.ust-secret:last-child { border-bottom:0; }
+.ust-secret-f { font-size:var(--fs-xs); color:var(--faint); white-space:nowrap; }
+.ust-secret-f.on { color:var(--ok); }
+.ust-input { height:24px; flex:1; min-width:0; padding:0 8px; border-radius:var(--r-s); border:1px solid var(--line); background:var(--raised); color:var(--fg);
+  font:inherit; font-size:var(--fs-s);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.ust-input::placeholder { color:var(--faint); }
+.ust-input:focus { outline:none; border-color:var(--focus); }

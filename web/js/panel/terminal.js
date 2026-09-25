@@ -37,8 +37,6 @@ let cropDetectTimer = null;
 const FIT_SCROLLBAR_PX = 14;
 // 위아래 여백의 합의 최소값. 나머지가 이보다 작으면 한 줄을 빼서 여백으로 쓴다.
 const MIN_VERTICAL_GAP_PX = 6;
-// 오른쪽 끝의 빈 여백. 글자가 채팅 칸 테두리에 붙어 보이지 않게 한다.
-const RIGHT_GAP_PX = 2;
 
 // 사용자가 조정판으로 맞춰 둔 보정치. 조정판은 없어졌지만 저장된 값은 그대로 적용한다.
 const TUNE_KEY = "ac.crop.tune";
@@ -78,12 +76,19 @@ export function getCropEnabled() { return cropEnabled; }
 export function setCropEnabled(value) { cropEnabled = value; }
 export function fitTerminal() { try { fitAddon?.fit(); } catch {} }
 
-const isDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+// 앱 화면과 같은 기준을 쓴다. 앱은 data-theme="light" 일 때만 밝고 OS 설정을 따르지 않는다(편집기도 같다).
+const isDark = () => document.documentElement.getAttribute("data-theme") !== "light";
+// 다크 색은 00-tokens.css 팔레트에서 읽는다. xterm 은 캔버스·인라인 색을 쓰므로 CSS 변수를 직접 받지 못한다.
+const pal = (name) => getComputedStyle(document.documentElement).getPropertyValue(`--pal-${name}`).trim();
 export function xtermTheme() {
-  // 커서=팔레트(sky-pop, 밝고 잘 보임), 배경·전경=soft ink/paper, 선택=커서와 같은 팔레트 틴트.
-  return isDark()
-    ? { background: "#0A1620", foreground: "#E7F4FB", cursor: "#85E8F6", selectionBackground: "rgba(133,232,246,.26)" }
-    : { background: "#EAF3FA", foreground: "#0A1620", cursor: "#00AFF0", selectionBackground: "rgba(0,175,240,.20)" };
+  if (!isDark()) return { background: "#EAF3FA", foreground: "#0A1620", cursor: "#00AFF0", selectionBackground: "rgba(0,175,240,.20)" };
+  const sky = pal("sky-pop"), mint = pal("mint-pop"), yellow = pal("yellow-pop"), pink = pal("pink");
+  return {
+    background: pal("term-bg"), foreground: pal("term-fg"),
+    cursor: pal("babyblue"), cursorAccent: pal("term-bg"), selectionBackground: "rgba(133,232,246,.26)",
+    cyan: sky, brightCyan: sky, green: mint, brightGreen: mint, yellow, brightYellow: yellow,
+    brightBlack: pal("faint"), red: pink, magenta: pink, blue: pal("skype"),
+  };
 }
 
 // xterm의 정확한 셀 크기(css px). 픽셀 반올림 오차를 없애 그리드에 정확히 정렬.
@@ -179,15 +184,22 @@ export function applyCropAndFit() {
   const tn = getCropTune();
   terminal.style.marginTop = tn.padTop + "px";
   terminal.style.marginBottom = tn.padBottom + "px";
+  // 글자 판은 .terminal 의 안쪽 여백 안에 둔다. 안쪽 요소는 position:absolute 라 left·top 이 여백을
+  // 무시하고 테두리 안쪽 끝에서 시작하므로 여백을 직접 더한다.
+  const pad = getComputedStyle(terminal);
+  const padL = parseFloat(pad.paddingLeft) || 0, padR = parseFloat(pad.paddingRight) || 0;
+  const padT = parseFloat(pad.paddingTop) || 0, padB = parseFloat(pad.paddingBottom) || 0;
   const cw = exactCellWidth(), ch = exactCellHeight();
   if (!(cw > 0 && ch > 0)) {
-    Object.assign(terminalInner.style, { left: "0", top: "0", width: "100%", height: "100%", clipPath: "" });
+    Object.assign(terminalInner.style, { left: padL + "px", top: padT + "px",
+      width: `calc(100% - ${padL + padR}px)`, height: `calc(100% - ${padT + padB}px)`, clipPath: "" });
     try { fitAddon.fit(); } catch {}
     return;
   }
   const o = cropEnabled ? origin : { cols: 0, rows: 0 };
   // 소수점까지 잰다. clientWidth·clientHeight 는 정수로 반올림해 0.5px 차이로 한 칸이 달라진다.
-  const box = terminal.getBoundingClientRect();
+  const rect = terminal.getBoundingClientRect();
+  const box = { width: rect.width - padL - padR, height: rect.height - padT - padB };
   // 조정판 값: left 는 pane 을 왼쪽으로, top 은 화면 전체를 위로 더 미는 px 이고 right 는 오른쪽에 더 들일 폭이다.
   const cols = o.cols + Math.max(1, Math.ceil((box.width + tn.left + tn.right) / cw - 1e-3));
   const usableH = box.height - tn.top;
@@ -198,8 +210,8 @@ export function applyCropAndFit() {
   const innerW = Math.ceil(cols * cw + FIT_SCROLLBAR_PX + cw / 2);
   terminalInner.style.width = innerW + "px";
   terminalInner.style.height = Math.ceil(rows * ch + ch / 2) + "px";
-  terminalInner.style.left = -(o.cols * cw + tn.left).toFixed(3) + "px";
-  terminalInner.style.top = (usableH - bottomGap - rows * ch).toFixed(3) + "px";
+  terminalInner.style.left = (padL - (o.cols * cw + tn.left)).toFixed(3) + "px";
+  terminalInner.style.top = (padT + usableH - bottomGap - rows * ch).toFixed(3) + "px";
   try { fitAddon.fit(); } catch {}
   // 위쪽 여백 자리에는 탭 줄이, 왼쪽에는 사이드바가 걸친다. pane 첫 줄이 실제로 그려진 위치에서 잘라
   // 조금도 보이지 않게 한다. 계산한 위치(o.rows * ch)는 소수점이라, 화면 픽셀에 맞춰 그려진 줄과
@@ -207,8 +219,8 @@ export function applyCropAndFit() {
   let clipTop = o.rows * ch;
   const paneRow = o.rows > 0 && terminalInner.querySelectorAll(".xterm-rows > div")[o.rows];
   if (paneRow) clipTop = paneRow.getBoundingClientRect().top - terminalInner.getBoundingClientRect().top;
-  // 오른쪽은 채팅 칸 끝에서 RIGHT_GAP_PX 앞에서 자른다. 칸 수로 맞추면 여백이 0~1칸 사이로 달라진다.
-  const clipRight = Math.max(0, innerW - (o.cols * cw + tn.left + box.width - RIGHT_GAP_PX));
+  // 오른쪽은 안쪽 여백이 시작하는 곳에서 자른다. 칸 수로 맞추면 여백이 0~1칸 사이로 달라진다.
+  const clipRight = Math.max(0, innerW - (o.cols * cw + tn.left + box.width));
   terminalInner.style.clipPath = `inset(${clipTop.toFixed(3)}px ${clipRight.toFixed(3)}px 0 ${(o.cols * cw).toFixed(3)}px)`;
 }
 

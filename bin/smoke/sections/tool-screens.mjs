@@ -15,6 +15,11 @@ import { capabilitySource } from "../sources.mjs";
 // 앵커로 잘라 보는 검사가 쓴다. 못 자르면 그 검사는 통과가 아니라 못 잼으로 내려간다.
 import { sliceBetween } from "../../slice-anchor.mjs";
 
+// 앱 셸이 기능에게 제공하는 공용 모듈. 앱 셸 자신은 쓰지 않아서 main 에서 정적으로 닿지 않지만
+// 여러 기능이 함께 쓰는 UI 부품(드롭다운 등)이다. 소유 검사는 이것을 앱 셸로 본다. 대신 이 모듈이
+// 기능 파일을 끌어오면 그 기능 코드가 소유 검사를 빠져나가므로, 앱 셸 밖을 import 하면 실패한다.
+const SHELL_LIBRARY = ["web/js/core/dropdown.js"];
+
 // 짝 없는 태그를 찾는다. 맞으면 null, 어긋나면 사람이 읽을 사유 한 줄.
 // 스스로 닫는 것과 내용을 담지 않는 것은 짝을 세지 않는다.
 const VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -276,6 +281,59 @@ await checkAsync("Base 대비 목록이 보기별로 갈리고, 목록 밖 base 
   } finally { rs.replace({ allowedRoots: [] }); rmSync(dir, { recursive: true, force: true }); }
 });
 
+// 브랜치 전환은 다른 조작과 같은 문을 지난다. 원격 연결은 거절하고, 화면이 알던 레포와 다르면
+// 거절하고, 로컬 브랜치 목록 밖 이름은 git 에 넘기지 않는다. 커밋하지 않은 변경과 겹치면 git 의
+// 거절을 알리고 브랜치를 그대로 둔다(강제로 넘어가거나 변경을 치우지 않는다).
+await checkAsync("브랜치 전환은 로컬·같은 레포·목록 안 이름만, 겹치는 변경이 있으면 멈춘다", async () => {
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const pathMod = await import("node:path");
+  const rs = await import(new URL("../../../server/runtime-state.js", import.meta.url).href);
+  const mod = await import(new URL("../../../server/git-handlers.js", import.meta.url).href);
+  const dir = realpathSync(mkdtempSync(pathMod.join(tmpdir(), "iris-checkout-")));
+  const g = (...a) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8",
+    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  const head = () => g("rev-parse", "--abbrev-ref", "HEAD").trim();
+  try {
+    g("init", "-q", "-b", "main");
+    writeFileSync(pathMod.join(dir, "a.js"), "1\n"); g("add", "-A"); g("commit", "-qm", "base");
+    g("checkout", "-qb", "feat");
+    writeFileSync(pathMod.join(dir, "a.js"), "feat\n"); g("commit", "-qam", "feat");
+    g("checkout", "-q", "main");
+    g("update-ref", "refs/remotes/origin/main", "HEAD");   // 원격 이름은 전환 목록에 들지 않는다
+    rs.replace({ allowedRoots: [dir] });
+    rs.initRuntimeState({ scheduleRecompute: async () => {} }); // 조작 뒤 파일 트리 재계산은 이 검사의 대상이 아니다
+    const out = [];
+    const send = (local, extra) => {
+      out.length = 0;
+      mod.handleGit({ _local: local, send: (x) => out.push(JSON.parse(x)) }, { type: "git.checkout", path: dir, expectRoot: dir, ...extra });
+      return out;
+    };
+    // status 가 전환 목록을 싣는다. 로컬만이다.
+    out.length = 0;
+    mod.handleGit({ _local: true, send: (x) => out.push(JSON.parse(x)) }, { type: "git.status", path: dir });
+    if ((out[0].branches || []).slice().sort().join(",") !== "feat,main") throw new Error("status 의 브랜치 목록: " + out[0].branches);
+    if (send(false, { branch: "feat" })[0].type !== "git-error" || head() !== "main") throw new Error("원격 연결에서 전환됐다");
+    if (send(true, { branch: "feat", expectRoot: dir + "/other" })[0].type !== "git-error" || head() !== "main") throw new Error("다른 레포 기준 요청이 전환됐다");
+    for (const bad of ["--orphan=x", "origin/main", "HEAD~0", "nope", ""]) {
+      if (send(true, { branch: bad })[0].type !== "git-error" || head() !== "main") throw new Error("목록 밖 이름을 받았다: " + bad);
+    }
+    // 겹치는 변경: 거절되고 브랜치도 파일도 그대로다.
+    writeFileSync(pathMod.join(dir, "a.js"), "dirty\n");
+    const r1 = send(true, { branch: "feat" });
+    if (r1[0].type !== "git-error" || !/전환하지 못했습니다/.test(r1[0].error) || !/a\.js/.test(r1[0].error)) throw new Error("겹침 알림: " + JSON.stringify(r1[0]));
+    if (head() !== "main" || readFileSync(pathMod.join(dir, "a.js"), "utf8") !== "dirty\n") throw new Error("겹침인데 상태가 바뀌었다");
+    if (!r1.some((m) => m.type === "git-status" && m.branch === "main")) throw new Error("실패 뒤 status 를 다시 안 보냈다");
+    // 깨끗하면 전환되고, 뒤따르는 status 가 새 브랜치를 적는다.
+    g("checkout", "--", "a.js");
+    const r2 = send(true, { branch: "feat" });
+    if (r2[0].type !== "git-ok" || head() !== "feat") throw new Error("전환 실패: " + JSON.stringify(r2[0]));
+    if (!r2.some((m) => m.type === "git-status" && m.branch === "feat")) throw new Error("전환 뒤 status 가 새 브랜치를 안 적는다");
+    return true;
+  } finally { rs.replace({ allowedRoots: [] }); rmSync(dir, { recursive: true, force: true }); }
+});
+
 // 강조는 옛쪽·새쪽을 따로 토큰화한 뒤 줄에 되돌려 넣는다. 짝이 한 칸 밀리면 모든 줄이 남의 색을 단다.
 await checkAsync("강조 줄이 옛쪽·새쪽의 같은 줄과 짝지어진다", async () => {
   const mod = await import(new URL("../../../web/js/devtool/diff.js", import.meta.url).href);
@@ -309,10 +367,8 @@ check("훑기를 부탁하고 · 답을 받고 · 다시 그린다", () => {
     && !/handleSourceControlMessage/.test(read("web/js/main.js"));
 });
 
-// 06-accounts.css 는 계정 화면 뒤에 깃 패널의 머리(.sc-head·.sc-title·.sc-branch)와 커밋
-// 상자, 도구 머리 여덟 곳이 함께 쓰는 .sc-ico 를 담고 있다. 그 부분을 잘라 내면 화면은 정상으로
-// 뜨고 배치만 무너져서 열어 보기 전에는 드러나지 않는다. 화면에 쓰는 class 이름에 규칙이 없으면
-// 이 검사가 잡는다.
+// 화면 CSS 에서 규칙 하나를 잘라 내면 화면은 정상으로 뜨고 배치만 무너져서 열어 보기 전에는
+// 드러나지 않는다. 화면에 쓰는 class 이름에 규칙이 없으면 이 검사가 잡는다.
 check("화면에 쓰는 class 는 규칙을 갖는다", () => {
   const html = read("web/index.html");
   const css = cssFiles.map((rel) => read(rel)).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -629,24 +685,20 @@ await checkAsync("표의 각 줄이 실물과 이어져 있다", async () => {
      밝힌 경로가 실제로 라우팅되고 그 처리기가 이 기능의 서버 파일에서 나오는가
      그 페이지가 실제로 그 경로를 호출하는가(아무도 호출하지 않는 경로는 죽은 경로다)
    같은 경로를 둘이 적는 것도 막는다. 나중에 등록된 쪽이 조용히 이긴다. */
-/* 면 색을 글자 색으로 쓰지 않는다.
-
-   이 팔레트에서 --muted 는 면(#16293A)이고 글자 보조 등급은 --muted-fg(#8FB0C4)다. 이름이
-   한 글자 차이라 다른 화면의 팔레트에서 옮겨 적으면 그대로 통과한다. 「따로 열기」가 그렇게
-   사이드바 바탕과 대비 1.3 으로 깔려 거의 보이지 않았던 적이 있다.
-
-   부재를 확인하는 검사라 이름이 바뀌면 아무것도 검사하지 못한다. 그래서 두 이름이 아직 그
-   뜻으로 쓰이는지 먼저 확인하고, 확인할 수 없으면 통과가 아니라 측정 불가로 처리한다. */
-check("면 토큰을 글자 색으로 쓰지 않는다", () => {
-  const tokens = read("web/css/00-tokens.css");
-  if (!/--muted:\s*var\(--pal-ink/.test(tokens)) cannotMeasure("--muted 가 더는 면 토큰이 아니다 — 검사 전제가 바뀌었다");
-  if (!/--muted-fg:/.test(tokens)) cannotMeasure("--muted-fg 가 없다 — 검사 전제가 바뀌었다");
+/* 앱 CSS와 인라인 스타일은 공통 방향 A의 역할 이름만 쓴다. 메모랩은 자기 팔레트를 가진
+   독립 지면이라 sourceFiles("web") 대상에 들어오지 않는다. */
+check("옛 역할 토큰을 남기지 않는다", () => {
+  const legacy = [
+    "bg", "card", "sidebar", "muted-fg", "faint-fg", "primary", "primary-fg", "on-accent",
+    "border", "sidebar-border", "border-strong", "input", "ring", "hover-bg", "select-bg",
+    "sidebar-accent", "success", "destructive", "fs-2xs", "fs-sm", "fs-title", "r-xs", "r-ctl",
+    "t-fade", "radius",
+  ];
+  const oldName = new RegExp(`(?<![\\w-])--(?:${legacy.join("|")})(?![\\w-])`, "g");
   const bad = [];
-  for (const rel of sourceFiles("web").filter((f) => f.endsWith(".css"))) {
-    const src = read(rel).replace(/\/\*[\s\S]*?\*\//g, "");
-    for (const m of src.matchAll(/color\s*:\s*var\(\s*--muted\s*\)/g)) {
-      bad.push(`${rel}: ${m[0]} — 글자에는 --muted-fg`);
-    }
+  for (const rel of sourceFiles("web")) {
+    const src = read(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    for (const m of src.matchAll(oldName)) bad.push(`${rel}: ${m[0]}`);
   }
   if (bad.length) throw new Error(bad.join(" · "));
   return true;
@@ -1299,7 +1351,13 @@ await checkAsync("기능은 자기 파일을 배타로 갖는다", async () => {
     return seen;
   };
   // 항상 로드되는 앱 셸은 main 에서 정적으로 도달하는 것 전부다. 기능이 이것을 함께 쓰는 것은 정상이다.
-  const shell = reach(["web/js/main.js"]);
+  const pureShell = reach(["web/js/main.js"]);
+  for (const lib of SHELL_LIBRARY) {
+    if (!files.has(lib)) throw new Error(`공용 모듈 ${lib} 이 없다`);
+    const out = staticEdges(lib).filter((f) => !pureShell.has(f) && !SHELL_LIBRARY.includes(f));
+    if (out.length) throw new Error(`공용 모듈 ${lib} 이 앱 셸 밖을 끌어온다: ${out.join(", ")}`);
+  }
+  const shell = new Set([...pureShell, ...SHELL_LIBRARY]);
   const owned = new Map();     // 파일 → 그 파일을 끌어오는 기능들
   const roots = new Map();
   for (const cap of CAPABILITIES) {
@@ -1747,7 +1805,7 @@ await checkAsync("기능이 적은 자기 파일이 실제 소유와 같다", as
     return seen;
   };
   const allBoundaries = new Set(boundary.values());
-  const shell = walk(["web/js/main.js"], allBoundaries);
+  const shell = walk(["web/js/main.js", ...SHELL_LIBRARY], allBoundaries);
   const bad = [];
   for (const cap of CAPABILITIES) {
     if (!Array.isArray(cap.files) || !cap.files.length) { bad.push(`${cap.id}: 자기 파일을 안 적었다`); continue; }

@@ -3,7 +3,7 @@
 // 소유 범위
 //   왼쪽 분류 목록과 오른쪽 내용의 배치, 그리고 이벤트 연결이 참조하는 이름들
 //   (data-km-rec · data-km-reset · data-km-sec · #km-reset-all · #km-search · data-set-toggle
-//    · data-set-screen · data-sw-pick · data-sw-key · #sw-refresh · #sw-open-perm).
+//    · data-set-screen · data-set-motion · data-sw-pick · data-sw-key · #sw-refresh · #sw-open-perm).
 //   부산물 분류의 이름은 artifacts-view.js 가 소유하고, 여기서는 그 함수를 부르기만 한다.
 //
 // 제공 API
@@ -27,6 +27,7 @@
 // 분류 표는 여기 하나뿐이고, 왼쪽 목록과 오른쪽 내용이 같은 표를 보고 그린다.
 import { PRESETS, featureLockNote } from "../core/features.js";
 import { artifactsPane } from "./artifacts-view.js";
+import { ANYWHERE, MAIN_WINDOW, ON_BROWSER, ON_EDITOR } from "../core/keymap.js";
 
 export const SETTINGS_SECTIONS = [
   { id: "keys", label: "단축키" },
@@ -66,54 +67,101 @@ export function settingsMarkup(model) {
   const nav = SETTINGS_SECTIONS.map((s) => {
     const n = counts[s.id];
     const count = n === undefined ? "" : `<span class="km-nav-c">${esc(n)}</span>`;
-    return `<button class="km-nav${s.id === section ? " on" : ""}" data-km-sec="${esc(s.id)}">
-      <span class="km-nav-n">${esc(s.label)}</span>${count}</button>`;
+    return `<button class="km-nav${s.id === section ? " on" : ""}" data-km-sec="${esc(s.id)}">${esc(s.label)}${count}</button>`;
   }).join("");
 
+  // 단축키는 검색 줄을 고정하고 목록만 스크롤한다. 나머지 분류는 판 전체가 스크롤한다.
+  const other = section === "features" ? screensPane(screens, model.presets || PRESETS, m.motion)
+    : section === "windows" ? switcherPane(m.switcher)
+    : section === "artifacts" ? artifactsPane(m.artifacts)
+    : section === "security" ? securityPane(toggles)
+    : "";
   return `<div class="km-split">
-    <nav class="km-nav-col">${nav}</nav>
-    <div class="km-pane">${
-      section === "keys" ? keysPane(m, items)
-      : section === "features" ? screensPane(screens, model.presets || PRESETS)
-      : section === "windows" ? switcherPane(m.switcher)
-      : section === "artifacts" ? artifactsPane(m.artifacts)
-      : securityPane(toggles)}</div>
+    <nav class="km-nav-col"><div class="km-nav-top"><span class="km-h2">설정</span></div><div class="km-nav-list">${nav}</div></nav>
+    <div class="km-pane">${section === "keys"
+      ? keysPane(m, items)
+      : `<div class="km-scroll"><div class="km-spane">${other}</div></div>`}</div>
   </div>`;
+}
+
+// 단축키는 쓰는 곳으로 묶는다. 같은 조합이라도 쓰는 곳이 다르면 충돌하지 않으므로,
+// 사람이 조합을 고를 때 먼저 보는 것이 쓰는 곳이다.
+const KEY_GROUPS = [
+  [ANYWHERE, "어디서나 쓰는 키"],
+  [ON_BROWSER, "브라우저 탭에서"],
+  [ON_EDITOR, "편집기에서"],
+  [MAIN_WINDOW, "메인 창에서"],
+];
+const LOCK_ICON = `<svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
+
+// "⌘⇧Tab" 을 ⌘ · ⇧ · Tab 세 칸으로 나눈다. 수정키는 한 글자씩, 나머지는 한 칸이다.
+function keyCaps(keys) {
+  const esc = escapeHtml;
+  const out = [];
+  let rest = String(keys || "");
+  while (rest && "⌘⌥⇧⌃".includes(rest[0])) { out.push(rest[0]); rest = rest.slice(1); }
+  if (rest) out.push(rest);
+  return out.map((k) => `<span class="km-kc">${esc(k)}</span>`).join("");
+}
+
+function countWord(n) {
+  return ({ 2: "두", 3: "세", 4: "네" })[n] || String(n);
 }
 
 function keysPane(m, items) {
   const esc = escapeHtml;
   const conflicts = m.conflicts || [];
   const shown = items.filter((x) => !m.query || matchOne(x, m.query));
+  const byId = new Map(items.map((x) => [x.id, x]));
+  const bad = new Set(conflicts.flatMap((c) => c.ids || []));
+  const locked = items.filter((x) => x.lock).length;
   const parts = [];
 
-  parts.push(`<div class="km-pane-h">
-    <input id="km-search" type="search" placeholder="이름·조합으로 찾기" value="${esc(m.query || "")}" autocomplete="off" />
+  parts.push(`<div class="km-tool">
+    <label class="km-search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="km-search" type="search" placeholder="이름·조합으로 찾기" value="${esc(m.query || "")}" autocomplete="off" /></label>
+    <span class="km-faint">바꾼 조합 ${esc(m.changed || 0)}개 · 잠긴 조합 ${esc(locked)}개</span><span class="km-sp"></span>
     ${m.changed ? `<button class="km-btn" id="km-reset-all">전부 기본값으로</button>` : ""}
   </div>`);
 
+  parts.push('<div class="km-scroll"><div class="km-keys-in">');
+  // 충돌은 id 가 아니라 사람이 보는 이름과 쓰는 곳으로 적는다. id 는 화면 어디에도 없는 글자다.
   if (conflicts.length) {
-    parts.push(`<div class="km-warn">같은 자리에 둘 이상 걸렸습니다: ${conflicts
-      .map((c) => `<b>${esc(c.keys)}</b> ${esc((c.ids || []).join(" · "))}`).join(" / ")}</div>`);
+    const title = conflicts.length === 1
+      ? `같은 조합이 ${countWord((conflicts[0].ids || []).length)} 곳에 걸렸습니다`
+      : "같은 조합이 여러 곳에 걸렸습니다";
+    parts.push(`<div class="km-warn"><i class="km-warn-d"></i><span>${title}</span>${conflicts.map((c) => `<b>${esc(c.keys)}</b><span>${
+      (c.ids || []).map((id) => {
+        const it = byId.get(id);
+        return it ? `${esc(it.label)} (${esc(it.where)})` : esc(id);
+      }).join(" · ")}</span>`).join("")}</div>`);
   }
 
-  parts.push('<div class="km-list">');
-  for (const item of shown) {
+  const known = new Set(KEY_GROUPS.map(([where]) => where));
+  const groups = KEY_GROUPS.concat([...new Set(shown.map((x) => x.where))].filter((w) => !known.has(w)).map((w) => [w, `${w}에서`]))
+    .map(([where, title]) => ({ title, list: shown.filter((x) => x.where === where) }))
+    .filter((g) => g.list.length);
+  const row = (item) => {
     const rec = m.recording === item.id;
-    parts.push(`<div class="km-row${item.lock ? " locked" : ""}${item.changed ? " changed" : ""}">
-      <div class="km-what"><span class="km-label">${esc(item.label)}</span><span class="km-where">${esc(item.where)}</span></div>
-      ${item.lock
-        ? `<span class="km-keys locked" title="${esc(item.lock)}">${esc(item.keys)}<span class="km-lock">잠김</span></span>`
-        : `<button class="km-keys${rec ? " rec" : ""}" data-km-rec="${esc(item.id)}">${
-            rec ? "새 조합을 누르세요 · Esc 취소" : esc(item.keys)}</button>`}
+    const lead = item.lock ? `<span class="km-lead" aria-hidden="true">${LOCK_ICON}</span>`
+      : item.changed ? `<span class="km-lead"><i class="km-chg" title="바꾼 조합"></i></span>` : `<span class="km-lead"></span>`;
+    return `<div class="km-row${item.lock ? " locked" : ""}${item.changed ? " changed" : ""}"${item.lock ? ` title="${esc(item.lock)}"` : ""}>
+      ${lead}<span class="km-label">${esc(item.label)}</span>
       ${item.changed && !item.lock
-        ? `<button class="km-undo" data-km-reset="${esc(item.id)}" title="기본값 ${esc(item.defKeys || "")} 으로">되돌리기</button>`
-        : '<span class="km-undo-space"></span>'}
-    </div>`);
-    if (item.lock) parts.push(`<div class="km-why">${esc(item.lock)}</div>`);
+        ? `<button class="km-undo" data-km-reset="${esc(item.id)}" title="기본값 ${esc(item.defKeys || "")} 으로">되돌리기</button>` : ""}
+      ${item.lock
+        ? `<span class="km-keys locked" title="${esc(item.lock)}">${keyCaps(item.keys)}</span>`
+        : `<button class="km-keys${rec ? " rec" : ""}${bad.has(item.id) ? " bad" : ""}" data-km-rec="${esc(item.id)}" title="눌러서 새 조합 입력">${
+            rec ? `<i class="km-rec-dot"></i>새 조합을 누르세요 · Esc 취소` : keyCaps(item.keys)}</button>`}
+    </div>`;
+  };
+  const group = (g) => `<div class="km-grp"><div class="km-sh"><h3 class="km-sh-t">${esc(g.title)}</h3><span class="km-sh-n">${g.list.length}</span></div>${g.list.map(row).join("")}</div>`;
+  // 두 단: 어디서나 쓰는 키가 가장 많아 왼쪽 한 단을 차지하고, 특정 화면에서만 쓰는 키는 오른쪽에 모은다.
+  if (groups.length) {
+    parts.push(`<div class="km-cols"><div>${group(groups[0])}</div><div>${groups.slice(1).map(group).join("")}</div></div>`);
+  } else {
+    parts.push('<div class="km-empty">찾는 단축키가 없습니다.</div>');
   }
-  if (!shown.length) parts.push('<div class="km-empty">찾는 단축키가 없습니다.</div>');
-  parts.push("</div>");
+  parts.push("</div></div>");
   return parts.join("");
 }
 
@@ -123,17 +171,41 @@ function presetRow(presets) {
   const esc = escapeHtml;
   if (!presets || !presets.length) return "";
   // 프리셋은 켤 id 목록이다. 여기서 그리는 문자열은 코드에 있는 것뿐이다.
-  return `<div class="km-presets">`
-    + presets.map((p) => `<button class="km-preset" data-set-preset="${esc(p.id)}" title="${esc(p.desc || "")}">${esc(p.label)}</button>`).join("")
+  return `<div class="km-seg">`
+    + presets.map((p) => `<button data-set-preset="${esc(p.id)}" title="${esc(p.desc || "")}">${esc(p.label)}</button>`).join("")
     + `</div>`;
 }
 
-function screensPane(screens, presets) {
+// motion: 지금 모션이 켜져 있는가. localStorage 는 DOM 이 있어야 읽을 수 있어서 이 순수 함수가
+// 직접 읽지 않고(파일 머리 "의존 대상" 참조) 호출하는 쪽(keymap-page.js)이 모델로 건넨다.
+function motionToggleMarkup(motion) {
+  return `<div class="km-toggle">
+      <div class="km-tx">
+        <div class="km-tn">모션</div>
+        <div class="km-td">rail·탭·스위치의 전환 애니메이션. 시스템의 동작 줄이기 설정과 무관하게 기본 켜짐입니다.</div>
+      </div>
+      <button class="km-sw${motion ? " on" : ""}" data-set-motion=""
+        role="switch" aria-checked="${motion ? "true" : "false"}" aria-label="모션"><i></i></button>
+      <span class="km-sw-s">${motion ? "켜짐" : "꺼짐"}</span>
+    </div>`;
+}
+
+function screensPane(screens, presets, motion) {
   const esc = escapeHtml;
-  if (!screens.length) return `<div class="km-empty">편의 기능 목록을 읽지 못했습니다.</div>`;
-  return `<div class="km-pane-h"><div class="km-pane-t">편의 기능</div></div>`
+  const motionRow = motionToggleMarkup(motion);
+  const lockNote = featureLockNote();
+  const onCount = screens.filter((t) => t.on || (t.lock && !t.readonly)).length;
+  const head = `<div class="km-phead"><span class="km-h2">편의 기능</span>${
+    screens.length ? `<span class="km-faint">${esc(screens.length)}개 중 ${esc(onCount)}개 켜짐</span>` : ""}<span class="km-sp"></span>${
+    lockNote ? "" : presetRow(presets)}</div>`;
+  if (!screens.length) {
+    return `${head}<div>${motionRow}</div><div class="km-empty">편의 기능 목록을 읽지 못했습니다.</div>`;
+  }
+  return head
     + `<div class="km-note">설정은 이 설치본에 저장됩니다. 서버·네이티브는 재시작 전까지 실행됩니다. 다른 창의 변경은 다음 부팅에 읽습니다.</div>`
-    + (featureLockNote() ? `<div class="km-note">${esc(featureLockNote())}</div>` : presetRow(presets))
+    + (lockNote ? `<div class="km-note">${esc(lockNote)}</div>` : "")
+    // 모션은 기능 하나가 아니라 앱 전체의 설정이라 목록 맨 위에 둔다.
+    + `<div>${motionRow}`
     + screens.map((t) => `<div class="km-toggle${t.lock ? " locked" : ""}">
       <div class="km-tx">
         <div class="km-tn">${esc(t.label)}</div>
@@ -145,7 +217,8 @@ function screensPane(screens, presets) {
         : `<button class="km-sw${t.on ? " on" : ""}" data-set-screen="${esc(t.id)}"
         role="switch" aria-checked="${t.on ? "true" : "false"}" aria-label="${esc(t.label)}"><i></i></button>`}
       <span class="km-sw-s">${t.lock && !t.readonly ? "항상 켜짐" : t.on ? "켜짐" : "꺼짐"}</span>
-    </div>`).join("");
+    </div>`).join("")
+    + `</div>`;
 }
 
 // 기본 꺼짐 기능을 켜기 전에 보여 주는 확인 창. 문구는 기능 표(capabilities.js 의 optIn)에 코드로 적힌 것뿐이다.
@@ -164,7 +237,7 @@ export function optInConfirmMarkup(optIn) {
 function switcherPane(model) {
   const esc = escapeHtml;
   if (!model || !Array.isArray(model.windows)) {
-    return `<section class="km-switcher"><div class="km-empty">창 목록을 읽는 중</div></section>`;
+    return `<section class="km-switcher"><div class="km-phead"><span class="km-h2">창 전환</span></div><div class="km-empty">창 목록을 읽는 중</div></section>`;
   }
 
   const status = model.status || {};
@@ -184,13 +257,9 @@ function switcherPane(model) {
   const sharedReason = reasons[0] && reasons.every((reason) => reason === reasons[0]) ? reasons[0] : "";
 
   const parts = [`<section class="km-switcher">
-    <div class="km-pane-h km-switcher-h">
-      <div>
-        <div class="km-pane-t">창 전환</div>
-        <div class="km-note km-sw-intro">체크한 창들 사이만 ⌥Tab으로 오갑니다.<br>하나도 없으면 콘솔과 브라우저를 토글합니다.</div>
-      </div>
-      <button class="km-btn" id="sw-refresh">다시 읽기</button>
-    </div>`];
+    <div class="km-phead"><span class="km-h2">창 전환</span><span class="km-sp"></span>
+      <button class="km-btn" id="sw-refresh">다시 읽기</button></div>
+    <div class="km-note km-sw-intro">체크한 창들 사이만 ⌥Tab으로 오갑니다. 하나도 없으면 콘솔과 브라우저를 토글합니다.</div>`];
 
   const permissionUsesAppIcons = sharedReason === "화면 기록 권한 없음";
   const screenNotice = screenPermissionNotice(media && media.permission, permissionUsesAppIcons);
@@ -198,14 +267,14 @@ function switcherPane(model) {
   if (screenNotice) parts.push(screenNotice);
 
   if (status.permission === false) {
-    parts.push(`<div class="km-warn km-sw-message">창 목록을 읽으려면 손쉬운 사용 권한이 필요합니다
+    parts.push(`<div class="km-warn km-sw-message"><i class="km-warn-d"></i><span>창 목록을 읽으려면 손쉬운 사용 권한이 필요합니다</span><span class="km-sp"></span>
       <button class="km-btn" id="sw-open-accessibility">설정 열기</button></div>`);
   }
   const lastStep = status.lastStep && status.lastStep.failed
     ? `<div class="km-note km-sw-last-step">마지막 전환 실패<br>${esc(switchFailureText(status.lastStep.failed))}</div>`
     : "";
   const registrationWarning = switcherRegistrationWarning(status);
-  if (registrationWarning) parts.push(`<div class="km-warn">${esc(registrationWarning)}</div>`);
+  if (registrationWarning) parts.push(`<div class="km-warn"><i class="km-warn-d"></i><span>${esc(registrationWarning)}</span></div>`);
   if (lastStep) parts.push(lastStep);
   if (Number(status.droppedOnRestart) > 0) {
     parts.push(`<div class="km-note">재시작 뒤 못 찾아 뺀 창 ${esc(status.droppedOnRestart)}개</div>`);
@@ -218,13 +287,14 @@ function switcherPane(model) {
       parts.push(`<div class="km-note km-sw-list-note">${esc(sharedReason)}. 앱 아이콘으로 표시합니다.</div>`);
     }
     if (pickedRows.length) {
-      parts.push(`<div class="km-note km-sw-order-label">⌥Tab 이 도는 순서</div>`);
+      parts.push(`<div class="km-sh"><h3 class="km-sh-t">⌥Tab 이 도는 순서</h3><span class="km-sh-n">${esc(pickedRows.length)}</span></div>`);
       parts.push(`<div class="km-sw-list km-sw-picked-list">${switcherRowsMarkup(
         pickedRows, status, media, reasons.slice(0, pickedRows.length), sharedReason,
         { orderable: true, allWindows: rows },
       )}</div>`);
     }
     if (restRows.length) {
+      parts.push(`<div class="km-sh"><h3 class="km-sh-t">나머지 창</h3><span class="km-sh-n">${esc(restRows.length)}</span></div>`);
       parts.push(`<div class="km-sw-list km-sw-rest-list">${switcherRowsMarkup(
         restRows, status, media, reasons.slice(pickedRows.length), sharedReason,
         { allWindows: rows },
@@ -365,9 +435,9 @@ function switcherRowsMarkup(windows, status, media, reasons, sharedReason, optio
       : iconMarkup(icon, displayApp, "km-sw-row-icon");
     const orderControls = options.orderable === true
       ? `<div class="km-sw-order" role="group" aria-label="${esc(`${label} 순서 바꾸기`)}">
-        <button class="km-btn km-sw-move" data-sw-move="-1"${index === 0 ? " disabled" : ""}
+        <button class="km-btn ghost" data-sw-move="-1"${index === 0 ? " disabled" : ""}
           aria-label="${esc(`앞으로 옮기기 — ${label}`)}">위로</button>
-        <button class="km-btn km-sw-move" data-sw-move="1"${index === windows.length - 1 ? " disabled" : ""}
+        <button class="km-btn ghost" data-sw-move="1"${index === windows.length - 1 ? " disabled" : ""}
           aria-label="${esc(`뒤로 옮기기 — ${label}`)}">아래로</button>
       </div>` : "";
     return `<article class="km-sw-row${visible ? "" : " dim"}" data-sw-app="${esc(appKey)}">
@@ -399,7 +469,7 @@ function screenPermissionNotice(permission, usesAppIcons = false) {
   };
   const message = messages[permission] || messages.unknown;
   const fallback = usesAppIcons ? " 창 그림 대신 앱 아이콘으로 표시합니다." : "";
-  return `<div class="km-warn km-sw-message">⚠ ${escapeHtml(message)}${fallback}
+  return `<div class="km-warn y km-sw-message"><i class="km-warn-d"></i><span>${escapeHtml(message)}${fallback}</span><span class="km-sp"></span>
     <button class="km-btn" id="sw-open-perm">설정 열기</button></div>`;
 }
 
@@ -457,17 +527,17 @@ function acceleratorLabel(value, fallback) {
 function securityPane(toggles) {
   const esc = escapeHtml;
   if (!toggles.length) return `<div class="km-empty">켜고 끌 것이 없습니다.</div>`;
-  return `<div class="km-pane-h"><div class="km-pane-t">보안</div></div>`
-    + toggles.map((t) => `<div class="km-toggle">
+  return `<div class="km-phead"><span class="km-h2">보안</span></div><div>`
+    + toggles.map((t) => `<div class="km-toggle top">
       <div class="km-tx">
         <div class="km-tn">${esc(t.name)}</div>
         <div class="km-td">${esc(t.desc)}</div>
-        ${t.warn ? `<div class="km-warn km-warn-sm">${esc(t.warn)}</div>` : ""}
+        ${t.warn ? `<div class="km-warn y km-warn-sm"><i class="km-warn-d"></i><span>${esc(t.warn)}</span></div>` : ""}
       </div>
       <button class="km-sw${t.on ? " on" : ""}" data-set-toggle="${esc(t.id)}"
         role="switch" aria-checked="${t.on ? "true" : "false"}" aria-label="${esc(t.name)}"><i></i></button>
       <span class="km-sw-s">${t.on ? "켜짐" : "꺼짐"}</span>
-    </div>`).join("");
+    </div>`).join("") + `</div>`;
 }
 
 // 사람은 "⌘F" 로도 찾고 "찾기" 로도 찾는다.

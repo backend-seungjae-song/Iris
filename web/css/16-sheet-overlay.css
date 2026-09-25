@@ -79,6 +79,6 @@
 .gs-fs { max-width:62px; }
 /* 저장 버튼은 고칠 것이 있을 때만 나온다. 채운 블록이 아니라 테두리 한 겹이라 바 안에서
    과하게 강조되지 않으면서 누를 수 있는 요소로 보인다. */
-.fv-bar button.hot { color:var(--fg); background:transparent; border:1px solid var(--ring);
-  margin:5px 0 5px 10px; border-radius:var(--r-blk); padding:2px 12px; font-size:var(--fs-xs); }
-.fv-bar button.hot:hover { background:var(--accent); border-color:var(--ai); color:var(--ai); }
+.fv-bar button.hot { color:var(--fg); background:transparent; border:1px solid var(--focus);
+  margin:5px 0 5px 10px; border-radius:var(--r-blk); padding:2px 12px; font-size:var(--fs-s); }
+.fv-bar button.hot:hover { background:var(--hover); border-color:var(--ai); color:var(--ai); }

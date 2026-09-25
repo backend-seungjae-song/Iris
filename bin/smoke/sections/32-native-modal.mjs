@@ -132,11 +132,12 @@ check("어느 세션이 어느 탭을 쥐고 있는지 창에 알린다", () => 
     && /"ai-targets": dispatchWs\(handleAiTargetsMessage\)/.test(mainJs) && /export function aiBusyLabels/.test(aiState)
     && /class="cai"/.test(centerTabs);
 });
-// 활성 표시와 그룹 소속 띠는 둘 다 box-shadow다. 따로 쓰면 그룹 안 탭에서 활성 표시가 사라진다.
+// 활성 표시는 ::after 윗선, 그룹 소속 띠는 box-shadow 다. 둘이 같은 속성을 쓰면 나중 규칙이 앞 규칙을
+// 덮어 그룹 안 탭에서 활성 표시가 사라지므로, 활성 표시가 box-shadow 를 쓰지 않는지도 본다.
 check("그룹 안에서도 활성 탭 표시가 남는다", () =>
-  /\.ctab\.active \{[^}]*box-shadow:inset 0 2px 0 var\(--primary\)/.test(css("11-center-tabs"))
-  && /\.ctab\.active\.in-group \{ box-shadow:inset 0 2px 0 var\(--primary\), inset 3px 0 0 var\(--ring\)/.test(css("18-browser"))
-  && /\.ctab\.selected\.active\.in-group/.test(css("18-browser")));
+  /\.ctab\.active::after \{[^}]*background:var\(--accent\)/.test(css("11-center-tabs"))
+  && /\.ctab\.in-group \{ box-shadow:inset 2px 0 0 var\(--focus\)/.test(css("18-browser"))
+  && !/\.ctab(\.[\w-]+)*\.active(\.[\w-]+)* \{[^}]*box-shadow/.test(css("11-center-tabs") + css("18-browser")));
 // 편의 기능: 볼 파일이 없는 도구까지 300px 패널 형태로 열려 사용이 불편했다.
 check("편의 기능은 전체형·패널형 두 모드로 나뉜다", () =>
   // 목록은 계속 늘어나므로 개수를 고정하면 도구를 추가할 때마다 깨진다. 두 모드로 나뉘는지만 본다.
@@ -148,8 +149,8 @@ check("편의 기능은 전체형·패널형 두 모드로 나뉜다", () =>
   && /body\.util-full \.rail-panel\.is-open \{ width:auto; flex:1 1 auto/.test(css("03-feature-modes")));
 check("지금 어느 편의 기능에 있는지 rail에 보인다", () =>
   /class="rl">작업</.test(web) && /class="rl">로그인</.test(web)
-  && /\.rail-ico\.active \{[^}]*background:var\(--sidebar-accent\)/.test(css("02-rail"))
-  && /\.rail-ico\.active \.rl \{ color:var\(--ai\); font-weight:var\(--fw-semi\)/.test(css("02-rail")));
+  && /\.rail-ico\.active \{[^}]*background:var\(--select\)/.test(css("02-rail"))
+  && /\.rail-ico\.active \.rl \{ color:var\(--ai\); font-weight:600/.test(css("02-rail")));
 // AI 자동완성 로그인: 허용한 (사이트, 아이디)만 쓰고, 비밀번호는 AI가 볼 수 없다.
 check("허용 목록에 오른 계정만 AI가 채운다", () => {
   return /function aiLoginAllowed\(origin, username\)/.test(aiLoginPolicySource)
@@ -162,7 +163,10 @@ check("ai-login-policy가 main 조립부에 연결된다", () =>
   /const \{ createAiLoginPolicy \} = require\("\.\/ai-login-policy\.cjs"\);/.test(main)
   && /createAiLoginPolicy\(\{/.test(main)
   && /stateDir: IRIS_HOME,/.test(main)
-  && /setLoginProvider,\n\s*ctlSend,/.test(main));
+  && /setLoginProvider,\n\s*ctlSend,/.test(main)
+  // 자격증명은 프로필 partition 별로 저장된다. 요청 탭의 session 으로 partition 을 찾는 조회가 빠지면
+  // 저장된 로그인을 못 찾거나(no-saved) 다른 프로필의 비밀번호를 고른다.
+  && /partitionForSession: \(sess\) => profileSessionPolicy\.partitionForSession\(sess\),/.test(main));
 await checkAsync("ai-login-policy는 정확한 허용 계정만 채우고 비번 없는 목록과 저장·삭제 왕복을 지킨다", async () => {
   const { createAiLoginPolicy } = require_("../native/electron/ai-login-policy.cjs");
   const fsMod = require_("node:fs");
@@ -173,10 +177,11 @@ await checkAsync("ai-login-policy는 정확한 허용 계정만 채우고 비번
     { origin, username: "alice", password: "inventory-must-not-leak-a" },
     { origin, username: "bob", password: "inventory-must-not-leak-b" },
   ];
+  const partition = "persist:acprof:p1";
   const credentialService = {
     listAccounts: () => accounts,
-    listForOrigin: (_partition, wantOrigin) => accounts.filter((row) => row.origin === wantOrigin),
-    passwordFor: (_partition, wantOrigin, username) => wantOrigin === origin ? `secret-${username}` : undefined,
+    listForOrigin: (part, wantOrigin) => part === partition ? accounts.filter((row) => row.origin === wantOrigin) : [],
+    passwordFor: (part, wantOrigin, username) => part === partition && wantOrigin === origin ? `secret-${username}` : undefined,
     partitionCounts: () => [],
   };
   const boot = () => {
@@ -193,13 +198,14 @@ await checkAsync("ai-login-policy는 정확한 허용 계정만 채우고 비번
       isProfilePartition: (partition) => /^persist:acprof:/.test(partition),
       setLoginProvider: (fn) => { provider = fn; },
       ctlSend: (message) => notes.push(message),
+      partitionForSession: (sess) => (sess && sess.partition) || null,
     });
     return { handles, notes, provider: () => provider };
   };
   try {
     const first = boot();
     const sent = [];
-    const wc = { id: 7, getURL: () => origin + "/form", send: (_channel, payload) => sent.push(payload) };
+    const wc = { id: 7, session: { partition }, getURL: () => origin + "/form", send: (_channel, payload) => sent.push(payload) };
     const blocked = await first.provider()(wc, { username: "bob" });
     if (blocked && blocked.ok || sent.length) throw new Error("목록에 없는 origin·username을 채웠다");
     const before = first.handles.get("ac-ai-login-list")({});
@@ -310,7 +316,7 @@ check("저장 버튼은 편집이 생기면 나타난다", () => {
 check("안 저장된 탭은 앞에 동그라미", () =>
   /function markTabDirty/.test(textEditor)
   && /class="cdirty"/.test(centerTabs)
-  && /\.ctab \.cdirty \{[^}]*border-radius:50%/.test(css("17-editor-bar"))
+  && /\.ctab \.cdirty \{[^}]*border-radius:50%/.test(css("11-center-tabs"))
   && /if \(at\.id === getActiveTabId\(getCenterSpace\(\)\)\) markFileDirty\(at\)/.test(mainJs));
 // 채팅이 남는 폭을 모두 차지하면, 왼쪽 도구를 바꿀 때마다 그 폭 차이가 채팅에 반영된다.
 // 고정 폭은 채팅이 갖고, 남는 폭은 센터가 받는다. 배치 엔진의 계산을 실제로 돌려 본다.
@@ -321,7 +327,7 @@ const layOf = (tree, hidden, toolKey = null) => layoutTree.computeLayout(tree, L
 check("채팅 폭은 도구를 바꿔도 그대로", () => {
   const tree = layoutTree.defaultTree({ toolW: { "sc-panel": 380 } });
   const plain = layOf(tree, ["tools"]), git = layOf(tree, [], "tools:sc-panel"), full = layOf(tree, ["center"], "tools:ml-panel");
-  return plain.chat.w === 420 && git.chat.w === 420 && full.chat.w === 420 && git.center.w === plain.center.w - 100;
+  return plain.chat.w === 400 && git.chat.w === 400 && full.chat.w === 400 && git.center.w === plain.center.w - (380 - 272);
 });
 // 끌어 맞춘 폭은 인라인으로 들어간다. 접힘 규칙이 그보다 약하면 접기를 눌러도 폭이 남는다
 // (확인 결과: 477px 로 끈 뒤 접기 → 클래스는 붙고 폭은 477 그대로). 엔진은 접힌 채팅을 자리에서 뺀다.
@@ -487,18 +493,20 @@ check("메모 페이지는 보던 스페이스로 돌아올 수 있다", () =>
   && /지금 작업 중\)으로/.test(memoAdmin)
   && /case "go": \{ const id = b\.dataset\.space; if \(!id\) break; mmView = id/.test(memoAdmin)
   && !/case "go": \{ const id = b\.dataset\.space; if \(!id\) break; selectedSpaceId/.test(memoAdmin));
-// 현재 스페이스가 중심이고 다른 스페이스는 보조이므로, 크기로 그 차이를 나타낸다.
+// 현재 스페이스가 중심이고 다른 스페이스는 보조이므로, 크기로 그 차이를 나타낸다. 세 단 가운데
+// 지금 메모 편집기 단만 폭이 늘고, 스페이스 목록과 보관본 단은 폭이 고정이다.
 check("메모 관리는 지금 스페이스를 크게 놓는다", () =>
-  /\.mm-main \{ display:grid; grid-template-columns:minmax\(0,1\.15fr\)/.test(css("05-memo-manage"))
-  && /id="mm-slot"/.test(memoAdmin) && /class="mm-others"/.test(memoAdmin)
+  /\.mm-main \{ display:grid; grid-template-columns:\d+px minmax\(0,1fr\) \d+px;/.test(css("05-memo-manage"))
+  && /id="mm-slot"/.test(memoAdmin) && /data-mm="go" data-space=/.test(memoAdmin)
   && /data-mm="restore"/.test(memoAdmin) && /data-mm="clear"/.test(memoAdmin));
 // 계정이 수십 개면 단층 목록으로는 찾을 수도, 무엇이 열려 있는지 볼 수도 없다.
 check("자동완성 관리 화면은 사이트로 묶고 찾을 수 있다", () =>
   /const groupOf = \(rows\) =>/.test(autofillAllowlist)
   && /const ao = a\[1\]\.some\(\(x\) => x\.allowed\) \? 0 : 1/.test(autofillAllowlist)   // 열어둔 사이트가 위로
   && /id="af-q"/.test(autofillAllowlist) && /data-filter="\$\{v\}"/.test(autofillAllowlist)
-  && /chip\("on", "허용됨"\)/.test(autofillAllowlist) && /data-lockall="1"/.test(autofillAllowlist)
-  && /\.af-sw \{[^}]*border-radius:var\(--r-pill\)/.test(css("06b-autofill")));     // 켜짐/꺼짐은 형태로 읽힌다
+  && /seg\("on", "허용됨"\)/.test(autofillAllowlist) && /data-lockall="1"/.test(autofillAllowlist)
+  && /class="af-sw/.test(autofillAllowlist) && /role="switch"/.test(autofillAllowlist)   // 켜짐/꺼짐은 형태로 읽힌다
+  && /\.af-sw \{[^}]*border-radius:8px/.test(css("06b-autofill")) && /\.af-sw\.on i \{[^}]*left:14px/.test(css("06b-autofill")));
 // 목록이 적은 이유는 누락이 아니라 가져오지 않은 프로필이다. 그 사실이 화면에 보여야 한다.
 check("열린 사이트와 저장된 전체를 나눠 보여준다", () =>
   /function afOpenOrigins/.test(autofillAllowlist)

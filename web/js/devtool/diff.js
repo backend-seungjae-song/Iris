@@ -100,21 +100,43 @@ export function diffRows(patch) {
   return rows;
 }
 export function colorizeDiff(patch) {
-  return diffRows(patch).map((r) =>
-    `<span class="dl ${r.cls}"><span class="dn">${r.cls === "del" ? r.o : r.n}</span>`
-    + `<span class="dt">${escapeHtml(r.text) || "​"}</span></span>`).join("");
+  // 첫 hunk 앞의 메타 줄(diff·index·---·+++·rename)은 파일 머리(fh)다. 접을 수 있게 따로 표시한다.
+  // hunk 안의 메타 줄("\ No newline at end of file")은 내용에 대한 정보라 접지 않는다.
+  let inHunk = false;
+  return diffRows(patch).map((r) => {
+    if (r.cls === "hunk") inHunk = true;
+    const fh = r.cls === "meta" && !inHunk ? " fh" : "";
+    return `<span class="dl ${r.cls}${fh}"><span class="dn">${r.cls === "del" ? r.o : r.n}</span>`
+      + `<span class="dt">${escapeHtml(r.text) || "​"}</span></span>`;
+  }).join("");
 }
 export function renderDiffView(t) {
   const dv = dom("#diffview");
   const tag = t.mode ? `${t.base || "Base"} 대비${t.mode === "worktree" ? " · 커밋 전 포함" : ""}`
     : (t.untracked ? "새 파일" : (t.staged ? "스테이지됨" : "변경"));
   // 어느 레포의 어느 경로인지를 머리글에 적는다. 레포가 여럿이면 파일 이름만으로는 구분되지 않는다.
-  const where = t.root ? repoNameOf(t.root) + (t.rel ? " / " + t.rel : "") : "";
-  const bar = `<div class="dv-bar"><span class="dv-name">${escapeHtml(t.label)}</span>`
-    + (where ? `<span class="dv-where">${escapeHtml(where)}</span>` : "")
-    + `<span class="dv-tag">${tag}</span></div>`;
+  const rel = t.rel || "", slash = rel.lastIndexOf("/");
+  const file = slash >= 0 ? rel.slice(slash + 1) : (rel || t.label);
+  const crumb = (t.root ? escapeHtml(repoNameOf(t.root)) + " / " : "")
+    + (slash >= 0 ? escapeHtml(rel.slice(0, slash + 1)) : "") + `<b>${escapeHtml(file)}</b>`;
+  const idx = t.patch ? /^index (\S+)/m.exec(t.patch) : null;
+  const hasHunk = !!t.patch && /^@@ /m.test(t.patch);
+  // 파일 머리 줄은 접어 두고 index 는 머리글에 적는다. hunk 가 없는 patch(바이너리 등)는 머리 줄이 내용 전부라 접지 않는다.
+  const meta = hasHunk
+    ? `<button class="dv-meta" type="button" aria-pressed="${t.showMeta ? "true" : "false"}" title="${t.showMeta ? "파일 머리 줄 접기" : "파일 머리 줄 보기"}">${idx ? "index " + escapeHtml(idx[1]) : "머리 줄"}</button>`
+    : "";
+  const bar = `<div class="dv-bar"><span class="dv-tag">${escapeHtml(tag)}</span>`
+    + `<span class="dv-crumb" title="${escapeHtml(t.root ? t.root + "/" + rel : t.label)}">${crumb}</span>` + meta + `</div>`;
   if (t.patch == null) { dv.innerHTML = bar + `<div class="dv-empty">불러오는 중…</div>`; return; }
-  dv.innerHTML = bar + (t.patch.trim() ? `<pre class="dv-body">${colorizeDiff(t.patch)}</pre>` : `<div class="dv-empty">표시할 diff가 없습니다.</div>`);
+  const fold = hasHunk && !t.showMeta ? " fold-meta" : "";
+  dv.innerHTML = bar + (t.patch.trim() ? `<pre class="dv-body${fold}">${colorizeDiff(t.patch)}</pre>` : `<div class="dv-empty">표시할 diff가 없습니다.</div>`);
+  const btn = dv.querySelector(".dv-meta");
+  if (btn) btn.onclick = () => {
+    t.showMeta = !t.showMeta;
+    const pre = dv.querySelector(".dv-body"); if (pre) pre.classList.toggle("fold-meta", !t.showMeta);
+    btn.setAttribute("aria-pressed", t.showMeta ? "true" : "false");
+    btn.title = t.showMeta ? "파일 머리 줄 접기" : "파일 머리 줄 보기";
+  };
   if (t.patch.trim()) highlightDiff(dv.querySelector(".dv-body"), t);
 }
 

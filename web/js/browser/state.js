@@ -24,7 +24,7 @@
 import { getCenterSpace } from "../center/tab-store.js";
 
 let browserState = {
-  bookmarksBySpace: {}, tabsBySpace: {}, activeBySpace: {}, activeSpace: null, docked: false,
+  bookmarksBySpace: {}, bookmarksCommon: [], tabsBySpace: {}, activeBySpace: {}, activeSpace: null, docked: false,
   profiles: [], profileSources: {}, defaultProfileBySpace: {}, urlHistoryBySpace: {},
 };
 let configuredBoundSpace = null;
@@ -63,6 +63,7 @@ export function isBrowserStateLoaded() { return loaded; }
 
 export function ensureBrowserStateCollections() {
   if (!browserState.bookmarksBySpace || typeof browserState.bookmarksBySpace !== "object") browserState.bookmarksBySpace = {};
+  if (!Array.isArray(browserState.bookmarksCommon)) browserState.bookmarksCommon = [];
   if (!Array.isArray(browserState.profiles)) browserState.profiles = [];
   if (!browserState.profileSources || typeof browserState.profileSources !== "object") browserState.profileSources = {};
   if (!browserState.defaultProfileBySpace || typeof browserState.defaultProfileBySpace !== "object") browserState.defaultProfileBySpace = {};

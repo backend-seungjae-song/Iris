@@ -26,10 +26,11 @@
 import { beginDrag } from "./drag-shield.js";
 import { computeLayout, defaultTree, leafIds, moveRegion, normalizeTree, setKidSize } from "./layout-tree.js";
 import { layoutRegions, onLayoutChange } from "./layout-regions.js";
+import { RAIL_ITEMS } from "./rail-items.js";
 
 const KEY = "ac.layout";
 const NARROW = 820;
-const LABEL = { explorer: "탐색기", spaces: "스페이스", agents: "에이전트", tools: "도구 화면", center: "가운데 탭", chat: "채팅" };
+const LABEL = { explorer: "탐색기", spaces: "Spaces · Agents", tools: "도구 화면", center: "가운데 탭", chat: "채팅" };
 
 let $ = null;
 let app = null;
@@ -52,29 +53,45 @@ function headPx(panel) {
   return (h && h.offsetHeight) || 30;
 }
 
+// 앱 머리(.sidebar-head)는 탐색기와 Spaces · Agents 중 위에 놓인 칸의 맨 위에 붙는다. 순서를 바꿔도 머리가
+// 사이드바 맨 위에 남게 하려고 칸마다 따로 두지 않고 relayout 이 고른다.
+const HEAD_HOSTS = ["explorer", "spaces"];
+let headHost = null;
+
+function sidebarPanel(id, panelSel) {
+  const hosts = () => headHost === id;
+  const headH = () => ($(".sidebar-head").offsetHeight || 38);
+  return {
+    els: () => (hosts() ? [$(".sidebar-head"), $(panelSel)] : [$(panelSel)]),
+    visible: () => !bodyCls().contains("sidebar-collapsed"),
+    collapsedPx: () => ($(panelSel).classList.contains("collapsed") ? (hosts() ? headH() : 0) + headPx($(panelSel)) + 1 : null),
+    place: (r) => {
+      const panel = $(panelSel);
+      if (!hosts()) { setRect(panel, r); return; }
+      const head = $(".sidebar-head");
+      // 머리는 높이를 주지 않는다. 주면 다음 계산에서 그 값을 다시 읽어 머리가 칸을 다 차지한다.
+      setRect(head, { x: r.x, y: r.y, w: r.w, h: null });
+      const hh = headH();
+      setRect(panel, { x: r.x, y: r.y + hh, w: r.w, h: Math.max(0, r.h - hh) });
+    },
+  };
+}
+
+// 자리를 받은 두 칸 가운데 가장 위(같으면 왼쪽)에 있는 칸. 겹친 자리의 뒤쪽이라 자리가 없으면 고르지 않는다.
+function topHost(rects) {
+  let best = null;
+  for (const id of HEAD_HOSTS) {
+    const r = rects[id];
+    if (r && (!best || r.y < best.r.y || (r.y === best.r.y && r.x < best.r.x))) best = { id, r };
+  }
+  return best ? best.id : null;
+}
+
 function shellRegion(id) {
   const leftHidden = () => bodyCls().contains("sidebar-collapsed");
   switch (id) {
-    case "explorer": return {
-      els: () => [$(".sidebar-head"), $("#panel-explorer")],
-      visible: () => !leftHidden(),
-      collapsedPx: () => ($("#panel-explorer").classList.contains("collapsed") ? ($(".sidebar-head").offsetHeight || 38) + headPx($("#panel-explorer")) + 1 : null),
-      place: (r) => {
-        const head = $(".sidebar-head"), panel = $("#panel-explorer");
-        // 머리는 높이를 주지 않는다. 주면 다음 계산에서 그 값을 다시 읽어 머리가 칸을 다 차지한다.
-        setRect(head, { x: r.x, y: r.y, w: r.w, h: null });
-        const hh = head.offsetHeight || 38;
-        setRect(panel, { x: r.x, y: r.y + hh, w: r.w, h: Math.max(0, r.h - hh) });
-      },
-    };
-    case "spaces": case "agents": {
-      const sel = id === "spaces" ? "#panel-spaces" : "#panel-agents";
-      return {
-        els: () => [$(sel)],
-        visible: () => !leftHidden(),
-        collapsedPx: () => ($(sel).classList.contains("collapsed") ? headPx($(sel)) + 1 : null),
-      };
-    }
+    case "explorer": return sidebarPanel("explorer", "#panel-explorer");
+    case "spaces": return sidebarPanel("spaces", "#panel-spaces");
     case "tools": return {
       els: () => { const t = openTool(); return t ? [t] : []; },
       visible: () => !leftHidden() && !!openTool(),
@@ -107,12 +124,11 @@ function migratedDefault() {
     const m = /^ac\.utilW\.(.+)$/.exec(k);
     if (m && m[1] !== "sidebar") { const v = num(k); if (v) toolW[m[1]] = v; }
   }
-  const fileTreeH = num("ac.fileTreeH"), spaceListH = num("ac.spaceListH");
+  const fileTreeH = num("ac.fileTreeH");
   return defaultTree({
     sidebarW: num("ac.utilW.sidebar") ?? undefined,
     chatW: num("ac.rightW") ?? undefined,
     explorerH: fileTreeH ? fileTreeH + 70 : undefined,
-    spacesH: spaceListH ? spaceListH + 32 : undefined,
     toolW,
   });
 }
@@ -178,9 +194,13 @@ function relayout() {
     prefer: editing ? realVisible : null,
     pick: editing ? editing.pick : null,
     toolKey: tool && realVisible("tools") ? "tools:" + tool.id : null,
+    toolBaseW: (tool && RAIL_ITEMS.find((it) => it.panel === tool.id)?.width) || null,
     collapsedPx: (id) => { const r = regions.get(id); return r && r.collapsedPx ? r.collapsedPx() : null; },
   };
+  // 머리를 얹는 칸에 따라 접힌 높이가 달라지므로, 고른 칸이 바뀌면 한 번 더 계산한다.
   last = computeLayout(tree, box(), ctx);
+  const host = topHost(last.rects);
+  if (host !== headHost) { headHost = host; last = computeLayout(tree, box(), ctx); }
   last.realVisible = realVisible;
   const placed = new Set();
   for (const [id, r] of regions) {
@@ -193,6 +213,8 @@ function relayout() {
   // 이번에 자리를 받지 못한 영역 요소는 숨긴다(겹친 자리의 뒤쪽, 보이지 않는 영역).
   for (const [, r] of regions) for (const el of r.els()) if (!placed.has(el)) hide(el);
   for (const el of touched) if (!placed.has(el) && !el.classList.contains("lay-off")) hide(el);
+  const head = $(".sidebar-head");
+  if (head && !placed.has(head)) hide(head);
   drawSplits();
   if (editing) drawEdit();
 }

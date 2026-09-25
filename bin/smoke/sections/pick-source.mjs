@@ -271,7 +271,7 @@ check("사본에서 돌고 있으면 그 자리도 적는다", () => {
 // 실행 출력과 같은 등급이다. 이 기계의 폴더 구조가 포함된다.
 check("소스 자리 응답은 루프백에만 연다", () =>
   /pathname === "\/pick-source"/.test(httpHandler)
-  && /if \(!\(ip === "127\.0\.0\.1" \|\| ip === "::1"\)\) \{ res\.writeHead\(403\)\.end\('\{"ok":false,"error":"local only \(AC5\)"\}'\); return; \}[\s\S]{0,600}resolvePickSource/.test(httpHandler));
+  && /if \(!isLoopbackRequest\(req\)\) \{ res\.writeHead\(403\)\.end\('\{"ok":false,"error":"local only \(AC5\)"\}'\); return; \}[\s\S]{0,600}resolvePickSource/.test(httpHandler));
 
 // 위 검사들은 문자열 존재만 확인한다. 그 문자열이 실제로 어떤 줄을 만드는지는 함수를 실행해야 알 수 있다.
 // 사용자와 다음 세션이 읽는 것은 이 줄들이지 정규식이 아니다.

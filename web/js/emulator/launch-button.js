@@ -31,7 +31,8 @@ export function mountLaunchButton({ host, hasTab, onOpen }) {
   btn.className = "sidebar-toggle emu-launch";
   btn.title = "모바일 에뮬레이터 켜기. 탭이 열려 있으면 기기를 고릅니다";
   btn.innerHTML = ICON;
-  head.insertBefore(btn, head.querySelector(".dot") || null);
+  // 세션 점·이름 묶음(.sess) 앞, 머리 단추들 뒤에 둔다. 기준은 머리의 직계 자식이어야 insertBefore 가 된다.
+  head.insertBefore(btn, head.querySelector(":scope > .sess"));
 
   let menu = null;
   function closeMenu() {

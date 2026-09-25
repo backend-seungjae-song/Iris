@@ -6,8 +6,9 @@
 // 로드되지 않는다는 관계가 성립하지 않는다. 그러려면 import 그래프를 먼저 분리해야 한다.
 //
 // 소유 범위
-//   rail 화면 하나의 정적 사실(이름·설명·아이콘·body class·패널 element·배치·내릴 수
-//   있는가)과 rail 에 등록되는 순서.
+//   rail 화면 하나의 정적 사실(이름·설명·아이콘·body class·패널 element·배치·기본 폭·내릴 수
+//   있는가)과 rail 에 등록되는 순서. width 는 패널형 화면이 사이드바 기본 폭과 다를 때만 적고,
+//   사용자가 그 화면의 폭을 끌어 바꾸면 배치 엔진은 저장한 값을 쓴다.
 //
 // 제공 API
 //   RAIL_ITEMS · railItemById(id) · railItemIds() · lockedIds() · fullIds(). 그 밖의 것은 없다.
@@ -99,7 +100,7 @@ export const RAIL_ITEMS = [
     id: "emulator", label: "모바일",
     title: "모바일 에뮬레이터: iOS 시뮬레이터·Android 기기",
     icon: "<rect x=\"6\" y=\"2.5\" width=\"12\" height=\"19\" rx=\"2.5\"/><path d=\"M10.5 18.5h3\"/>",
-    body: "emu-active", panel: "emu-panel", layout: "panel",
+    body: "emu-active", panel: "emu-panel", layout: "panel", width: 288,
     canDisable: true, disabledReason: "",
   },
   {

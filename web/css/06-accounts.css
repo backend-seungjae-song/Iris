@@ -1,68 +1,140 @@
-/* 계정·사이트 카드 */
-/* 이 이름을 만드는 곳: browser/accounts-screen.js · browser/profiles.js */
-/* 이 화면은 항상 뷰어를 덮은 넓은 폭으로 표시된다(rail 의 RAIL_FULL). 280px 패널용 한 줄
-   배치를 그대로 늘이면 이름은 왼쪽 끝, 조작은 오른쪽 끝에 붙어 가운데가 비게 된다.
-   그래서 읽는 단위를 줄에서 카드로 바꾼다. 한 프로필이 무엇을 갖고 어디에 쓰이는지가
-   카드 한 장에서 끝난다. */
-.acct-body { flex:1 1 auto; overflow-y:auto; padding:4px 18px 28px; min-height:0; font-size:var(--fs-sm); }
-body.util-full .acct-body { padding:4px 22px 32px; }
-
-.acct-hero { position:sticky; top:0; background:var(--sidebar); padding:10px 0 12px; margin-bottom:14px;
-  border-bottom:1px solid var(--border); z-index:2; }
-.acct-sum { font-size:var(--fs-sm); }
-.acct-sum b { font-size:var(--fs-t3); font-weight:var(--fw-semi); letter-spacing:var(--ls-title); margin-right:2px; }
-.acct-sum span { color:var(--muted-fg); }
-.acct-why { color:var(--muted-fg); font-size:var(--fs-2xs); line-height:var(--lh); margin-top:4px; max-width:88ch; }
-
-.acct-sec { margin-bottom:24px; }
-.acct-sec-h { display:flex; align-items:center; gap:8px; font-size:var(--fs-xs); font-weight:var(--fw-semi); color:var(--fg);
-  margin:0 0 8px; flex-wrap:wrap; }
-.acct-sec-c { font-size:var(--fs-2xs); font-weight:var(--fw-med); color:var(--muted-fg); background:var(--accent);
-  border-radius:var(--r-pill); padding:1px 7px; font-variant-numeric:tabular-nums; }
-.acct-tools { display:flex; align-items:center; gap:6px; margin-left:auto; }
-.acct-tools input[type="text"], .acct-tools input:not([type]) { font:inherit; font-size:var(--fs-sm); padding:4px 8px;
-  background:var(--input); color:var(--fg); border:1px solid var(--border); border-radius:var(--r-blk); outline:none; width:190px;
-  transition:border-color var(--t-fade) var(--ease); }
-.acct-tools input:focus { border-color:var(--ring); }
-.acct-pw { font-size:var(--fs-xs); color:var(--muted-fg); cursor:pointer; }
-
-/* 같은 줄의 카드는 높이를 맞춘다. 각자 높이가 다르면 줄이 고르지 않게 보이고, 어느 카드가
-   더 많은 내용을 담았는지도 높이로 잘못 읽힌다. */
-.acct-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:10px; align-items:stretch; }
-.acct-grid-sm { grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); }
-
-.acct-card { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden;
-  display:flex; flex-direction:column; }
-.acct-card-h { display:flex; align-items:center; gap:7px; padding:9px 11px; border-bottom:1px solid var(--border); }
-.acct-card-h .an { flex:1; min-width:0; font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.acct-count { flex:none; font-size:var(--fs-2xs); color:var(--muted-fg); font-variant-numeric:tabular-nums;
-  background:var(--accent); border-radius:var(--r-pill); padding:1px 7px; }
-.acct-card-b { padding:8px 11px; display:flex; flex-direction:column; gap:5px; }
-.acct-card-b .asub { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.acct-accs { font-size:var(--fs-2xs); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.acct-used { display:flex; flex-wrap:wrap; gap:4px; }
-.acct-used.none { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.acct-chip { font-size:var(--fs-2xs); color:var(--fg); background:var(--accent); border-radius:var(--r-ctl); padding:1px 6px; }
-.acct-card-f { margin-top:auto; display:flex; gap:6px; padding:8px 11px 10px; border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
-.acct-locked { font-size:var(--fs-2xs); color:var(--muted-fg); }
-/* 가져오기 카드는 이름과 버튼 하나뿐이라 몸통을 비운 채 두면 빈 공간만 커지므로 한 줄로 둔다. */
-.acct-imp { flex-direction:row; align-items:center; gap:8px; padding:0 11px; }
-.acct-imp .acct-card-h { flex:1; min-width:0; border-bottom:none; padding:11px 0; }
-.acct-imp .acct-card-f { border-top:none; padding:0; margin:0; }
-
-/* 스페이스 기본 계정은 고르는 동작 하나뿐이라 카드가 아니라 한 줄로 둔다. 다만 화면 폭만큼
-   늘어나지 않게 격자에 담는다. */
-.acct-row { display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--border);
-  border-radius:var(--r-blk); background:var(--card); }
-.acct-row .an { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.acct-row .asub { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.acct-row select { max-width:130px; font:inherit; font-size:var(--fs-xs); background:var(--input); color:var(--fg); border:1px solid var(--border); border-radius:var(--r-ctl); padding:2px 4px; }
-.acct-rename-in { width:100%; font:inherit; font-size:var(--fs-sm); background:var(--input); color:var(--fg); border:1px solid var(--ring); border-radius:var(--r-ctl); padding:2px 5px; outline:none; }
-.acct-btn { flex:none; border:1px solid var(--border); background:var(--bg); color:var(--muted-fg); border-radius:var(--r-blk); cursor:pointer; padding:4px 10px; font-size:var(--fs-xs);
-  transition:border-color var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.acct-btn:hover { border-color:var(--ring); color:var(--fg); }
-.acct-btn.danger:hover { border-color:var(--destructive); color:var(--destructive); }
-.acct-note { font-size:var(--fs-2xs); color:var(--muted-fg); margin-top:8px; line-height:var(--lh); max-width:88ch; }
+/* 계정 화면: 프로필 칸 격자 + 오른쪽 설정 칸 */
+/* 이 이름을 만드는 곳: browser/accounts-screen.js · browser/accounts-view.js */
+/* 이 화면은 항상 뷰어를 덮은 넓은 폭으로 표시된다(rail 의 RAIL_FULL). 프로필은 선으로 나눈 칸
+   하나에 무엇을 갖고 어디에 쓰이는지를 담고, 모든 프로필에 걸친 설정(스페이스 기본 계정·Chrome
+   가져오기)은 오른쪽 좁은 칸으로 뺀다.
+   앱에는 button 기본 모양과 제목·문단 여백을 지우는 전역 규칙이 없어서 각 요소가 스스로 정한다. */
 
 /* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
-.acct-panel { width:300px; }
+.acct-panel { width:300px; background:var(--surface); }
+
+/* ---- 부품: 아이콘 단추 · 단추 · 입력 · 힌트 · 개수 · 칩 · 체크칸 · 회전 표시 ---- */
+.acct-ib { width:24px; height:24px; padding:1px 6px; display:grid; place-items:center; flex:none;
+  border:0; border-radius:var(--r-s); background:none; color:var(--muted); font:inherit; cursor:pointer; }
+.acct-ib:hover { background:var(--hover); color:var(--fg); }
+.acct-ib:active { transform:scale(.94); }
+
+.acct-btn { height:24px; padding:0 9px; display:inline-flex; align-items:center; gap:6px; flex:none;
+  border:1px solid var(--line-strong); border-radius:var(--r-s); background:none; color:var(--fg-2);
+  font:inherit; font-size:var(--fs-s); white-space:nowrap; cursor:pointer; }
+.acct-btn svg.i { width:12px; height:12px; }
+.acct-btn:hover { background:var(--hover); color:var(--fg); }
+.acct-btn:active { transform:scale(.97); }
+.acct-btn.acct-btn-ghost { border-color:transparent; color:var(--muted); }
+.acct-btn.acct-btn-ghost:hover { color:var(--fg); }
+.acct-btn.acct-btn-danger { color:var(--pal-danger); border-color:color-mix(in srgb, var(--pal-danger) 35%, transparent); }
+.acct-btn[disabled] { opacity:.6; cursor:default; }
+.acct-btn[disabled]:hover { background:none; }
+.acct-btn[disabled]:active { transform:none; }
+
+.acct-inp { height:24px; padding:0 8px; border:1px solid var(--line-strong); border-radius:var(--r-s); background:var(--raised);
+  color:var(--fg); font:inherit; font-size:var(--fs); outline:none; min-width:0; }
+.acct-inp::placeholder { color:var(--faint); }
+.acct-inp:focus { border-color:var(--focus); }
+/* 칸 테두리가 포커스를 보이므로 01-base 의 :focus-visible 링을 또 그리지 않는다. */
+.acct-inp:focus-visible { box-shadow:none; }
+
+.acct-hint { font-size:var(--fs-xs); color:var(--faint); }
+.acct-cnt { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.acct-chip { font-size:var(--fs-xs); line-height:16px; padding:0 6px; border-radius:var(--r-s);
+  background:rgb(var(--pal-babyblue-rgb) / .08); color:var(--fg-2); white-space:nowrap; }
+
+/* 체크칸. 실제 입력은 키보드·스크린리더용으로 두고 보이지 않게 하며, 그 옆의 칸이 상태를 그린다. */
+.acct-lbl { display:inline-flex; align-items:center; gap:7px; margin-bottom:4px; color:var(--fg-2); font-size:var(--fs-s); cursor:pointer; position:relative; }
+.acct-lbl input { position:absolute; width:1px; height:1px; margin:0; opacity:0; pointer-events:none; }
+.acct-check { width:14px; height:14px; border:1px solid var(--line-strong); border-radius:3px; display:grid; place-items:center; flex:none; background:var(--raised); }
+.acct-check svg.i { width:10px; height:10px; stroke-width:2.2; visibility:hidden; }
+.acct-lbl input:checked + .acct-check { background:var(--accent); border-color:transparent; color:var(--pal-ink); }
+.acct-lbl input:checked + .acct-check svg.i { visibility:visible; }
+.acct-lbl input:focus-visible + .acct-check { border-color:var(--focus); }
+
+.acct-spin { width:10px; height:10px; border-radius:50%; border:1.5px solid rgb(var(--pal-babyblue-rgb) / .25); border-top-color:var(--accent);
+  animation:scr-spin .7s linear infinite; flex:none; }
+
+/* ---- 머리 ---- */
+.acct-head { height:36px; flex:none; display:flex; align-items:center; gap:10px; padding:0 8px 0 16px;
+  background:var(--chrome); border-bottom:1px solid var(--line); }
+.acct-head h1 { margin:0; font:600 var(--fs-h)/1 var(--sans); letter-spacing:-.01em; }
+.acct-sum { color:var(--muted); font-size:var(--fs-s); }
+.acct-sum b { color:var(--fg-2); font:600 var(--fs-s)/1 var(--mono); }
+.acct-sp { flex:1; }
+
+/* ---- 본문: 왼쪽 칸 격자 ---- */
+/* 프로필이 많으면 칸 격자와 설정 칸이 화면 높이를 넘으므로 각 단이 스스로 스크롤한다. */
+.acct-body { flex:1; min-height:0; display:grid; grid-template-columns:1fr 300px; }
+.acct-main { overflow-y:auto; padding:16px 16px 20px; }
+.acct-why { margin:0 0 16px; color:var(--muted); font-size:var(--fs-s); max-width:640px; line-height:1.55; }
+.acct-shead { display:flex; align-items:center; gap:8px; height:28px; margin-bottom:8px; }
+.acct-shead h2 { margin:0; font:600 var(--fs-s)/1 var(--sans); color:var(--fg-2); }
+
+/* 칸 격자. 바깥 선은 위·왼쪽만 긋고 각 칸이 오른쪽·아래 선을 가져서, 선이 겹쳐 두꺼워지지 않는다. */
+.acct-tiles { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); border-top:1px solid var(--line);
+  border-left:1px solid var(--line); border-radius:var(--r); overflow:hidden; }
+.acct-tile { border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:10px 12px 8px;
+  display:flex; flex-direction:column; gap:6px; min-height:112px; position:relative; }
+.acct-tile:hover { background:var(--hover); }
+.acct-nm { display:flex; align-items:center; gap:8px; font-weight:600; color:var(--fg); }
+.acct-nm .acct-cnt { margin-left:auto; }
+/* 이름이 칸보다 길면 개수를 밀어내지 않고 이름을 줄인다. */
+.acct-nm .an { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 이름변경 중에는 이름 자리에 입력과 키 안내를 세운다. */
+.acct-nm .an.acct-editing { flex:1; display:flex; flex-direction:column; gap:4px; overflow:visible; }
+.acct-acc { font:400 var(--fs-s)/1.4 var(--mono); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acct-acc.none { font-family:var(--sans); color:var(--faint); }
+.acct-used { display:flex; gap:4px; flex-wrap:wrap; }
+.acct-used .none { font-size:var(--fs-xs); color:var(--faint); }
+.acct-ft { margin-top:auto; display:flex; align-items:center; gap:2px; margin-left:-6px; }
+.acct-ft .acct-btn { height:22px; }
+.acct-lock { font-size:var(--fs-xs); color:var(--faint); padding-left:6px; display:flex; align-items:center; gap:5px; }
+.acct-lock svg.i { width:11px; height:11px; }
+
+/* 새 프로필 입력은 격자의 마지막 칸이다. */
+.acct-tile.acct-add { justify-content:center; gap:8px; background:transparent; }
+.acct-tile.acct-add:hover { background:transparent; }
+.acct-add .acct-inp { width:100%; }
+.acct-add-row { display:flex; align-items:center; gap:8px; }
+
+/* ---- 오른쪽 설정 칸 ---- */
+.acct-side { border-left:1px solid var(--line); background:var(--chrome); overflow-y:auto; display:flex; flex-direction:column; }
+.acct-sec { border-top:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+.acct-sec:first-child { border-top:0; }
+.acct-sec-h { display:flex; align-items:center; gap:6px; padding:12px 12px 6px; color:var(--muted); }
+.acct-sec-h h3 { margin:0; font:600 var(--fs-s)/1 var(--sans); text-transform:none; letter-spacing:0; color:var(--fg-2); }
+.acct-n { font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); }
+.acct-sec-b { padding:0 12px 12px; display:flex; flex-direction:column; gap:4px; }
+.acct-srow { height:28px; display:grid; grid-template-columns:1fr 132px; align-items:center; gap:8px; }
+.acct-sn { font:500 var(--fs-s)/1 var(--mono); color:var(--fg-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acct-sn.sans { font-family:var(--sans); }
+/* 설정 칸에 줄로 놓는 빈 상태·불러오는 중. */
+.acct-empty { display:flex; align-items:center; gap:7px; padding:6px 0; font-size:var(--fs-xs); color:var(--faint); }
+
+/* 스페이스 기본 계정 드롭다운. 동작과 기본 모양은 core/dropdown.js · 01c-components.css 가 갖고, 이 화면에서는 값만 바꾼다. */
+.acct-dd { position:relative; }
+.acct-dd .cc-dd-trigger { height:24px; width:100%; display:flex; align-items:center; gap:6px; padding:0 6px 0 8px;
+  border:1px solid var(--line); border-radius:var(--r-s); background:var(--raised); color:var(--fg); font:inherit; font-size:var(--fs); }
+.acct-dd .cc-dd-trigger:hover { border-color:var(--line-strong); }
+.acct-dd .cc-dd-trigger svg { width:12px; height:12px; color:var(--muted); stroke-width:1.5; }
+.acct-dd .cc-dd-menu { z-index:5; left:auto; right:0; min-width:100%; width:180px; padding:4px; background:var(--raised);
+  border:1px solid var(--line-strong); border-radius:var(--r); box-shadow:var(--menu-shadow); }
+.acct-dd .cc-dd-item { height:var(--row); display:flex; align-items:center; gap:6px; padding:0 8px; border-radius:var(--r-s);
+  color:var(--fg-2); white-space:nowrap; position:relative; cursor:auto; }
+.acct-dd .cc-dd-item:hover, .acct-dd .cc-dd-item.active { background:var(--hover); color:var(--fg-2); }
+.acct-dd .cc-dd-item[aria-selected="true"] { background:var(--select); color:var(--fg-2); }
+.acct-dd .cc-dd-item[aria-selected="true"]::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background:var(--accent); }
+.acct-ck { margin-left:auto; color:var(--accent); }
+.acct-ck svg.i { width:12px; height:12px; stroke-width:2; }
+
+/* Chrome 가져오기. 목록 상자는 다시 그리는 자리일 뿐이라 줄은 설정 칸의 간격을 그대로 받는다. */
+.acct-chrome { display:contents; }
+.acct-imp { display:grid; grid-template-columns:1fr auto; align-items:center; gap:2px 8px; padding:6px 0; border-bottom:1px solid var(--line); }
+.acct-imp:last-child { border-bottom:0; }
+.acct-imp-l { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acct-imp-to { grid-column:1; font-size:var(--fs-xs); color:var(--faint); }
+.acct-imp-to b { color:var(--muted); font-weight:500; }
+.acct-imp .acct-btn { grid-row:1 / span 2; grid-column:2; }
+.acct-note { margin:8px 0 0; font-size:var(--fs-xs); color:var(--faint); line-height:1.6; }
+
+/* 누르는 요소만 움직인다. body.motion-off 는 01-base.css 가 끈다. */
+.acct-ib, .acct-btn, .acct-inp, .acct-tile, .acct-check, .acct-dd .cc-dd-trigger, .acct-dd .cc-dd-item {
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease),
+    transform .12s var(--ease), opacity var(--t) var(--ease); }

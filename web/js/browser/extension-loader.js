@@ -7,7 +7,7 @@
 //   initCapability(ctx).
 //
 // 의존 대상
-//   ctx.acHost의 제한된 enableExtensionLoader/waitForExtension bridge와 ctx.showToast.
+//   ctx.acHost의 제한된 enableExtensionLoader/waitForExtension bridge와 ctx.showToast. acHost 가 없으면 미지원.
 //
 // 유지 조건
 //   Chrome path·extension id·Electron session API를 알지 않는다. DevTools를 열기 전에는 현재
@@ -27,7 +27,10 @@ function failureSummary(results) {
 
 export async function initCapability(ctx = {}) {
   const host = ctx.acHost;
-  if (typeof host?.enableExtensionLoader !== "function" || typeof host?.waitForExtension !== "function") {
+  // native bridge 자체가 없는 창(일반 브라우저·원격 접속)은 확장을 실을 곳이 없으므로 조용히 미지원으로 둔다.
+  // bridge 는 있는데 확장 로더 함수가 빠졌으면 preload 와 어긋난 것이라 오류로 알린다.
+  if (host == null) return {};
+  if (typeof host.enableExtensionLoader !== "function" || typeof host.waitForExtension !== "function") {
     throw new Error("확장 로더 native bridge가 없습니다");
   }
   provide("extensionloader.before-devtools", async ({ partition } = {}) => {

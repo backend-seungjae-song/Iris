@@ -2,26 +2,44 @@
 /* 이 이름을 쓰는 곳: center/text-editor.js · sheet/render.js · docx/panel.js · docx/editor.js */
 /* 텍스트·표·문서가 같은 바와 같은 알림 줄을 쓴다. 규칙이 메모 CSS 에 있으면 메모를
    수정하는 사람이 파일 보기까지 바꾸게 된다. */
-.center-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted-fg); font-size:var(--fs-sm); }
-.fileview { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--bg); }
+/* 열린 탭이 없을 때: 공용 빈 상태 블록(cc-empty)을 가운데 영역 왼쪽에 둔다. 행동 줄마다 단축키를 붙인다.
+   여백은 넓은 창에서 64px 이고 가운데가 좁아지면 폭에 따라 줄어든다. */
+.center-empty { position:absolute; inset:0; justify-content:flex-start; padding:0 clamp(12px, 9%, 64px); container-type:inline-size; }
+.center-empty .cc-empty-desc { line-height:inherit; }
+.center-empty .cc-empty-action { font:inherit; transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.center-empty button.cc-empty-action { text-align:center; }
+.center-empty .cc-empty-action svg { fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.center-empty .cc-empty-action-note { color:var(--faint); }
+.center-empty-keys { margin-left:auto; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); border:1px solid var(--line); border-radius:var(--r-s); padding:2px 4px; }
+.center-empty-keys:empty { display:none; }
+.center-empty-drop { cursor:auto; }
+.center-empty-drop:hover { background:none; color:var(--fg-2); }
+/* 창 폭 900px 안팎에서는 가운데 열이 160px 남짓까지 좁아진다. 여백을 줄이는 것만으로는 행동 줄이 글자
+   단위로 끊기므로, 단축키를 숨기고 어절 단위로 줄을 바꾼다. */
+@container (max-width:280px) {
+  .center-empty .center-empty-keys, .center-empty .cc-empty-action-note { display:none; }
+  .center-empty .cc-empty-title, .center-empty .cc-empty-desc { word-break:keep-all; }
+  .center-empty .cc-empty-action { height:auto; min-height:36px; padding-block:6px; word-break:keep-all; }
+}
+.fileview { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); }
 /* 문서 편집기도 같은 영역을 쓴다. 원래 diff CSS 에 있던 규칙이다. */
-.docxview { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--bg); }
-.fv-loading { padding:16px; color:var(--muted-fg); font-size:var(--fs-xs); }
+.docxview { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); }
+.fv-loading { padding:16px; color:var(--muted); font-size:var(--fs-s); }
 /* 파일 이름표. 앱 셸의 글 편집기와 뷰어가 같은 막대에서 함께 쓰므로 이 이름은 앱 셸이 소유한다. */
-.fv-name { flex:none; padding:0 14px; color:var(--muted-fg); font-size:var(--fs-2xs); align-self:center; white-space:nowrap; }
-.fv-bar { flex:none; display:flex; align-items:stretch; gap:0; background:var(--sidebar); border-bottom:1px solid var(--border); }
+.fv-name { flex:none; padding:0 14px; color:var(--muted); font-size:var(--fs-xs); align-self:center; white-space:nowrap; }
+.fv-bar { flex:none; display:flex; align-items:stretch; gap:0; background:var(--chrome); border-bottom:1px solid var(--line); }
 /* 외부에서 바뀐 파일 알림. 편집 중일 때만 뜬다. 눈에 띄되 편집을 가리지 않는 한 줄이다. */
-.fv-conflict { flex:none; display:flex; align-items:center; gap:8px; padding:6px 10px; font-size:var(--fs-xs);
-  background:var(--accent); color:var(--fg); border-bottom:1px solid var(--border); }
-.fv-conflict button { font:inherit; font-size:var(--fs-xs); padding:2px 8px; border:1px solid var(--ring); border-radius:var(--r-ctl);
-  background:var(--bg); color:var(--fg); cursor:pointer; }
-.fv-conflict button:hover { background:var(--input); }
-.fv-bar button { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs); padding:7px 14px; cursor:pointer; border-bottom:2px solid transparent; border-radius:0;
-  transition:color var(--t-fade) var(--ease); }
+.fv-conflict { flex:none; display:flex; align-items:center; gap:8px; padding:6px 10px; font-size:var(--fs-s);
+  background:var(--select); color:var(--select-fg); border-bottom:1px solid var(--line); }
+.fv-conflict button { font:inherit; font-size:var(--fs-s); padding:2px 8px; border:1px solid var(--focus); border-radius:var(--r);
+  background:var(--surface); color:var(--fg); cursor:pointer; }
+.fv-conflict button:hover { background:var(--hover); }
+.fv-bar button { border:none; background:none; color:var(--muted); font:inherit; font-size:var(--fs-s); padding:7px 14px; cursor:pointer; border-bottom:2px solid transparent; border-radius:0;
+  transition:color var(--t) var(--ease); }
 .fv-bar button:hover { color:var(--fg); }
 .fv-bar button.on { color:var(--fg); border-bottom-color:var(--ai); }
 /* 지금 연 파일의 경로. 브라우저 주소줄처럼 보여 주고 눌러서 복사한다.
    길면 앞을 자른다(뒤쪽 파일명이 더 중요). direction:rtl 로 생략부호가 왼쪽에 붙는다.
    남는 공간을 모두 차지해(flex:1) 바가 좁을 때만 잘리게 한다. */
 .fv-bar .fv-path { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  direction:rtl; text-align:left; font-family:var(--mono); font-size:var(--fs-2xs); }
+  direction:rtl; text-align:left; font-family:var(--mono); font-size:var(--fs-xs); }

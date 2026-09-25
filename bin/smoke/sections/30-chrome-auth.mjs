@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 
-import { check, checkAsync, read, readAll, require_, ROOT } from "../core.mjs";
+import { check, checkAsync, read, readAll, require_, ROOT, filesUnder } from "../core.mjs";
 import {
   accountsScreen, allCss, allWebJs, audioDiagnosticsSource, bookmarks, browserHandoff, browserTabs, browserWindowManagerSource, cdpHiddenViewportSource, centerTabs, certificateTrustSource, chromeHandoffIpcSource, chromeImportRegistrySource, credentialIpcSource, css, downloadHookSource, keynav, main, mainJs, pick, pickHost, pickModeSource, profileSessionPolicySource, profiles, reorder, textEditor, web, webview, webviewFactory, webviewLifecycleSource, webviewStore, workspaceRuntime,
 } from "../sources.mjs";
@@ -273,8 +273,11 @@ check("탭·북마크 순서를 드래그로 바꾸고 서버가 기억한다", 
     && /m\.before \? tabs\.findIndex/.test(bs)
     && /export function wireReorder/.test(reorder)
     && /op: "tab\.move"/.test(browserTabs) && /op: "bookmark\.move"/.test(bookmarks)
-    // 원격(폰)은 다른 쓰기 op와 같은 취급
-    && /"tab\.move", "bookmark\.move"/.test(readAll("server"));
+    // 원격(폰)은 다른 쓰기 op와 같은 취급: 원격 허용 목록(열람용 선택 op)에 들어 있지 않다
+    && (() => {
+      const allow = /const REMOTE_VIEW_OPS = new Set\(\[([^\]]*)\]\)/.exec(readAll("server"));
+      return !!allow && !/"tab\.move"|"bookmark\.move"/.test(allow[1]);
+    })();
 });
 // 탭에 아이콘·상태가 없으면 탭이 많을 때 글자만 보고 골라야 한다(Chrome도 같은 영역을 쓴다).
 check("탭에 파비콘·불러오는 중·소리 표시가 붙는다", () =>
@@ -362,6 +365,17 @@ check("스크롤바가 앱 전체에 눈에 띄게 그려진다", () => {
   // Monaco는 스크롤바를 직접 그려 CSS가 적용되지 않으므로, 같은 굵기·세기를 옵션과 테마로 맞춘다.
   const mono = /verticalScrollbarSize: 12/.test(textEditor) && /scrollbarSlider\.background/.test(textEditor);
   return has && noStandard && thumb && mono;
+});
+// 모션은 OS 의 동작 줄이기 설정과 무관하게 켜져 있고, 끄는 것은 앱 안 모션 스위치(body.motion-off)
+// 하나다. 화면 하나라도 prefers-reduced-motion 을 보면 그 설정을 켠 사용자에게만 그 화면이 멈춘다.
+// 외부 라이브러리(web/vendor)는 우리 코드가 아니라 제외한다.
+check("모션은 OS 동작 줄이기 설정을 따르지 않는다", () => {
+  const own = (rel) => /\.(css|js|mjs|cjs|html)$/.test(rel) && !rel.startsWith("web/vendor/") && !rel.startsWith("bin/smoke/");
+  const files = [...filesUnder("web", own), ...filesUnder("native", own), ...filesUnder("bin", own)];
+  if (files.length < 100) throw new Error(`훑은 파일이 ${files.length} 개뿐이다 — 목록이 깨졌다`);
+  const hit = files.filter((f) => /prefers-reduced-motion|reducedMotion/.test(read(f)));
+  if (hit.length) throw new Error("동작 줄이기 설정을 보는 파일: " + hit.join(", "));
+  return /body\.motion-off/.test(css("01-base"));
 });
 // 프로필 버튼은 툴바 오른쪽 끝에 있어 left로 잡으면 메뉴가 창 밖으로 밀리므로 왼쪽으로 펼친다.
 check("계정 메뉴가 왼쪽으로 펼쳐지고 글은 오른쪽 정렬", () =>

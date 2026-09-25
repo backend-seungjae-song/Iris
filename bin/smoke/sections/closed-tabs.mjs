@@ -21,7 +21,7 @@ const closedTabs = read("web/js/center/closed-tabs.js");
 check("닫히기 전에 재료를 남긴다", () => {
   const seg = /export function handleBrowserSync[\s\S]*?\n\}/.exec(browserMessages);
   if (!seg) throw new Error("handleBrowserSync 를 못 찾음");
-  const at = seg[0].indexOf("recordClosedTab("), mut = seg[0].indexOf("bsMutate(m)");
+  const at = seg[0].indexOf("recordClosedTab("), mut = seg[0].indexOf("bsMutate(mutation)");
   return at > 0 && mut > 0 && at < mut;
 });
 

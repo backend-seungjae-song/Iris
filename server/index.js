@@ -167,8 +167,9 @@ import {
   REMOTE,
   connectionAllowed,
   createHttpHandler,
-  isAllowedRemote,
-  normalizeIp,
+  hardenHeaderParsing,
+  isLoopbackRequest,
+  selfTailscaleIps,
 } from "./http-handler.js";
 import { initKeymapStore, keymapWire, resetKeymap, setKeymapOverride } from "./keymap-store.js";
 import { handleSpace, handleTab, initWorkspaceHandlers } from "./workspace-handlers.js";
@@ -344,10 +345,10 @@ initBrowserMessageHandlers({
   broadcastLocal: (message) => broadcastLocal(message),
 });
 
-const server = http.createServer(createHttpHandler({
+const server = hardenHeaderParsing(http.createServer(createHttpHandler({
   irisHome: IRIS_HOME,
   capabilityHost,
-}));
+})));
 
 
 // WS 업그레이드도 같은 IP 필터를 통과해야 한다(AC6).
@@ -357,7 +358,7 @@ const HB_MS = 10000;
 initWsTransport({
   wss,
   heartbeatMs: HB_MS,
-  isLocalRequest: (req) => { const ip = normalizeIp(req.socket?.remoteAddress); return ip === "127.0.0.1" || ip === "::1"; },
+  isLocalRequest: isLoopbackRequest,
 });
 const herdr = new HerdrClient();
 // 실제 터미널: node-pty로 herdr session attach를 그대로 사용한다(재구현이 아니다).
@@ -534,17 +535,6 @@ process.on("SIGTERM", () => { for (const stop of shutdownCapabilities) { try { s
 // 안전망으로 주기적 재계산(느슨한 폴백, push가 주 경로).
 setInterval(recompute, 4000);
 
-// 원격 모드일 때 Tailscale IP를 찾아 폰 접속 주소를 안내.
-function tailscaleIp() {
-  const ifaces = os.networkInterfaces();
-  for (const list of Object.values(ifaces)) {
-    for (const a of list || []) {
-      if (a.family === "IPv4" && isAllowedRemote(a.address) && a.address.startsWith("100.")) return a.address;
-    }
-  }
-  return null;
-}
-
 // 종료 전에 밀린 쓰기를 끝낸다. 탭·북마크(200ms)·스페이스 키(200ms)·보관(120ms)은
 // 잦은 변경을 합치려고 지연을 두는데, 그 사이에 종료 신호가 오면 마지막 변경이 저장되지 않는다.
 // 앱이 서버를 관리하므로 앱을 끌 때마다 SIGTERM이 오고, 이 구간을 매번 지난다.
@@ -598,7 +588,7 @@ server.on("error", (e) => {
 server.listen(PORT, HOST, () => {
   console.log(`Iris → http://127.0.0.1:${PORT}`);
   if (REMOTE) {
-    const ts = tailscaleIp();
+    const ts = selfTailscaleIps()[0];
     if (ts) console.log(`  폰 접속(tailnet): http://${ts}:${PORT}`);
     else console.log(`  원격 모드 ON — Tailscale 미탐지. 'sudo tailscale up' 후 tailnet IP로 접속됩니다.`);
     console.log(`  접속 허용: localhost + Tailscale(100.64/10)만. 그 외 원격 IP는 403(AC6).`);

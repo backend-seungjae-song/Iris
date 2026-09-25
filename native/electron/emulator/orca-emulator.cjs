@@ -1173,7 +1173,7 @@ function getServeSimEnv(executable) {
   if (openShimDir) {
     env.PATH = `${openShimDir}${import_node_path4.delimiter}${env.PATH ?? ""}`;
   }
-  return env;
+  return require("./serve-sim-framework-env.cjs").withSimulatorFrameworkPath(env);
 }
 __name(getServeSimEnv, "getServeSimEnv");
 var materializedServeSimPackageDir;

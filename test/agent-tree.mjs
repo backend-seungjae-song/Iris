@@ -6,6 +6,7 @@ import {
 } from "../web/js/herdr/agent-tree.js";
 import { initAgents, renderAgents, revealAgentRow } from "../web/js/herdr/agents.js";
 import { replaceHerdrState } from "../web/js/herdr/state.js";
+import { initTree, renderSpaces } from "../web/js/explorer/tree.js";
 
 const agent = (paneId, parentPaneId = null, extra = {}) => ({
   paneId, parentPaneId, workspaceId: "w1", tabId: `tab-${paneId}`, agent: "codex", ...extra,
@@ -94,15 +95,39 @@ test("DOM 배선은 토글 클릭을 선택으로 흘리지 않고 reveal 때 �
   let selectedPane = null;
   const sent = [];
   initAgents({
-    $: (selector) => selector === "#agent-list" ? list : null,
+    $: (selector) => selector === "#space-list" ? list : null,
     esc: (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;"),
-    cssEsc: (value) => String(value), statusClass: (value) => value, wsSend: (message) => sent.push(message),
+    cssEsc: (value) => String(value), wsSend: (message) => sent.push(message),
     getIsLocal: () => true, getCurTarget: () => selectedPane, setCurTarget: (value) => { selectedPane = value; },
     orderedSpaces: () => [{ id: "w1", label: "작업" }], spk: (value) => value,
     saveCollapsed: () => {}, selectSession: (paneId) => { selected.push(paneId); selectedPane = paneId; },
     collapsed: { groups: new Set() },
+    getSelectedSpaceId: () => "w1",
+    renderSpaces,
+  });
+  // 스페이스 줄은 앱 셸(explorer/tree.js)이 그리고, 그 아래 에이전트 줄은 위에서 등록한 함수가 채운다.
+  initTree({
+    $: (selector) => selector === "#space-list" ? list : selector === "#file-tree" ? { addEventListener() {} } : null,
+    esc: (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;"),
+    wsSend() {},
+    orderedSpaces: () => [{ id: "w1", label: "작업" }],
+    getIsLocal: () => true, getSelectedSpaceId: () => "w1",
+    getActiveFile: () => null, setActiveFile() {}, saveCollapsed() {}, syncWatchDirs() {},
+    collapsed: { dirs: new Set() }, dirCache: new Map(),
   });
   renderAgents();
+
+  const spaceAt = list.innerHTML.indexOf('class="space-row sel"');
+  assert.ok(spaceAt >= 0 && spaceAt < list.innerHTML.indexOf('data-target="root"'), "스페이스 줄 바로 아래에 에이전트 줄이 온다");
+  assert.match(list.innerHTML, /data-space-tog="w1" aria-expanded="true"/);
+  assert.match(list.innerHTML, /class="agent-add-row" data-add="w1"/, "고른 스페이스 아래에 터미널 탭 추가 줄을 둔다");
+  const spaceTog = { closest: (selector) => selector === "[data-space-tog]" ? { dataset: { spaceTog: "w1" } } : null };
+  listeners.get("click")({ target: spaceTog });
+  assert.match(list.innerHTML, /data-space-tog="w1" aria-expanded="false"/);
+  assert.doesNotMatch(list.innerHTML, /class="srow/, "접은 스페이스는 에이전트 줄을 감춘다");
+  assert.match(list.innerHTML, /class="space-count"[^>]*>4</, "접힌 스페이스 줄에 에이전트 수를 적는다");
+  listeners.get("click")({ target: spaceTog });
+  assert.deepEqual(selected, [], "접기 삼각형은 에이전트를 고르지 않는다");
 
   assert.match(list.innerHTML, /aria-expanded="true"/);
   assert.match(list.innerHTML, /aria-label="공유 탭 하위 에이전트 접기"/);
@@ -156,14 +181,16 @@ test("DOM 배선은 토글 클릭을 선택으로 흘리지 않고 reveal 때 �
   const clickRow = (target) => listeners.get("click")({ target: {
     closest: (selector) => selector === ".srow" ? {dataset: {target}} : null,
   }});
+  // 하위가 있는 줄은 누를 때마다 접힘이 바뀐다. 고르지 않은 줄이면 고르면서 바꾼다.
   clickRow("root");
   assert.deepEqual(selected, ["root"], "다른 에이전트의 첫 클릭은 즉시 한 번 선택한다");
-  assert.match(list.innerHTML, />검증 담당<\/span>/, "첫 선택은 가지를 접지 않는다");
+  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/, "첫 클릭도 펼친 가지를 접는다");
   clickRow("root");
-  assert.deepEqual(selected, ["root"], "같은 에이전트를 다시 누르면 재이동 없이 접는다");
-  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/);
+  assert.deepEqual(selected, ["root"], "같은 에이전트를 다시 누르면 재이동 없이 편다");
+  assert.match(list.innerHTML, />검증 담당<\/span>/);
   clickRow("root");
-  assert.match(list.innerHTML, />검증 담당<\/span>/, "같은 행을 다시 누르면 펼친다");
+  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/, "같은 행을 다시 누르면 다시 접는다");
+  clickRow("root");
   clickRow("child");
   assert.deepEqual(selected, ["root", "child"], "자식으로 이동도 첫 클릭 한 번이다");
 });

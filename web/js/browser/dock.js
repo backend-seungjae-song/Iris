@@ -37,7 +37,7 @@ import {
 } from "./webview-store.js";
 import {
   WEBVIEW_LRU, activeBrowserId, activeWv, markWebviewUsed, renderTabDialog, scheduleWebviewThrottling,
-  shouldMaterializeTab, sleepDeadSpaceWebviews, sleepStoredTab, wakeWebview,
+  shouldMaterializeTab, sleepDeadSpaceWebviews, sleepStoredTab, syncNavButtons, wakeWebview,
 } from "./webview.js";
 import { openFilePalette } from "../center/file-palette.js";
 import { findNext, openFind } from "./find-in-page.js";
@@ -106,6 +106,7 @@ export function initDock(deps) {
         case "sketch": callHook("sketch.open"); break; // ⌘⇧D. 이 창의 활성 탭을 찍어 그 위에 그린다
         case "rec-toggle": if (activeWv()) callHook("record.set", !callHook("record.on")); break; // ⌘⇧A 녹화 토글. 문서 탭에는 webview가 없다
         case "memo-archive": callHook("memo.archive"); break; // ⌘⇧S. webview에 포커스가 있어도 보관된다
+        case "agent-chat": callHook("agentchat.toggle"); break; // ⌘⇧J. 채팅 보기 기능이 꺼져 있으면 아무 일도 없다
         case "tab-prev": cycleCenterTab(-1); break;
         case "tab-next": cycleCenterTab(1); break;
         case "agent-prev": cycleAgent(-1); break;
@@ -204,6 +205,7 @@ export function reconcileBrowserMode() {
     urlInput.value = isNewTab(active.url, active) ? "" : (active.url || "");
     syncBookmarkStar();
   }
+  syncNavButtons();
   bNote.hidden = tabs.length > 0;
   updateProfileBtn();
   updateSizeBtn(); viewportLayout(); syncTouchDrag(false);

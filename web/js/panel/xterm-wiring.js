@@ -267,12 +267,22 @@ export function terminalLinkSpans(cellsAt, y, opts = {}) {
   return links;
 }
 
+// 글자 12px, 행 높이는 그 1.6배다. xterm 의 lineHeight 는 글꼴이 잰 글자 높이에 곱하는 배수라
+// 글꼴마다 값이 달라지므로, 연 뒤에 잰 높이로 나눠 행 높이를 px 로 맞춘다. 1 미만은 xterm 이 거부한다.
+const TERM_FONT_PX = 12, TERM_LINE_PX = TERM_FONT_PX * 1.6;
+function fitLineHeight(xterm) {
+  try {
+    const h = xterm._core._charSizeService.height;
+    if (h > 0) xterm.options.lineHeight = Math.max(1, TERM_LINE_PX / h);
+  } catch {}
+}
+
 export function initXterm() {
   let xterm = getXterm(), fitAddon = getFitAddon();
   if (xterm) return;
   xterm = new Terminal({
-    fontFamily: "'SF Mono', Menlo, Monaco, 'Apple SD Gothic Neo', monospace", fontSize: 13, lineHeight: 1.1,
-    cursorBlink: true, scrollback: 5000, convertEol: false, theme: xtermTheme(), allowProposedApi: true,
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(), fontSize: TERM_FONT_PX, lineHeight: 1,
+    cursorBlink: true, cursorStyle: "block", scrollback: 5000, convertEol: false, theme: xtermTheme(), allowProposedApi: true,
     // 채팅 속 링크는 확인 팝업 없이 이 스페이스의 브라우저 탭·뷰어에서 연다(xterm 기본 confirm+window.open 대체).
     // allowNonHttpProtocols는 필수다. 없으면 xterm이 file: OSC 8 링크를 링크로 내주지 않아
     // 클릭이 성립하지 않는다(확인). 이 코드가 주는 파일 링크는 전부 file: 이다.
@@ -292,6 +302,7 @@ export function initXterm() {
   xterm.loadAddon(fitAddon);
   const terminalInner = getTerminalInner(), terminal = getTerminal();
   xterm.open(terminalInner);
+  fitLineHeight(xterm);
   wireLinkMode(terminalInner);
   try { fitAddon.fit(); } catch {}
   // 파일 경로 감지 → ⌘/Ctrl+클릭으로 가운데 뷰어에 연다(VSCode식). 상대경로는 현재 에이전트 cwd 기준.

@@ -1,53 +1,126 @@
-/* 메모 관리 화면 */
+/* 메모 관리 화면: 스페이스 목록 · 지금 메모 편집기 · 날짜별 보관본의 세 단 */
 /* 이 이름을 만드는 곳: panel/memo-admin.js */
-/* 메모 관리: 이 스페이스가 주된 대상이고 다른 스페이스는 보조다. 두 영역의 크기를 뚜렷하게 다르게 둔다. */
-.mm-main { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:16px; align-items:start; }
-@media (max-width: 900px) { .mm-main { grid-template-columns:1fr; } }
-.mm-now { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden; }
-.mm-now-h { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--border); }
-.mm-now-h b { font-size:var(--fs-sm); font-weight:var(--fw-semi); }
-.mm-now-h .mm-sp { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.mm-edit-pv { min-height:230px; max-height:52vh; overflow:auto; padding:12px 14px; background:var(--bg);
-  border-radius:var(--r-blk); border:1px solid var(--border); }
-.mm-now-h .memo-modes { margin-left:auto; }
-.mm-notes { margin-top:14px; border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden; }
-.mm-note-row { display:flex; align-items:center; gap:8px; padding:8px 12px; border-top:1px solid var(--border); }
-.mm-note-row:first-of-type { border-top:none; }
-.mm-note-name { flex:1; min-width:0; font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mm-note-meta { color:var(--muted-fg); font-size:var(--fs-2xs); }
-.mm-deleted { border-top:1px solid var(--border); padding:8px 12px; }
-.mm-deleted summary { color:var(--muted-fg); cursor:pointer; }
-.mm-slot { position:relative; width:100%; height:46vh; min-height:230px; background:var(--bg);
-  border-radius:var(--r-blk); border:1px solid var(--border); overflow:hidden; }
-.mm-bar { display:flex; align-items:center; gap:7px; padding:9px 12px; border-top:1px solid var(--border); flex-wrap:wrap; }
-.mm-hint { margin-left:auto; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.mm-arch { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); overflow:hidden; }
-.mm-arch-h { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--border); font-size:var(--fs-xs); font-weight:var(--fw-semi); }
-.mm-item { border-bottom:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
-.mm-item:last-child { border-bottom:none; }
-.mm-item-h { display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; }
-.mm-item-h:hover { background:var(--accent); }
-.mm-date { font-variant-numeric:tabular-nums; font-weight:var(--fw-semi); }
-.mm-rev { font-size:var(--fs-2xs); color:var(--muted-fg); }
-.mm-prev { flex:1; min-width:0; font-size:var(--fs-2xs); color:var(--muted-fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mm-body-txt { padding:0 14px 12px; font:var(--fs-xs)/var(--lh) var(--mono); white-space:pre-wrap; word-break:break-word; color:var(--fg); max-height:320px; overflow:auto; }
-.mm-acts { display:flex; gap:6px; padding:0 12px 12px; }
+/* 지금 보는 스페이스의 편집기가 주된 대상이라 가운데 단만 폭이 늘어나고, 양옆 단은 폭이 고정이다. */
+.mm-body { flex:1 1 auto; min-height:0; display:flex; }
+.mm-main { display:grid; grid-template-columns:208px minmax(0,1fr) 300px; width:100%; flex:1; min-width:0; min-height:0;
+  flex-direction:column; background:var(--surface); }
+.mm-col { min-height:0; display:flex; flex-direction:column; }
+.mm-col-a { background:var(--chrome); border-right:1px solid var(--line); }
+.mm-col-b { min-width:0; }
+.mm-col-c { border-left:1px solid var(--line); }
+
+/* 머리 */
+.mm-ph { height:36px; flex:none; display:flex; align-items:center; gap:8px; padding:0 8px 0 14px; background:var(--chrome); border-bottom:1px solid var(--line); }
+/* 스페이스 이름이 길면 단 폭을 넘기므로 말줄임으로 자른다. */
+.mm-ph h2 { margin:0; min-width:0; font:600 var(--fs-h)/1 var(--sans); letter-spacing:-.012em; color:var(--fg); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.mm-sp { flex:1; }
+.mm-n { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.mm-scroll { flex:1; overflow:auto; min-height:0; }
+.mm-scroll::-webkit-scrollbar { width:8px; }
+.mm-scroll::-webkit-scrollbar-thumb { background:var(--line-strong); border-radius:4px; }
+
+/* 단추 */
+.mm-ib { width:24px; height:24px; display:grid; place-items:center; border:0; border-radius:var(--r-s); background:none;
+  font:inherit; color:var(--muted); flex:none; cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-ib:hover { background:var(--hover); color:var(--fg); }
+.mm-ib:active { transform:scale(.96); }
+.mm-btn { height:24px; padding:0 9px; display:inline-flex; align-items:center; gap:6px; border-radius:var(--r-s); border:1px solid var(--line);
+  background:none; font:inherit; color:var(--fg-2); font-size:var(--fs); white-space:nowrap; flex:none; cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-btn:hover { background:var(--hover); color:var(--fg); border-color:var(--line-strong); }
+.mm-btn:active { transform:scale(.97); }
+.mm-btn.pri { background:var(--pal-babyblue); border-color:transparent; color:var(--pal-ink); font-weight:600; }
+.mm-btn.pri:hover { background:var(--pal-paper); }
+.mm-btn.txt { border-color:transparent; color:var(--muted); padding:0 6px; }
+.mm-btn.txt:hover { color:var(--fg); }
+.mm-btn.dz:hover { color:var(--pal-danger); }
+.mm-btn.sm { height:20px; padding:0 6px; font-size:var(--fs-s); }
+.mm-seg { display:inline-flex; padding:1px; gap:1px; border:1px solid var(--line); border-radius:var(--r-s); flex:none; }
+.mm-seg button { height:20px; padding:0 8px; border:0; border-radius:3px; background:none; font:inherit; font-size:var(--fs-s); color:var(--muted); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-seg button:hover { color:var(--fg); }
+.mm-seg button.on { background:var(--select); color:var(--select-fg); }
+/* 다른 스페이스를 보는 중일 때만 나온다. 작업 중인 스페이스로 돌아가는 단추다. */
+.mm-back { height:24px; display:inline-flex; align-items:center; gap:6px; padding:0 9px; border:0; border-radius:var(--r-s);
+  background:var(--select); font:inherit; color:var(--select-fg); font-size:var(--fs-s); flex:none; cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-back:hover { background:var(--pal-ink-5); }
+
+/* 왼쪽 단: 스페이스 · 닫아 둔 별도 메모 */
+.mm-sec { border-top:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+.mm-sec:first-child { border-top:0; }
+.mm-sec-head { display:flex; align-items:center; gap:6px; padding:8px var(--pad) 6px; color:var(--muted); }
+.mm-sec-head h3 { margin:0; font:600 11px/1 var(--sans); letter-spacing:0; color:var(--fg-2); }
+.mm-sec-head .mm-n { font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); }
+.mm-list { padding:0 6px 8px; overflow:hidden; }
+.mm-sprow { width:100%; height:40px; display:flex; flex-direction:column; justify-content:center; gap:3px; padding:0 8px; border:0;
+  border-radius:var(--r-s); background:none; font:inherit; letter-spacing:inherit; color:inherit; text-align:left; position:relative; cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-sprow:hover { background:var(--hover); }
+.mm-l1 { display:flex; align-items:center; gap:6px; min-width:0; color:var(--fg-2); }
+.mm-l1 .mm-nm { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mm-l1 .mm-n { margin-left:auto; }
+.mm-l2 { font-size:var(--fs-s); color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mm-sprow.on { background:var(--select); }
+.mm-sprow.on::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:2px; border-radius:2px; background:var(--accent); }
+.mm-sprow.on .mm-l1 { color:var(--select-fg); }
+.mm-here { font-size:var(--fs-xs); color:var(--ok); flex:none; }
+.mm-nrow { height:var(--row); display:flex; align-items:center; gap:8px; padding:0 8px; border-radius:var(--r-s); color:var(--fg-2);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-nrow:hover { background:var(--hover); color:var(--fg); }
+.mm-nrow .mm-nm { flex:none; max-width:52%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mm-nrow .mm-pv { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--faint); font-size:var(--fs-s); }
+.mm-nrow .mm-btn { opacity:.6; }
+.mm-nrow:hover .mm-btn, .mm-nrow .mm-btn:focus-visible { opacity:1; }
+.mm-nrow.mm-del { color:var(--muted); }
+.mm-nrow .mm-cv { color:var(--faint); }
+/* 삭제된 메모는 접어 둔다. 펼치면 한 줄씩 복구할 수 있다. */
+.mm-deleted > summary { list-style:none; }
+.mm-deleted > summary::-webkit-details-marker { display:none; }
+.mm-deleted .mm-cv { transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-deleted[open] > summary .mm-cv { transform:rotate(90deg); }
+/* 목록이 비었을 때 그 자리에 한 줄로 알린다. */
+.mm-hint { height:var(--row); display:flex; align-items:center; padding:0 8px; font-size:var(--fs-xs); color:var(--faint); }
+.mm-hint-day { padding:0 12px; }
+
+/* 가운데 단: 지금 메모 */
+.mm-why { flex:none; padding:8px 14px; font-size:var(--fs-s); color:var(--muted); line-height:1.5; border-bottom:1px solid var(--line); }
+/* 편집기(Monaco)가 붙는 자리. 남은 높이를 다 쓴다. display 는 원문/미리보기 전환이 직접 바꾼다. */
+.mm-slot { position:relative; flex:1; min-height:0; background:var(--surface); overflow:hidden; }
+.mm-edit-pv { flex:1; min-height:0; overflow:auto; padding:10px 14px; }
+.mm-ebar { height:40px; flex:none; display:flex; align-items:center; gap:6px; padding:0 10px; border-top:1px solid var(--line); }
+/* 스페이스가 하나도 선택되지 않았을 때 가운데 단에 한 번만 안내한다. */
+.mm-main-empty { grid-template-columns:208px minmax(0,1fr); }
+.mm-empty { padding:12px 14px; }
+.mm-empty b { display:block; font-size:var(--fs-h); font-weight:600; color:var(--fg); }
+.mm-empty p { margin:4px 0 0; font-size:var(--fs-s); color:var(--muted); line-height:1.5; }
+
+/* 오른쪽 단: 날짜별 보관본 */
+.mm-day { border-bottom:1px solid var(--line); }
+.mm-day-h { height:var(--row); display:flex; align-items:center; gap:8px; padding:0 12px; cursor:pointer; position:relative;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mm-day-h:hover { background:var(--hover); }
+.mm-d { font:600 var(--fs-s)/1 var(--mono); color:var(--fg-2); flex:none; }
+.mm-rv { font-size:var(--fs-xs); color:var(--faint); flex:none; }
+.mm-day-h .mm-pv { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:var(--fs-s); }
+.mm-day-h .mm-cv { color:var(--faint); flex:none; transition:transform var(--t) var(--ease); }
+.mm-day.open .mm-day-h { background:var(--select); }
+.mm-day.open .mm-day-h::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background:var(--accent); }
+.mm-day.open .mm-d { color:var(--select-fg); }
+.mm-day.open .mm-day-h .mm-cv { transform:rotate(90deg); }
 /* 하루치 안에서 보관한 시점 하나가 한 묶음이다. 경계가 보여야 그중 하나만 지울 수 있다. */
-.mm-blk { border-top:1px solid var(--border); }
-.mm-blk-h { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px 6px; }
-.mm-blk-t { font:var(--fw-semi) var(--fs-xs)/1 var(--mono); color:var(--fg); letter-spacing:var(--ls-caps); }
-/* 관리 화면에서 hover 로만 나오는 버튼은 찾기 어려우므로 항상 표시하되 강조하지 않는다. */
-.mm-blk-acts { display:flex; gap:6px; opacity:.6; transition:opacity var(--t-fade) var(--ease); }
-.mm-blk:hover .mm-blk-acts, .mm-blk-acts:focus-within { opacity:1; }
-.mm-blk .mm-body-txt { padding:0 14px 10px; }
-.mm-others { margin-top:22px; }
-.mm-oth-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:8px; }
-.mm-oth { border:1px solid var(--border); border-radius:var(--r-card); background:var(--card); padding:9px 11px; cursor:pointer;
-  transition:border-color var(--t-fade) var(--ease); }
-.mm-oth:hover { border-color:var(--ring); }
-.mm-oth-n { font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mm-oth-m { font-size:var(--fs-2xs); color:var(--muted-fg); margin-top:3px; }
-.mm-oth.cur { border-color:var(--primary); }
+.mm-blk { padding:8px 12px 10px 12px; border-top:1px solid var(--line); }
+.mm-blk-h { display:flex; align-items:center; gap:6px; height:20px; }
+.mm-t { font:600 var(--fs-s)/1 var(--mono); color:var(--fg-2); }
+.mm-blk-h .mm-nm { font-size:var(--fs-s); color:var(--muted); }
+.mm-blk-h .mm-btn { opacity:.55; }
+.mm-blk:hover .mm-blk-h .mm-btn, .mm-blk-h .mm-btn:focus-visible { opacity:1; }
+/* 한 번에 보관한 글이 길면 이 묶음 안에서만 스크롤한다. 끊을 곳 없는 긴 주소는 줄을 바꾼다. */
+.mm-blk pre { margin:4px 0 0; font:400 var(--fs-s)/1.6 var(--mono); color:var(--fg-2); white-space:pre-wrap;
+  word-break:break-word; max-height:320px; overflow:auto; }
+.mm-dacts { display:flex; gap:4px; padding:8px 10px 10px; border-top:1px solid var(--line); }
 
 /* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
 .mm-panel { width:360px; }

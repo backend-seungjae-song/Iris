@@ -428,8 +428,16 @@ const TOOLS = [
     schema: { to: { type: "number", description: "절대 y 좌표" },
       amount: { type: "string", description: "down·up·top·bottom 또는 픽셀 수(상대 이동)" } },
     run: (a, C) => (a.to != null ? C("scrollto", { y: Number(a.to) }) : C("scroll", { amount: String(a.amount || "down") })) },
-  { name: "browser_wait", desc: "로드 완료를 기다린다. ms를 주면 그만큼 고정 대기, 없으면 readyState 완료까지(최대 10초).",
-    schema: { ms: { type: "number" } }, run: (a, C) => C("wait", a.ms != null ? { ms: Number(a.ms) } : {}) },
+  { name: "browser_wait",
+    desc: "기다린다. 기다릴 상태가 있으면 until 을 준다 — 조건이 맞는 순간 돌아오므로 고정 ms 를 여러 번 돌리지 않는다. "
+      + "예: 응답 생성이 끝날 때까지 {gone: 'button[aria-label=\"응답 중단\"]', stable_ms: 2000}. "
+      + "until 이 없으면 ms 만큼 고정 대기, 둘 다 없으면 readyState 완료까지(최대 10초).",
+    schema: { ms: { type: "number" },
+      until: { type: "object", description: "모두 맞을 때 돌아온다. selector=이 요소가 있다 · gone=이 요소가 없다 · text=본문에 이 글이 있다 · stable_ms=본문이 이 시간 동안 바뀌지 않았다.",
+        properties: { selector: { type: "string" }, gone: { type: "string" }, text: { type: "string" }, stable_ms: { type: "number" } } },
+      timeout_ms: { type: "number", description: "until 의 최대 대기(기본 30000, 최대 120000). 넘으면 마지막 상태와 함께 돌아온다." } },
+    run: (a, C) => (a.until != null ? waitUntil(a.until, a.timeout_ms, C)
+      : C("wait", a.ms != null ? { ms: Number(a.ms) } : {})) },
   { name: "browser_viewport", desc: "탭 화면 크기를 지정한다(반응형 확인). 뷰포트·배율·미디어쿼리가 모두 따라온다. clear를 주면 원래 크기로.",
     schema: { width: { type: "number" }, height: { type: "number" },
       dpr: { type: "number", description: "화면 배율(기본은 창 배율 그대로)" },
@@ -865,6 +873,162 @@ const TAB_PARAM = { tab: {
   description: "이 호출만 지정한 탭에서 실행. browser_tabs가 준 핸들(예: claude-tab-a3f9k2)을 쓴다 — 핸들은 앱을 재시작해도 같은 탭을 가리킨다. 여러 개를 주면(배열 또는 쉼표, 최대 4) 그 탭들에 같은 명령을 동시에 돌리고 결과를 대상별로 돌려준다. 생략하면 고정된 탭, 고정이 없으면 이 세션 그룹의 탭.",
 } };
 const NO_TAB = new Set(["browser_tabs", "browser_target", "browser_new_tab", "browser_report", "browser_trace", "browser_picks", "app_picks"]);
+// 행동 바로 뒤에 좁힌 snapshot 이나 읽기 eval 을 따로 부르는 일이 행동의 40%였다(30일 기록).
+// 결과는 짧고 비용은 왕복 자체라서, 볼 것이 정해져 있으면 같은 호출에 붙인다.
+const THEN_TOOLS = new Set(["browser_wait", "browser_click", "browser_dblclick", "browser_hover", "browser_fill", "browser_focus",
+  "browser_clear", "browser_check", "browser_select", "browser_type", "browser_key", "browser_goto",
+  "browser_history", "browser_scroll"]);
+const THEN_BUDGET = 4000;
+const THEN_PARAM = { then: {
+  type: "object",
+  description: "행동 뒤에 볼 것이 이미 정해져 있으면 여기 적어 같은 호출로 받는다. 따로 browser_snapshot·browser_eval 을 부르면 왕복이 하나 는다. "
+    + "snapshot 은 role·name·region 중 하나 이상으로 좁힌다(budget 기본 4000). eval 은 browser_eval 과 같은 읽기 전용 식. "
+    + "after_ms 는 관측 전 기다릴 시간(최대 5000). 행동이 실패하면 관측하지 않는다. 존재·문구 판정과 증거는 browser_expect 로 한다.",
+  properties: {
+    snapshot: { type: "object", properties: { role: { type: "string" }, name: { type: "string" },
+      region: { type: "string" }, budget: { type: "number" } } },
+    eval: { type: "string" },
+    after_ms: { type: "number" },
+  },
+} };
+// 행동을 보내기 전에 거절한다. 행동만 되고 관측이 거절되면 모델은 같은 행동을 다시 보낸다.
+function thenFault(v) {
+  if (v === undefined) return null;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return "then 은 {snapshot, eval, after_ms} 객체입니다.";
+  const extra = Object.keys(v).filter((k) => !["snapshot", "eval", "after_ms"].includes(k));
+  if (extra.length) return `then 이 받지 않는 이름입니다: ${extra.join(", ")} — 받는 이름: snapshot · eval · after_ms`;
+  if (v.snapshot == null && v.eval == null) return "then 에 snapshot 이나 eval 중 하나는 있어야 합니다.";
+  if (v.snapshot != null) {
+    const s = v.snapshot;
+    if (typeof s !== "object" || Array.isArray(s)) return "then.snapshot 은 {role, name, region, budget} 객체입니다.";
+    const bad = Object.keys(s).filter((k) => !["role", "name", "region", "budget"].includes(k));
+    if (bad.length) return `then.snapshot 이 받지 않는 이름입니다: ${bad.join(", ")}`;
+    if (!s.role && !s.name && !s.region) return "then.snapshot 은 role·name·region 중 하나 이상으로 좁혀야 합니다. 전체가 필요하면 browser_snapshot 을 따로 부릅니다.";
+  }
+  if (v.eval != null && (typeof v.eval !== "string" || !v.eval.trim())) return "then.eval 은 비어 있지 않은 문자열입니다.";
+  if (v.after_ms != null && !(Number(v.after_ms) >= 0 && Number(v.after_ms) <= 5000)) return "then.after_ms 는 0~5000 입니다.";
+  return null;
+}
+// 행동 직후 좁힌 관측을 따로 부르면 then 을 한 번만 알려 준다. 매번 붙이면 토큰만 늘고 읽히지 않는다.
+let lastWasBareAction = false, thenHinted = false;
+function thenHint(name, a) {
+  const follow = lastWasBareAction && (name === "browser_eval" || (name === "browser_snapshot" && (a.role || a.name || a.region)));
+  lastWasBareAction = THEN_TOOLS.has(name) && a.then == null;
+  if (!follow || thenHinted) return "";
+  thenHinted = true;
+  return "\n\n(방금 행동 뒤 이 관측을 따로 불렀다. 다음부터 볼 것이 정해져 있으면 행동 도구의 then 에 적어 같은 호출로 받는다.)";
+}
+// 대상을 못 찾으면 지금 화면에서 그 대상일 만한 요소를 같은 결과에 붙인다. 못 찾은 뒤 다음 호출이
+// snapshot·eval 인 경우가 대부분이었다(30일 기록). 붙이기만 하고 누르지는 않는다.
+const TARGET_TOOLS = new Set(["browser_click", "browser_dblclick", "browser_hover", "browser_fill", "browser_focus",
+  "browser_clear", "browser_check", "browser_select"]);
+const TARGET_MISS = /선택자에 맞는 요소가 없습니다|ref가 만료|ref 맵 없음|알 수 없는 ref/;
+const REF_LINE = /\[@(e\d+)\]\s+(.+?)\s+"((?:[^"\\]|\\.)*)"/;
+const refBook = new Map();   // 탭 지정값 → (ref → {role, name}). 마지막 snapshot 기준이다.
+function noteRefs(tabKey, r) {
+  const text = r && r.ok && r.data && r.data.snapshot;
+  if (typeof text !== "string") return;
+  const book = new Map();
+  for (const line of text.split("\n")) {
+    const m = REF_LINE.exec(line);
+    if (m) book.set(m[1], { role: m[2], name: m[3] });
+  }
+  if (book.size) refBook.set(tabKey, book);
+}
+function missText(r) {
+  if (!r || r.multi) return "";
+  return String((!r.ok ? r.error : r.data && r.data.ok === false ? r.data.error : "") || "");
+}
+async function attachCandidates(a, r, C) {
+  if (!TARGET_MISS.test(missText(r))) return null;
+  const known = a.ref ? (refBook.get(String(a.tab ?? "")) || new Map()).get(String(a.ref).replace(/^@/, "")) : null;
+  const quoted = !a.ref && /["']([^"']{2,40})["']/.exec(String(a.selector || ""));
+  const name = known ? known.name : quoted ? quoted[1] : "";
+  let sr = name ? await C("snapshot", { name: name.slice(0, 40), budget: 2500 }) : null;
+  let how = name ? `좁힌 이름: "${name.slice(0, 40)}"` : "";
+  if (!sr || !sr.ok || !(sr.data && sr.data.refCount)) {
+    sr = await C("snapshot", { budget: 2500 });
+    how = name ? `좁힌 이름 "${name.slice(0, 40)}"에 맞는 요소가 없어 화면 앞부분` : "화면 앞부분";
+  }
+  noteRefs(String(a.tab ?? ""), sr);
+  const text = render("browser_snapshot", sr).text;
+  return { text: `\n\n── 대상을 못 찾아 지금 화면의 후보를 붙인다(${how}, 누르지 않았다) ──\n` + text,
+    refs: [...text.matchAll(/\[@(e\d+)\]/g)].map((m) => m[1]).slice(0, 40), narrowed: !how.includes("앞부분") };
+}
+// 조건 대기. 모델이 wait(ms)와 관측을 번갈아 부르던 순환(30일 204회, 1,462호출)을 한 호출로 줄인다.
+// 판정은 읽기 전용 eval 한 번으로 하므로 서버의 eval 쓰기 차단을 그대로 거친다.
+const UNTIL_KEYS = ["selector", "gone", "text", "stable_ms"];
+async function waitUntil(u, timeoutMs, C) {
+  if (!u || typeof u !== "object" || Array.isArray(u)) return { ok: false, error: "until 은 {selector, gone, text, stable_ms} 객체입니다." };
+  const extra = Object.keys(u).filter((k) => !UNTIL_KEYS.includes(k));
+  if (extra.length) return { ok: false, error: `until 이 받지 않는 이름입니다: ${extra.join(", ")} — 받는 이름: ${UNTIL_KEYS.join(" · ")}` };
+  if (!UNTIL_KEYS.some((k) => u[k] != null && u[k] !== "")) return { ok: false, error: "until 에 조건이 하나는 있어야 합니다." };
+  const stable = Number(u.stable_ms) || 0;
+  const limit = Math.min(Math.max(Number(timeoutMs) || 30000, 1000), 120000);
+  const probe = `(() => { const q = (s) => { try { return document.querySelector(s); } catch (e) { return undefined; } };
+    const t = document.body ? document.body.innerText : ""; let h = 0;
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    const sel = ${JSON.stringify(u.selector || null)}, gone = ${JSON.stringify(u.gone || null)}, txt = ${JSON.stringify(u.text || null)};
+    return { has: sel ? (q(sel) === undefined ? "bad" : !!q(sel)) : null, gone: gone ? (q(gone) === undefined ? "bad" : !q(gone)) : null,
+      text: txt ? t.includes(txt) : null, h: h, len: t.length }; })()`;
+  const start = Date.now();
+  let last = null, lastHash = null, sameSince = start, polls = 0;
+  for (;;) {
+    const r = await C("eval", { expression: probe });
+    polls++;
+    if (!r || r.multi) return { ok: false, error: "until 은 탭 하나에서만 기다린다." };
+    if (!r.ok) return r;
+    const v = r.data && r.data.value;
+    if (!v || typeof v !== "object") return { ok: false, error: "페이지 상태를 읽지 못했습니다: " + JSON.stringify(r.data) };
+    if (v.has === "bad" || v.gone === "bad") return { ok: false, error: "선택자를 읽을 수 없습니다: " + (v.has === "bad" ? u.selector : u.gone) };
+    const now = Date.now();
+    if (v.h !== lastHash) { lastHash = v.h; sameSince = now; }
+    last = { selector: v.has, gone: v.gone, text: v.text, stable_for_ms: now - sameSince, text_length: v.len };
+    const met = (v.has !== false) && (v.gone !== false) && (v.text !== false) && (!stable || now - sameSince >= stable);
+    if (met) return { ok: true, data: { met: true, waited_ms: now - start, polls, state: last } };
+    if (now - start >= limit) return { ok: true, data: { met: false, note: "시간 초과 — 조건이 맞지 않은 채 돌아왔다", waited_ms: now - start, polls, state: last } };
+    await new Promise((res) => setTimeout(res, 700));
+  }
+}
+// then·후보 첨부·until 이 실제로 쓰이는지와 남는 실패를 재는 기록. 두 주 뒤 판정 모델을 붙일지 이 기록으로
+// 정한다(못 찾은 뒤 후보 안에 최종 대상이 있었는가, until 대신 고정 대기를 쓴 순환이 얼마나 남는가).
+// 페이지 내용은 적지 않는다. 대상은 ref·선택자, 후보는 ref 만 남긴다.
+const USE_LOG = path.join(IRIS_HOME, "mcp-use.jsonl");
+const USE_LOG_MAX = 4 * 1024 * 1024;
+function recordUse(t, a, r, extra) {
+  if (!t.name.startsWith("browser_")) return;
+  try {
+    const d = (r && r.data) || {};
+    const row = { ts: Date.now(), session: EXPLICIT_SESSION || discoveredSession || null, tool: t.name,
+      tab: a.tab == null ? null : String(a.tab), ok: !!(r && (r.multi ? r.okCount > 0 : r.ok && !(d.ok === false))),
+      ...(a.ref ? { ref: String(a.ref) } : {}), ...(a.selector ? { selector: String(a.selector).slice(0, 200) } : {}),
+      ...(a.then != null ? { then: Object.keys(a.then).sort() } : {}),
+      ...(t.name === "browser_wait" ? { ms: a.ms ?? null, until: a.until ? Object.keys(a.until).sort() : null,
+        met: d.met ?? null, waited_ms: d.waited_ms ?? null } : {}),
+      ...extra };
+    fs.mkdirSync(IRIS_HOME, { recursive: true });
+    try { if (fs.statSync(USE_LOG).size > USE_LOG_MAX) fs.renameSync(USE_LOG, USE_LOG + ".1"); } catch {}
+    fs.appendFileSync(USE_LOG, JSON.stringify(row) + "\n");
+  } catch { /* 기록 실패가 도구 결과를 바꾸지 않는다 */ }
+}
+async function runThen(v, r, C, label = "행동") {
+  // 전달은 됐어도 페이지에서 실패하면 결과 안쪽의 ok 가 false 다(예: 크기가 0인 요소).
+  const failed = (x) => !x || !x.ok || (x.data && x.data.ok === false);
+  const done = r.multi ? (r.targets || []).some((x) => !failed(x)) : !failed(r);
+  if (!done) return "\n\n── 행동 뒤 관측: 행동이 실패해 관측하지 않았다 ──";
+  const wait = Number(v.after_ms) || 0;
+  if (wait) await C("wait", { ms: wait });
+  const parts = [];
+  if (v.snapshot) {
+    const s = v.snapshot;
+    const sr = await C("snapshot", { role: s.role, name: s.name, region: s.region,
+      budget: s.budget != null ? Number(s.budget) : THEN_BUDGET });
+    noteRefs(String(C.tabKey ?? ""), sr);
+    parts.push(render("browser_snapshot", sr).text);
+  }
+  if (v.eval) parts.push("eval: " + render("browser_eval", await C("eval", { expression: String(v.eval) })).text);
+  return `\n\n── ${label} 뒤 관측${wait ? ` (${wait}ms 뒤)` : ""} ──\n` + parts.join("\n\n");
+}
 // 앱 도구는 탭 대신 기기를 고른다. 기기를 여럿 켜 두고 동시성을 재현하는 일이 흔해서
 // 탭과 같은 규칙으로 목록도 받는다. 하나면 그것만, 여럿이면 동시에 실행한다.
 const DEVICE_PARAM = { device: {
@@ -875,9 +1039,10 @@ const NO_DEVICE = new Set(["app_targets", "app_target", "app_picks"]);   // 목�
 // 도구가 실제로 받는 인자표. 목록에 내는 것과 호출을 검사하는 것이 같은 표여야 한다.
 // 둘로 나뉘면 "목록엔 있는데 검사는 모르는" 인자가 생긴다.
 function schemaOf(t) {
-  return t.app
+  const s = t.app
     ? (NO_DEVICE.has(t.name) ? t.schema : { ...t.schema, ...DEVICE_PARAM })
     : (NO_TAB.has(t.name) ? t.schema : { ...t.schema, ...TAB_PARAM });
+  return THEN_TOOLS.has(t.name) ? { ...s, ...THEN_PARAM } : s;
 }
 const toolList = TOOLS.map((t) => ({
   name: t.name, description: t.desc,
@@ -1042,6 +1207,8 @@ rl.on("line", async (line) => {
         const a = (params && params.arguments) || {};
         const fault = argFault(t, a);
         if (fault) { ok(id, { content: [{ type: "text", text: "오류: " + fault }], isError: true }); return; }
+        const thenBad = THEN_TOOLS.has(t.name) ? thenFault(a.then) : null;
+        if (thenBad) { ok(id, { content: [{ type: "text", text: "오류: " + thenBad }], isError: true }); return; }
         // 도구마다 인자를 직접 조립하므로, tab은 요청 단위로 감싼 호출기가 얹는다.
         // 전역 상태로 두면 동시 호출이 서로의 대상을 덮어쓴다.
         const C = (cmd, args = {}) =>
@@ -1050,6 +1217,7 @@ rl.on("line", async (line) => {
           // 갈라 태우는 것은 서버의 runBrowserCmd 한 곳에서만 한다.
           call(cmd, a.tab != null && !NO_TAB.has(t.name)
             ? { ...args, tab: Array.isArray(a.tab) ? a.tab.join(",") : String(a.tab) } : args);
+        C.tabKey = String(a.tab ?? "");   // then 의 snapshot 이 ref 장부를 이 탭 기준으로 갱신한다
         // 앱 도구는 서버를 거치지 않고 여기서 idb를 부른다. 그래서 여러 기기에 도는 것도 여기서
         // 나눠 실행한다. 기기마다 같은 run을 한 번씩 실행하고 결과를 기기별로 묶는다.
         // 증거 도구면 여기서 회차가 열린다. 도구가 돌기 전이라 첫 장면부터 회차 폴더로 굳는다.
@@ -1060,7 +1228,13 @@ rl.on("line", async (line) => {
           : await t.run(devs ? { ...a, device: devs[0] } : a, C);
         const out = render(t.name, r);
         const moment = await absorbMoments(r);      // 사라진 알림은 여기서 말해 주지 않으면 묻힌다
-        ok(id, { content: [{ type: "text", text: out.text + moment }], ...(out.isError ? { isError: true } : {}) });
+        if (t.name === "browser_snapshot") noteRefs(String(a.tab ?? ""), r);
+        const seen = a.then != null && THEN_TOOLS.has(t.name) ? await runThen(a.then, r, C, t.name === "browser_wait" ? "대기" : "행동") : "";
+        const near = TARGET_TOOLS.has(t.name) ? await attachCandidates(a, r, C) : null;
+        const hint = thenHint(t.name, a);
+        recordUse(t, a, r, { ...(near ? { miss: true, candidates: near.refs, narrowed: near.narrowed } : {}),
+          ...(hint ? { hinted: true } : {}) });
+        ok(id, { content: [{ type: "text", text: out.text + moment + seen + (near ? near.text : "") + hint }], ...(out.isError ? { isError: true } : {}) });
       } finally { inFlight--; maybeExit(); }
       return;
     }

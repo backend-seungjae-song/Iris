@@ -69,19 +69,92 @@ check("모든 창이 방송 하나를 그대로 적용", () =>
   /"pick-mode": \(m\) => applyPickMode\(!!m\.on\)/.test(read("web/js/browser/pick-boot.js"))
   && /type: "pick-mode", on: getPickMode\(\) \}\)\); \/\/ 뒤늦게/.test(srvG));
 check("끌 때 비활성 탭도 함께 해제", () => /for \(const id of getWebviewIds\(\)\)[\s\S]{0,120}setOrca\(rec\.el, pickMode\)/.test(pick));
-// 로컬 데브는 사용자의 기존 시스템을 감싸기만 하고, 별도 대시보드를 만들지 않는다.
-check("로컬 데브는 rail 메뉴 + 원본 임베드", () =>
+// 로컬 데브는 Iris 자체 화면이다. 데이터와 조작은 localdev 라우터에서 오고 화면은 Iris 가 그린다.
+check("로컬 데브는 rail 메뉴 + 자체 화면(webview 를 붙이지 않는다)", () =>
   // 패널 외곽(class="rail-panel ld-panel")은 rail 이 표를 보고 그린다. 여기서는 그
   // 기능이 패널 내부를 구성하는지만 검사한다. 외곽은 tool-screens 가 한 곳에서 검사한다.
-  /data-rail="localdev"/.test(web) && /id="ld-err"/.test(screenMarkup)
-  && /const LD_URL = "http:\/\/localdev\.test\/"/.test(localdev));
-check("localdev 원본 주소로 띄움(Origin 고정 때문)", () => {
-  // 컨트롤 서버가 ALLOWED_ORIGIN=http://localdev.test 라 127.0.0.1:4599로 띄우면 조작 버튼이 403.
-  const seg = sliceFrom(localdev, "async function ldEnsure", 1400, "localdev 원본 주소로 띄움(Origin 고정 때문)");
-  return /createElement\("webview"\)/.test(seg) && /setAttribute\("src", LD_URL\)/.test(seg) && !/4599/.test(localdev);
+  /data-rail="localdev"/.test(web) && /id="ld-body"/.test(screenMarkup) && /id="ld-err"/.test(screenMarkup)
+  && !/createElement\("webview"\)|<webview/.test(localdev));
+check("로컬 데브 조작은 Iris 서버를 거친다(Origin 고정 때문)", () => {
+  // 컨트롤 서버가 Origin=http://localdev.test 만 받고 status.json 에는 CORS 가 없어 렌더러가 직접 부르면 막힌다.
+  // 서버가 대신 부르되 이 Mac 의 연결(ws._local)만 받는다. 기능 파일 밖(앱 셸)에 두면 끄는 의미가 없다.
+  const bridge = read("server/localdev-bridge.js");
+  const capabilities = read("server/capabilities.js");
+  return !/fetch\(/.test(localdev) && /wsSend\(\{ type: "localdev\.status", id \}\)/.test(localdev)
+    && /type: "localdev\.action"/.test(localdev)
+    && /const BASE = "http:\/\/localdev\.test"/.test(bridge) && /Origin: BASE/.test(bridge)
+    && /if \(!ws\._local\) return fail\("local only"\)/.test(bridge)
+    && /id: "localdev", wsPrefixes: \["localdev\."\],\s*handle: handleLocaldev/.test(capabilities)
+    && !/localdev-bridge/.test(read("server/index.js"));
 });
-check("로컬 데브 상태 UI를 우리가 재구현하지 않음", () =>
-  !/ld-route|ldRoutes|api\/state/.test(web + localdev)); // 목록·시작·정지는 전부 원본 대시보드 몫
+await checkAsync("로컬 데브 진행 표시는 다시 그려도 남고, 반영되면 내리고, 20초 뒤 스스로 내린다", async () => {
+  // 실제 모듈을 가짜 DOM·시계로 돌린다. 3초 주기로 표를 통째로 다시 그리므로 진행 표시가 표 밖에 있지 않으면
+  // 다음 주기에 지워진다(눌렀는데 원래대로 돌아간 것처럼 보인다).
+  const els = {};
+  const el = (id) => (els[id] ||= { id, innerHTML: "", textContent: "", hidden: false, handlers: {},
+    addEventListener(t, f) { this.handlers[t] = f; }, focus() {} });
+  for (const id of ["#ld-body", "#ld-err", "#ld-sys", "#ld-upd", "#ld-reload", "#ld-open"]) el(id);
+  const sent = [];
+  let now = 0; const timers = [];
+  const realST = globalThis.setTimeout, realSI = globalThis.setInterval, realCI = globalThis.clearInterval, realCT = globalThis.clearTimeout, realNow = Date.now;
+  globalThis.setTimeout = (fn, ms) => { const t = { at: now + (ms || 0), fn }; timers.push(t); return t; };
+  globalThis.clearTimeout = (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); };
+  globalThis.setInterval = () => ({}); globalThis.clearInterval = () => {};
+  Date.now = () => now;
+  const advance = (ms) => { now += ms; for (;;) { const due = timers.filter((t) => t.at <= now).sort((a, b) => a.at - b.at)[0]; if (!due) break; timers.splice(timers.indexOf(due), 1); due.fn(); } };
+  const flush = () => new Promise((r) => realST(r, 0));
+  try {
+    const url = new URL("../../../web/js/devtool/localdev.js", import.meta.url).href + "?smoke=" + realNow();
+    const mod = await import(url);
+    const out = mod.initCapability({ $: (s) => els[s] || null, esc: (v) => String(v), wsSend: (m) => sent.push(m),
+      copyText() {}, askConfirm: async () => true, openBrowserTab() {}, browserMode: false });
+    const route = { name: "demo", port: 3001, up: true, service: false, url: "http://demo.test" };
+    const data = (up) => ({ updated: "00:00:00", system: { caddy: true, dnsmasq: true, daemon: true, ip: "10.0.0.2" },
+      routes: [{ ...route, up }], aliases: [],
+      projects: [{ name: "idle-a", path: "/x/Projects/idle-a", running: false, eligible: false, managed: false },
+        { name: "idle-b", path: "/x/Projects/idle-b", running: false, eligible: true, managed: false }] });
+    out.screen.enter();
+    if (!sent.some((m) => m.type === "localdev.status")) throw new Error("화면에 들어와도 상태를 묻지 않는다");
+    // 응답은 요청 id 를 돌려받아야 받아들여진다. 첫 응답은 화면에 들어올 때 보낸 요청의 것이고,
+    // 그 뒤로는 새로고침 단추로 요청을 하나 보내고 그 id 로 답한다.
+    const lastAsk = () => sent.filter((m) => m.type === "localdev.status").at(-1);
+    const answer = (m) => out.ws["localdev.status"]({ ...m, id: lastAsk().id });
+    const reply = (m) => { els["#ld-reload"].onclick(); answer(m); };
+    answer({ ok: true, data: data(true) });
+    const body = els["#ld-body"];
+    if (!/data-kill="demo"/.test(body.innerHTML)) throw new Error("종료 버튼이 없다");
+    if (!/실행 버튼이 없는 프로젝트 1개/.test(body.innerHTML) || /idle-a/.test(body.innerHTML)) throw new Error("켤 수 없는 idle 프로젝트를 접지 않는다");
+    body.handlers.click({ target: { closest: () => ({ dataset: { kill: "demo" } }) }, preventDefault() {} });
+    await flush();
+    const act = sent.find((m) => m.type === "localdev.action");
+    if (!act || act.action !== "kill" || act.port !== 3001) throw new Error("종료 요청을 서버로 보내지 않는다");
+    out.ws["localdev.result"]({ id: act.id, ok: true });
+    await flush();
+    reply({ ok: true, data: data(true) });   // 응답은 왔지만 status.json 은 아직 옛 상태
+    if (!/꺼짐 확인 중/.test(body.innerHTML) || /data-kill="demo"/.test(body.innerHTML)) throw new Error("다시 그리면 진행 표시가 사라진다");
+    reply({ ok: true, data: data(false) });  // 반영됨
+    if (/꺼짐 확인 중/.test(body.innerHTML)) throw new Error("반영된 뒤에도 진행 표시가 남는다");
+    // 소식이 없는 경우: 켜기 요청 후 status.json 이 끝내 바뀌지 않으면 20초 상한에서 내려와야 한다.
+    body.handlers.click({ target: { closest: () => ({ dataset: { start: "idle-b" } }) }, preventDefault() {} });
+    await flush();
+    const st = sent.filter((m) => m.type === "localdev.action").at(-1);
+    out.ws["localdev.result"]({ id: st.id, ok: true });
+    await flush();
+    advance(19000); reply({ ok: true, data: data(false) });
+    if (!/켜짐 확인 중/.test(body.innerHTML)) throw new Error("20초 전에 진행 표시가 내려간다");
+    advance(1500);
+    if (/켜짐 확인 중/.test(body.innerHTML)) throw new Error("20초가 지나도 진행 표시가 내려오지 않는다");
+    // 라우터에 닿지 않으면 표 대신 연결 실패 화면을 보인다.
+    reply({ ok: false, reason: "unreachable" });
+    if (els["#ld-err"].hidden || !body.hidden || !/라우터에 연결하지 못했습니다/.test(els["#ld-err"].innerHTML) || !/ld-retry/.test(els["#ld-err"].innerHTML)) {
+      throw new Error("연결 실패 화면이 뜨지 않는다");
+    }
+    out.screen.leave();
+    return true;
+  } finally {
+    globalThis.setTimeout = realST; globalThis.setInterval = realSI; globalThis.clearInterval = realCI; globalThis.clearTimeout = realCT; Date.now = realNow;
+  }
+});
 // 채팅 링크: xterm 기본 동작은 confirm 팝업 뒤 외부 브라우저로 여는 것이다.
 check("터미널 링크는 확인 팝업 없이 스페이스 탭에서", () =>
   /activate: \(ev, uri\) => \{[^}]*openTerminalLink\(uri, ev\)/.test(xtermWiring)

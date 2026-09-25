@@ -310,4 +310,53 @@ check("앱이 그리는 확장자 표가 렌더러에서 main 까지 건너간�
     && /ac-open-in-console/.test(main);
   return bridges && renderer && mainSide;
 });
+
+// 메모·마크다운 미리보기의 링크는 target=_blank 라 그대로 두면 창의 열기 처리기가 외부 브라우저로 보낸다.
+// 웹 링크만 Iris 안(메모 창이면 콘솔 창)에서 연다. file 은 열지 않는다. 메모는 원격도 쓸 수 있어 file 을
+// 열면 작업 폴더 밖 파일이 편집기에 열리고 저장 허용까지 얻는다. 판정은 두 함수가 하고 여기서 실행한다.
+await checkAsync("마크다운 링크는 웹 주소만 Iris 안에서 열린다", async () => {
+  const md = await req("../../../web/js/core/markdown.js");
+  md.initMarkdown({ esc: (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]) });
+  const marked = /<a href="https:\/\/x\.test\/" [^>]*data-md-link>/.test(md.mdToHtml("[x](https://x.test/)"));
+  const webOk = ["https://x.test/a", "http://127.0.0.1:3000/"].every((u) => md.markdownWebLink(u) === u);
+  const notWeb = ["file:///etc/hosts", "file://localhost/r/a.md", "javascript:alert(1)", "data:text/html,x", "mailto:a@x.test", "/abs/path", ""]
+    .every((u) => md.markdownWebLink(u) === null);
+  const { consoleOpenTarget } = await req("../../../native/electron/local-link.cjs");
+  const ipc = consoleOpenTarget("/Users/x/a.md") === "/Users/x/a.md" && consoleOpenTarget("https://x.test/") === "https://x.test/"
+    && ["file:///etc/hosts", "javascript:x", "relative/a.md", ""].every((u) => consoleOpenTarget(u) === null);
+  // 배선: 판정이 null 이면 기본 동작을 막기 전에 빠진다. IPC 는 판정 결과만 넘긴다.
+  const shell = /const href = markdownWebLink\(a\.getAttribute\("href"\)\);\s*if \(!href\) return;\s*e\.preventDefault\(\);/.test(web)
+    && /openInSpaceBrowser\(href\);/.test(web);
+  const bridge = /const t = consoleOpenTarget\(target\);\s*if \(!t\) return;/.test(main);
+  return marked && webOk && notWeb && ipc && shell && bridge;
+});
+
+// 도킹된 웹 탭은 가운데에 선다. 모바일 화면은 패널형인데 가운데의 탭 본문을 숨겨서, 화면 종류(util-full)만
+// 보면 탭이 만들어져도 보이지 않는다. 실제로 숨었는지를 보고 작업 화면으로 돌려야 한다.
+check("도킹된 웹 탭을 열 때 탭 본문을 숨긴 화면은 작업 화면으로 돌린다", () => {
+  const routing = read("web/js/center/file-routing.js");
+  return /const tabsHidden = body\.contains\("screen-open"\) && getComputedStyle\(\$\("#center-body"\)\)\.display === "none";/.test(routing)
+    && /if \(body\.contains\("util-full"\) \|\| tabsHidden\) railSelect\("workspace"\);/.test(routing);
+});
+
+// 메모와 미리보기는 사람이 쓴 글과 에이전트 대화를 그린다. 링크가 스크립트 주소면 누르는 순간 앱 창에서 실행된다.
+await checkAsync("마크다운 링크는 스크립트 주소를 누를 수 있게 만들지 않는다", async () => {
+  const md = await req("../../../web/js/core/markdown.js");
+  md.initMarkdown({ esc: (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])) });
+  for (const bad of ["javascript:alert(1", "JavaScript:x", "java\tscript:x", "vbscript:x", "data:text/html,x"]) {
+    if (/href=/.test(md.mdToHtml(`[x](${bad})`))) throw new Error("링크로 만든다: " + JSON.stringify(bad));
+  }
+  if (!/href="https:\/\/a\.example"/.test(md.mdToHtml("[x](https://a.example)"))) throw new Error("웹 링크가 사라졌다");
+  return true;
+});
+
+// 메모와 md 파일은 대개 Monaco 편집기로 본다. 편집기 안 링크는 Monaco 가 window.open 으로 열고 창의 열기
+// 처리기가 외부 브라우저로 보내므로, 미리보기 링크만 가로채면 편집기에서 누른 링크는 여전히 크롬으로 간다.
+check("편집기(Monaco) 안의 웹 링크도 Iris 안에서 연다", () => {
+  const te = read("web/js/center/text-editor.js"), m = read("web/js/main.js");
+  return /require\(\["vs\/editor\/editor\.main"\], \(\) => \{ registerWebLinkOpener\(\); resolve\(\); \}\)/.test(te)
+    && /registerLinkOpener\?\.\(\{[\s\S]*?markdownWebLink\(uri\.toString\(true\)\)[\s\S]*?openWebLink\(href\);\s*return true;/.test(te)
+    && /openWebLink: \(href\) => openMarkdownWebLink\(href\)/.test(m)
+    && /function openMarkdownWebLink\(href\) \{[\s\S]*?openInSpaceBrowser\(href\);/.test(m);
+});
 }

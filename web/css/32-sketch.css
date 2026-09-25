@@ -132,7 +132,7 @@
   /* 왼쪽 끝 도구의 안내가 창 밖으로 나가지 않게 손잡이 왼쪽 모서리에 맞춘다. */
   position: absolute; top: calc(100% + 7px); left: 0;
   padding: 4px 8px; border: 1px solid var(--line, #333); border-radius: 6px;
-  background: var(--card, #26262b); color: var(--fg, #eee);
+  background: var(--raised, #26262b); color: var(--fg, #eee);
   font-size: 11px; line-height: 1.25; white-space: pre; z-index: 40;
   opacity: 0; transform: translateY(-3px); pointer-events: none;
   transition: opacity .12s ease .18s, transform .12s ease .18s;

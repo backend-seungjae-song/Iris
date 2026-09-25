@@ -19,16 +19,19 @@
 //   herdr/agents의 renderAgents·revealAgentRow 계약.
 //   현재 목록 확인: node bin/importers.mjs web/js/herdr/sync.js
 
+import { callHook } from "../core/hooks.js";
+import { agentMark } from "../core/glyphs.js";
+import { paintStateDot, stateLabel } from "../core/agent-state.js";
 import { renderAgents, revealAgentRow } from "./agents.js";
 import { agentByPane, nameOf } from "./state.js";
 
-let getCurTarget, setCurTarget, getSelectedSpaceId, statusClass, switchToSpaceOf;
+let getCurTarget, setCurTarget, getSelectedSpaceId, switchToSpaceOf;
 let lastAgentBySpace, tName, tSub, tDot;
 let lastUserSelect = 0, herdrSyncTimer = null, herdrSyncPane = null;
 
 export function initHerdrSync(deps) {
   ({
-    getCurTarget, setCurTarget, getSelectedSpaceId, statusClass, switchToSpaceOf,
+    getCurTarget, setCurTarget, getSelectedSpaceId, switchToSpaceOf,
     lastAgentBySpace, tName, tSub, tDot,
   } = deps);
 }
@@ -51,10 +54,11 @@ function applyHerdrFocus(paneId) {
   if (!a) return; // 아직 목록에 없는 pane이면 스킵
   setCurTarget(paneId);
   if (a.workspaceId) lastAgentBySpace[a.workspaceId] = paneId; // herdr 역방향 전환도 마지막 탭으로 기록(스페이스 복귀 복원용)
-  tName.textContent = nameOf(a); tSub.textContent = `${a.agent} · ${a.status}`; tDot.className = "dot " + statusClass(a.status);
+  tName.textContent = nameOf(a); tSub.innerHTML = agentMark(a.agent); tSub.append(Object.assign(document.createElement("span"), { textContent: stateLabel(a) })); paintStateDot(tDot, a);
   if (a.workspaceId && a.workspaceId !== getSelectedSpaceId()) { // workspace 바뀔 때만 무거운 동기화
     switchToSpaceOf(a);
   }
   renderAgents();
   revealAgentRow(paneId);
+  callHook("agentchat.sync"); // herdr 쪽에서 pane 을 옮겨도 채팅 보기가 따라간다
 }

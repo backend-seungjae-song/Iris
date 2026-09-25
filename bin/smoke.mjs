@@ -257,6 +257,12 @@ await runMemolab();
 const { default: runEmulator } = await import("./smoke/sections/emulator.mjs");
 await runEmulator();
 
+const { default: runAgentChat } = await import("./smoke/sections/agent-chat.mjs");
+await runAgentChat();
+
+const { default: runAgentState } = await import("./smoke/sections/agent-state.mjs");
+await runAgentState();
+
 const { default: runRedBlocks } = await import("./smoke/sections/80-red-blocks.mjs");
 await runRedBlocks();
 

@@ -1,0 +1,130 @@
+/* 공용 컴포넌트: 버튼·입력칸·스위치·세그먼트·드롭다운·키캡·배지·상태 점·빈 상태·폴더 묶음 머리 */
+/* 특정 모듈에 속하지 않고 앱 전체가 쓴다. 이름은 전부 cc-(common component) 로 시작한다.
+   그냥 .btn·.badge·.chip 을 쓰면 10-sidebar.css·17-editor-bar.css·18-browser.css 가 이미 쓰고
+   있는 같은 이름과 부딪혀 그 화면의 모양이 조용히 바뀐다(선택자 우선순위가 같으면 나중에 읽는
+   파일이 이긴다). */
+
+/* ── 선 아이콘(24 격자) · 단축키 한 덩어리 ── */
+/* 모든 화면이 같은 값을 쓴다. 크기만 쓰는 곳에서 바꾼다. */
+svg.i { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; display:block; }
+.kbd { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); border:1px solid var(--line); border-radius:var(--r-s); padding:2px 4px; }
+
+/* ── 버튼 ── */
+.cc-btn { height:24px; padding:0 9px; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  border-radius:var(--r-s); border:1px solid var(--line); background:none; color:var(--fg-2);
+  font-size:var(--fs-s); font-weight:var(--fw-med); line-height:1; white-space:nowrap; cursor:pointer; flex:none;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease),
+    border-color var(--t) var(--ease), transform var(--t-quick) var(--ease); }
+.cc-btn svg { width:12px; height:12px; flex:none; }
+.cc-btn:hover:not(:disabled) { background:var(--hover); color:var(--fg); border-color:var(--line-strong); }
+.cc-btn:active:not(:disabled) { transform:scale(.97); }
+.cc-btn:disabled { opacity:.5; cursor:default; }
+/* 주 단추. 화면 하나에 한 곳(가장 앞선 동작)에만 쓴다. */
+.cc-btn-pri { background:var(--pal-babyblue); border-color:transparent; color:var(--pal-ink); font-weight:var(--fw-semi); }
+.cc-btn-pri:hover:not(:disabled) { background:var(--pal-sky-pop); color:var(--pal-ink); }
+/* 글자 단추. 테두리 없이 글자만 있는 가장 가벼운 형태. */
+.cc-btn-txt { border-color:transparent; color:var(--muted); padding:0 6px; }
+.cc-btn-txt:hover:not(:disabled) { color:var(--fg); background:var(--hover); }
+/* 아이콘 단추. 정사각형으로 아이콘 하나만 담는다. */
+.cc-btn-icon { width:24px; padding:0; }
+/* 위험 단추. 삭제처럼 되돌리기 어려운 동작에 쓴다. */
+.cc-btn-danger { color:var(--pal-danger); }
+.cc-btn-danger:hover:not(:disabled) { color:var(--pal-danger); border-color:color-mix(in srgb, var(--pal-danger) 45%, transparent);
+  background:color-mix(in srgb, var(--pal-danger) 10%, transparent); }
+
+/* ── 입력칸 · 검색칸 ── */
+.cc-search { height:28px; display:flex; align-items:center; gap:8px; padding:0 10px; border-radius:var(--r);
+  background:var(--raised); border:1px solid var(--line); color:var(--muted); min-width:0;
+  transition:border-color var(--t) var(--ease); }
+.cc-search:focus-within { border-color:var(--focus); }
+.cc-search svg { width:13px; height:13px; color:var(--muted); flex:none; }
+.cc-search input { flex:1; min-width:0; background:none; border:0; outline:0; font:inherit; font-size:var(--fs); color:var(--fg); }
+.cc-search input::placeholder { color:var(--muted); }
+/* 포커스는 칸 테두리(:focus-within)가 보여 준다. 안쪽 input 의 전역 :focus-visible 링까지 그리면 링이 두 겹이 된다. */
+.cc-search input:focus-visible { box-shadow:none; }
+
+/* ── 스위치 ── */
+.cc-switch { width:28px; height:16px; padding:0; border:0; border-radius:var(--r-pill); background:var(--line-strong);
+  position:relative; flex:none; cursor:pointer; transition:background var(--t) var(--ease); }
+.cc-switch i { position:absolute; left:2px; top:2px; width:12px; height:12px; border-radius:50%; background:var(--muted); display:block;
+  transition:transform var(--t) var(--ease), background var(--t) var(--ease); }
+.cc-switch.on { background:var(--accent); }
+.cc-switch.on i { transform:translateX(12px); background:var(--pal-ink); }
+.cc-switch:active i { width:14px; }
+
+/* ── 세그먼트(분할 단추) ── */
+.cc-seg { display:inline-flex; gap:1px; padding:2px; border-radius:var(--r-s); border:1px solid var(--line); }
+.cc-seg button { height:20px; padding:0 8px; border-radius:3px; border:0; background:none; color:var(--muted);
+  font-size:var(--fs-xs); cursor:pointer; transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.cc-seg button:hover { color:var(--fg); }
+.cc-seg button.on { background:var(--select); color:var(--fg); }
+
+/* ── 커스텀 드롭다운 ── */
+/* 동작(키보드 ↑↓ Enter Esc·포커스 복귀·화면 경계 반전)은 core/dropdown.js 의 createDropdown 이 준다.
+   여기 CSS 는 그 모듈이 붙이는 상태(.open · [data-place="up"] · [aria-selected]) 만 그린다. */
+.cc-dd { position:relative; }
+.cc-dd-trigger { width:100%; height:26px; display:flex; align-items:center; gap:6px; padding:0 8px;
+  border:1px solid var(--line); border-radius:var(--r-s); background:var(--raised); color:var(--fg);
+  font-size:var(--fs); cursor:pointer; transition:border-color var(--t) var(--ease); }
+.cc-dd-trigger:hover { border-color:var(--line-strong); }
+.cc-dd.open .cc-dd-trigger, .cc-dd-trigger:focus-visible { border-color:var(--focus); outline:0; box-shadow:none; }
+.cc-dd-value { flex:1; min-width:0; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 트리거 보조 글자(showSub). 좁아지면 이름이 먼저 보이도록 보조 글자는 트리거의 절반까지만 차지한다. */
+.cc-dd-sub { flex:0 1 auto; min-width:0; max-width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:var(--fs-s); color:var(--muted); }
+.cc-dd-trigger svg { width:12px; height:12px; color:var(--muted); flex:none; }
+.cc-dd-menu { position:absolute; z-index:80; left:0; right:0; top:calc(100% + 4px); margin:0; padding:4px;
+  list-style:none; max-height:min(320px, 60vh); overflow-y:auto; background:var(--raised); border:1px solid var(--line);
+  border-radius:var(--r); box-shadow:var(--menu-shadow); }
+/* 트리거 아래에 다 펼칠 화면 높이가 없을 때 core/dropdown.js 가 붙인다. */
+.cc-dd-menu[data-place="up"] { top:auto; bottom:calc(100% + 4px); }
+.cc-dd-item { height:var(--row); display:flex; align-items:center; gap:6px; padding:0 8px; border-radius:var(--r-s);
+  color:var(--fg-2); font-size:var(--fs); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cc-dd-item:hover, .cc-dd-item.active { background:var(--hover); color:var(--fg); }
+.cc-dd-item[aria-selected="true"] { background:var(--select); color:var(--fg); }
+
+/* ── 키캡(단축키 표시) ── */
+/* sans 12px. mono 10~11px 로는 ⌘⌥⇧ 가 눌러 찌그러져 보인다는 지적이 있었다. */
+.cc-kc { min-width:20px; height:18px; padding:0 5px; display:inline-grid; place-items:center; border-radius:3px;
+  border:1px solid var(--line-strong); background:var(--raised); font-size:var(--fs); font-weight:var(--fw-med); color:var(--fg-2); }
+
+/* ── 배지 · 개수 칩 ── */
+.cc-badge { font-size:var(--fs-xs); font-weight:var(--fw-semi); padding:1px 6px; border-radius:var(--r-pill);
+  background:rgb(var(--pal-babyblue-rgb) / .1); color:var(--pal-babyblue); font-variant-numeric:tabular-nums; }
+.cc-chip { height:24px; display:inline-flex; align-items:center; gap:5px; padding:0 8px; border-radius:var(--r-s);
+  border:1px solid var(--line); color:var(--fg-2); font-size:var(--fs-s); cursor:pointer; white-space:nowrap;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease); }
+.cc-chip:hover { background:var(--hover); color:var(--fg); }
+.cc-chip.on { background:var(--select); color:var(--fg); border-color:transparent; }
+.cc-chip svg { width:13px; height:13px; color:var(--muted); }
+
+/* ── 상태 점 ── */
+.cc-dot { width:7px; height:7px; border-radius:50%; flex:none; display:inline-block; background:var(--muted); }
+.cc-dot-work { background:var(--ok); box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 12%, transparent); }
+.cc-dot-idle { background:var(--muted); }
+.cc-dot-block { background:var(--pal-danger); }
+
+/* ── 빈 상태 블록 ── */
+.cc-empty { flex:1; display:flex; align-items:center; padding:0 48px; min-height:0; }
+.cc-empty-box { width:360px; max-width:100%; }
+.cc-empty-title { font-size:var(--fs-h); font-weight:var(--fw-semi); color:var(--fg); margin-bottom:4px; }
+.cc-empty-desc { font-size:var(--fs); color:var(--muted); line-height:var(--lh); margin-bottom:16px; }
+.cc-empty-actions { border-top:1px solid var(--line); }
+.cc-empty-action { height:36px; width:100%; display:flex; align-items:center; gap:10px; padding:0 8px; text-align:left;
+  border:0; border-bottom:1px solid var(--line); background:none; color:var(--fg-2); cursor:pointer; font-size:var(--fs);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.cc-empty-action:hover { background:var(--hover); color:var(--fg); }
+.cc-empty-action svg { width:14px; height:14px; color:var(--muted); flex:none; }
+.cc-empty-action-note { margin-left:auto; font-size:var(--fs-s); color:var(--muted); }
+
+/* ── 폴더 묶음 머리(접기·개수) ── */
+.cc-fold-head { height:var(--row); display:flex; align-items:center; gap:6px; padding:0 8px; cursor:pointer;
+  color:var(--muted); font-size:var(--fs-s); font-weight:var(--fw-semi); border-radius:var(--r-s);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.cc-fold-head:hover { background:var(--hover); color:var(--fg); }
+.cc-fold-caret { width:10px; height:10px; color:var(--muted); flex:none; transition:transform var(--t) var(--ease); }
+.cc-fold-head.open .cc-fold-caret { transform:rotate(90deg); }
+.cc-fold-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cc-fold-count { margin-left:auto; font-size:var(--fs-xs); font-family:var(--mono); color:var(--muted);
+  background:rgb(var(--pal-babyblue-rgb) / .1); border-radius:var(--r-pill); padding:1px 6px; font-variant-numeric:tabular-nums; }
+.cc-fold-body.collapsed { display:none; }

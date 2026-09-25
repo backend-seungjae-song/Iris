@@ -62,6 +62,7 @@ export const KEYMAP = [
   { id: "pick-toggle", label: "요소 지목 모드", where: ANYWHERE, def: { mod: true, shift: true, key: "e" } },
   { id: "sketch", label: "화면 스케치", where: ANYWHERE, def: { mod: true, shift: true, key: "d" } },
   { id: "detach", label: "브라우저 분리 / 도킹", where: ANYWHERE, def: { mod: true, shift: true, key: "o" } },
+  { id: "agent-chat", label: "에이전트 채팅 보기 / 터미널", where: MAIN_WINDOW, def: { mod: true, shift: true, key: "j" } },
   { id: "rec-toggle", label: "화면 녹화 시작 / 종료", where: ON_BROWSER, def: { mod: true, shift: true, key: "a" } },
   { id: "memo-archive", label: "메모 오늘 자 보관", where: ANYWHERE, def: { mod: true, shift: true, key: "s" } },
   { id: "file-search", label: "파일 검색", where: ANYWHERE, def: { mod: true, shift: true, key: "p" } },

@@ -21,6 +21,7 @@
 
 import { getSpaces, getTabsForSpace } from "../herdr/state.js";
 import { icon } from "../core/glyphs.js";
+import { STATE_LABEL, agentState } from "../core/agent-state.js";
 import { askText, showCtx } from "../explorer/context-menu.js";
 
 let $, wsSend, showToast, getIsLocal, getSelectedSpaceId, onLayoutChange;
@@ -108,12 +109,19 @@ export function renderHerdrTabs() {
   const meta = readMeta();
   const items = tabs.map((t, i) => {
     const m = meta[t.tabId] || {};
-    const label = t.label || `터미널 ${t.number ?? i + 1}`;
+    const num = String(t.number ?? i + 1);
+    const label = t.label || `터미널 ${num}`;
+    // 이름 없이 만든 창만 번호로 부른다.
+    const text = t.label || num;
     const tint = colorOf(m.color);
+    // 에이전트가 도는 창만 상태 점을 단다. 그냥 셸 창은 herdr 이 "unknown" 을 주고 점이 없다.
+    const st = agentState(t.agentStatus, t.question);
+    const dot = t.agentStatus && t.agentStatus !== "unknown" ? `<span class="dot dotst ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span>` : "";
     return `<button class="htab${t.focused ? " on" : ""}${m.pin ? " pinned" : ""}" data-tab="${esc(t.tabId)}"`
       + `${tint ? ` style="--htab-tint:${tint}"` : ""} title="${esc(label)}">`
       + (m.pin ? `<span class="htab-pin">${icon("pin", 10)}</span>` : "")
-      + `<span class="htab-name">${esc(label)}</span>`
+      + dot
+      + `<span class="htab-name">${esc(text)}</span>`
       + `<span class="htab-x" data-close="${esc(t.tabId)}" title="닫기">${icon("close", 10)}</span>`
       + `</button>`;
   }).join("");

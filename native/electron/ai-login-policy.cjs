@@ -7,7 +7,7 @@
 //   createAiLoginPolicy(deps) 함수 하나만 내준다. 허용 Set·저장 배열·비밀번호를 내주지 않는다.
 //
 // 의존 대상
-//   Electron 을 require 하지 않는다. fs·path·상태 폴더, ipcMain·신뢰/partition 판정,
+//   Electron 을 require 하지 않는다. fs·path·상태 폴더, ipcMain·신뢰/partition 판정·session→partition 조회,
 //   credential-service·cookie-import·chrome-import-registry와 CDP login/notify port를 main.cjs에서 받는다.
 //
 // 유지 조건
@@ -24,6 +24,7 @@
 function createAiLoginPolicy({
   fs, path, stateDir, ipcMain, isTrustedSender, credentialService, cookieImport,
   chromeImportRegistry, chromeProfileCid, isProfilePartition, setLoginProvider, ctlSend,
+  partitionForSession = () => null,
   localLoginFor = () => null,
 }) {
   // ── AI 자동완성 로그인 허용 목록 ─────────────────────────────────────────────
@@ -107,7 +108,11 @@ function createAiLoginPolicy({
     let origin = "";
     try { origin = new URL(wc.getURL()).origin; } catch {}
     if (!/^https?:\/\//.test(origin)) return { error: "http(s) 페이지가 아닙니다." };
-    const saved = credentialService.listForOrigin("", origin);
+    // 자격증명은 프로필 partition 별로 저장된다. 요청한 탭의 session 이 어느 프로필인지 모르면
+    // 다른 프로필의 비밀번호를 고를 수 있으므로 저장된 로그인이 없는 것으로 본다.
+    let partition = null;
+    try { partition = partitionForSession(wc.session); } catch {}
+    const saved = partition ? credentialService.listForOrigin(partition, origin) : [];
     const allowed = saved.filter((l) => aiLoginAllowed(origin, l.username));
     const notify = (kind, extra) => ctlSend({ type: "ai-login-note", kind, wc: wc.id, origin, ...(extra || {}) });
     // 로컬은 프로젝트가 심어 둔 개발 계정으로 자동 로그인한다. 이 계정 하나 때문에 사용자를
@@ -142,7 +147,7 @@ function createAiLoginPolicy({
       return { ok: false, choose: true, origin, accounts: allowed.map((l) => l.username),
         note: "허용된 계정이 여럿입니다 — `iris-browser login <아이디>`로 고르세요." };
     }
-    const password = credentialService.passwordFor("", origin, pick.username);
+    const password = credentialService.passwordFor(partition, origin, pick.username);
     try { wc.send("ac-ai-login", { origin, username: pick.username, password }); }
     catch (e2) { return { error: "채우기 실패: " + String((e2 && e2.message) || e2) }; }
     notify("filled", { username: pick.username });

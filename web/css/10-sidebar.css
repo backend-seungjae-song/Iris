@@ -1,129 +1,114 @@
 /* 사이드바 */
 /* 이 이름을 만드는 곳: explorer/tree.js · main.js · herdr/agents.js */
-/* ── 사이드바 ── */
-.sidebar { width:280px; flex:none; background:var(--sidebar); border-right:1px solid var(--sidebar-border); display:flex; flex-direction:column; min-height:0; }
-.sidebar.collapsed { display:none; }
-.sidebar-head { display:flex; align-items:center; gap:8px; padding:12px 14px 8px; }
-.brand { font-weight:var(--fw-semi); font-size:var(--fs-sm); letter-spacing:var(--ls-title); }
-.conn { width:7px; height:7px; border-radius:50%; background:var(--muted-fg); margin-left:auto; }
-.conn.on { background:var(--success); }
-.panel { display:flex; flex-direction:column; min-height:0; border-top:1px solid var(--sidebar-border); }
-.panel.grow { flex:1 1 auto; }
-.panel.explorer, .panel.spaces { flex:0 0 auto; }
-#file-tree { flex:0 0 auto; height:200px; } /* 드래그로 조절 */
-#space-list { flex:0 0 auto; height:150px; } /* 드래그로 조절 */
-.panel.explorer.collapsed #file-tree, .panel.spaces.collapsed #space-list { height:auto; }
+.sidebar { width:272px; flex:none; background:var(--chrome); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+.sidebar-head { display:flex; align-items:center; gap:8px; padding:12px var(--pad) 8px; }
+.brand { font-weight:650; font-size:var(--fs-h); letter-spacing:-.018em; font-family:var(--sans); }
+.sidebar-head .conn { margin-left:auto; width:6px; height:6px; border-radius:50%; background:var(--faint); }
+.sidebar-head .conn.on { background:var(--ok); }
+
 /* 크롬 UI(사이드바·탭바·툴바)에서는 드래그가 텍스트를 선택하지 않게 한다. 탭·라벨을 끌다가 선택되는 것을 막는다.
    실제로 복사가 필요한 곳(터미널·파일 뷰·입력·이름 편집)만 다시 켠다. */
-#url-sug { position:absolute; z-index:60; top:100%; left:0; right:0; margin-top:4px; max-height:260px; overflow:auto;
-background:var(--card); border:1px solid var(--input); border-radius:var(--r-card); box-shadow:var(--sh-mid); padding:4px; }
-#url-sug .sug { padding:6px 9px; border-radius:var(--r-ctl); font-size:var(--fs-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
-#url-sug .sug.on, #url-sug .sug:hover { background:var(--input); }
-#url-sug .sug { color:var(--fg); }
 body { user-select:none; -webkit-user-select:none; }
 input, textarea, .ctab-rename-in, .md-body, .editor-wrap, .xterm, #term, .ctxmenu .ci
   { user-select:text; -webkit-user-select:text; }
 .ctxmenu { user-select:none; }
-.panel-head { display:flex; align-items:center; gap:6px; padding:7px 12px 6px; cursor:pointer; user-select:none; }
-.panel-title { font-size:var(--fs-2xs); font-weight:var(--fw-semi); text-transform:uppercase; letter-spacing:var(--ls-caps); color:var(--muted-fg); }
-.panel-head .add { margin-left:auto; border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-lg); line-height:1; padding:0 4px; border-radius:var(--r-ctl); }
-.panel-head .add:hover { background:var(--sidebar-accent); color:var(--fg); }
-.panel-actions { margin-left:auto; display:flex; align-items:center; gap:1px; }
-.panel-head .explorer-action { width:23px; height:22px; display:grid; place-items:center; border:0; border-radius:var(--r-ctl); padding:0; background:none; color:var(--muted-fg); cursor:pointer;
-  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.panel-head .explorer-action:hover { background:var(--sidebar-accent); color:var(--fg); }
-.panel-head .explorer-action svg { width:var(--ic); height:var(--ic); fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
-.hint-key { font-size:var(--fs-2xs); color:var(--muted-fg); border:1px solid var(--sidebar-border); border-radius:var(--r-ctl); padding:0 2px; letter-spacing:-.02em; }
-.meta { font-size:var(--fs-2xs); color:var(--muted-fg); }
+
+/* 구역: Spaces · Agents 가 위, 탐색기가 아래. 머리를 누르면 접는다. */
+.sidebar > .panel { display:flex; flex-direction:column; min-height:0; border-top:1px solid var(--line); }
+.panel.grow { flex:1 1 auto; }
+.panel.explorer { flex:0 0 auto; }
+#file-tree { flex:0 0 auto; height:200px; } /* 드래그로 조절 */
+.panel.explorer.collapsed #file-tree, .panel.spaces.collapsed #space-list { height:auto; }
+.panel-head { display:flex; align-items:center; gap:6px; padding:8px var(--pad) 6px; color:var(--muted); user-select:none; }
+.panel-head .caret { width:10px; height:10px; color:var(--faint); transition:transform var(--t) var(--ease); }
+.panel-head .caret.open { transform:rotate(90deg); }
+.panel-title { font:600 var(--fs-s)/1 var(--sans); text-transform:none; letter-spacing:0; color:var(--fg-2); }
+.panel-head .meta { font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); }
+.panel-actions { margin-left:auto; display:flex; gap:2px; }
+.panel-actions .add, .panel-actions .explorer-action { width:22px; height:22px; display:grid; place-items:center; padding:1px 6px; border:0; border-radius:var(--r-s);
+  background:none; font:inherit; color:var(--muted); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.panel-actions .add:hover, .panel-actions .explorer-action:hover { background:var(--hover); color:var(--fg); }
 .panel-body { overflow-y:auto; padding:0 6px 8px; min-height:0; flex:1 1 auto; }
 .panel.collapsed .panel-body { display:none; }
 .panel.collapsed { flex:0 0 auto; max-height:none; }
 
-.caret { width:12px; flex:none; color:var(--muted-fg); font-size:var(--fs-2xs); display:inline-block; text-align:center; transition:transform var(--t-fade) var(--ease); }
-.caret.open { transform:rotate(90deg); }
-.dot { width:8px; height:8px; border-radius:50%; flex:none; }
-.dot.working { background:var(--success); } .dot.idle { background:var(--muted-fg); opacity:.5; }
-.dot.blocked { background:var(--destructive); } .dot.done { background:var(--muted-fg); } .dot.unknown { background:var(--muted-fg); opacity:.3; }
+/* 상태 점. 오른쪽 머리와 창 번호 줄의 점도 이 규칙을 쓰고 크기만 따로 정한다.
+   상태 이름과 판정은 web/js/core/agent-state.js, 색은 --st-* 토큰이 갖는다.
+   색만으로 구분하지 않도록 모양도 다르다: 작업 중은 고리 두른 원, 작업 완료는 원, 비활성화는 속 빈 원,
+   멈춤은 정지 표시처럼 고리 두른 네모, 질문 있음은 마름모. */
+.dot { width:7px; height:7px; border-radius:50%; flex:none; background:transparent; }
+.dot.idle { box-shadow:inset 0 0 0 1px var(--st-idle); }
+.dot.working { background:var(--st-working); box-shadow:0 0 0 3px color-mix(in srgb, var(--st-working) 12%, transparent); }
+.dot.done { background:var(--st-done); }
+.dot.blocked { border-radius:1px; background:var(--st-blocked); box-shadow:0 0 0 3px color-mix(in srgb, var(--st-blocked) 14%, transparent); }
+.dot.question { border-radius:1px; background:var(--st-question); transform:rotate(45deg) scale(.86); }
 
-/* Spaces */
-.space-row { display:flex; align-items:center; gap:6px; padding:5px 8px; border-radius:var(--r-blk); cursor:pointer;
-  transition:background var(--t-fade) var(--ease); }
-.space-row { color:var(--muted-fg); }
-.space-row:hover { background:var(--sidebar-accent); color:var(--fg); }
-.space-row.sel { background:var(--sidebar-accent); color:var(--fg); }
+/* 줄 하나: 스페이스·에이전트·파일이 같은 값을 쓴다. */
+.space-row, .srow, .agent-info-row, .agent-add-row, .fitem { position:relative; height:var(--row); display:flex; align-items:center; gap:6px; padding:0 8px;
+  border-radius:var(--r-s); color:var(--fg-2); white-space:nowrap;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.space-row:hover, .srow:hover, .agent-info-row:hover, .agent-add-row:hover, .fitem:hover { background:var(--hover); color:var(--fg); }
+/* 고른 에이전트와 연 파일: 선택 배경과 왼쪽 2px 띠. */
+.srow.sel, .fitem.file.active { background:var(--select); color:var(--select-fg); }
+.srow.sel::before, .fitem.file.active::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background:var(--accent); }
+
+/* 접기 삼각형. 열리면 아래를 가리키도록 돌린다. */
+.space-tog, .agent-tree-toggle { width:10px; height:10px; display:grid; place-items:center; flex:none; padding:0; border:0;
+  background:none; color:var(--faint); cursor:pointer; transition:transform var(--t) var(--ease), color var(--t) var(--ease); }
+.space-tog.open, .agent-tree-toggle.open { transform:rotate(90deg); }
+.space-tog:hover, .agent-tree-toggle:hover { color:var(--fg); }
+.space-tog svg, .agent-tree-toggle svg { width:10px; height:10px; }
+.space-tog-spacer, .agent-tree-toggle-spacer, .agent-add-spacer { width:10px; flex:none; }
+
+/* Spaces · Agents: 스페이스 줄 바로 아래에 그 스페이스의 에이전트 줄이 온다. 고른 스페이스는 굵기와 밝은 글자로 표시한다. */
+.space-row.sel { font-weight:650; color:var(--fg); }
 .space-row.dragover { box-shadow:inset 0 2px 0 var(--ai); }
 .space-row.dragging { opacity:.4; }
-.space-name { font-weight:var(--fw-med); font-size:var(--fs-sm); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.space-row .dot { margin-left:auto; }
-.grip { color:var(--muted-fg); opacity:.4; font-size:var(--fs-2xs); cursor:grab; flex:none; }
-.ftree { list-style:none; margin:0; padding:0; }
-.fitem { display:flex; align-items:center; gap:5px; padding:3px 8px; border-radius:var(--r-blk); font-size:var(--fs-sm); white-space:nowrap; overflow:hidden;
-  transition:background var(--t-fade) var(--ease); }
-/* 목록의 기본 상태는 흐리게 둔다. 밝은 글자는 지금 포인터가 올라갔거나 열려 있는 것에만 준다.
-   전부 밝으면 아무것도 구분되지 않는다. */
-.fitem { color:var(--muted-fg); }
-.fitem.dir { cursor:pointer; } .fitem.file { cursor:pointer; }
-.fitem:hover { background:var(--sidebar-accent); color:var(--fg); }
-.fitem.focused { background:var(--sidebar-accent); color:var(--fg); }
-.fitem.file.active { background:var(--sidebar-accent); color:var(--fg); }
-.fitem.file.active .fname { font-weight:var(--fw-semi); }
-.fname { overflow:hidden; text-overflow:ellipsis; }
-.ficon { display:inline-flex; width:var(--ic); flex:none; align-items:center; }
-.ficon svg { display:block; }
-.gbadge { margin-left:auto; font-size:var(--fs-2xs); font-weight:var(--fw-semi); flex:none; padding-left:4px; }
-.fitem.git-M .fname, .fitem.git-M .gbadge { color:#e2c08d; }
-.fitem.git-U .fname, .fitem.git-U .gbadge, .fitem.git-A .fname, .fitem.git-A .gbadge { color:#73c991; }
-.fitem.git-D .fname, .fitem.git-D .gbadge { color:#f14c4c; }
-.floading,.fempty { font-size:var(--fs-2xs); color:var(--muted-fg); padding:3px 8px; }
+.space-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.space-row .space-count { margin-left:auto; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.space-row .kbd { margin-left:auto; }
+.space-row .dot { margin-left:auto; font-size:var(--fs-xs); font-family:var(--mono); color:var(--faint); }
+.space-row .space-count ~ .dot, .space-row .kbd ~ .dot { margin-left:6px; }
+.space-row .space-count + .kbd { margin-left:6px; }
+/* 끄는 손잡이는 가리킬 때만 보인다. 줄 전체를 끌 수 있으므로 자리를 차지하지 않게 왼쪽 여백에 겹친다. */
+.space-row .grip { position:absolute; left:0; top:0; bottom:0; width:8px; height:100%; color:var(--faint); opacity:0; cursor:grab; }
+.space-row:hover .grip { opacity:1; }
 
-/* Agents (space별 그룹) */
-/* 에이전트는 스페이스별로 묶인다. 머리줄이 목록 줄과 같은 굵기면 묶음 경계가 보이지 않으므로,
-   위에 선을 긋고 글자를 굵게 해 묶음이 바뀌는 지점을 표시한다. */
-.agroup { margin-top:6px; }
-.agroup:first-child { margin-top:0; }
-.agroup-head { display:flex; align-items:center; gap:6px; padding:5px 8px; border-radius:var(--r-blk); cursor:pointer;
-  border-top:1px solid var(--sidebar-border); margin-bottom:2px;
-  transition:background var(--t-fade) var(--ease); }
-
-.agroup-head:hover { background:var(--sidebar-accent); }
-.agroup-head:hover .agroup-name { color:var(--fg); }
-.agroup-name { font-size:var(--fs-2xs); font-weight:var(--fw-semi); color:var(--muted-fg); text-transform:uppercase; letter-spacing:var(--ls-caps); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.agroup-add { margin-left:auto; border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-md); padding:0 4px; border-radius:var(--r-ctl); opacity:0; }
-.agroup-head:hover .agroup-add { opacity:1; }
-.agroup-add:hover { background:var(--card); color:var(--fg); }
-.srow { display:flex; align-items:center; gap:7px; padding:5px 8px 5px 20px; border-radius:var(--r-blk); cursor:pointer;
-  transition:background var(--t-fade) var(--ease); }
-.agent-tree-row { position:relative; display:flex; align-items:center; gap:5px; min-width:0;
-  padding:5px 8px 5px var(--agent-indent, 5px); }
-/* 계층을 따라갈 수 있게 안내선을 긋는다. 윗절반은 부모에서 내려오는 선과 이 줄로 꺾이는
-   부분이고, 아랫절반은 다음 형제가 있을 때만 잇는다. 그래야 계층이 어디서 끝나는지 보인다. */
-.agent-tree-row[data-depth]:not([data-depth="0"])::before { content:""; position:absolute;
-  left:var(--agent-guide, 10px); top:0; width:8px; height:50%;
-  border-left:1px solid var(--tree-line); border-bottom:1px solid var(--tree-line); pointer-events:none; }
-.agent-tree-row.has-next[data-depth]:not([data-depth="0"])::after { content:""; position:absolute;
-  left:var(--agent-guide, 10px); top:50%; bottom:0; width:1px; background:var(--tree-line); pointer-events:none; }
-.agent-tree-toggle, .agent-tree-toggle-spacer { width:11px; height:14px; flex:none; display:grid; place-items:center; }
-.agent-tree-toggle { border:0; padding:0; border-radius:var(--r-ctl); background:none; color:var(--muted-fg);
-  font-size:8px; line-height:1; cursor:pointer; transition:transform var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.agent-tree-toggle.open { transform:rotate(90deg); }
-.agent-tree-toggle:hover { color:var(--fg); background:var(--sidebar-accent); }
-.agent-info-row { color:var(--muted-fg); cursor:default; }
-.agent-info-row .srow-name { font-size:var(--fs-xs); font-weight:var(--fw); }
-.agent-info-row .dot { width:6px; height:6px; }
-.srow { color:var(--muted-fg); }
-.srow:hover { background:var(--sidebar-accent); color:var(--fg); }
-.srow.sel { background:var(--sidebar-accent); color:var(--fg); }
-.srow.changed { box-shadow:inset 2px 0 0 var(--ai); }
+.agent-tree-row { padding-left:var(--agent-indent, 22px); min-width:0; }
+.agent-tree-row.sub { color:var(--muted); }
+/* 하위 에이전트의 안내선. 다음 형제가 없으면 줄 가운데에서 멈춰 분기가 끝나는 곳을 보인다. */
+.agent-tree-row .guide { position:absolute; left:var(--agent-guide, 17px); top:0; bottom:0; width:1px; background:var(--line-strong); }
+.agent-tree-row.last .guide { bottom:50%; }
+.srow-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.srow .x-badge { font:600 var(--fs-xs)/1 var(--mono); color:var(--ai); }
+/* 돌아와 보니 바뀐 세션. 줄 끝의 점으로 표시해 선택 띠와 겹치지 않게 한다. */
+.srow-chg { width:5px; height:5px; border-radius:50%; background:var(--ai); flex:none; }
 .srow.dragging { opacity:.4; }
 /* 놓으면 들어갈 위치를 그 줄의 위/아래로 표시한다. 아래로 끌면 그 줄 아래에 들어간다. */
 .srow.dragover { box-shadow:inset 0 2px 0 var(--ai); }
 .srow.dragover-after { box-shadow:inset 0 -2px 0 var(--ai); }
-.srow-name { font-size:var(--fs-sm); font-weight:var(--fw-med); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; }
-.rename-input { width:100%; font:inherit; font-size:var(--fs-sm); background:var(--card); border:1px solid var(--ring); border-radius:var(--r-ctl); color:var(--fg); padding:1px 5px; outline:none; }
+.agent-add-row { padding-left:22px; color:var(--faint); }
+.agent-add-row .agent-add-plus { width:12px; height:12px; }
+.rename-input { width:100%; height:20px; font:inherit; background:var(--raised); border:1px solid var(--focus); border-radius:var(--r-s);
+  color:var(--fg); padding:0 6px; outline:none; }
+/* 에이전트 종류 마크(사이드바 줄·터미널 머리·채팅 턴). 마크가 없는 도구는 첫 글자를 세운다. */
 .srow-mark { margin-left:auto; flex:none; display:inline-flex; align-items:center; }
 .srow-mark img { display:block; }
-/* 마크가 없는 도구는 첫 글자를 세운다. */
-.srow-letter { display:inline-flex; align-items:center; justify-content:center; border-radius:var(--r-ctl);
-  background:var(--muted); color:var(--muted-fg); font-size:8px; font-weight:var(--fw-bold); line-height:1; }
-.badge { font-size:var(--fs-2xs); font-weight:var(--fw-semi); padding:0 5px; border-radius:var(--r-ctl); border:1px solid color-mix(in srgb,var(--ai) 35%,transparent); color:var(--ai); background:color-mix(in srgb,var(--ai) 10%,transparent); text-transform:uppercase; flex:none; }
-.list-empty { color:var(--muted-fg); font-size:var(--fs-xs); text-align:center; padding:24px 12px; }
+.srow-letter { display:inline-flex; align-items:center; justify-content:center; border-radius:var(--r-s);
+  background:rgb(var(--pal-babyblue-rgb) / .1); color:var(--muted); font-size:8px; font-weight:700; line-height:1; }
+
+/* 파일 트리 */
+.ftree { list-style:none; margin:0; padding:0; }
+.fitem.focused { background:var(--hover); color:var(--fg); }
+.fitem .caret { width:10px; height:10px; color:var(--faint); transition:transform var(--t) var(--ease); }
+.fitem .caret.open { transform:rotate(90deg); }
+.fitem .ic { color:var(--faint); }
+.fitem.file.active .ic { color:inherit; }
+.fname { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.gbadge { margin-left:auto; font:600 var(--fs-xs)/1 var(--mono); }
+.fitem.git-M .gbadge { color:var(--pal-yellow-pop); }
+.fitem.git-A .gbadge, .fitem.git-U .gbadge { color:var(--ok); }
+.fitem.git-D .gbadge { color:var(--pal-danger); }
+/* 목록을 받는 중·빈 폴더·스페이스 미선택 안내. 줄과 같은 높이에 흐린 글자로 둔다. */
+.floading, .fempty { height:var(--row); display:flex; align-items:center; padding:0 8px; font-size:var(--fs-s); color:var(--faint); white-space:nowrap; }

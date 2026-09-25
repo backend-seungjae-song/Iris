@@ -107,7 +107,9 @@ export default async function run() {
       /mv "\$APP" "\$OLD"/.test(inst) && /mv "\$OLD" "\$APP"/.test(inst)
       && !/rm -rf "\$APP"\n\s*ditto/.test(inst));
     check("뜨는 것은 고정 시간이 아니라 조건으로 기다린다", () =>
-      !/^\s*sleep 5\s*$/m.test(inst) && /for _ in \$\(seq 1 10\); do pgrep -f "\$APP[^"]*" >\/dev\/null && break/.test(inst));
+      !/^\s*sleep 5\s*$/m.test(inst)
+      && /^running\(\) \{ pgrep -f "\$APP\/Contents\/MacOS\/Iris" >\/dev\/null; \}$/m.test(inst)
+      && /for _ in \$\(seq 1 10\); do running && break; sleep 1; done/.test(inst));
 
     // 상태 폴더의 소유자는 하나다. 포트가 겹쳐도 바인딩이 항상 충돌하지는 않아(0.0.0.0 vs 127.0.0.1)
     // 서버 둘이 같은 파일을 서로 덮어쓴다(확인 결과: 계정·검색 기록·탭 유실).

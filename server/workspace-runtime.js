@@ -4,6 +4,7 @@ import path from "node:path";
 
 import * as archive from "./archive.js";
 import { attachAgentLineage, watchAgentLineage } from "./agent-lineage.js";
+import { attachQuestionState } from "./agent-question.js";
 import { attachCodexSessions } from "./codex-session.js";
 import { buildMonitorState } from "./join.js";
 import * as spaceKey from "./space-key.js";
@@ -159,6 +160,8 @@ export async function buildWorkspaceSnapshot() {
   // codex 세션 키는 herdr가 제공하지 않으므로 프로세스에서 찾아 채운다. 이 값을 채워야
   // 화면에서 codex도 접을 수 있는 세션으로 표시된다(codex-session.js 주석 참조).
   await attachCodexSessions(nextState, herdr);
+  // codex 기록 파일까지 채운 뒤, 답을 끝낸 에이전트가 질문을 남겼는지 붙인다(status 는 그대로 둔다).
+  attachQuestionState(nextState);
   // 부모 세션 UUID까지 검증할 수 있도록 codex 키를 채운 다음, launcher가 남긴 명시적
   // receipt를 현재 pane/terminal snapshot과 대조해 유효한 관계만 붙인다.
   attachAgentLineage(nextState, agents);
@@ -178,6 +181,9 @@ export async function buildWorkspaceSnapshot() {
   const infoByPane = new Map();
   for (const a of agents) if (a.pane_id) infoByPane.set(a.pane_id, { tabLabel: tabLabel.get(a.tab_id) || null, tabId: a.tab_id || null });
   for (const s of nextState) { const i = infoByPane.get(s.paneId); s.tabLabel = i?.tabLabel || null; s.tabId = i?.tabId || null; }
+  // 탭 점도 같은 판정을 쓰도록 질문을 남긴 에이전트가 있는 탭에 question 을 붙인다.
+  const questionTabs = new Set(nextState.filter((s) => s.question && s.tabId).map((s) => s.tabId));
+  for (const list of Object.values(tabsByWorkspace)) for (const t of list) if (questionTabs.has(t.tabId)) t.question = true;
   return {
     agents,
     migrations,

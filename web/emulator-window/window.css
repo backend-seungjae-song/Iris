@@ -1,3 +1,8 @@
-/* 에뮬레이터 전용 창. 창 전체를 화면 하나가 쓴다. 화면 자체의 모양은 33-emulator.css 가 정한다. */
-html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
+/* 에뮬레이터 전용 창. 창 전체를 화면 하나가 쓴다. 화면 자체의 모양은 33-emulator.css 가 정한다.
+   이 창은 01-base.css 를 싣지 않으므로, 화면이 기대는 바탕 규칙(상자 크기·hidden·글꼴)을 여기 둔다. */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--surface); color: var(--fg); overflow: hidden;
+  font: 500 var(--fs)/1.45 var(--sans); letter-spacing: -.005em; font-variant-numeric: tabular-nums; }
 .emu-window { height: 100%; display: flex; flex-direction: column; }

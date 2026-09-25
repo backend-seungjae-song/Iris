@@ -118,29 +118,40 @@ function stamp(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function card(label, value, note) {
-  const box = el("div", "ust-card");
-  box.appendChild(el("div", "ust-card-l", label));
-  box.appendChild(el("div", "ust-card-v", value));
-  if (note) box.appendChild(el("div", "ust-card-n", note));
+// 요약 한 줄의 칸 하나. 칸 사이는 선 하나로 나누고, 제공자 칸은 앞에 색 표시를 단다.
+function cell(label, value, note, color) {
+  const box = el("div", "ust-cell");
+  const lab = el("span", "ust-cell-l");
+  if (color) {
+    const sw = el("i", "ust-sw");
+    sw.style.background = color;
+    lab.appendChild(sw);
+  }
+  lab.appendChild(document.createTextNode(label));
+  box.appendChild(lab);
+  box.appendChild(el("span", "ust-cell-v", value));
+  box.appendChild(el("span", "ust-cell-n", note || " "));
   return box;
 }
 
-function cardRow(cards) {
-  const row = el("div", "ust-cards");
-  for (const c of cards) row.appendChild(c);
+// 칸 수는 전체 탭 다섯, 제공자 탭 일곱이다.
+function strip(cells) {
+  const row = el("div", `ust-strip${cells.length > 5 ? " seven" : ""}`);
+  for (const c of cells) row.appendChild(c);
   return row;
 }
 
-function sectionTitle(text, note) {
+function sectionTitle(text, note, right) {
   const head = el("div", "ust-sec");
-  head.appendChild(el("span", "ust-sec-t", text));
+  head.appendChild(el("h3", "ust-sec-t", text));
   if (note) head.appendChild(el("span", "ust-sec-n", note));
+  if (right) head.appendChild(el("span", "ust-sec-r", right));
   return head;
 }
 
 // 일별 막대. 두 제공자를 한 막대에 쌓아 어느 쪽이 그날을 채웠는지 한눈에 보이게 한다.
-function dailyChart(series) {
+// 제목 줄(기간·기준·가장 많은 날)과 범례, 세로·가로 축을 함께 만든다.
+function dailyChart(series, tall) {
   const byDay = new Map();
   for (const s of series) {
     for (const d of s.daily || []) {
@@ -150,25 +161,41 @@ function dailyChart(series) {
     }
   }
   const days = [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : 1)).slice(-CHART_DAYS);
-  const wrap = el("div", "ust-chart");
+  const box = el("div", tall ? "ust-grow" : "");
   if (!days.length) {
-    wrap.appendChild(el("div", "ust-empty", "아직 기록이 없습니다."));
-    return wrap;
+    box.appendChild(sectionTitle("날짜별 토큰", `최근 ${CHART_DAYS}일`));
+    box.appendChild(el("div", "ust-empty", "아직 기록이 없습니다."));
+    return box;
   }
   const totals = days.map((d) => d.parts.reduce((a, p) => a + p.tokens, 0));
   const peak = Math.max(...totals, 1);
+  const peakDay = days[totals.indexOf(Math.max(...totals))].day;
   // 가장 높은 날에 맞추면 하루가 다른 날의 스무 배인 경우 나머지가 전부 바닥에 붙는다
   // (확인 결과: 어느 하루가 58B, 보통 날이 0.3B). 그래서 기준은 위에서 열째 날에 맞추고, 그보다
   // 높은 날은 꼭대기까지 그리되 잘렸다는 표시를 단다. 표시가 없으면 값이 잘못 읽힌다.
   const ranked = totals.filter((v) => v > 0).sort((a, b) => a - b);
   const base = ranked.length ? Math.max(ranked[Math.floor(ranked.length * 0.9)], 1) : 1;
+  const md = (day) => day.slice(5);
+  const range = `최근 ${CHART_DAYS}일 · ${md(days[0].day)} ~ ${md(days[days.length - 1].day)}`;
+  box.appendChild(sectionTitle("날짜별 토큰",
+    base < peak ? `${range} · 흰 선은 ${compact(base)} 를 넘은 날` : range,
+    `가장 많은 날 ${compact(peak)} · ${md(peakDay)}`));
+  if (series.length > 1) box.appendChild(legend(series));
+
+  const chart = el("div", `ust-chart${tall ? " tall" : ""}`);
+  const plot = el("div", "ust-plot");
+  for (const top of ["0", "50%"]) {
+    const line = el("div", "ust-grid");
+    line.style.top = top;
+    plot.appendChild(line);
+  }
   const bars = el("div", "ust-bars");
   for (const d of days) {
     const total = d.parts.reduce((a, p) => a + p.tokens, 0);
     const col = el("div", `ust-bar${total > base ? " clip" : ""}`);
     col.title = `${d.day} · ${full(total)} 토큰`;
     const stack = el("div", "ust-stack");
-    stack.style.height = `${Math.min(Math.max((total / base) * 100, total > 0 ? 2 : 0), 100)}%`;
+    stack.style.height = `${Math.min(Math.max((total / base) * 100, total > 0 ? 1.5 : 0), 100)}%`;
     for (const p of d.parts) {
       if (p.tokens <= 0) continue;
       const seg = el("div", "ust-seg");
@@ -179,41 +206,56 @@ function dailyChart(series) {
     col.appendChild(stack);
     bars.appendChild(col);
   }
-  wrap.appendChild(bars);
-  const axis = el("div", "ust-axis");
-  axis.appendChild(el("span", "", days[0].day));
-  axis.appendChild(el("span", "", base < peak
-    ? `자 높이 ${compact(base)} · 가장 많은 날 ${compact(peak)}`
-    : `가장 많은 날 ${compact(peak)}`));
-  axis.appendChild(el("span", "", days[days.length - 1].day));
-  wrap.appendChild(axis);
-  return wrap;
+  plot.appendChild(bars);
+  chart.appendChild(plot);
+
+  const yax = el("div", "ust-yax");
+  for (const [top, text] of [["0", compact(base)], ["50%", compact(base / 2)], ["100%", "0"]]) {
+    const tick = el("span", "", text);
+    tick.style.top = top;
+    yax.appendChild(tick);
+  }
+  chart.appendChild(yax);
+
+  // 가로 축은 다섯 날짜. 막대 가운데에 맞추고, 양 끝은 칸 밖으로 넘치지 않게 안쪽으로 붙인다.
+  const xax = el("div", "ust-xax");
+  const picks = [...new Set([0, 1, 2, 3, 4].map((i) => Math.round((i * (days.length - 1)) / 4)))];
+  for (const i of picks) {
+    const tick = el("span", "", md(days[i].day));
+    tick.style.left = `${((i + 0.5) / days.length) * 100}%`;
+    xax.appendChild(tick);
+  }
+  chart.appendChild(xax);
+  chart.appendChild(el("div", ""));
+  box.appendChild(chart);
+  return box;
 }
 
 function legend(series) {
   const row = el("div", "ust-legend");
   for (const s of series) {
-    const item = el("span", "ust-leg");
-    const dot = el("span", "ust-dot");
+    const item = el("span", "");
+    const dot = el("i", "ust-sw");
     dot.style.background = s.color;
     item.appendChild(dot);
-    item.appendChild(el("span", "", s.label));
+    item.appendChild(document.createTextNode(s.label));
     row.appendChild(item);
   }
   return row;
 }
 
-function rankTable(title, rows) {
-  const box = el("div", "ust-rank");
-  box.appendChild(el("div", "ust-rank-t", title));
+function rankTable(title, rows, color) {
+  const box = el("div", "");
+  box.appendChild(sectionTitle(title, "토큰 순"));
   if (!rows.length) { box.appendChild(el("div", "ust-empty", "없음")); return box; }
   const peak = Math.max(...rows.map((r) => r.tokens), 1);
   for (const r of rows) {
     const line = el("div", "ust-rank-r");
     line.appendChild(el("span", "ust-rank-n", r.name));
     const track = el("span", "ust-rank-bar");
-    const fill = el("span", "ust-rank-fill");
+    const fill = el("i", "ust-rank-fill");
     fill.style.width = `${Math.round((r.tokens / peak) * 100)}%`;
+    fill.style.background = color;
     track.appendChild(fill);
     line.appendChild(track);
     line.appendChild(el("span", "ust-rank-v", compact(r.tokens)));
@@ -222,55 +264,67 @@ function rankTable(title, rows) {
   return box;
 }
 
-function sessionTable(recent, columns) {
-  const table = el("div", "ust-table");
-  const head = el("div", "ust-tr ust-th");
-  for (const c of columns) head.appendChild(el("span", `ust-td ${c.cls || ""}`, c.label));
-  table.appendChild(head);
-  if (!recent.length) { table.appendChild(el("div", "ust-empty", "아직 세션이 없습니다.")); return table; }
-  for (const s of recent) {
-    const line = el("div", "ust-tr");
-    for (const c of columns) line.appendChild(el("span", `ust-td ${c.cls || ""}`, c.value(s)));
-    table.appendChild(line);
+// 머리 칸의 폭 클래스(w-*)가 열 폭을 정하고, 몸통 칸은 모양 클래스(td)만 받는다.
+function table(columns, rows) {
+  const t = el("table", "ust-tbl");
+  const head = el("tr", "");
+  for (const c of columns) head.appendChild(el("th", [c.w, c.num ? "ust-num" : ""].filter(Boolean).join(" "), c.label));
+  t.appendChild(el("thead", "")).appendChild(head);
+  const tbody = el("tbody", "");
+  for (const r of rows) {
+    const line = el("tr", "");
+    for (const c of columns) {
+      const v = c.value(r);
+      const td = el("td", [c.td, c.num ? "ust-num" : ""].filter(Boolean).join(" "));
+      if (v instanceof Node) td.appendChild(v); else td.textContent = String(v);
+      line.appendChild(td);
+    }
+    tbody.appendChild(line);
   }
-  return table;
+  t.appendChild(tbody);
+  return t;
 }
 
-// 스캔 상태
+function sessionTable(recent, columns) {
+  if (!recent.length) return el("div", "ust-empty", "아직 세션이 없습니다.");
+  return table(columns, recent);
+}
+
+// 훑기 상태. 머리 줄 오른쪽에 둔다. 처음 여는 사람은 이것만 보고 몇 분을 기다리므로
+// 무엇을 하는 중인지와 얼마나 왔는지를 적는다.
 function scanBar() {
-  const bar = el("div", "ust-scan");
-  const left = el("div", "ust-scan-l");
+  const bar = el("span", "ust-scan");
   if (history.scanning) {
     const p = history.progress;
     const what = p && p.kind === "codex" ? "Codex" : "Claude";
-    left.appendChild(el("span", "ust-scan-t", "기록을 훑는 중"));
-    left.appendChild(el("span", "ust-scan-n", p ? `${what} ${p.done}/${p.total}` : "시작하는 중"));
+    bar.appendChild(el("i", "ust-pulse"));
+    bar.appendChild(el("b", "", "기록을 훑는 중"));
+    bar.appendChild(el("span", "ust-scan-n", p ? `${what} ${full(p.done)} / ${full(p.total)}` : "시작하는 중"));
+    const prog = el("span", "ust-prog");
+    const fill = el("i", "");
+    fill.style.width = p && p.total ? `${Math.round((p.done / p.total) * 100)}%` : "0%";
+    prog.appendChild(fill);
+    bar.appendChild(prog);
   } else if (history.summary) {
     const files = (history.summary.claude.fileCount || 0) + (history.summary.codex.fileCount || 0);
-    left.appendChild(el("span", "ust-scan-t", `마지막 훑기 ${since(history.summary.scannedAt) || "-"}`));
-    left.appendChild(el("span", "ust-scan-n", `파일 ${full(files)}개 · ${Math.round((history.summary.durationMs || 0) / 1000)}초 걸림`));
+    const t = el("span", "", "마지막 훑기 ");
+    t.appendChild(el("b", "", since(history.summary.scannedAt) || "-"));
+    bar.appendChild(t);
+    bar.appendChild(el("span", "ust-scan-n faint", `파일 ${full(files)}개 · ${Math.round((history.summary.durationMs || 0) / 1000)}초 걸림`));
   } else {
-    left.appendChild(el("span", "ust-scan-t", "아직 훑지 않았습니다"));
-    left.appendChild(el("span", "ust-scan-n", "기록이 크면 첫 훑기에 몇 분이 걸립니다"));
+    bar.appendChild(el("b", "", "아직 훑지 않았습니다"));
+    bar.appendChild(el("span", "ust-scan-n faint", "기록이 크면 첫 훑기에 몇 분이 걸립니다"));
   }
-  bar.appendChild(left);
   const btn = el("button", "ust-btn", history.scanning ? "훑는 중" : "새로고침");
   btn.type = "button";
   btn.disabled = history.scanning;
   btn.addEventListener("click", () => wsSend({ type: "usage.history.scan" }));
   bar.appendChild(btn);
-  if (history.error) {
-    const err = el("div", "ust-err", history.error);
-    const holder = el("div", "ust-scan-wrap");
-    holder.appendChild(bar);
-    holder.appendChild(err);
-    return holder;
-  }
   return bar;
 }
 
 // 탭 내용
-const CLAUDE_COLOR = "var(--pal-pink)";
+const CLAUDE_COLOR = "var(--ai)";
 const CODEX_COLOR = "var(--pal-sky-pop)";
 
 function claudeSeries(summary) {
@@ -288,11 +342,19 @@ function codexSeries(summary) {
   };
 }
 
+function body() { return el("div", "ust-body"); }
+function foot() {
+  return el("div", "ust-foot",
+    "이 집계는 이 기계에 남은 대화 기록에서 셉니다. 요금이 아니라 토큰 수이고, 지운 기록은 세지 않습니다.");
+}
+
 function overviewPane() {
-  const pane = el("div", "ust-pane");
+  const pane = document.createDocumentFragment();
   const s = history.summary;
   if (!s) {
-    pane.appendChild(el("div", "ust-empty", "훑기를 마치면 여기에 집계가 섭니다."));
+    const b = body();
+    b.appendChild(el("div", "ust-empty", "훑기를 마치면 여기에 집계가 섭니다."));
+    pane.appendChild(b);
     return pane;
   }
   const tokens = s.claude.totalTokens + s.codex.totalTokens;
@@ -300,103 +362,88 @@ function overviewPane() {
   const days = new Set([...s.claude.daily.map((d) => d.day), ...s.codex.daily.map((d) => d.day)]).size;
   const first = [s.claude.firstDay, s.codex.firstDay].filter(Boolean).sort()[0] || null;
 
-  pane.appendChild(cardRow([
-    card("전체 토큰", compact(tokens), full(tokens)),
-    card("세션", full(sessions), `Claude ${full(s.claude.sessionCount)} · Codex ${full(s.codex.sessionCount)}`),
-    card("기록한 날", full(days), first ? `${first} 부터` : ""),
+  pane.appendChild(strip([
+    cell("전체 토큰", compact(tokens), full(tokens)),
+    cell("세션", full(sessions), `Claude ${full(s.claude.sessionCount)} · Codex ${full(s.codex.sessionCount)}`),
+    cell("기록한 날", full(days), first ? `${first} 부터` : ""),
+    cell("Claude", compact(s.claude.totalTokens), `세션 ${full(s.claude.sessionCount)} · ${full(s.claude.activeDays)}일`, CLAUDE_COLOR),
+    cell("Codex", compact(s.codex.totalTokens), `세션 ${full(s.codex.sessionCount)} · ${full(s.codex.activeDays)}일`, CODEX_COLOR),
   ]));
 
-  pane.appendChild(sectionTitle("날짜별 토큰", `최근 ${CHART_DAYS}일`));
-  const series = [claudeSeries(s), codexSeries(s)];
-  pane.appendChild(legend(series));
-  pane.appendChild(dailyChart(series));
+  const b = body();
+  b.appendChild(dailyChart([claudeSeries(s), codexSeries(s)], true));
+  b.appendChild(foot());
+  pane.appendChild(b);
+  return pane;
+}
 
-  pane.appendChild(sectionTitle("제공자"));
-  pane.appendChild(cardRow([
-    card("Claude", compact(s.claude.totalTokens), `세션 ${full(s.claude.sessionCount)} · ${full(s.claude.activeDays)}일`),
-    card("Codex", compact(s.codex.totalTokens), `세션 ${full(s.codex.sessionCount)} · ${full(s.codex.activeDays)}일`),
+// Claude·Codex 탭은 모양이 같고 칸 이름과 단위만 다르다.
+function providerPane(s, cells, series, color, unit) {
+  const pane = document.createDocumentFragment();
+  pane.appendChild(strip(cells));
+  const b = body();
+  b.appendChild(dailyChart([series]));
+  const two = el("div", "ust-two");
+  two.appendChild(rankTable("모델", s.models, color));
+  two.appendChild(rankTable("프로젝트", s.projects, color));
+  b.appendChild(two);
+  const recent = el("div", "");
+  recent.appendChild(sectionTitle("최근 세션", "마지막 기록 순"));
+  recent.appendChild(sessionTable(s.recent, [
+    { label: "마지막", w: "w-time", td: "ust-mono", value: (x) => stamp(x.last) },
+    { label: "프로젝트", value: (x) => x.project },
+    { label: "모델", w: "w-model", td: "ust-mono", value: (x) => x.model },
+    { label: unit.label, w: "w-num", num: true, value: unit.value },
+    { label: "토큰", w: "w-num", num: true, value: (x) => compact(x.tokens) },
   ]));
+  b.appendChild(recent);
+  b.appendChild(foot());
+  pane.appendChild(b);
+  return pane;
+}
+
+function emptyPane(text) {
+  const pane = document.createDocumentFragment();
+  const b = body();
+  b.appendChild(el("div", "ust-empty", text));
+  pane.appendChild(b);
   return pane;
 }
 
 function claudePane() {
-  const pane = el("div", "ust-pane");
   const s = history.summary && history.summary.claude;
-  if (!s || !s.sessionCount) {
-    pane.appendChild(el("div", "ust-empty", "Claude 기록이 없습니다. ~/.claude/projects 를 읽습니다."));
-    return pane;
-  }
+  if (!s || !s.sessionCount) return emptyPane("Claude 기록이 없습니다. ~/.claude/projects 를 읽습니다.");
   const t = s.totals;
-  pane.appendChild(cardRow([
-    card("전체 토큰", compact(s.totalTokens), full(s.totalTokens)),
-    card("입력", compact(t.inp), "캐시 제외"),
-    card("출력", compact(t.out), ""),
-    card("캐시 읽기", compact(t.cr), `쓰기 ${compact(t.cw)}`),
-  ]));
-  pane.appendChild(cardRow([
-    card("턴", full(t.turns), ""),
-    card("세션", full(s.sessionCount), ""),
-    card("활동한 날", full(s.activeDays), s.firstDay ? `${s.firstDay} ~ ${s.lastDay}` : ""),
-  ]));
-
-  pane.appendChild(sectionTitle("날짜별 토큰", `최근 ${CHART_DAYS}일`));
-  pane.appendChild(dailyChart([claudeSeries(history.summary)]));
-
-  const two = el("div", "ust-two");
-  two.appendChild(rankTable("모델", s.models));
-  two.appendChild(rankTable("프로젝트", s.projects));
-  pane.appendChild(sectionTitle("많이 쓴 곳"));
-  pane.appendChild(two);
-
-  pane.appendChild(sectionTitle("최근 세션"));
-  pane.appendChild(sessionTable(s.recent, [
-    { label: "마지막", cls: "w-time", value: (x) => stamp(x.last) },
-    { label: "프로젝트", cls: "w-proj", value: (x) => x.project },
-    { label: "모델", cls: "w-model", value: (x) => x.model },
-    { label: "턴", cls: "w-num", value: (x) => full(x.turns) },
-    { label: "토큰", cls: "w-num", value: (x) => compact(x.tokens) },
-  ]));
-  return pane;
+  return providerPane(s, [
+    cell("전체 토큰", compact(s.totalTokens), full(s.totalTokens)),
+    cell("입력", compact(t.inp), "캐시 제외"),
+    cell("출력", compact(t.out), ""),
+    cell("캐시 읽기", compact(t.cr), `쓰기 ${compact(t.cw)}`),
+    cell("턴", full(t.turns), ""),
+    cell("세션", full(s.sessionCount), ""),
+    cell("활동한 날", full(s.activeDays), dayRange(s.firstDay, s.lastDay)),
+  ], claudeSeries(history.summary), CLAUDE_COLOR, { label: "턴", value: (x) => full(x.turns) });
 }
 
 function codexPane() {
-  const pane = el("div", "ust-pane");
   const s = history.summary && history.summary.codex;
-  if (!s || !s.sessionCount) {
-    pane.appendChild(el("div", "ust-empty", "Codex 기록이 없습니다. ~/.codex/sessions 를 읽습니다."));
-    return pane;
-  }
+  if (!s || !s.sessionCount) return emptyPane("Codex 기록이 없습니다. ~/.codex/sessions 를 읽습니다.");
   const t = s.totals;
-  pane.appendChild(cardRow([
-    card("전체 토큰", compact(s.totalTokens), full(s.totalTokens)),
-    card("입력", compact(t.inp), `캐시 적중 ${compact(t.cached)}`),
-    card("출력", compact(t.out), ""),
-    card("추론", compact(t.reasoning), "출력에 포함"),
-  ]));
-  pane.appendChild(cardRow([
-    card("회차", full(t.events), ""),
-    card("세션", full(s.sessionCount), ""),
-    card("활동한 날", full(s.activeDays), s.firstDay ? `${s.firstDay} ~ ${s.lastDay}` : ""),
-  ]));
+  return providerPane(s, [
+    cell("전체 토큰", compact(s.totalTokens), full(s.totalTokens)),
+    cell("입력", compact(t.inp), `캐시 적중 ${compact(t.cached)}`),
+    cell("출력", compact(t.out), ""),
+    cell("추론", compact(t.reasoning), "출력에 포함"),
+    cell("회차", full(t.events), ""),
+    cell("세션", full(s.sessionCount), ""),
+    cell("활동한 날", full(s.activeDays), dayRange(s.firstDay, s.lastDay)),
+  ], codexSeries(history.summary), CODEX_COLOR, { label: "회차", value: (x) => full(x.events) });
+}
 
-  pane.appendChild(sectionTitle("날짜별 토큰", `최근 ${CHART_DAYS}일`));
-  pane.appendChild(dailyChart([codexSeries(history.summary)]));
-
-  const two = el("div", "ust-two");
-  two.appendChild(rankTable("모델", s.models));
-  two.appendChild(rankTable("프로젝트", s.projects));
-  pane.appendChild(sectionTitle("많이 쓴 곳"));
-  pane.appendChild(two);
-
-  pane.appendChild(sectionTitle("최근 세션"));
-  pane.appendChild(sessionTable(s.recent, [
-    { label: "마지막", cls: "w-time", value: (x) => stamp(x.last) },
-    { label: "프로젝트", cls: "w-proj", value: (x) => x.project },
-    { label: "모델", cls: "w-model", value: (x) => x.model },
-    { label: "회차", cls: "w-num", value: (x) => full(x.events) },
-    { label: "토큰", cls: "w-num", value: (x) => compact(x.tokens) },
-  ]));
-  return pane;
+// 같은 해 안이면 끝 날짜의 연도를 뺀다. 칸이 좁아 전체를 적으면 끝 날짜가 잘린다.
+function dayRange(first, last) {
+  if (!first) return "";
+  return `${first} ~ ${last && last.slice(0, 4) === first.slice(0, 4) ? last.slice(5) : last}`;
 }
 
 function statusOf(provider) {
@@ -410,37 +457,40 @@ function statusOf(provider) {
 }
 
 function accountsPane() {
-  const pane = el("div", "ust-pane");
-  pane.appendChild(sectionTitle("자격증명", since(providersAt) ? `${since(providersAt)} 확인` : "확인 전"));
-  pane.appendChild(el("div", "ust-note", "Iris 는 읽기만 합니다. 토큰을 새로 발급하지 않으므로 로그인이 끊기지 않습니다."));
+  const pane = document.createDocumentFragment();
+  const b = body();
+  const creds = el("div", "");
+  creds.appendChild(sectionTitle("자격증명", since(providersAt) ? `${since(providersAt)} 확인` : "확인 전"));
+  creds.appendChild(el("p", "ust-note", "Iris 는 읽기만 합니다. 토큰을 새로 발급하지 않으므로 로그인이 끊기지 않습니다."));
 
-  const list = el("div", "ust-accounts");
   const byId = new Map(providers.map((p) => [p.provider, p]));
-  for (const id of Object.keys(PROVIDER_NAMES)) {
-    const p = byId.get(id);
-    const st = statusOf(p);
-    const line = el("div", "ust-acct");
-    line.appendChild(el("span", "ust-acct-n", PROVIDER_NAMES[id]));
-    line.appendChild(el("span", `ust-acct-s ${st.cls}`, st.text));
-    line.appendChild(el("span", "ust-acct-p", PROVIDER_SOURCE[id]));
-    list.appendChild(line);
-  }
-  pane.appendChild(list);
+  creds.appendChild(table([
+    { label: "제공자", w: "w-prov", td: "ust-name", value: (id) => PROVIDER_NAMES[id] },
+    { label: "상태", w: "w-state", value: (id) => {
+      const st = statusOf(byId.get(id));
+      const tag = el("span", `ust-st${st.cls ? " " + st.cls : ""}`);
+      tag.appendChild(el("i", ""));
+      tag.appendChild(document.createTextNode(st.text));
+      return tag;
+    } },
+    { label: "읽는 곳", td: "ust-mono", value: (id) => PROVIDER_SOURCE[id] },
+  ], Object.keys(PROVIDER_NAMES)));
+  b.appendChild(creds);
 
-  pane.appendChild(sectionTitle("직접 넣는 값"));
-  pane.appendChild(el("div", "ust-note", "opencode Go 와 MiniMax 는 로그인 쿠키가 있어야 잔량을 읽습니다. 넣은 값은 창으로 되돌아오지 않고 이 기계에만 남습니다."));
-  const form = el("div", "ust-secrets");
+  const direct = el("div", "");
+  direct.appendChild(sectionTitle("직접 넣는 값"));
+  direct.appendChild(el("p", "ust-note", "opencode Go 와 MiniMax 는 로그인 쿠키가 있어야 잔량을 읽습니다. 넣은 값은 창으로 되돌아오지 않고 이 기계에만 남습니다."));
+  const form = el("div", "");
   for (const f of SECRET_FIELDS) {
     const row = el("div", "ust-secret");
-    const label = el("label", "ust-secret-l");
-    label.appendChild(el("span", "ust-secret-n", f.label));
+    row.appendChild(el("span", "", f.label));
     const flag = prefsFlags[`has${f.field.charAt(0).toUpperCase()}${f.field.slice(1)}`];
-    label.appendChild(el("span", `ust-secret-f ${flag ? "on" : ""}`, flag ? "들어 있음" : "비어 있음"));
-    row.appendChild(label);
+    row.appendChild(el("span", `ust-secret-f ${flag ? "on" : ""}`, flag ? "들어 있음" : "비어 있음"));
     const input = el("input", "ust-input");
     input.type = "password";
     input.autocomplete = "off";
     input.placeholder = f.hint;
+    input.setAttribute("aria-label", f.label);
     row.appendChild(input);
     const save = el("button", "ust-btn", "저장");
     save.type = "button";
@@ -449,13 +499,15 @@ function accountsPane() {
       input.value = "";
     });
     row.appendChild(save);
-    const clear = el("button", "ust-btn ghost", "지우기");
+    const clear = el("button", "ust-btn ust-btn-ghost", "지우기");
     clear.type = "button";
     clear.addEventListener("click", () => wsSend({ type: "usage.secret", field: f.field, value: "" }));
     row.appendChild(clear);
     form.appendChild(row);
   }
-  pane.appendChild(form);
+  direct.appendChild(form);
+  b.appendChild(direct);
+  pane.appendChild(b);
   return pane;
 }
 
@@ -465,7 +517,7 @@ function draw() {
 
   const head = el("div", "ust-head");
   head.appendChild(el("h2", "ust-h", "사용량 상세·이력"));
-  const tabs = el("div", "ust-tabs");
+  const tabs = el("nav", "ust-tabs");
   for (const t of TABS) {
     const btn = el("button", `ust-tab${t.id === tab ? " on" : ""}`, t.label);
     btn.type = "button";
@@ -473,21 +525,18 @@ function draw() {
     tabs.appendChild(btn);
   }
   head.appendChild(tabs);
+  if (tab !== "accounts") head.appendChild(scanBar());
   root.appendChild(head);
+  if (tab !== "accounts" && history.error) root.appendChild(el("div", "ust-err", history.error));
 
-  if (tab !== "accounts") root.appendChild(scanBar());
-
-  root.appendChild(
+  const scroll = el("div", "ust-scroll");
+  scroll.appendChild(
     tab === "claude" ? claudePane()
     : tab === "codex" ? codexPane()
     : tab === "accounts" ? accountsPane()
     : overviewPane(),
   );
-
-  if (tab !== "accounts") {
-    root.appendChild(el("div", "ust-foot",
-      "이 집계는 이 기계에 남은 대화 기록에서 셉니다. 요금이 아니라 토큰 수이고, 지운 기록은 세지 않습니다."));
-  }
+  root.appendChild(scroll);
 }
 
 // 상태바가 넘겨 주는 것들

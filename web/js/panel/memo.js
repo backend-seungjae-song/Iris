@@ -62,7 +62,7 @@ function memoEachEditor(fn) { for (const e of memoEds.values()) { try { fn(e.edi
 function memoOpts() {
   return { model: memoModel, theme: monacoTheme(), automaticLayout: true, fontSize: 12.5,
     fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
-    ...monacoPrefOpts("memo"), lineNumbers: "off", folding: false,
+    ...monacoPrefOpts("memo"), lineNumbers: "on", lineNumbersMinChars: 4, folding: false,
     readOnly: !getMemoShownSpace(),
     // 한글을 조합하는 동안 커서 앞 글자가 겹쳐 보이는 문제를 막는다. 소프트 랩이
     // 걸린 줄에서 입력하면 접히기 전 텍스트가 앞에 생기고 띄어쓰면 사라진다. 원인은 Monaco가

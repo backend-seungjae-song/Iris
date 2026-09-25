@@ -7,7 +7,7 @@
 .dtab-back {
   width: auto;
   padding: 0 10px;
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-xs);
   letter-spacing: var(--ls);
   color: #9fd0e8;
   border-color: #24435a;

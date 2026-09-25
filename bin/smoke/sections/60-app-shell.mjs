@@ -91,7 +91,7 @@ console.log("[3c] Explorer 파일·폴더 생성");
 // 트리 행도 다른 목록 행과 같은 모서리 값을 쓴다. 여기만 직각이면 같은 화면에서 행 모양이
 // 두 가지가 되므로, 값이 달라지지 않게 검사로 강제한다.
 check("파일 트리 행 모서리가 항목 크기로 통일됨", () =>
-  /\.fitem\s*\{[^}]*border-radius:\s*var\(--r-blk\)\s*;/.test(css("10-sidebar"))
+  /\.fitem\s*\{[^}]*border-radius:\s*var\(--r-s\)\s*;/.test(css("10-sidebar"))
   && !/\.fitem\s*\{[^}]*border-radius:\s*0\s/.test(allCss));
 check("Explorer 헤더에 로컬 전용 새 파일·새 폴더 진입점이 있음", () =>
   /id="file-add"/.test(web) && /id="folder-add"/.test(web)
@@ -387,7 +387,7 @@ check("문서가 저장소 실행 파일을 맨 이름으로 부르지 않는다
 
 // DESIGN.md 는 팔레트의 hex 와 역할 토큰 이름을 그대로 적는다. 사람은 그 표를 보고 색을
 // 고르므로, 표가 CSS 와 달라지면 없는 토큰이나 다른 색을 쓰게 된다. 예를 들어 다크
-// 기본 절이 `--primary #33C3F5` 로 적혀 있어도 실제 값은 `var(--pal-skype)` 이고, `--ai` 를
+// 기본 절이 `--accent #33C3F5` 로 적혀 있어도 실제 값은 `var(--pal-skype)` 이고, `--ai` 를
 // 「바이올렛」이라 적어도 실제는 `--pal-pink` 인 경우가 있었다(팔레트에 바이올렛은 없다).
 check("DESIGN.md 가 대는 색·토큰이 CSS 와 같다", () => {
   const doc = read("DESIGN.md");
@@ -402,8 +402,8 @@ check("DESIGN.md 가 대는 색·토큰이 CSS 와 같다", () => {
     else if (m[1].trim().toLowerCase() !== hex.toLowerCase()) bad.push(`${name} 문서 ${hex} / CSS ${m[1].trim()}`);
   }
   // 2층: 역할 토큰은 이름만 본다(값은 팔레트를 참조하므로 hex 로 비교할 대상이 아니다).
-  const roleLine = doc.split("\n").find((l) => l.startsWith("이름 규칙: 기존 역할")) || "";
-  const roles = [...roleLine.matchAll(/`(--[a-z-]+)`/g)].map((m) => m[1]);
+  const roleLine = doc.split("\n").find((l) => l.startsWith("이름 규칙: 시안 역할")) || "";
+  const roles = [...roleLine.matchAll(/`(--[a-z0-9-]+)`/g)].map((m) => m[1]);
   if (roles.length < 5) cannotMeasure(`역할 토큰을 ${roles.length}개밖에 못 읽었다 — 세는 방식이 깨졌다`);
   for (const r of roles) if (!new RegExp(`${r}\\s*:`).test(css)) bad.push(`${r} 이 CSS 에 없다`);
   if (bad.length) throw new Error(bad.join(" · "));
@@ -903,4 +903,31 @@ check("CSS 파일은 각자 문법이 성립한다", () => {
     return true;
   });
 
+
+  // 820px 이하는 한 열이다. 작업 밖의 화면이 열리면 터미널이 내려가고 패널형 화면은 가운데를 써야 한다.
+  // 파일·브라우저가 가운데를 덮으면 작업 rail 이나 에이전트 선택으로 터미널에 돌아올 수 있어야 한다.
+  check("좁은 창에서도 화면과 가운데가 보이고 터미널로 돌아온다", () => {
+    const term = read("web/css/19-terminal.css");
+    const narrow = sliceBetween(term, "@media (max-width:820px) {", "/* ⌘⇧P", "좁은 창 규칙");
+    return /body\.screen-open \.right \{ display:none; \}/.test(narrow)
+      && /body\.screen-open:not\(\.util-full\) \.center \{ display:flex;/.test(narrow)
+      && /body:not\(\.browser-mode\) \.center\.mobile-show \{ left:var\(--rail-w\); \}/.test(narrow)
+      && /view === "workspace" && globalThis\.innerWidth <= 820\) document\.getElementById\("center"\)\?\.classList\.remove\("mobile-show"\)/.test(read("web/js/devtool/rail.js"))
+      && /\$\("#center"\)\.classList\.remove\("mobile-show"\); \$\("#right"\)\.scrollIntoView\(\)/.test(read("web/js/main.js"));
+  });
+
+  // 에이전트 종류를 "claude" 같은 글자로 적으면 줄마다 같은 낱말이 반복돼 구별이 느리다. 마크를 쓰고,
+  // 표에 적은 그림 파일이 실제로 있어야 한다(없으면 깨진 그림이 줄마다 뜬다).
+  check("에이전트 종류는 글자가 아니라 마크로 보이고 마크 그림이 모두 있다", () => {
+    const agents = read("web/js/herdr/agents.js"), sync = read("web/js/herdr/sync.js"), glyphs = read("web/js/core/glyphs.js");
+    if (/class="mk"/.test(agents)) throw new Error("에이전트 줄이 종류를 글자로 적는다");
+    if (!/\$\{agentMark\(a\.agent\)\}/.test(agents) || !/\$\{agentMark\(parentAgent\)\}/.test(agents)) throw new Error("에이전트·서브에이전트 줄이 마크를 쓰지 않는다");
+    if (!/tSub\.innerHTML = agentMark\(a\.agent\)/.test(sync)) throw new Error("터미널 머리가 종류를 글자로 적는다");
+    const list = /const MARK_IMG = Object\.fromEntries\(\[([\s\S]*?)\]\.map/.exec(glyphs);
+    if (!list) throw new Error("glyphs.js 에서 그림 목록을 못 읽었다");
+    const ids = [...list[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+    const missing = ids.filter((id) => !existsSync(path.join("web/img/agents", `${id}.png`)));
+    if (missing.length) throw new Error(`그림 파일이 없다: ${missing.join(", ")}`);
+    return ids.length >= 20;
+  });
 }

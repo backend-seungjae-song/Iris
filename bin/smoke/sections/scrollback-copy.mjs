@@ -375,7 +375,7 @@ await checkAsync("그냥 골라 복사해도 복사됐다고 알린다", async (
     boot.initCapability({
       blog: () => {}, wsSend: () => {}, showToast: (t) => toasts.push(String(t)),
       getLastAgents: () => [], getCurTarget: () => null, wsIsOpen: () => false,
-      acHost: { writeClipboard: () => {} },
+      acHost: {}, copyText: async () => true,
     });
     // 고르는 동안 선택 변경이 여러 번 발생하므로 모아서 마지막 한 번만 알린다.
     // 모으지 않으면 드래그하는 동안 알림이 계속 뜬다.
@@ -389,6 +389,30 @@ await checkAsync("그냥 골라 복사해도 복사됐다고 알린다", async (
   }
   if (toasts.length !== 1) throw new Error(`알림이 ${toasts.length}번 — 한 번이어야 한다: ${JSON.stringify(toasts)}`);
   if (!/2줄 복사됨/.test(toasts[0])) throw new Error(`알림 문구가 다르다: ${toasts[0]}`);
+  return true;
+});
+
+await checkAsync("클립보드에 쓰지 못했으면 복사됐다고 알리지 않는다", async () => {
+  const term = await import(new URL("../../../web/js/panel/terminal.js", import.meta.url).href);
+  const hooks = await import(new URL("../../../web/js/core/hooks.js", import.meta.url).href);
+  const boot = await import(new URL("../../../web/js/chatcopy/boot.js", import.meta.url).href);
+  const toasts = [];
+  const prev = term.getXterm();
+  term.setXterm({ getSelection: () => "한 줄", getSelectionPosition: () => null, onSelectionChange: () => {} });
+  hooks.clearHooks();
+  try {
+    boot.initCapability({
+      blog: () => {}, wsSend: () => {}, showToast: (t) => toasts.push(String(t)),
+      getLastAgents: () => [], getCurTarget: () => null, wsIsOpen: () => false,
+      acHost: {}, copyText: async () => false,
+    });
+    hooks.callHook("chatcopy.selectionChanged");
+    await new Promise((r) => setTimeout(r, 500));
+  } finally {
+    hooks.clearHooks();
+    term.setXterm(prev);
+  }
+  if (toasts.length !== 1 || /복사됨/.test(toasts[0])) throw new Error(`실패인데 알림이 ${JSON.stringify(toasts)}`);
   return true;
 });
 

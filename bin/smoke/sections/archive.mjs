@@ -1,4 +1,4 @@
-// 소유 범위: server/archive.js 와 web/js/devtool/archive.js 의 되살리기·잊기·그룹·검색·접기.
+// 소유 범위: server/archive.js 와 web/js/devtool/archive.js 의 되살리기·잊기·그룹·검색·선택.
 // 제공 API: 러너가 한 번 부르는 비동기 기본 run.
 // 의존 대상: core 의 공유 검사·파일 도구, sources 의 공유 소스, Node 파일·경로·모듈 API.
 // 유지 조건: 검사 이름과 본문. 40-qa-evidence.mjs 를 기능별로 나눈 것이므로,
@@ -42,7 +42,7 @@ check("잊기는 확인을 거친다", () => /archive\.forget/.test(archive) && 
 check("묶음은 폴더 기준", () => /ar-group/.test(archive) && /ar-kids/.test(archive) && /groups\.set\(cwd/.test(archive));
 check("검색이 마지막 화면 내용까지 본다", () => /e\.tail && e\.tail\.toLowerCase\(\)\.includes\(q\)/.test(archive));
 check("걸린 자리를 표시한다", () => /<mark>/.test(archive) && /arTailView/.test(archive));
-check("미리보기는 기본 두 줄", () => /-webkit-line-clamp:2/.test(css("04-archive")));
+check("미리보기는 기본 세 줄", () => /\.ar-tail \{[^}]*-webkit-line-clamp:3/.test(css("04-archive")));
 // 같은 조작이 위치마다 문구나 판정이 다르면 사실상 두 기능이 된다. 한 곳에서 만들어 두 곳이 공유한다.
 // 정의는 소유 모듈에 있고 호출 위치는 main 에도 있으므로, 개수는 둘을 합쳐 집계한다.
 // 스페이스 접기는 보관 기능의 조작이다. 앱 셸에서 만들면 보관을 꺼도 그 조작이 남아, 끈 기능이
@@ -85,15 +85,19 @@ await checkAsync("빈 항목이 와도 우클릭 메뉴가 뜬다", async () => 
   if (ctxItems(null).length !== 0 || ctxItems(undefined).length !== 0) throw new Error("목록이 아예 없을 때 터진다");
   return true;
 });
-// 스페이스 목록과 에이전트 그룹 헤더는 같은 스페이스를 가리킨다. 선택지가 위치마다 다르면
+// 스페이스 줄과 그 아래 터미널 탭 추가 줄은 같은 스페이스를 가리킨다. 선택지가 위치마다 다르면
 // 어느 쪽이 정본인지 알 수 없으므로, 두 위치가 한 목록(spaceCtxItems)을 함께 쓰고
 // 접기 항목은 그 목록에 한 번만 둔다.
 check("접기 항목을 받아 가는 자리는 둘", () =>
   /export function spaceCtxItems\([\s\S]{0,900}callHook\("archive\.spaceItem"/.test(contextMenu)
-  && /closest\("\.agroup-head"\)[\s\S]{0,300}spaceCtxItems\(/.test(herdrAgents));
-// 검색에 걸린 세션이 접힌 채로 가려지면 검색 결과를 확인할 수 없다. 검색 중에는 펼친다.
-check("보관함 스페이스는 기본 접힘", () => /const open = arOpen\.has\(g\.cwd\) \|\| \(!!q && kidsShown\.length > 0\)/.test(archive));
-check("눌러서 펼친다", () => /data-ar-toggle/.test(archive) && /arOpen\.has\(id\) \? arOpen\.delete\(id\)/.test(archive));
+  && /closest\("\.space-row"\)[\s\S]{0,400}spaceCtxItems\(row\.dataset\.space\)/.test(contextMenu)
+  && /closest\("\.agent-add-row"\)[\s\S]{0,300}spaceCtxItems\(/.test(herdrAgents));
+// 왼쪽 목록은 스페이스만 두고, 고른 스페이스의 세션은 오른쪽 상세에 보인다. 검색 중에는 걸린 세션만
+// 상세에 남는다. 걸린 세션이 다른 세션 사이에 섞이면 검색 결과를 확인할 수 없다.
+check("고른 스페이스의 세션이 상세에 선다", () => /data-ar-pick/.test(archive)
+  && /const pick = e\.target\.closest\("\[data-ar-pick\]"\);\s*if \(pick\) \{ arSel = pick\.dataset\.arPick; arRender\(\)/.test(archive)
+  && /detail\.innerHTML = !sel \? "" : sel\.g \? arGroupDetail\(sel\.g, q, m\)/.test(archive));
+check("검색 중에는 걸린 세션만 상세에 남는다", () => /const hits = q \? g\.kids\.filter\(\(k\) => m\.get\(k\.id\)\.hit\) : g\.kids;/.test(archive));
 
 
 // 복사 정리는 crop 설정과 무관하게 항상 실행한다. crop 이 꺼졌을 때 원문을 그대로 반환하면

@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/css/00-tokens.css" />
 <link rel="stylesheet" href="/css/01-base.css" />
 <link rel="stylesheet" href="/css/01b-screen-chrome.css" />
+<link rel="stylesheet" href="/css/01c-components.css" />
 <link rel="stylesheet" href="/css/02-rail.css" />
 <link rel="stylesheet" href="/css/02b-localdev.css" />
 <link rel="stylesheet" href="/css/03-feature-modes.css" />
@@ -47,6 +48,7 @@
 <link rel="stylesheet" href="/css/32-sketch.css" />
 <link rel="stylesheet" href="/css/33-emulator.css" />
 <link rel="stylesheet" href="/css/34-layout.css" />
+<link rel="stylesheet" href="/css/35-agent-chat.css" />
 </head>
 <body>
 <div class="titlebar"></div>
@@ -71,34 +73,27 @@
       <span class="brand">Iris</span>
       <span class="conn" id="conn"></span>
     </div>
+    <div class="panel spaces grow" id="panel-spaces">
+      <div class="panel-head" data-panel="panel-spaces" title="스페이스 이동 ⌥⇧↑↓ · 에이전트 이동 ⌥↑↓">
+        <svg class="i caret open" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg><span class="panel-title">Spaces · Agents</span>
+        <span class="meta" id="meta">연결 중…</span>
+        <span class="panel-actions"><button class="add" id="space-add" title="스페이스 추가" aria-label="스페이스 추가" hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></span>
+      </div>
+      <div class="panel-body" id="space-list"></div>
+    </div>
     <div class="panel explorer" id="panel-explorer">
       <div class="panel-head" data-panel="panel-explorer">
-        <span class="caret open">▶</span><span class="panel-title">Explorer</span><span class="meta" id="explorer-space">스페이스 선택</span>
+        <svg class="i caret open" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg><span class="panel-title">탐색기</span><span class="meta" id="explorer-space">스페이스 선택</span>
         <span class="panel-actions">
-          <button class="explorer-action" id="file-add" title="새 파일" aria-label="새 파일" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5h6l3 3V14H3z"/><path d="M9 1.5v3h3M7.5 7v4M5.5 9h4"/></svg></button>
-          <button class="explorer-action" id="folder-add" title="새 폴더" aria-label="새 폴더" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4l1.3 1.4h7.7v8.6h-13z"/><path d="M8 7v4M6 9h4"/></svg></button>
+          <button class="explorer-action" id="file-add" title="새 파일" aria-label="새 파일" hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/></svg></button>
+          <button class="explorer-action" id="folder-add" title="새 폴더" aria-label="새 폴더" hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/></svg></button>
         </span>
       </div>
       <div class="panel-body" id="file-tree"><div class="fempty">스페이스를 선택하면 파일 트리가 열립니다.</div></div>
     </div>
-    <div class="panel spaces" id="panel-spaces">
-      <div class="panel-head" data-panel="panel-spaces">
-        <span class="caret open">▶</span><span class="panel-title">Spaces</span><span class="hint-key">⌥⇧↑↓</span>
-        <button class="add" id="space-add" title="스페이스 추가" hidden>＋</button>
-      </div>
-      <div class="panel-body" id="space-list"></div>
-    </div>
-    <div class="panel grow" id="panel-agents">
-      <div class="panel-head" data-panel="panel-agents">
-        <span class="caret open">▶</span><span class="panel-title">Agents</span><span class="hint-key">⌥↑↓</span>
-        <span class="meta" id="meta">연결 중…</span>
-      </div>
-      <div class="panel-body" id="agent-list"><div class="list-empty">…</div></div>
-    </div>
   </aside>
 
   <aside class="rail-panel km-panel" id="km-panel">
-    <div class="scr-bar"><span class="scr-bar-title">설정</span></div>
     <div class="km-body" id="km-body"></div>
   </aside>
 
@@ -108,36 +103,50 @@
   <section class="center" id="center">
     <div class="tabbar-row" id="tabbar-row">
       <div class="tabstrip" id="tabstrip"></div>
-      <button class="ico" id="wv-pick" title="요소 선택 모드(⌘⇧E): 켜면 화면이 고정되고, 클릭한 요소가 상호작용 없이 터미널로 전달됩니다">◎</button>
+      <button id="wv-pick" title="요소 선택 모드(⌘⇧E): 켜면 화면이 고정되고, 클릭한 요소가 상호작용 없이 터미널로 전달됩니다" aria-label="요소 선택 모드"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg></button>
     </div>
     <div class="center-body" id="center-body">
-      <div class="center-empty" id="center-empty">왼쪽에서 파일을 열거나 상단 🌐로 브라우저를 여세요.</div>
+      <div class="center-empty cc-empty" id="center-empty">
+        <div class="cc-empty-box">
+          <div class="cc-empty-title" id="center-empty-title">열린 탭이 없습니다</div>
+          <div class="cc-empty-desc">파일이나 브라우저를 열면 여기에 탭으로 쌓입니다.</div>
+          <div class="cc-empty-actions">
+            <button class="cc-empty-action" type="button" data-empty-act="file-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>파일 검색<span class="center-empty-keys" data-empty-key="file-search"></span></button>
+            <button class="cc-empty-action" type="button" data-empty-act="browser"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>브라우저 탭 열기<span class="center-empty-keys" data-empty-key="new-tab"></span></button>
+            <button class="cc-empty-action" type="button" data-empty-act="reopen-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 8v4.5l3 2"/></svg>닫은 탭 되살리기<span class="center-empty-keys" data-empty-key="reopen-tab"></span></button>
+            <div class="cc-empty-action center-empty-drop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Finder에서 파일을 끌어다 놓기<span class="cc-empty-action-note">열기</span></div>
+          </div>
+        </div>
+      </div>
       <div class="fileview" id="fileview" hidden></div>
       <div class="browserview" id="browserview" hidden>
         <div class="urlbar">
           <div class="ub-nav">
-            <button class="ico" id="wv-back" title="뒤로">‹</button>
-            <button class="ico" id="wv-fwd" title="앞으로">›</button>
-            <button class="ico" id="wv-reload" title="새로고침">↻</button>
+            <button class="ico" id="wv-back" title="뒤로 (⌘[)" aria-label="뒤로"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+            <button class="ico" id="wv-fwd" title="앞으로 (⌘])" aria-label="앞으로"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+            <button class="ico" id="wv-reload" title="새로고침" aria-label="새로고침"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v5h-5"/></svg></button>
           </div>
           <div class="url-wrap">
+            <svg class="url-lead" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
             <input id="url" type="text" placeholder="주소 검색 또는 입력" autocomplete="off" inputmode="url" />
-            <button class="ico in-url" id="wv-bookmark" title="이 페이지 북마크">☆</button>
+            <button class="ico in-url" id="wv-bookmark" title="이 페이지 북마크" aria-label="이 페이지 북마크"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg></button>
             <div id="url-sug" hidden></div>
           </div>
           <div class="ub-tools">
-            <button class="chip" id="wv-profile" title="이 탭의 구글 프로필(탭마다 다른 로그인)">👤 기본</button>
-            <button class="chip" id="wv-closed" title="최근 닫은 탭 (⌘⇧T 는 맨 위 하나)">↺ 닫은 탭</button>
-            <button class="ico" id="wv-sketch" title="이 페이지 전체를 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다">✏️</button>
+            <button class="chip" id="wv-profile" title="이 탭의 구글 프로필(탭마다 다른 로그인)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg><span>기본</span></button>
+            <button class="ico" id="wv-closed" title="최근 닫은 탭 (⌘⇧T 는 맨 위 하나)" aria-label="최근 닫은 탭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 8v4.5l3 2"/></svg></button>
+            <button class="ico" id="wv-sketch" title="이 페이지 전체를 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다" aria-label="화면 스케치"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4L8 20H4v-4z"/></svg></button>
             <span class="ub-sep"></span>
-            <button class="ico" id="wv-detach" title="이 브라우저를 별도 창으로 분리(분리 창에서 ⌘⇧O로 다시 도킹)">⇱</button>
-            <button class="ico" id="wv-dock" title="이 브라우저를 콘솔에 도킹(⌘⇧O)">⇲</button>
-            <button class="chip" id="wv-size" title="이 탭의 화면 크기(반응형 확인)">🖥 크기</button>
-            <button class="ico mono" id="wv-devtools" title="개발자 도구">&lt;/&gt;</button>
+            <button class="ico" id="wv-size" title="이 탭의 화면 크기(반응형 확인)" aria-label="화면 크기"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg></button>
+            <button class="ico" id="wv-detach" title="이 브라우저를 별도 창으로 분리(분리 창에서 ⌘⇧O로 다시 도킹)" aria-label="별도 창으로 분리"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="14" height="14" rx="2"/><path d="M13 3h8v8"/><path d="m21 3-9 9"/></svg></button>
+            <button class="ico" id="wv-dock" title="이 브라우저를 콘솔에 도킹(⌘⇧O)" aria-label="콘솔에 도킹"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m16 8-7 7"/><path d="M9 10v5h5"/></svg></button>
+            <button class="ico" id="wv-devtools" title="개발자 도구 (F12)" aria-label="개발자 도구"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg></button>
           </div>
         </div>
         <div class="bookmark-line">
-          <button class="bmk-add" id="bmk-add" title="현재 페이지를 북마크에 추가">＋</button>
+          <button class="bmk-add" id="bmk-add" title="현재 페이지를 북마크에 추가" aria-label="현재 페이지를 북마크에 추가"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button class="bmk-add" id="bmk-folder-add" title="새 북마크 폴더" aria-label="새 북마크 폴더"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg></button>
+          <span class="bmk-line-sep" aria-hidden="true"></span>
           <div class="bookmark-bar" id="bookmark-bar"></div>
         </div>
         <div class="wv-wrap" id="wv-stack"><div class="wv-dialog" id="wv-dialog" hidden></div>
@@ -159,7 +168,7 @@
     <div class="panel memo center-dock collapsed" id="panel-memo">
       <div class="memo-resize" id="memo-resize" title="드래그해서 높이 조절"></div>
       <div class="panel-head" data-panel="panel-memo">
-        <span class="caret">▶</span><span class="panel-title">메모</span><span class="meta" id="memo-meta"></span>
+        <svg class="i caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg><span class="panel-title">메모</span><span class="meta" id="memo-meta"></span>
         <span class="memo-launches"><button id="memo-new-window" title="이 스페이스에 독립 메모 창 만들기">새 메모</button><button id="memo-shared-window" title="같은 공유 메모를 보는 새 창 만들기">공유 메모</button></span>
         <span class="memo-modes"><button data-memo-md="raw" class="on">원문</button><button data-memo-md="preview">미리보기</button></span>
       </div>
@@ -170,7 +179,7 @@
     </div>
     <div class="panel run center-dock collapsed" id="panel-run">
       <div class="panel-head" data-panel="panel-run">
-        <span class="caret">▶</span><span class="panel-title">실행</span><span class="meta" id="run-meta"></span>
+        <svg class="i caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg><span class="panel-title">실행</span><span class="meta" id="run-meta"></span>
       </div>
       <div class="panel-body" id="run-body"><div class="fempty">스페이스를 선택하면 스크립트가 열립니다.</div></div>
     </div>
@@ -182,9 +191,7 @@
       <button class="sidebar-toggle" id="browser-open" title="브라우저 열기"></button>
       <button class="sidebar-toggle" id="shared-browser-open" title="공유 브라우저 창: 스페이스와 무관하게 유지됩니다"></button>
       <button class="sidebar-toggle" id="crop-toggle" title="herdr 사이드바 가리기(콘솔에서만)"></button>
-      <span class="dot idle" id="t-dot"></span>
-      <span class="t-name" id="t-name">세션 미선택</span>
-      <span class="t-sub" id="t-sub"></span>
+      <span class="sess"><span class="dot idle" id="t-dot" role="img" aria-label="비활성화" title="비활성화"></span><span class="t-name" id="t-name">세션 미선택</span><span class="t-sub" id="t-sub"></span></span>
       <button class="collapse-btn" id="right-collapse" title="접기"></button>
     </div>
     <div class="htabs" id="htabs" hidden></div>

@@ -186,7 +186,9 @@ export function subagentTree(sessionUuid, idx) {
     }
   }
   // 직렬화 가능한 형태로(순환 없는 트리).
+  // agentId 는 창이 그 서브에이전트의 대화를 열 때 돌려보내는 열쇠다(경로는 서버가 만든다).
   const strip = (n) => ({
+    agentId: n.agentId,
     agentType: n.agentType,
     description: n.description,
     running: true,
@@ -236,6 +238,7 @@ export function buildMonitorState(agents) {
       terminalId: a.terminal_id || null,
       focused: !!a.focused, // herdr에서 현재 포커스된 pane → UI 선택을 역방향 동기화(loop-safe)
       sessionUuid: uuid,
+      transcriptFile: (uuid && idx.get(uuid)?.file) || null, // 질문 판정(agent-question.js)이 끝을 읽는다
       cross: hasCodex ? { owner: "claude", verifier: "codex" } : null,
       subagents: tree,
     };

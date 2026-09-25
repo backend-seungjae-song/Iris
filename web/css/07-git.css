@@ -1,81 +1,142 @@
 /* 소스 제어(깃) 화면*/
 /* 이 이름을 만드는 곳: devtool/source-control.js*/
-/* ── 레포 섹션: 여러 레포를 동시에 만질 때 어느 레포에 무엇이 남았는지가 먼저 읽혀야 한다. ──
- 머리 한 줄에 레포·스페이스·브랜치·개수를 두고, 접어도 개수는 남긴다.*/
-.sc-repo + .sc-repo { margin-top:6px; border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent); padding-top:4px; }
-/* 머리는 스크롤해도 고정된다. 변경이 많은 레포를 훑는 동안에도 지금 보는 것이 어느 레포인지
- 계속 보여야 한다(레포가 여럿일 때 이 줄이 유일한 기준이다).*/
-.sc-repo-head { position:sticky; top:0; z-index:2; background:var(--sidebar); display:flex; align-items:center; gap:5px;
-  padding:5px 6px; border-radius:var(--r-blk); cursor:pointer; font-size:var(--fs-xs); white-space:nowrap;
-  transition:background var(--t-fade) var(--ease); }
-.sc-repo-head:hover { background:var(--sidebar-accent); }
-.sc-repo-head .sc-fold { flex:none; width:11px; color:var(--muted-fg); font-size:9px; transition:transform var(--t-fade) var(--ease); }
-.sc-repo.folded .sc-repo-head .sc-fold { transform:rotate(-90deg); }
-/* 공간이 모자라면 브랜치·스페이스 이름부터 줄인다. 레포 이름이 먼저 읽혀야 기준이 선다.*/
-.sc-repo-head .sc-repo-name { font-weight:var(--fw-semi); overflow:hidden; text-overflow:ellipsis; flex:0 .15 auto; min-width:0; }
-.sc-repo.cur .sc-repo-head .sc-repo-name { color:var(--ai); }
-.sc-repo-head .sc-repo-where { color:var(--muted-fg); font-size:var(--fs-2xs); overflow:hidden; text-overflow:ellipsis; min-width:0; }
-.sc-repo-head .sc-repo-branch { color:var(--muted-fg); font-size:var(--fs-2xs); flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
-.sc-repo-head .sc-repo-n { flex:none; margin-left:auto; font-size:var(--fs-2xs); font-variant-numeric:tabular-nums; color:var(--muted-fg);
-  background:var(--card); border:1px solid var(--border); border-radius:var(--r-pill); padding:0 6px; line-height:15px; }
-.sc-repo-head .sc-repo-n.zero { opacity:.45; }
-/* 조작 버튼은 포인터를 올리기 전에는 공간도 차지하지 않는다. 그 공간을 레포 이름이 쓴다(이름이 잘리면 기준을 잃는다).*/
-.sc-repo-head .sc-repo-acts { flex:none; display:none; gap:1px; }
-.sc-repo-head:hover .sc-repo-acts, .sc-repo-head:focus-within .sc-repo-acts { display:flex; }
-.sc-repo-head .sc-ract { border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-sm); padding:0 4px; border-radius:var(--r-ctl); line-height:1; }
-.sc-repo-head .sc-ract:hover { background:var(--card); color:var(--fg); }
-.sc-repo.folded .sc-repo-body { display:none; }
-.sc-repo-body { padding-left:6px; }
-.sc-repo-clean { color:var(--muted-fg); font-size:var(--fs-xs); padding:2px 8px 6px; }
-.sc-note { padding:0 12px; font-size:var(--fs-2xs); color:var(--muted-fg); min-height:0; }
-.sc-note.err { color:var(--destructive); }
-.sc-body { flex:1 1 auto; overflow-y:auto; padding:4px 6px 10px; min-height:0; }
-.sc-empty { color:var(--muted-fg); font-size:var(--fs-xs); padding:10px 8px; }
-.sc-group-head { display:flex; align-items:center; gap:6px; padding:5px 8px 3px; font-size:var(--fs-2xs); font-weight:var(--fw-semi); text-transform:uppercase; letter-spacing:var(--ls-caps); color:var(--muted-fg); }
-.sc-group-head .sc-count { margin-left:auto; font-size:var(--fs-2xs); opacity:.8; }
-.sc-group-head .sc-gact { border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-md); padding:0 4px; border-radius:var(--r-ctl); }
-.sc-group-head .sc-gact:hover { background:var(--sidebar-accent); color:var(--fg); }
-.sc-file { display:flex; align-items:center; gap:6px; padding:3px 8px; border-radius:var(--r-ctl); cursor:pointer; font-size:var(--fs-xs); white-space:nowrap;
-  transition:background var(--t-fade) var(--ease); }
-.sc-file:hover { background:var(--sidebar-accent); }
-.sc-file .sc-name { overflow:hidden; text-overflow:ellipsis; }
-.sc-file .sc-dir { color:var(--muted-fg); font-size:var(--fs-2xs); overflow:hidden; text-overflow:ellipsis; }
-.sc-file .sc-actions { margin-left:auto; display:flex; gap:1px; opacity:0; flex:none; }
-.sc-file:hover .sc-actions { opacity:1; }
-.sc-file .sc-act { border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-md); padding:0 4px; border-radius:var(--r-ctl); line-height:1; }
-.sc-file .sc-act:hover { background:var(--card); color:var(--fg); }
-.sc-code { flex:none; width:13px; text-align:center; font-size:var(--fs-2xs); font-weight:var(--fw-bold); }
-.sc-code.M { color:#d19a11; } .sc-code.U { color:var(--success); } .sc-code.A { color:var(--success); }
-.sc-code.D { color:var(--destructive); } .sc-code.R { color:var(--ai); } .sc-code.C { color:var(--ai); }
-
-/* 패널 머리: 제목·브랜치·새로고침. 깃 화면의 규칙이므로 여기 둔다.
- .sc-ico 는 깃 머리 안에서만 쓰고, 나머지 여섯 패널은 01b-screen-chrome.css 의
- .scr-ico 를 쓴다.*/
-.sc-head { display:flex; align-items:center; gap:6px; padding:12px 12px 8px; }
-.sc-title { font-weight:var(--fw-semi); font-size:var(--fs-sm); }
-.sc-branch { font-size:var(--fs-2xs); color:var(--muted-fg); display:flex; align-items:center; gap:3px; }
-.sc-head .sc-ico { margin-left:0; border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-md); padding:2px 5px; border-radius:var(--r-ctl); }
-.sc-head #sc-refresh { margin-left:auto; }
-.sc-head .sc-ico:hover { background:var(--sidebar-accent); color:var(--fg); }
-.sc-commit { padding:4px 4px 6px; }
-.sc-commit textarea { width:100%; box-sizing:border-box; resize:vertical; font:inherit; font-size:var(--fs-sm); background:var(--card); border:1px solid var(--input); border-radius:var(--r-blk); color:var(--fg); padding:6px 8px; outline:none;
-  transition:border-color var(--t-fade) var(--ease); }
-.sc-commit textarea:focus { border-color:var(--ring); }
-.sc-commit-row { display:flex; gap:6px; margin-top:6px; }
-.sc-commit-row button { flex:1 1 auto; border:1px solid var(--input); background:var(--card); color:var(--fg); border-radius:var(--r-blk); cursor:pointer; font-size:var(--fs-xs); padding:5px 8px;
-  transition:filter var(--t-fade) var(--ease); }
-.sc-commit-row .sc-commit-btn { background:color-mix(in srgb,var(--ai) 16%,var(--card)); border-color:color-mix(in srgb,var(--ai) 40%,transparent); color:var(--fg); }
-.sc-commit-row button:hover { filter:brightness(1.08); }
 
 /* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다.*/
-.sc-panel { width:280px; }
+.sc-panel { width:272px; }
 
-/* 보기 전환: 커밋 전 / Base 대비 / Base+커밋 전. 지금 어느 보기인지가 목록보다 먼저 읽혀야 한다.*/
-.sc-views { display:flex; gap:2px; margin:0 12px 6px; padding:2px; background:var(--card); border:1px solid var(--border); border-radius:var(--r-blk); }
-.sc-view { flex:1 1 0; min-width:0; border:none; background:none; color:var(--muted-fg); cursor:pointer; font-size:var(--fs-2xs); padding:3px 4px;
-  border-radius:var(--r-ctl); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.sc-view:hover { color:var(--fg); }
-.sc-view.on { background:var(--sidebar-accent); color:var(--fg); font-weight:var(--fw-semi); }
-.sc-base-row { display:flex; align-items:center; gap:6px; padding:4px 8px 2px; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.sc-base { flex:1 1 auto; min-width:0; font:inherit; font-size:var(--fs-xs); color:var(--fg); background:var(--card); border:1px solid var(--input); border-radius:var(--r-ctl); padding:2px 4px; }
-.sc-repo-clean.err { color:var(--destructive); }
+/* 누르는 요소만 움직인다. body.motion-off 는 01-base.css 가 끈다.*/
+.sc-ico, .sc-view, .sc-gact, .sc-act, .sc-btn, .sc-msg, .sc-file, .sc-dir-head, .sc-dir-head svg,
+.sc-repo-head, .sc-repo-head .sc-fold, .sc-sel .cc-dd-trigger {
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+
+/* 아이콘 단추: 머리(받기·보내기·새로고침), 무리 머리, 파일 줄*/
+.sc-ico, .sc-gact, .sc-act { width:24px; height:24px; display:grid; place-items:center; border-radius:var(--r-s); color:var(--muted); flex:none;
+  font:inherit; background:none; border:0; cursor:pointer; }
+.sc-ico:hover:not(:disabled), .sc-gact:hover, .sc-act:hover { background:var(--hover); color:var(--fg); }
+.sc-ico:active:not(:disabled), .sc-gact:active, .sc-act:active, .sc-btn:active, .sc-view:active { transform:scale(.96); }
+.sc-ico svg, .sc-gact svg, .sc-act svg { width:13px; height:13px; }
+/* 레포가 없으면 받기·보내기가 적용될 곳이 없다.*/
+.sc-ico:disabled { opacity:.4; cursor:default; }
+
+/* 패널 머리: 제목·(레포가 여럿이면) 요약·받기·보내기·새로고침. 받기·보내기는 지금 보는 레포에 적용된다.*/
+.sc-head { display:flex; align-items:center; gap:8px; padding:10px 8px 8px var(--pad); }
+.sc-title { flex:none; white-space:nowrap; font-weight:650; font-size:var(--fs-h); letter-spacing:-.018em; }
+/* 단추가 셋이라 요약이 길면 줄여서 한 줄을 지킨다.*/
+.sc-sum { margin-left:auto; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.sc-sum:empty { display:none; }
+.sc-sum:empty + .sc-ico { margin-left:auto; }
+
+/* 머리 바로 아래 브랜치 선택기. 앞선·뒤처진 커밋 수를 오른쪽에 붙인다.*/
+.sc-branch-row { display:flex; align-items:center; gap:8px; padding:0 var(--pad) 10px; min-width:0; }
+.sc-branch-repo { flex:none; max-width:40%; font-size:var(--fs-s); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sc-branch-dd { flex:1; min-width:0; }
+.sc-sync { flex:none; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.sc-sync:empty { display:none; }
+
+/* 브랜치·Base 선택기의 트리거. 동작과 펼친 목록은 공용 드롭다운(01c-components.css)이 갖는다.*/
+.sc-sel { display:flex; }
+.sc-sel .cc-dd-trigger { height:28px; display:flex; align-items:center; gap:6px; padding:0 8px; border-radius:var(--r); border:1px solid var(--line);
+  background:var(--raised); font:500 var(--fs-s)/1 var(--mono); color:var(--fg); }
+.sc-sel .cc-dd-trigger:hover { border-color:var(--line-strong); }
+.sc-sel .cc-dd-trigger svg { width:12px; height:12px; color:var(--muted); margin-left:auto; }
+.sc-sel .cc-dd-item { font-family:var(--mono); font-size:var(--fs-s); }
+
+/* 보기 전환: 커밋 전 / Base 대비 / Base+커밋 전*/
+.sc-views { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; padding:2px; margin:0 var(--pad) 10px; border-radius:var(--r);
+  border:1px solid var(--line); background:var(--surface); }
+.sc-view { height:22px; border-radius:var(--r-s); font:inherit; font-size:var(--fs-s); color:var(--muted); white-space:nowrap; min-width:0;
+  background:none; border:0; cursor:pointer; }
+.sc-view:hover { color:var(--fg); background:var(--hover); }
+.sc-view.on { background:var(--select); color:var(--select-fg); font-weight:600; }
+
+/* 알림 줄. 진행 중은 흐리게, 끝난 조작은 확인 표시와 함께, 실패는 위험 색으로 적는다.*/
+.sc-note { font-size:var(--fs-s); padding:0 var(--pad) 8px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+.sc-note:empty { display:none; }
+.sc-note.ok { color:var(--ok); }
+.sc-note.err { color:var(--pal-danger); }
+.sc-note svg { width:12px; height:12px; flex:none; }
+/* git 오류는 여러 줄이라 세 줄까지만 보이고 전문은 title 에 남긴다.*/
+.sc-note span { min-width:0; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; }
+
+.sc-body { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; border-top:1px solid var(--line); }
+.sc-body > * { flex:none; }
+.sc-empty { padding:10px var(--pad); font-size:var(--fs-s); color:var(--muted); }
+
+/* ── 레포 섹션. 레포가 여럿일 때만 머리 한 줄(레포·스페이스·브랜치·개수)을 둔다. 접어도 개수는 남긴다. ──*/
+.sc-repo { padding-top:10px; }
+.sc-repo + .sc-repo { border-top:1px solid var(--line); }
+.sc-repo.folded .sc-repo-body { display:none; }
+/* 머리는 스크롤해도 고정된다. 변경이 많은 레포를 훑는 동안에도 지금 보는 것이 어느 레포인지 계속 보여야 한다.*/
+.sc-repo-top { position:sticky; top:0; z-index:2; margin:0 var(--pad) 8px; container-type:scroll-state; }
+.sc-repo-head { height:30px; display:flex; align-items:center; gap:6px; padding:0 8px 0 6px; border-radius:var(--r); }
+.sc-repo-head:hover { background:var(--hover); }
+/* 붙어 있는 동안에는 그 아래로 지나가는 목록을 가린다.*/
+@container scroll-state(stuck: top) {
+  .sc-repo-head { background-color:var(--chrome); }
+  .sc-repo-head:hover { background-image:linear-gradient(var(--hover), var(--hover)); }
+}
+.sc-repo-head .sc-fold { width:10px; height:10px; color:var(--faint); flex:none; transform:rotate(90deg); }
+.sc-repo.folded .sc-repo-head .sc-fold { transform:none; }
+.sc-repo-name { font-weight:650; color:var(--fg); flex:none; }
+.sc-repo-where { flex:0 1 auto; min-width:0; font-size:var(--fs-xs); color:var(--faint); overflow:hidden; text-overflow:ellipsis; }
+.sc-repo-bi { width:12px; height:12px; color:var(--muted); flex:none; }
+.sc-repo-branch { font:500 var(--fs-xs)/1 var(--mono); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; }
+.sc-repo-ahead { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); flex:none; }
+.sc-repo-n { font:600 var(--fs-xs)/1 var(--mono); color:var(--fg-2); padding:2px 5px; border-radius:var(--r-s); background:rgb(var(--pal-babyblue-rgb)/.1); flex:none; }
+.sc-repo-n.zero { background:none; color:var(--faint); }
+/* 변경이 없거나, 불러오는 중이거나, 비교가 실패한 레포의 한 줄*/
+.sc-repo-clean { padding:0 var(--pad) 10px; font-size:var(--fs-s); color:var(--faint); }
+.sc-repo-clean.err { color:var(--pal-danger); }
+
+/* 커밋 입력(레포마다 하나)*/
+.sc-commit { padding:0 var(--pad) 10px; }
+.sc-msg { width:100%; min-height:64px; resize:none; display:block; border-radius:var(--r); border:1px solid var(--line); background:var(--raised); color:var(--fg);
+  font:500 var(--fs)/1.5 var(--sans); padding:6px 8px; outline:none; }
+.sc-msg::placeholder { color:var(--faint); }
+.sc-msg:focus { border-color:var(--focus); }
+/* 포커스는 테두리 색이 보여 준다. 전역 :focus-visible 링까지 그리면 두 겹이 된다.*/
+.sc-msg:focus-visible { box-shadow:none; }
+.sc-commit-row { display:flex; align-items:center; gap:6px; margin-top:8px; }
+.sc-hint { font-size:var(--fs-xs); color:var(--faint); }
+.sc-btn { height:26px; padding:0 10px; border-radius:var(--r-s); display:flex; align-items:center; justify-content:center; gap:6px;
+  font:inherit; font-size:var(--fs); color:var(--fg-2); background:none; border:1px solid var(--line); white-space:nowrap; cursor:pointer; }
+.sc-btn:hover { background:var(--hover); color:var(--fg); }
+.sc-btn-pri { margin-left:auto; background:var(--accent); border-color:var(--accent); color:var(--pal-ink); font-weight:600; }
+.sc-btn-pri:hover { background:var(--focus); border-color:var(--focus); color:var(--pal-ink); }
+.sc-btn svg { width:13px; height:13px; }
+.sc-commit-n { font:600 var(--fs-xs)/1 var(--mono); opacity:.75; }
+
+/* 무리 머리(스테이지된 변경 · 변경)*/
+.sc-group-head { height:26px; display:flex; align-items:center; gap:6px; padding:0 6px 0 var(--pad); color:var(--fg-2); font-weight:600; font-size:var(--fs-s); }
+.sc-count { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.sc-gact { margin-left:auto; opacity:0; }
+.sc-group-head:hover .sc-gact, .sc-gact:focus-visible { opacity:1; }
+
+/* 폴더 묶음과 파일 줄. 폴더 이름은 머리가 들고 있으므로 줄에는 파일 이름만 둔다.*/
+.sc-files { padding:0 6px; }
+.sc-dir-head { height:24px; display:flex; align-items:center; gap:6px; padding:0 6px 0 8px; border-radius:var(--r-s); color:var(--muted);
+  font-size:var(--fs-s); white-space:nowrap; }
+.sc-dir-head:hover { background:var(--hover); color:var(--fg); }
+.sc-dir-head svg { width:10px; height:10px; color:var(--faint); flex:none; }
+.sc-dir-head.open svg { transform:rotate(90deg); }
+.sc-dir-name { font-family:var(--mono); font-size:var(--fs-xs); overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.sc-dir-n { margin-left:auto; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.sc-dir-body.collapsed { display:none; }
+.sc-file { height:var(--row); display:flex; align-items:center; gap:7px; padding:0 4px 0 24px; border-radius:var(--r-s); color:var(--fg-2);
+  position:relative; white-space:nowrap; }
+.sc-file:hover { background:var(--hover); color:var(--fg); }
+/* 가운데에서 diff 를 보고 있는 파일*/
+.sc-file.on { background:var(--select); color:var(--select-fg); }
+.sc-file.on::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background:var(--accent); }
+.sc-code { width:10px; flex:none; font:600 var(--fs-xs)/1 var(--mono); text-align:center; }
+.sc-code.M { color:var(--pal-yellow-pop); } .sc-code.A, .sc-code.U { color:var(--ok); } .sc-code.D { color:var(--pal-danger); } .sc-code.R, .sc-code.C { color:var(--ai); }
+.sc-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.sc-file.D .sc-name { text-decoration:line-through; text-decoration-color:var(--faint); }
+.sc-actions { display:none; margin-left:auto; gap:1px; flex:none; }
+.sc-file:hover .sc-actions, .sc-file:focus-within .sc-actions { display:flex; }
+.sc-act { width:22px; height:22px; }
+
+/* Base 대비 보기의 비교 기준 줄*/
+.sc-base-row { display:flex; align-items:center; gap:8px; padding:6px var(--pad) 10px; }
+.sc-base-lbl { font-size:var(--fs-s); color:var(--muted); }
+.sc-base-slot { flex:1; min-width:0; }

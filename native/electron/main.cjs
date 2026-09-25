@@ -28,7 +28,7 @@ if (pinnedUserData) console.log(`[iris] 개발 갈래 쿠키 폴더: ${pinnedUse
 
 const { BrowserWindow, Menu, shell, ipcMain, clipboard, session, dialog, webContents, screen, safeStorage, globalShortcut, systemPreferences, desktopCapturer, nativeImage } = require("electron");
 const { execFile } = require("node:child_process");
-const { applyHardening, isAudioInputPermission, setNativeUserAgent, WEBAUTHN_SCRIPT, BOTCHECK_SCRIPT, dialogScript } = require("./browser-hardening.cjs");
+const { applyHardening, isAudioInputPermission, setNativeUserAgent, WEBAUTHN_SCRIPT, BOTCHECK_SCRIPT, OPENER_SCRIPT, dialogScript } = require("./browser-hardening.cjs");
 const chromeAuth = require("./chrome-auth.cjs");
 const { runChromeAuth } = chromeAuth;
 const cookieImport = require("./cookie-import.cjs");
@@ -50,6 +50,7 @@ const { createWebviewContextMenu } = require("./webview-context-menu.cjs");
 const { createWebviewContextActions } = require("./webview-context-actions.cjs");
 const { createMenu } = require("./menu.cjs");
 const { createDownloadHook } = require("./download-hook.cjs");
+const { consoleOpenTarget } = require("./local-link.cjs");
 const { createFsIpc } = require("./fs-ipc.cjs");
 const { createCredentialIpc } = require("./credential-ipc.cjs");
 const { createMainWindow, setRelayKeymap, DEFAULT_RELAY } = require("./main-window.cjs");
@@ -153,10 +154,11 @@ function audioDiagLog(event, details = {}) { audioDiagnostics.log(event, details
 function startAudioDiagnostics() { audioDiagnostics.start(); }
 
 // 터미널 붙여넣기용 클립보드 읽기(동기). sandbox preload는 clipboard 모듈이 없어 메인이 대신 읽는다.
-ipcMain.on("ac-clipboard-read", (e) => { try { e.returnValue = clipboard.readText(); } catch { e.returnValue = ""; } });
+// 읽기·쓰기 모두 이 앱의 렌더러만 받는다. webview 게스트가 사용자 클립보드를 읽거나 덮어쓰지 못하게 한다.
+ipcMain.on("ac-clipboard-read", (e) => { if (!isTrustedSender(e)) { e.returnValue = ""; return; } try { e.returnValue = clipboard.readText(); } catch { e.returnValue = ""; } });
 // 터미널 복사 쓰기. 렌더러의 navigator.clipboard.writeText가 Electron webview 컨텍스트에서
 // 실패해 빈 값이 복사되는 문제가 있다. 붙여넣기와 동일하게 메인 프로세스 clipboard로 쓴다.
-ipcMain.on("ac-clipboard-write", (_e, text) => { try { clipboard.writeText(String(text ?? "")); } catch {} });
+ipcMain.handle("ac-clipboard-write", (e, text) => { if (!isTrustedSender(e)) return false; try { clipboard.writeText(String(text ?? "")); return true; } catch { return false; } });
 let switcherHost = null;
 // 창이 보내온 단축키 표. webview 포커스에서의 중계 판정이 이 표를 본다. 창의 판정과 같은 표를
 // 봐야 화면에서 바꾼 키가 페이지 위에서도 동작한다. 도착하기 전까지는 main-window 의 기본표를 쓴다.
@@ -447,6 +449,7 @@ createAiLoginPolicy({
   isProfilePartition,
   setLoginProvider,
   ctlSend,
+  partitionForSession: (sess) => profileSessionPolicy.partitionForSession(sess),
   localLoginFor,
 });
 
@@ -486,11 +489,12 @@ function appDrawsLink(url) {
   if (dot < 0) return false;
   return appDrawnLinkExts.includes(decodeURIComponent(pathname.slice(dot + 1)).toLowerCase());
 }
-// 분리 브라우저 창에는 글자 탭 영역이 없으므로 그 파일은 콘솔 창이 열고, 그 창을 앞으로 가져온다.
+// 분리 브라우저 창에는 글자 탭 영역이, 메모 창에는 브라우저가 없으므로 콘솔 창이 열고 그 창을 앞으로 가져온다.
 ipcMain.on("ac-open-in-console", (e, target) => {
   if (!isTrustedSender(e)) return;
-  const t = String(target || "");
-  if (!t.startsWith("/")) return;
+  // 파일 경로, 그리고 메모 창에서 누른 웹 링크(브라우저는 콘솔 창에만 있다).
+  const t = consoleOpenTarget(target);
+  if (!t) return;
   try {
     const win = getMainWindow();
     if (!win || win.isDestroyed()) return;
@@ -509,6 +513,7 @@ createWebviewLifecycle({
   dialogScript,
   webAuthnScript: WEBAUTHN_SCRIPT,
   botcheckScript: BOTCHECK_SCRIPT,
+  openerScript: OPENER_SCRIPT,
   registerSessionPrimer,
   noteNavigation,
   forgetAttachPolicy,

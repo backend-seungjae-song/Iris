@@ -6,7 +6,8 @@
 //
 // 제공 API
 //   createProfileSessionPolicy(...)가 guardWebviewPartition·ensureHardened·hardenSession·purgePartition·
-//   forget·forEachHardened·onSessionHardened 명령을 제공하고, 순수 partition/origin/FIDO 판정 함수도 함께 제공한다.
+//   forget·forEachHardened·onSessionHardened 명령과 ownsSession·partitionForSession 조회를 제공하고,
+//   순수 partition/origin/FIDO 판정 함수도 함께 제공한다.
 //   원시 Set·WeakSet이나 session 객체 registry는 제공하지 않는다.
 //
 // 의존 대상
@@ -223,9 +224,15 @@ function createProfileSessionPolicy({
     return () => hardenedListeners.delete(listener);
   }
 
+  // 이 정책이 설치한 프로필 session 의 partition. 모르는 session 이면 null 이다.
+  function partitionForSession(sess) {
+    const partition = sess ? sessionPartitions.get(sess) : undefined;
+    return isProfilePartition(partition) && hardenedPartitions.has(partition) ? partition : null;
+  }
+
   return {
-    ownsSession: (sess) => isProfilePartition(sessionPartitions.get(sess))
-      && hardenedPartitions.has(sessionPartitions.get(sess)),
+    ownsSession: (sess) => partitionForSession(sess) !== null,
+    partitionForSession,
     guardWebviewPartition,
     ensureHardened,
     hardenSession,

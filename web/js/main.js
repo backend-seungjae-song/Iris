@@ -6,6 +6,7 @@ import { featureHidden } from "./core/features.js";
 import { CAPABILITIES } from "./core/capabilities.js";
 import { callHook, hasHook } from "./core/hooks.js";
 import { isFileLikeTabKind } from "./core/tab-views.js";
+import { paintStateDot, stateLabel } from "./core/agent-state.js";
 import { bootCapabilities } from "./core/capability-boot.js";
 import { toggleSidebar } from "./panel/layout.js";
 import { initLayoutEngine } from "./core/layout-engine.js";
@@ -19,15 +20,16 @@ import { agentMark } from "./core/glyphs.js";
 import {
   initXterm, initXtermWiring, sendPtyResize, startPty,
 } from "./panel/xterm-wiring.js";
-import { initMarkdown, mdToHtml } from "./core/markdown.js";
+import { initMarkdown, markdownWebLink, mdToHtml } from "./core/markdown.js";
 import { cycleAgent, initKeynav } from "./core/keynav.js";
 import { initScreenSwitch } from "./core/screen-switch.js";
+import { initMotion } from "./core/motion.js";
 
 import { getWs, getWsGeneration, initWs, wsSend as transportWsSend } from "./core/ws.js";
 import { initDock, reconcileBrowserMode, reconcileDocTabs, toggleDock } from "./browser/dock.js";
 import { initBrowserTabs, renderBmTabs } from "./browser/tabs.js";
 import { initFindInPage } from "./browser/find-in-page.js";
-import { bookmarks, initBookmarks, wireUrlBar } from "./browser/bookmarks.js";
+import { bookmarks, initBookmarks, renderBookmarks, wireUrlBar } from "./browser/bookmarks.js";
 
 
 import {
@@ -50,7 +52,7 @@ import {
 } from "./browser/webview.js";
 import { initFilePalette, spaceRootFor, handleFilePaletteTree } from "./center/file-palette.js";
 import {
-  APP_DRAWN_LINK_EXTS, consoleSpace, openBrowser, openDownloadedLocal, openDroppedLocal, openFile, openLocalLink,
+  APP_DRAWN_LINK_EXTS, consoleSpace, openBrowser, openDownloadedLocal, openDroppedLocal, openFile, openInSpaceBrowser, openLocalLink,
 } from "./center/file-routing.js";
 import { initCenterFileDrop } from "./center/file-drop.js";
 import {
@@ -97,6 +99,7 @@ window.addEventListener("error", (e) => {
     console.log("[browser] uncaught:", e.message, "@" + (e.lineno || "?") + ":" + (e.colno || "?"), st);
   } catch (x) {}
 });
+initMotion();   // 다른 초기화보다 먼저: 켜져 있던 전환·애니메이션이 첫 프레임부터 멈춰 있어야 한다
 const $ = (s) => document.querySelector(s);
 const esc = (s) => (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // 파일 계열 탭인지 판정한다. 순수 함수이고, init 인자로 즉시 평가되므로 위쪽에 둔다.
@@ -108,7 +111,6 @@ const isFileLikeKind = (k) => k === "file" || isFileLikeTabKind(k);
 // 이후 모듈을 분리할 때도 같은 순서를 지킨다.
 const blog = (...a) => { try { console.log("[browser]", ...a); } catch {} };
 const cssEsc = (s) => (window.CSS && CSS.escape) ? CSS.escape(s) : s;
-const statusClass = (s) => ["working","idle","blocked","done","unknown"].includes(s) ? s : "idle";
 const countSubs = (n) => (n || []).reduce((a, x) => a + 1 + countSubs(x.children), 0);
 // Monaco 안에서도 앱 전체의 에이전트·rail 이동 키가 같게 동작하게 하는 공용 연결.
 // 메모와 일반 파일 편집기가 함께 쓰고, 실제 이동 명령은 main과 rail이 소유한다.
@@ -258,7 +260,7 @@ let activeFile = null;
 // ── Explorer(포커스 스페이스 파일 트리, 좌상) + Spaces 목록(좌중) ──
 // 최상위 DOM 조회와 파일 트리 click listener 의 초기화 위치. 상태와 연결은 explorer/tree.js 가 소유한다.
 initTree({
-  $, esc, wsSend, statusClass, orderedSpaces,
+  $, esc, wsSend, orderedSpaces,
   getIsLocal: () => isLocal,
   getSelectedSpaceId: () => selectedSpaceId,
   getActiveFile: () => activeFile,
@@ -272,7 +274,20 @@ let toastTimer = null;
 function showToast(msg) { const t = $("#copied-toast"); if (!t) return; t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1600); }
 // main 이 조용히 취소한 일을 사람에게 한 줄로 알린다. 그게 없으면 버튼이 안 먹는 것으로만 보인다.
 try { window.acHost?.onNativeNotice?.((m) => { if (m && m.text) showToast(String(m.text)); }); } catch {}
-function copyText(text) { try { window.acHost?.writeClipboard(String(text)); } catch {} try { navigator.clipboard?.writeText(String(text)); } catch {} }
+// 복사했는지를 돌려준다. 호출자는 true 일 때만 복사했다고 알린다. 앱에서는 메인 프로세스가 쓰고
+// 결과를 알려 주고, 브라우저로 연 화면은 웹 API 를 쓴다(권한이 없으면 거절된다).
+async function copyText(text) {
+  const value = String(text ?? "");
+  const host = window.acHost;
+  if (host && typeof host.writeClipboard === "function") {
+    try { return (await host.writeClipboard(value)) === true; } catch { return false; }
+  }
+  try {
+    if (typeof navigator.clipboard?.writeText !== "function") return false;
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch { return false; }
+}
 // docx/sheet 패널에 지금 연 파일의 경로를 보여주고 누르면 복사한다. 브라우저 탭의 주소줄과 같은
 // 역할. 전체
 // 경로는 title(hover)로도 볼 수 있게 그대로 노출한다.
@@ -282,7 +297,7 @@ function filePathBarHtml(path) {
 }
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-copy-path]"); if (!btn) return;
-  copyText(btn.dataset.copyPath); showToast("경로를 복사했습니다");
+  copyText(btn.dataset.copyPath).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다"));
 });
 // 유지되는 알림. 사라지는 토스트와 달리 사용자가 확인을 누를 때까지 남고, 해당 위치로 이동시킨다.
 let noticeSeq = 0;
@@ -385,11 +400,11 @@ initContextMenu({
 // ── Agents (Space별 그룹) ──
 // 최상위 Agents listener 등록 위치. 렌더·drag·우클릭·이름변경 연결을 같은 phase에 등록한다.
 initAgents({
-  $, esc, cssEsc, statusClass, wsSend,
+  $, esc, cssEsc, wsSend,
   getIsLocal: () => isLocal,
   getCurTarget: () => curTarget,
   setCurTarget: (value) => { curTarget = value; },
-  orderedSpaces, spk, saveCollapsed, selectSession, collapsed,
+  orderedSpaces, spk, saveCollapsed, selectSession, collapsed, renderSpaces,
   copyText, showToast,
   getSelectedSpaceId: () => selectedSpaceId,
 });
@@ -459,8 +474,8 @@ function selectSession(target, fromSpace) {
   const a = agentByPane(target);
   if (a && a.workspaceId) lastAgentBySpace[a.workspaceId] = target; // 이 스페이스의 마지막 활성 탭 기억
   tName.textContent = a ? nameOf(a) : target;
-  tSub.innerHTML = a ? `${agentMark(a.agent)}<span>${escHtml(a.status)}</span>` : "";
-  tDot.className = "dot " + statusClass(a?.status);
+  tSub.innerHTML = a ? `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>` : "";
+  paintStateDot(tDot, a);
   initXterm();
   // 임베드된 herdr(같은 세션)를 이 에이전트 pane으로 이동 → 터미널 화면이 그 에이전트로 전환.
   wsSend({ type: "focus", target });
@@ -472,7 +487,10 @@ function selectSession(target, fromSpace) {
   }
   renderAgents();
   revealAgentRow(target);   // 클릭으로 고른 것도 앞뒤가 보이게 한다(목록 끝에 붙지 않도록)
-  if (window.innerWidth <= 820) { $("#right").scrollIntoView(); $("#sidebar").classList.remove("mobile-open"); }
+  callHook("agentchat.sync"); // 채팅 보기가 켜져 있으면 새 pane 의 대화로 바꾼다
+  // 좁은 폭에서 파일·브라우저를 열면 가운데가 터미널을 덮는다(mobile-show). 에이전트를 고르는 것이
+  // 터미널로 돌아가는 길이라 여기서 내린다.
+  if (window.innerWidth <= 820) { $("#center").classList.remove("mobile-show"); $("#right").scrollIntoView(); $("#sidebar").classList.remove("mobile-open"); }
 }
 // Space를 고르면: 그 Space의 파일트리(Explorer)·센터 작업공간·첫 에이전트를 함께 포커싱.
 // VSCode 창이 스페이스마다 각각 존재하는 모델.
@@ -508,7 +526,7 @@ function setHerdrSyncCurTarget(value) { curTarget = value; }
 function herdrSyncSelectedSpaceId() { return selectedSpaceId; }
 initHerdrSync({
   getCurTarget: herdrSyncCurTarget, setCurTarget: setHerdrSyncCurTarget,
-  getSelectedSpaceId: herdrSyncSelectedSpaceId, statusClass, switchToSpaceOf,
+  getSelectedSpaceId: herdrSyncSelectedSpaceId, switchToSpaceOf,
   lastAgentBySpace, tName, tSub, tDot,
 });
 // (ANSI 렌더/컴포저는 xterm.js 엔진으로 대체. initXterm/renderTerm 상단 정의)
@@ -637,8 +655,26 @@ try { window.acHost && acHost.onContextAction && acHost.onContextAction((message
 // 페이지 안에서 누른 로컬 링크. 브라우저가 못 그리는 것(표·문서·압축파일)과 앱이 그리기로 한
 // 것(마크다운)이 여기로 온다. 처리하지 않으면 같은 탭에서는 내려받기로 빠지고 새 탭에서는 동작하지 않는다.
 try { window.acHost && acHost.onOpenLocal && acHost.onOpenLocal((m) => {
-  if (m && m.target) openLocalLink(m.target);
+  if (!m || !m.target) return;
+  // 메모 창에서 누른 웹 링크도 이 길로 온다. 브라우저는 콘솔 창에만 있다.
+  if (/^https?:\/\//i.test(m.target)) openInSpaceBrowser(m.target); else openLocalLink(m.target);
 }); } catch (e2) {}
+// 메모·마크다운 미리보기의 웹 링크. 그대로 두면 target=_blank 가 창의 열기 처리기로 가서 외부 브라우저가
+// 연다. 스페이스 브라우저에서 열고, 메모 창에는 브라우저가 없어 콘솔 창으로 넘긴다. file 링크는 여기서
+// 열지 않는다. 메모는 원격도 쓸 수 있어 작업 폴더 밖 파일을 편집기에 열고 저장 허용까지 주게 된다.
+// file·mailto 등은 기본 동작(기본 앱)에 맡긴다.
+function openMarkdownWebLink(href) {
+  if (MEMO_MODE) { try { acHost && acHost.openInConsole && acHost.openInConsole(href); } catch (err) {} return; }
+  openInSpaceBrowser(href);
+}
+document.addEventListener("click", (e) => {
+  const a = e.target instanceof Element ? e.target.closest("a[data-md-link]") : null;
+  if (!a || e.button !== 0) return;
+  const href = markdownWebLink(a.getAttribute("href"));
+  if (!href) return;
+  e.preventDefault();
+  openMarkdownWebLink(href);
+});
 // 로컬에서 받은 파일: 뷰어가 맡는 종류만 연다. 그 판정은 등록표가 한다.
 try { window.acHost && acHost.onDownloaded && acHost.onDownloaded((m) => {
   if (m && m.path) openDownloadedLocal(m.path);
@@ -661,6 +697,7 @@ initTextEditor({
   withFileViewTransition, bindAgentKeys, wsSend, isFileLikeKind, showToast,
   getRenderedFileOwner,
   getRenderedFileToken,
+  openWebLink: (href) => openMarkdownWebLink(href),
 });
 
 initMarkdown({ esc });
@@ -948,7 +985,8 @@ function handleStateMessage(m) {
       const agents = getLastAgents();
       const foc = agents.find((a) => a.focused);
       if (foc && !BROWSER_MODE) scheduleHerdrSync(foc.paneId); // 분리창은 콘솔 포커스 동기화 안 함
-      if (curTarget) { const a = agentByPane(curTarget); if (a) { tName.textContent = nameOf(a); tSub.innerHTML = `${agentMark(a.agent)}<span>${escHtml(a.status)}</span>`; tDot.className = "dot " + statusClass(a.status); } }
+      if (curTarget) { const a = agentByPane(curTarget); if (a) { tName.textContent = nameOf(a); tSub.innerHTML = `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>`; paintStateDot(tDot, a); } }
+      callHook("agentchat.sync"); // 에이전트 상태(답 기다림)와 pane 목록 변화를 채팅 보기에 알린다
       const running = agents.filter((a) => a.status === "working").length;
       $("#meta").textContent = `${agents.length} · ${running}▶`;
 }
@@ -1280,6 +1318,8 @@ function capabilityBootArgs(items) {
       getCurTarget: terminalCurTarget,
       getProfileChromeSource, autofillBlocked,
       closedTabsForView, reopenClosedTab, uiToken,
+      // 공통 북마크가 쓰는 값: 서버 상태의 현재 객체와 북마크바 다시 그리기.
+      getBrowserState, renderBookmarks,
       renderTabs, showActiveTab,
       copyText, MEMO_MODE, orderedSpaces, spk, memoReqId,
       cssEsc, forgetTabWc, createWebview, navigateOn,

@@ -1,202 +1,193 @@
-/* 편의 기능 화면: 단축키 목록과 최근 닫은 탭 */
-/* 이 이름을 만드는 곳: devtool/keymap-page.js · devtool/rail.js · index.html */
+/* 설정 화면: 왼쪽 분류와 오른쪽 내용(단축키 · 편의 기능 · 창 전환 · 부산물 · 보안) */
+/* 이 이름을 만드는 곳: devtool/settings-view.js · devtool/artifacts-view.js · devtool/keymap-page.js · index.html */
+/* 앱에는 button 기본 모양을 지우는 전역 규칙이 없어서 단추마다 글꼴·배경·테두리를 스스로 정한다. */
 
-/* 화면을 지배하는 것은 조합 그 자체다. 이름은 읽는 것이고 조합은 찾는 것이라, 조합 칩을
-   오른쪽 한 줄에 세로로 정렬해 눈이 그 열만 훑어도 되게 한다. */
-/* 배치는 03-feature-modes.css 가 갖고 이 CSS 는 폭만 갖는다. 여기서 나머지 여덟 화면을
-   이름으로 나열하면 양방향으로 열여섯 줄이 필요하다. 그 규칙은 rail-panel · is-open ·
-   screen-open 세 규칙으로 대체했다. */
+/* 배치는 03-feature-modes.css 가 갖고 이 CSS 는 폭만 갖는다. */
 .km-panel { width:420px; }
+.km-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; }
 
-.km-body { flex:1 1 auto; min-height:0; overflow:auto; padding:12px 14px 24px; }
-body.util-full .km-body { max-width:840px; }
+/* ── 틀: 왼쪽 분류 + 오른쪽 내용 ── */
+.km-split { flex:1; min-width:0; min-height:0; display:flex; background:var(--surface); overflow:hidden; }
+.km-pane { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+.km-scroll { flex:1; min-height:0; overflow:auto; }
+.km-h2 { font:600 var(--fs-h)/1 var(--sans); letter-spacing:-.015em; color:var(--fg); white-space:nowrap; }
+.km-faint { color:var(--faint); }
+.km-sp { flex:1; }
 
-.km-search { position:sticky; top:0; z-index:2; display:flex; gap:8px; align-items:center;
-  padding:0 0 11px; background:var(--sidebar); }
-.km-search input { flex:1 1 auto; min-width:0; padding:6px 10px; border-radius:var(--r-blk); font:inherit; font-size:var(--fs-sm);
-  background:var(--bg); color:var(--fg); border:1px solid var(--border);
-  transition:border-color var(--t-fade) var(--ease); }
-.km-search input:focus { outline:none; border-color:var(--ai); }
+.km-nav-col { width:176px; flex:none; background:var(--chrome); border-right:1px solid var(--line); display:flex; flex-direction:column; }
+.km-nav-top { height:44px; display:flex; align-items:center; padding:0 16px; }
+.km-nav-list { padding:0 6px; }
+.km-nav { width:100%; height:var(--row); display:flex; align-items:center; gap:6px; padding:0 8px; border:0; border-radius:var(--r-s);
+  background:none; font:inherit; color:var(--fg-2); white-space:nowrap; position:relative; cursor:pointer; }
+.km-nav:hover { background:var(--hover); color:var(--fg); }
+.km-nav.on { background:var(--select); color:var(--select-fg); }
+.km-nav.on::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background:var(--accent); }
+.km-nav-c { margin-left:auto; font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); }
+.km-nav.on .km-nav-c { color:inherit; opacity:.8; }
 
-.km-sec { margin:0 0 20px; }
-.km-sec-h { display:flex; align-items:center; gap:8px; font-size:var(--fs-xs); font-weight:var(--fw-semi); color:var(--fg);
-  padding:0 0 8px; border-bottom:1px solid var(--border); margin:0 0 6px; }
-.km-dim { font-weight:var(--fw); color:var(--muted-fg); }
+/* ── 부품: 단추 · 검색 · 세그먼트 · 스위치 · 경고 · 소제목 ── */
+.km-btn { height:24px; padding:0 10px; display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line-strong); border-radius:var(--r-s);
+  background:none; font:inherit; font-size:var(--fs-s); color:var(--fg-2); white-space:nowrap; cursor:pointer; }
+.km-btn:hover:not(:disabled) { background:var(--hover); color:var(--fg); border-color:var(--focus); }
+.km-btn:active:not(:disabled) { transform:scale(.97); }
+.km-btn:disabled { opacity:.45; cursor:default; }
+.km-btn.ghost { border-color:transparent; color:var(--muted); }
+.km-btn.ghost:hover { border-color:var(--line); }
+/* 휴지통으로 보내는 단추. 겹친 조합 표시와 같은 빨강을 쓴다. */
+.km-btn.danger { color:var(--pal-danger); }
+.km-btn.danger:hover:not(:disabled) { color:var(--pal-danger); border-color:var(--pal-danger); }
 
-.km-warn { margin:0 0 14px; padding:8px 11px; border-radius:var(--r-card); font-size:var(--fs-xs); line-height:var(--lh); color:var(--fg);
-  background:color-mix(in srgb,var(--destructive) 12%,var(--card));
-  border:1px solid color-mix(in srgb,var(--destructive) 34%,var(--border)); }
-.km-warn b { font-variant-numeric:tabular-nums; }
+.km-search { width:300px; height:26px; display:flex; align-items:center; gap:7px; padding:0 8px; border-radius:var(--r); border:1px solid var(--line);
+  background:var(--raised); color:var(--faint); }
+.km-search:focus-within { border-color:var(--focus); }
+.km-search input { flex:1; min-width:0; background:none; border:0; outline:none; color:var(--fg); font:inherit; }
+.km-search input::placeholder { color:var(--faint); }
+.km-search input::-webkit-search-cancel-button { display:none; }
+/* 칸 테두리가 이미 포커스를 보이므로 01-base 의 :focus-visible 링을 입력칸 안쪽에 또 그리지 않는다. */
+.km-search input:focus-visible { box-shadow:none; }
 
-.km-row { display:flex; align-items:center; gap:10px; padding:5px 0; min-height:30px; }
-.km-what { flex:1 1 auto; min-width:0; display:flex; align-items:baseline; gap:8px; }
-.km-label { font-size:var(--fs-sm); color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.km-where { flex:none; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.km-row.locked .km-label { color:var(--muted-fg); }
+.km-seg { display:inline-flex; border:1px solid var(--line-strong); border-radius:var(--r-s); overflow:hidden; }
+.km-seg button { height:22px; padding:0 10px; border:0; background:none; font:inherit; font-size:var(--fs-s); color:var(--muted); cursor:pointer; }
+.km-seg button + button { border-left:1px solid var(--line-strong); }
+.km-seg button:hover { background:var(--hover); color:var(--fg); }
 
-/* 조합 칩. 누르면 그 자리에서 새 조합을 받는다. 별도 대화상자를 띄우면 그 창의 키를
-   가로채는 문제가 추가된다. */
-.km-keys { flex:none; min-width:92px; text-align:center; padding:4px 10px; border-radius:var(--r-blk);
-  font-family:var(--mono); font-size:var(--fs-xs); font-weight:var(--fw-semi); letter-spacing:var(--ls); font-variant-numeric:tabular-nums;
-  color:var(--fg); background:var(--card); border:1px solid var(--border); cursor:pointer;
-  transition:background var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-button.km-keys:hover { border-color:var(--ring); background:var(--accent); }
-.km-keys.rec { min-width:172px; background:var(--ai); color:#fff; animation:km-pulse 1.1s ease-in-out infinite; }
-.km-keys.locked { cursor:default; background:var(--muted); color:var(--muted-fg); border-color:var(--border);
-  display:inline-flex; align-items:center; gap:7px; justify-content:center; }
-.km-lock { font-size:var(--fs-2xs); font-weight:var(--fw-med); opacity:.8; }
-.km-row.changed .km-keys { box-shadow:0 0 0 2px color-mix(in srgb,var(--ai) 45%,transparent); }
+.km-sw { width:28px; height:16px; border:0; border-radius:8px; background:var(--line-strong); position:relative; flex:none; font:inherit; color:inherit; cursor:pointer; }
+.km-sw i { position:absolute; left:2px; top:2px; width:12px; height:12px; border-radius:50%; background:var(--muted);
+  transition:transform var(--t) var(--ease), background var(--t) var(--ease); }
+.km-sw.on { background:var(--accent); }
+.km-sw.on i { transform:translateX(12px); background:var(--pal-ink); }
+.km-sw:active i { width:14px; }
 
-@keyframes km-pulse { 0%,100% { opacity:1 } 50% { opacity:.72 } }
-@media (prefers-reduced-motion: reduce) { .km-keys.rec { animation:none } }
+/* 경고. 빨강은 지금 동작하지 않는 것, 노랑은 알고 있어야 할 조건이다. */
+.km-warn { display:flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid rgb(var(--pal-danger-rgb) / .35); border-radius:var(--r);
+  background:rgb(var(--pal-danger-rgb) / .06); color:var(--fg-2); font-size:var(--fs-s); }
+.km-warn-d { width:6px; height:6px; border-radius:50%; background:var(--pal-danger); flex:none; }
+.km-warn b { font:600 var(--fs-s)/1 var(--mono); color:var(--pal-danger); }
+.km-warn.y { border-color:rgb(var(--pal-yellow-pop-rgb) / .3); background:rgb(var(--pal-yellow-pop-rgb) / .05); }
+.km-warn.y .km-warn-d { background:var(--pal-yellow-pop); }
+.km-warn-sm { margin-top:8px; }
 
-.km-undo { flex:none; padding:3px 8px; border-radius:var(--r-blk); font:inherit; font-size:var(--fs-2xs);
-  color:var(--muted-fg); background:none; border:1px solid var(--border); cursor:pointer;
-  transition:color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.km-undo:hover { color:var(--fg); border-color:var(--ai); }
-.km-undo-space { flex:none; width:58px; }
+.km-sh { display:flex; align-items:baseline; gap:8px; padding:0 8px 6px; }
+.km-sh-t { margin:0; font:600 var(--fs-s)/1 var(--sans); color:var(--fg-2); }
+.km-sh-n { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
 
-.km-why { font-size:var(--fs-2xs); line-height:var(--lh); color:var(--muted-fg); padding:0 0 7px 0; margin:-3px 0 4px; }
+/* 목록이 비었거나 아직 읽는 중일 때 한 줄로 적는다. */
+.km-empty { padding:10px 8px; font-size:var(--fs-s); color:var(--muted); line-height:1.5; }
 
-.km-btn { margin-left:auto; padding:3px 9px; border-radius:var(--r-blk); font:inherit; font-size:var(--fs-2xs);
-  color:var(--muted-fg); background:none; border:1px solid var(--border); cursor:pointer;
-  transition:color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.km-btn:hover { color:var(--fg); border-color:var(--ai); }
-.km-closed + .km-btn { margin:9px 0 0; }
+/* ── 단축키 ── */
+.km-tool { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding:0 24px; border-bottom:1px solid var(--line); }
+.km-keys-in { padding:12px 16px 16px; display:flex; flex-direction:column; gap:12px; }
+.km-cols { display:grid; grid-template-columns:1fr 1fr; gap:0 24px; }
+.km-grp + .km-grp { margin-top:12px; }
 
-.km-empty { font-size:var(--fs-xs); color:var(--muted-fg); padding:10px 0; }
+/* 한 줄: 표시 칸 · 이름 · (되돌리기) · 조합. 이름과 조합 사이를 좁혀 눈이 한 줄을 따라가게 한다. */
+.km-row { height:var(--row); display:flex; align-items:center; gap:8px; padding:0 4px 0 8px; border-radius:var(--r-s); color:var(--fg-2); position:relative; }
+.km-row:hover { background:var(--hover); color:var(--fg); }
+.km-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.km-row.locked .km-label { color:var(--muted); }
+.km-lead { width:12px; flex:none; display:grid; place-items:center; color:var(--faint); }
+.km-lead svg { width:12px; height:12px; }
+.km-chg { width:5px; height:5px; border-radius:50%; background:var(--ai); display:block; }
+.km-undo { padding:2px 5px; border:0; border-radius:var(--r-s); background:none; font:inherit; font-size:var(--fs-xs); color:var(--muted); cursor:pointer; }
+.km-undo:hover { background:var(--hover); color:var(--fg); }
 
-.km-ct { display:flex; align-items:center; gap:9px; padding:4px 0; font-size:var(--fs-xs); min-width:0; }
-.km-ct-kind { flex:none; font-size:var(--fs-2xs); padding:1.5px 6px; border-radius:var(--r-ctl);
-  color:var(--muted-fg); background:var(--muted); }
-.km-ct-name { flex:1 1 auto; min-width:0; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* 조합. 글자마다 한 칸이고, 누르면 그 자리에서 새 조합을 받는다. 별도 대화상자를 띄우면
+   그 창의 키를 가로채는 문제가 추가된다. */
+.km-keys { display:inline-flex; align-items:center; gap:3px; height:22px; padding:0 3px; border-radius:var(--r-s); border:1px solid transparent; flex:none; }
+button.km-keys { background:none; font:inherit; color:inherit; cursor:pointer; }
+button.km-keys:hover { border-color:var(--line-strong); background:var(--hover); }
+button.km-keys:active { transform:scale(.97); }
+.km-kc { min-width:20px; height:18px; padding:0 5px; display:inline-grid; place-items:center; border-radius:3px; border:1px solid var(--line-strong);
+  background:var(--raised); font:500 var(--fs)/1 var(--sans); color:var(--fg-2); }
+.km-keys.locked .km-kc { border-color:var(--line); background:none; color:var(--faint); }
+.km-keys.bad .km-kc { border-color:var(--pal-danger); color:var(--pal-danger); }
+.km-keys.rec { border-color:var(--ai); color:var(--ai); background:rgb(var(--pal-pink-rgb) / .08); padding:0 8px; font-size:var(--fs-s); gap:8px; }
+.km-rec-dot { width:6px; height:6px; border-radius:50%; background:var(--ai); animation:km-pulse 1.1s var(--ease) infinite; }
+@keyframes km-pulse { 50% { opacity:.25; } }
 
-/* ── 좌측 분류 + 우측 내용 ──
-   이 화면은 언제나 뷰어를 덮은 넓은 폭에 선다. 한 줄짜리 목록을 그대로 늘이면 이름은 왼쪽 끝,
-   조합은 오른쪽 끝에 붙어 사이가 통째로 빈다. 왼쪽에 분류를 세우고 내용은 읽을 수 있는 폭으로 묶는다. */
-.km-split { display:flex; align-items:stretch; min-height:0; gap:0; }
-.km-nav-col { flex:none; width:132px; display:flex; flex-direction:column; gap:2px;
-  padding:0 12px 0 0; border-right:1px solid var(--border); }
-.km-nav { display:flex; align-items:center; gap:8px; width:100%; text-align:left; font:inherit; font-size:var(--fs-sm);
-  padding:7px 10px; border:none; border-left:2px solid transparent; border-radius:0 var(--r-blk) var(--r-blk) 0;
-  background:none; color:var(--muted-fg); cursor:pointer;
-  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.km-nav:hover { color:var(--fg); background:var(--accent); }
-.km-nav.on { color:var(--fg); background:var(--sidebar-accent); border-left-color:var(--ai); font-weight:var(--fw-semi); }
-.km-nav-n { flex:1; min-width:0; }
-.km-nav-c { flex:none; font-size:var(--fs-2xs); font-weight:var(--fw-med); color:var(--muted-fg); font-variant-numeric:tabular-nums; }
-.km-pane { flex:1 1 auto; min-width:0; padding:0 0 0 20px; max-width:760px; }
-.km-pane-h { display:flex; align-items:center; gap:8px; margin:0 0 12px; }
-.km-pane-h #km-search { flex:1 1 auto; min-width:0; max-width:320px; padding:6px 10px; border-radius:var(--r-blk);
-  font:inherit; font-size:var(--fs-sm); background:var(--bg); color:var(--fg); border:1px solid var(--border); }
-.km-pane-h #km-search:focus { outline:none; border-color:var(--ring); }
-.km-pane-t { font-size:var(--fs-xs); font-weight:var(--fw-semi); }
-.km-pane-h .km-btn { margin-left:auto; }
-.km-warn-sm { margin:6px 0 0; }
+/* ── 편의 기능 · 창 전환 · 부산물 · 보안 ── */
+.km-spane { padding:0 24px 24px; max-width:760px; }
+.km-phead { height:44px; display:flex; align-items:center; gap:10px; }
+.km-note { font-size:var(--fs-s); color:var(--muted); line-height:1.5; margin-bottom:10px; }
 
-/* 켜짐·꺼짐은 글자보다 형태로 읽힌다. */
-.km-note { padding:2px 0 8px; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.km-toggle.locked { opacity:.55; }
-.km-sw-space { flex:none; width:34px; }
-/* 프리셋. 한 번에 여러 기능을 켜고 끈다. 토글 목록 바로 위에 두어 어느 묶음인지 보이게 한다. */
-.km-presets { display:flex; flex-wrap:wrap; gap:6px; padding:2px 0 12px; }
-.km-preset { border:1px solid var(--border); background:var(--sidebar-accent); color:var(--fg);
-  font-size:var(--fs-xs); padding:5px 11px; border-radius:var(--r-pill); cursor:pointer;
-  transition:border-color var(--t-fade) var(--ease); }
-.km-preset:hover { border-color:var(--accent); }
-.km-preset:active { transform:translateY(1px); }
-.km-toggle { display:flex; align-items:flex-start; gap:12px; padding:11px 0; border-bottom:1px solid var(--border); }
-.km-tx { flex:1 1 auto; min-width:0; }
-.km-tn { font-size:var(--fs-sm); font-weight:var(--fw-semi); }
-.km-td { font-size:var(--fs-xs); color:var(--muted-fg); line-height:var(--lh); margin-top:3px; max-width:78ch; }
-.km-sw { flex:none; margin-top:2px; width:34px; height:19px; padding:0; border:1px solid var(--border);
-  border-radius:var(--r-pill); background:var(--bg); cursor:pointer; position:relative;
-  transition:background var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.km-sw i { position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%;
-  background:var(--muted-fg); transition:left var(--t-fade) var(--ease), background var(--t-fade) var(--ease); }
-.km-sw:hover { border-color:var(--ring); }
-.km-sw.on { background:var(--primary); border-color:var(--primary); }
-.km-sw.on i { left:16px; background:var(--primary-fg); }
-.km-sw-s { flex:none; margin-top:3px; width:46px; text-align:right; font-size:var(--fs-2xs); color:var(--muted-fg); }
+/* 켜고 끄는 줄. 켜짐·꺼짐은 글자보다 형태로 읽힌다. */
+.km-toggle { display:flex; align-items:center; gap:12px; min-height:34px; padding:5px 8px; border-bottom:1px solid var(--line); color:var(--fg-2); }
+.km-toggle:last-child { border-bottom:0; }
+/* 설명과 경고가 여러 줄인 줄은 스위치를 첫 줄에 맞춘다. */
+.km-toggle.top { align-items:flex-start; padding-top:10px; padding-bottom:10px; }
+.km-toggle.top .km-sw { margin-top:2px; }
+.km-tx { flex:1; min-width:0; }
+.km-tn { display:block; color:var(--fg); }
+.km-td { display:block; font-size:var(--fs-s); color:var(--muted); line-height:1.45; margin-top:2px; }
+.km-sw-s { width:52px; font-size:var(--fs-xs); color:var(--faint); text-align:right; flex:none; }
+.km-sw-space { width:28px; flex:none; }
 
-/* ⌥Tab 창 그림을 쓸 수 없을 때는 같은 자리를 앱 아이콘으로 채운다. */
-.km-switcher { margin-top:18px; min-width:0; }
-.km-switcher-h { margin-bottom:14px; align-items:flex-start; gap:18px; }
-.km-sw-intro { margin-top:6px; line-height:1.55; }
-#sw-refresh { flex:none; margin-left:auto; padding:3px 10px; font-size:var(--fs-2xs); }
-.km-sw-message { display:flex; align-items:center; gap:12px; }
-#sw-open-perm, #sw-open-accessibility { flex:none; margin-left:auto; }
-.km-sw-list-note { margin:0 0 6px; }
-.km-sw-list { min-width:0; border-top:1px solid var(--border); }
-.km-sw-row { min-width:0; min-height:34px; display:flex; align-items:center; gap:9px;
-  padding:3px 0; border-bottom:1px solid var(--border); }
+/* 창 전환 */
+.km-switcher .km-sh { padding-left:0; }
+.km-sw-message { margin-bottom:12px; }
+.km-sw-picked-list { margin-bottom:14px; }
+.km-sw-row { display:flex; align-items:center; gap:12px; min-height:34px; padding:5px 8px; border-bottom:1px solid var(--line); color:var(--fg-2); }
+.km-sw-row:last-child { border-bottom:0; }
 .km-sw-row.dim { opacity:.48; }
-.km-sw-visual { flex:none; display:grid; place-items:center; width:42px; height:28px;
-  overflow:hidden; border:1px solid var(--border); border-radius:var(--r-blk); background:var(--muted); }
-.km-sw-row-icon { width:70%; height:70%; object-fit:contain; }
-.km-sw-icon-fallback { display:grid; place-items:center; border:1px solid var(--border); border-radius:var(--r-card);
-  background:var(--muted); color:var(--muted-fg); font-weight:var(--fw-semi); }
-.km-sw-row-icon.km-sw-icon-fallback { width:24px; height:20px; border-radius:var(--r-ctl); font-size:var(--fs-2xs); }
-.km-sw-thumb { width:100%; height:100%; object-fit:contain; }
-.km-sw-copy { flex:1 1 auto; min-width:0; }
-.km-sw-title-line, .km-sw-meta { min-width:0; display:flex; align-items:center; gap:7px; }
-.km-sw-title { min-width:0; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-size:var(--fs-xs); line-height:1.2; }
-.km-sw-title.empty { color:var(--muted-fg); }
-.km-sw-badges { flex:none; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:3px; }
-.km-sw-badge { padding:0 5px; border:1px solid var(--border); border-radius:var(--r-pill); font-size:var(--fs-2xs);
-  line-height:1.35; color:var(--fg); background:color-mix(in srgb, var(--bg) 88%, transparent); }
-.km-sw-meta { margin-top:2px; font-size:var(--fs-2xs); line-height:1.2; color:var(--muted-fg); }
+.km-sw-visual { width:22px; height:22px; border-radius:5px; display:grid; place-items:center; background:var(--select); color:var(--fg-2);
+  font-size:var(--fs-s); font-weight:600; flex:none; overflow:hidden; }
+.km-sw-row-icon { width:100%; height:100%; object-fit:contain; }
+.km-sw-icon-fallback { display:grid; place-items:center; }
+.km-sw-thumb { width:100%; height:100%; object-fit:cover; }
+.km-sw-copy { flex:1; min-width:0; }
+.km-sw-title-line { min-width:0; display:flex; align-items:center; }
+.km-sw-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); }
+.km-sw-title.empty { color:var(--muted); }
+.km-sw-badges { flex:none; }
+.km-sw-badge { font-size:var(--fs-xs); color:var(--muted); border:1px solid var(--line); border-radius:3px; padding:1px 5px; margin-left:6px; }
+.km-sw-meta { min-width:0; display:flex; align-items:center; gap:6px; font-size:var(--fs-s); color:var(--muted); line-height:1.45; margin-top:2px; }
 .km-sw-app, .km-sw-reason { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .km-sw-app { flex:none; max-width:38%; }
 .km-sw-reason { flex:1 1 auto; }
-.km-sw-reason::before { content:"·"; margin-right:7px; }
-.km-sw-row > .km-sw { flex:none; margin:0 0 0 3px; }
+.km-sw-reason::before { content:"·"; margin-right:6px; }
+.km-sw-order { display:flex; gap:2px; }
 .km-sw-blocked-note { margin-top:8px; }
 
-/* 부산물 정리. 종류를 눌러 펼치면 날짜가 나오고, 날짜를 눌러 펼치면 그날 항목이 나온다.
-   줄 하나에 이름·설명·수량을 나란히 두는 것은 위 목록들과 같은 규칙이다. */
-.art-list { border-top:1px solid var(--border); }
-.art-kind { display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); }
-.art-head { flex:1 1 auto; min-width:0; display:flex; align-items:baseline; gap:10px;
-  padding:0; border:0; background:none; color:inherit; font:inherit; text-align:left; cursor:pointer; }
-.art-caret { flex:none; width:12px; color:var(--muted-fg); font-size:var(--fs-2xs); }
-.art-n { flex:none; font-size:var(--fs-sm); font-weight:var(--fw-semi); }
-.art-d { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-size:var(--fs-2xs); color:var(--muted-fg); }
-.art-c { flex:none; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.art-head:hover .art-n { color:var(--ai); }
-.art-rows { padding:2px 0 10px 22px; border-bottom:1px solid var(--border); }
-.art-row { display:flex; align-items:center; gap:10px; min-height:26px; }
-.art-f { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-size:var(--fs-xs); }
-.art-sub { color:var(--muted-fg); font-size:var(--fs-2xs); }
-.art-s { flex:none; width:72px; text-align:right; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.art-t { flex:none; width:112px; text-align:right; font-size:var(--fs-2xs); color:var(--muted-fg); }
-.art-days { padding:2px 0 8px 22px; border-bottom:1px solid var(--border); }
-.art-day { display:flex; align-items:center; gap:10px; min-height:28px; }
-.art-day-h { flex:1 1 auto; min-width:0; display:flex; align-items:baseline; gap:10px;
-  padding:0; border:0; background:none; color:inherit; font:inherit; text-align:left; cursor:pointer; }
-.art-date { flex:none; font-size:var(--fs-xs); font-variant-numeric:tabular-nums; }
-.art-day-h:hover .art-date { color:var(--ai); }
+/* 부산물. 종류를 눌러 펼치면 날짜가 나오고, 날짜를 눌러 펼치면 그날 항목이 나온다. */
+.art-kind { display:flex; align-items:center; gap:12px; min-height:34px; padding:5px 8px; border-bottom:1px solid var(--line); color:var(--fg-2); }
+.art-kind:has(> .art-head:hover) { background:var(--hover); }
+.art-head { flex:1; min-width:0; display:flex; align-items:center; gap:12px; padding:0; border:0; background:none; font:inherit; letter-spacing:inherit; color:inherit;
+  text-align:left; cursor:pointer; }
+.art-caret { color:var(--faint); }
+.art-kind.open > .art-head .art-caret, .art-day.open > .art-day-h .art-caret { transform:rotate(90deg); }
+.art-c { flex:none; font-size:var(--fs-xs); color:var(--faint); text-align:right; }
+.art-act-space { flex:none; width:48px; }
+.art-days { padding:2px 0 8px 22px; border-bottom:1px solid var(--line); }
+.art-day { display:flex; align-items:center; gap:12px; min-height:var(--row); padding:0 8px; border-radius:var(--r-s); }
+.art-day:has(> .art-day-h:hover) { background:var(--hover); }
+.art-day-h { flex:1; min-width:0; display:flex; align-items:center; gap:12px; padding:0; border:0; background:none; font:inherit; color:inherit;
+  text-align:left; cursor:pointer; }
+.art-date { flex:none; font-family:var(--mono); font-size:var(--fs-s); }
 .art-day .art-c { margin-left:auto; }
+.art-rows { padding:2px 0 10px 22px; border-bottom:1px solid var(--line); }
 /* 항목 줄은 날짜 아래로 한 단계 더 들여쓴다. 어느 날짜에 속한 것인지 구분된다. */
 .art-day + .art-rows { padding-left:22px; border-bottom:0; }
-.art-row.on .art-f { color:var(--ai); }
-.art-f[data-art-open] { padding:0; border:0; background:none; color:inherit; font:inherit;
-  text-align:left; cursor:pointer; }
-.art-f[data-art-open]:hover { color:var(--ai); }
+.art-row, .art-pv-row { display:flex; align-items:center; gap:10px; min-height:var(--row); padding:0 8px; border-radius:var(--r-s); }
+.art-row:hover, .art-pv-row:hover { background:var(--hover); }
+.art-row.on { background:var(--select); }
+.art-f { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0; border:0; background:none; font:inherit;
+  color:var(--fg-2); text-align:left; cursor:pointer; }
+.art-row:hover .art-f, .art-pv-row:hover .art-f { color:var(--fg); }
+.art-row.on .art-f { color:var(--select-fg); }
+.art-sub { color:var(--faint); font-size:var(--fs-xs); }
+.art-s { flex:none; width:72px; text-align:right; font-size:var(--fs-xs); color:var(--faint); }
+.art-t { flex:none; width:112px; text-align:right; font-family:var(--mono); font-size:var(--fs-xs); color:var(--faint); }
 
 /* 미리보기. 누른 줄 바로 아래에서 열려 목록을 유지한 채 내용을 볼 수 있다. */
-.art-pv { margin:4px 0 10px; padding:8px; border:1px solid var(--border); border-radius:6px;
-  background:var(--panel-2, var(--panel)); }
+.art-pv { margin:4px 0 10px; padding:8px; border:1px solid var(--line); border-radius:var(--r); background:var(--raised); }
 .art-pv-h { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-.art-pv-n { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-size:var(--fs-2xs); color:var(--muted-fg); }
-.art-pv-img { display:block; max-width:100%; max-height:480px; object-fit:contain;
-  border:1px solid var(--border); border-radius:4px; background:#fff; }
-.art-pv-txt { max-height:360px; overflow:auto; margin:0; padding:8px; border-radius:4px;
-  background:var(--code-bg, rgba(0,0,0,.18)); font-size:var(--fs-2xs); line-height:1.5;
-  white-space:pre-wrap; word-break:break-word; }
+.art-pv-n { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-xs); color:var(--muted); }
+.art-pv-img { display:block; max-width:100%; max-height:480px; object-fit:contain; border:1px solid var(--line); border-radius:var(--r-s); background:var(--fg); }
+.art-pv-txt { max-height:360px; overflow:auto; margin:0; padding:8px; border-radius:var(--r-s); background:var(--surface);
+  font:500 var(--fs-xs)/1.5 var(--mono); color:var(--fg-2); white-space:pre-wrap; word-break:break-word; }
 .art-pv-dir { max-height:280px; overflow:auto; }
-.art-pv-row { display:flex; align-items:center; gap:10px; min-height:24px; }
+
+/* 누르는 요소만 움직인다. body.motion-off 는 01-base.css 가 끈다. */
+.km-nav, .km-btn, .km-search, .km-seg button, .km-sw, .km-row, .km-undo, .km-keys, .art-kind, .art-head, .art-caret, .art-day, .art-row, .art-pv-row, .art-f {
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease),
+    transform .12s var(--ease), opacity var(--t) var(--ease); }

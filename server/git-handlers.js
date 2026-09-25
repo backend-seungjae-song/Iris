@@ -67,14 +67,16 @@ export function nestedRepos(dir, { depth = REPO_SCAN_DEPTH, max = REPO_SCAN_MAX,
 function gitCodeOf(c) { return ({ M: "M", A: "A", D: "D", R: "R", C: "C", U: "U", "?": "U" })[c] || c; }
 // reqPath = 화면이 요청한 폴더. 응답에 포함해야 화면이 그 폴더가 어느 저장소로 해석됐는지
 // 기억할 수 있다. 중첩 저장소의 .git이 사라지면 같은 폴더가 다른 저장소로 해석되기 때문이다.
-function gitStatusRich(root, reqPath) {
+export function gitStatusRich(root, reqPath) {
   const r = git(root, ["status", "--porcelain=v1", "-uall", "--branch"]);
   const staged = [], changes = []; let branch = "", ahead = 0, behind = 0;
   for (const line of (r.out || "").split("\n")) {
     if (!line) continue;
     if (line.startsWith("## ")) {
-      const b = line.slice(3);
-      branch = b.split("...")[0].split(" ")[0] || "";
+      // 커밋이 없는 브랜치는 "## No commits yet on main"(git 2.28 이전은 "Initial commit on")로 온다.
+      // 앞말을 떼지 않으면 첫 낱말 "No" 가 브랜치 이름이 된다.
+      const b = line.slice(3).replace(/^(?:No commits yet|Initial commit) on /, "");
+      branch =b.split("...")[0].split(" ")[0] || "";
       const ma = b.match(/ahead (\d+)/); if (ma) ahead = +ma[1];
       const mb = b.match(/behind (\d+)/); if (mb) behind = +mb[1];
       continue;
@@ -87,12 +89,16 @@ function gitStatusRich(root, reqPath) {
     if (x !== " " && x !== "?") staged.push({ rel, abs, code: gitCodeOf(x) });
     if (y !== " " && y !== "?") changes.push({ rel, abs, code: gitCodeOf(y), untracked: false });
   }
-  return { type: "git-status", root, path: reqPath || root, isRepo: true, branch, ahead, behind, staged, changes };
+  // branches = 전환할 수 있는 로컬 브랜치. 커밋·전환 뒤에 오는 status 에 함께 실어 목록이 따로 낡지 않게 한다.
+  return { type: "git-status", root, path: reqPath || root, isRepo: true, branch, ahead, behind, staged, changes,
+    branches: gitBranchRefs(root, ["refs/heads"]) };
 }
 // Base 브랜치 후보는 로컬·원격 브랜치 목록이다. 화면이 보낸 base 는 이 목록에 있을 때만 git 에
 // 넘긴다. 목록 밖 문자열을 그대로 넘기면 "--output=..." 같은 값이 옵션으로 해석된다.
-export function gitBranchRefs(root) {
-  const r = git(root, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]);
+// scopes 로 로컬 브랜치만 고를 수 있다. 브랜치 전환 목록은 로컬만 쓴다. 원격 이름으로 전환하면
+// 브랜치가 아닌 분리된 HEAD 가 된다.
+export function gitBranchRefs(root, scopes = ["refs/heads", "refs/remotes"]) {
+  const r = git(root, ["for-each-ref", "--format=%(refname)", ...scopes]);
   const out = [];
   for (const ref of (r.out || "").split("\n")) {
     if (!ref || ref.endsWith("/HEAD")) continue;
@@ -152,7 +158,7 @@ function gitBranchDiff(root, reqPath, base, mode) {
   for (const f of files) f.abs = path.join(root, f.rel);
   return { ...head, files };
 }
-const GIT_MUTATIONS = new Set(["stage", "unstage", "stageAll", "discard", "commit", "push", "pull"]);
+const GIT_MUTATIONS = new Set(["stage", "unstage", "stageAll", "discard", "commit", "push", "pull", "checkout"]);
 // 응답에는 항상 어느 저장소의 결과인지 남긴다. 화면이 저장소를 여러 개 동시에 관리해서,
 // root가 없으면 성공·실패 알림이 어느 섹션 것인지 붙일 데가 없다. root를 아직 모르는 단계(경로
 // 거부)에서는 요청한 폴더(path)를 대신 실어 그 후보를 지울 수 있게 한다.
@@ -221,6 +227,18 @@ export function handleGit(ws, msg) {
     }
     else if (op === "push") { const r = git(root, ["push"], 60000); ws.send(JSON.stringify(r.ok ? { type: "git-ok", op, root, message: "push 완료" } : { type: "git-error", op, root, error: (r.err || r.out || "push 실패").trim() })); }
     else if (op === "pull") { const r = git(root, ["pull", "--ff-only"], 60000); ws.send(JSON.stringify(r.ok ? { type: "git-ok", op, root, message: "pull 완료" } : { type: "git-error", op, root, error: (r.err || r.out || "pull 실패").trim() })); }
+    else if (op === "checkout") {
+      // 로컬 브랜치 목록에 있는 이름만 git 에 넘긴다. 목록 밖 문자열은 옵션이나 커밋으로 해석될 수 있다.
+      // 커밋하지 않은 변경과 겹치면 git 이 거절하고, 그 거절을 그대로 알린다(강제 전환·stash 는 하지 않는다).
+      const b = String(msg.branch || "");
+      if (!gitBranchRefs(root, ["refs/heads"]).includes(b)) { ws.send(JSON.stringify({ type: "git-error", op, root, error: `로컬 브랜치가 없습니다: ${b}` })); return; }
+      const r = git(root, ["switch", b]);
+      let error = (r.err || r.out || "브랜치 전환 실패").trim();
+      // git 은 겹친 파일을 탭으로 들여 쓴 줄로 나열한다. 문구는 사용자 locale 에 따라 달라서 그 줄로만 알아본다.
+      const files = r.ok ? [] : error.split("\n").filter((l) => /^\t\S/.test(l)).map((l) => l.trim());
+      if (files.length) error = `커밋하지 않은 변경이 ${b} 브랜치와 겹쳐 전환하지 못했습니다. 커밋하거나 되돌린 뒤 다시 하세요. (${files.join(", ")})`;
+      ws.send(JSON.stringify(r.ok ? { type: "git-ok", op, root, message: `${b} 브랜치로 전환` } : { type: "git-error", op, root, error }));
+    }
     if (GIT_MUTATIONS.has(op)) { clearGitStatusCache(root); ws.send(JSON.stringify(gitStatusRich(root, dir))); recompute(); } // 조작 후 최신 상태 회신 + 파일트리 git 갱신
   } catch (e) { ws.send(JSON.stringify({ type: "git-error", op, root, error: String(e.message || e) })); }
 }

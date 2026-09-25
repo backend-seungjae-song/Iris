@@ -265,6 +265,16 @@ export const CAPABILITIES = [
     load: () => import("../browser/closed-tabs-menu.js"),
   },
   {
+    // 모든 스페이스에서 보이는 북마크 구역. 끄면 북마크바가 이 스페이스의 세션 북마크만 보여 준다.
+    // 폴더와 구역 그리기는 앱 셸(browser/bookmarks.js)이 하고, 이 기능은 공통 목록을 내주기만 한다.
+    id: "commonbookmarks",
+    windows: ["main", "browser"],
+    files: ["browser/common-bookmarks.js"],
+    css: [],
+    label: "공통 북마크",
+    load: () => import("../browser/common-bookmarks.js"),
+  },
+  {
     id: "pagetranslate",
     windows: ["main", "browser"],
     files: ["browser/page-translate.js"],
@@ -293,6 +303,7 @@ export const CAPABILITIES = [
     presets: ["dev"],
     files: ["devtool/localdev.js"],
     css: ["02b-localdev.css"],
+    server: ["server/localdev-bridge.js"],
     rail: "localdev",
     load: () => import("../devtool/localdev.js"),
   },
@@ -327,6 +338,17 @@ export const CAPABILITIES = [
     load: () => import("../chatcopy/boot.js"),
   },
   {
+    // 터미널의 Claude Code·Codex pane 을 대화 기록으로 그린 채팅으로 바꿔 본다. rail 도 전용 영역도
+    // 없이 터미널 머리 단추 하나와 터미널 위의 덮개 판에 붙는다. 서브에이전트 줄을 누르면 그
+    // 서브에이전트의 대화도 같은 판에 연다.
+    id: "agentchat",
+    files: ["agentchat/boot.js", "agentchat/view.js", "agentchat/fold.js"],
+    css: ["35-agent-chat.css"],
+    server: ["server/agent-chat.js"],
+    label: "에이전트 채팅 보기",
+    load: () => import("../agentchat/boot.js"),
+  },
+  {
     // rail 화면이 아니라 사이드바 영역 하나를 갖는 기능이다. capability 의 범위는 rail 보다
     // 넓다. label 은 rail 표에서 가져올 수 없으므로 여기서 직접 갖는다.
     id: "run",
@@ -356,7 +378,7 @@ export const CAPABILITIES = [
     // rail 화면은 기기 목록과 SDK 상태이고, 탭을 전용 창으로 분리할 수 있다(그 창이 page).
     id: "emulator",
     native: true,
-    files: ["emulator/boot.js", "emulator/pane.js", "emulator/devices-panel.js", "emulator/launch-button.js"],
+    files: ["emulator/boot.js", "emulator/pane.js", "emulator/devices-panel.js", "emulator/launch-button.js", "emulator/xcode-guidance.js", "emulator/android-guidance.js"],
     css: ["33-emulator.css"],
     page: "web/emulator-window",
     rail: "emulator",

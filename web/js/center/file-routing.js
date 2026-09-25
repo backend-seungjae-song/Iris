@@ -25,6 +25,7 @@
 //   browser sbState/newBrowserTab, Explorer·xterm 링크, sheet/docx 읽기와 탭 복원.
 
 import { fileKindOf } from "../core/file-kinds.js";
+import { railSelect } from "../devtool/rail.js";
 import {
   addTab, ensureTabSpace, getCenterSpace, getTabs, setActiveTab, setCenterSpace,
 } from "./tab-store.js";
@@ -69,7 +70,7 @@ export function openFileLocal(path) {
     const tab = addTab(sp, makeFileTab(path)); requestFileContent(path); trackFileWatch(sp, tab);
   }
   setCenterSpace(sp); setActiveTab(sp, id); renderTabs(); showActiveTab(); persistFileTabs(); syncWatchDirs();
-  if (window.innerWidth <= 820) $("#center").classList.add("mobile-show");
+  if (window.innerWidth <= 820) { $("#center").classList.add("mobile-show"); $("#sidebar").classList.remove("mobile-open"); }
 }
 
 export function openDocInSpaceBrowser(path) {
@@ -189,11 +190,22 @@ export function openBrowser() {
     const existing = (state.tabsBySpace && state.tabsBySpace[sp]) || [];
     if (existing.length === 0) newBrowserTab();
   }
-  if (window.innerWidth <= 820) $("#center").classList.add("mobile-show");
+  if (window.innerWidth <= 820) { $("#center").classList.add("mobile-show"); $("#sidebar").classList.remove("mobile-open"); }
 }
 
 export function openInSpaceBrowser(url) {
   if (!BROWSER_MODE && !getBrowserState().docked) { try { acHost && acHost.openBrowser && acHost.openBrowser(); } catch (e) {} }
+  // 도킹된 탭은 가운데에 선다. 메모·계정처럼 가운데를 덮는 전체형 화면이거나, 모바일처럼 가운데의 탭 본문을
+  // 숨기는 화면이면 작업 화면으로 돌린다. 깃처럼 탭이 함께 보이는 화면은 그대로 둔다. 좁은 창의 작업 화면은
+  // 가운데를 올린다.
+  if (!BROWSER_MODE && getBrowserState().docked) {
+    const body = document.body.classList;
+    const tabsHidden = body.contains("screen-open") && getComputedStyle($("#center-body")).display === "none";
+    if (body.contains("util-full") || tabsHidden) railSelect("workspace");
+    if (window.innerWidth <= 820 && !document.body.classList.contains("screen-open")) {
+      $("#center").classList.add("mobile-show"); $("#sidebar").classList.remove("mobile-open");
+    }
+  }
   newBrowserTab(url);
 }
 

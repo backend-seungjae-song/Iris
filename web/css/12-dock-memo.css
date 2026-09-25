@@ -9,77 +9,76 @@
    .panel-body 기본값 auto 를 그대로 두면 반올림 1px 에도 스크롤바가 생긴다. */
 .panel.memo .panel-body { max-height:none; overflow:visible; padding:0; }
 /* 메모 원문도 파일 쪽과 같은 편집기(Monaco·markdown)를 쓰므로 ## 같은 표시에 색이 붙는다. */
-.memo-slot { position:relative; height:var(--memo-h, 220px); border-top:1px solid var(--border); background:var(--bg); }
+.memo-slot { position:relative; height:var(--memo-h, 220px); border-top:1px solid var(--line); background:var(--surface); }
 /* 잡는 곳은 이 도크의 맨 위 모서리, 즉 머리 위쪽 끝이다. 도크는 위로 커지므로 커지는 쪽
    모서리를 잡아야 끄는 방향과 커지는 방향이 같다. 공간을 차지하는 띠로 두면 그만큼 두꺼워
    보이므로 머리 위에 겹치는 투명 판으로 둔다. 평소에는 두께가 0 이고, 잡을 수 있다는 표시는
    hover 때 모서리에 2px 선으로만 낸다. 집는 범위는 5px 라 1px 테두리보다 잡기 쉽다. */
 .panel.memo { position:relative; }
-/* top:-1px 은 이 패널의 1px 테두리까지 덮기 위한 것이다. 절대배치 기준이 패딩 상자라 top:0 이면
-   그 선 바로 아래에서 시작해, 사람이 겨냥하는 모서리 선을 눌러도 잡히지 않는다. */
-.memo-resize { position:absolute; top:-1px; left:0; right:0; height:6px; z-index:5; cursor:ns-resize; }
-.memo-resize:hover { box-shadow:inset 0 2px 0 var(--ring); }
+/* 절대배치 기준이 패딩 상자라 top:0 이면 1px 테두리 바로 아래에서 시작해, 사람이 겨냥하는 모서리 선을
+   눌러도 잡히지 않는다. 위로 3px 올려 그 선을 가운데에 둔다. */
+.memo-resize { position:absolute; top:-3px; left:0; right:0; height:5px; z-index:5; cursor:ns-resize; }
+.memo-resize:hover { box-shadow:inset 0 2px 0 var(--focus); }
 /* 접혀 있으면 조절할 높이가 없다. panel-body 밖에 있으므로 따로 끈다. */
 .panel.memo.collapsed .memo-resize { display:none; }
 .panel.memo.collapsed .panel-body { display:none; }
 /* 메모도 md 라서 파일 쪽과 같은 원문/미리보기, 같은 처리기(mdToHtml)와 .md-body 스타일을 쓴다 */
-.memo-modes { margin-left:auto; display:flex; flex:none; }
-.memo-modes button { border:none; background:none; color:var(--muted-fg); font:inherit; font-size:var(--fs-xs);
-  padding:2px 8px; cursor:pointer; border-bottom:2px solid transparent; border-radius:0;
-  transition:color var(--t-fade) var(--ease); }
+.memo-launches { margin-left:auto; display:flex; align-items:center; gap:2px; }
+.memo-launches button { height:22px; padding:0 8px; border:0; border-radius:var(--r-s); background:none; font:inherit; font-size:var(--fs-s);
+  color:var(--muted); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.memo-launches button:hover { background:var(--hover); color:var(--fg); }
+.memo-modes { display:flex; gap:1px; padding:2px; border-radius:var(--r-s); border:1px solid var(--line); flex:none; }
+.memo-modes button { height:20px; padding:0 8px; border:0; border-radius:3px; background:none; font:inherit; font-size:var(--fs-xs);
+  color:var(--muted); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
 .memo-modes button:hover { color:var(--fg); }
-.memo-modes button.on { color:var(--fg); border-bottom-color:var(--ai); }
-.panel.memo.collapsed .memo-modes { display:none; }
-.memo-launches { margin-left:auto; display:flex; align-items:center; gap:5px; }
-.memo-launches button { border:1px solid var(--border); background:var(--card); color:var(--muted-fg); font:inherit;
-  font-size:var(--fs-2xs); padding:2px 8px; border-radius:var(--r-blk); cursor:pointer;
-  transition:color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.memo-launches button:hover { color:var(--fg); border-color:var(--ring); }
-.panel.memo.collapsed .memo-launches { display:none; }
-.panel.memo .memo-modes { margin-left:0; }
-#memo-preview { height:var(--memo-h, 220px); overflow:auto; border-top:1px solid var(--border); padding:10px 12px; }
-#panel-memo .panel-head .cdirty { flex:0 0 auto; width:7px; height:7px; border-radius:50%; background:var(--ai); margin-left:6px; }
+.memo-modes button.on { background:var(--select); color:var(--select-fg); }
+.panel.memo.collapsed .memo-modes, .panel.memo.collapsed .memo-launches { display:none; }
+#memo-preview { height:var(--memo-h, 220px); overflow:auto; border-top:1px solid var(--line); padding:10px 12px; }
+#panel-memo .panel-head .cdirty { flex:none; width:6px; height:6px; border-radius:50%; background:var(--fg-2); }
 
 /* 별도 메모 창. 기존 앱 표면은 그대로 둔 채 이 mode에서만 한 장짜리 편집 표면을 올린다. */
 /* 글꼴은 body 에서 상속한다. `font:<크기> var(--sans)` 축약형은 그 이름이 정의되어 있지
    않으면 축약형 전체가 무효가 되어 크기까지 적용되지 않는다. 크기만 적는다. */
-.memo-window { display:none; position:fixed; inset:0; padding-top:30px; background:var(--bg); color:var(--fg); }
+.memo-window { display:none; position:fixed; inset:0; padding-top:30px; background:var(--surface); color:var(--fg); }
 .mw-titlebar { position:absolute; inset:0 0 auto; height:30px; display:flex; align-items:center; justify-content:flex-end;
   padding:0 10px 0 78px; -webkit-app-region:drag; user-select:none; pointer-events:none; }
 .mw-titlebar-space { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  color:var(--muted-fg); font-size:var(--fs-2xs); }
+  color:var(--muted); font-size:var(--fs-xs); }
 .mw-head { flex:none; display:flex; align-items:center; gap:8px; min-height:38px; padding:4px 10px;
-  border-bottom:1px solid var(--border); background:var(--sidebar); }
+  border-bottom:1px solid var(--line); background:var(--chrome); }
 .mw-name { min-width:80px; max-width:210px; flex:0 1 210px; border:1px solid transparent; background:transparent;
-  color:var(--fg); border-radius:var(--r-blk); padding:4px 6px; font-size:var(--fs-sm); font-weight:var(--fw-semi); text-overflow:ellipsis; }
-.mw-name:hover, .mw-name:focus { border-color:var(--border); background:var(--bg); outline:none; }
+  color:var(--fg); border-radius:var(--r-s); padding:4px 6px; font:inherit; font-weight:600; text-overflow:ellipsis; }
+.mw-name:hover, .mw-name:focus { border-color:var(--line); background:var(--surface); outline:none; }
 .mw-name[readonly] { pointer-events:none; }
 .mw-state { width:7px; height:7px; border-radius:50%; background:transparent; flex:none; }
 .mw-state.dirty { background:var(--ai); }
 .mw-grow { flex:1; }
-.mw-action { border:1px solid var(--border); background:var(--card); color:var(--muted-fg); border-radius:var(--r-blk);
-  padding:3px 7px; font-size:var(--fs-2xs); cursor:pointer; white-space:nowrap;
-  transition:color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.mw-action:hover { color:var(--fg); border-color:var(--ring); }
-.mw-action.on { color:var(--fg); border-color:var(--primary); background:var(--accent); }
-.mw-action.danger:hover { color:var(--destructive); border-color:var(--destructive); }
-.mw-modes { display:flex; align-self:stretch; }
-.mw-modes button { border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted-fg);
-  padding:4px 7px 2px; font-size:var(--fs-2xs); cursor:pointer; }
-.mw-modes button.on { color:var(--fg); border-bottom-color:var(--ai); }
+.mw-action { height:24px; display:inline-flex; align-items:center; padding:0 8px; border:1px solid var(--line); border-radius:var(--r-s);
+  background:none; font:inherit; font-size:var(--fs-s); color:var(--fg-2); cursor:pointer; white-space:nowrap;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.mw-action:hover { background:var(--hover); color:var(--fg); }
+.mw-action.on { background:var(--select); color:var(--select-fg); }
+.mw-action.danger:hover { color:var(--pal-danger); border-color:var(--pal-danger); }
+.mw-modes { display:flex; gap:1px; padding:2px; border-radius:var(--r-s); border:1px solid var(--line); flex:none; }
+.mw-modes button { height:20px; padding:0 8px; border:0; border-radius:3px; background:none; font:inherit; font-size:var(--fs-xs); color:var(--muted); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.mw-modes button:hover { color:var(--fg); }
+.mw-modes button.on { background:var(--select); color:var(--select-fg); }
 .mw-alert { flex:none; display:flex; align-items:center; gap:7px; min-height:28px; padding:4px 10px;
-  border-bottom:1px solid var(--border); background:var(--accent); color:var(--fg); font-size:var(--fs-2xs); }
+  border-bottom:1px solid var(--line); background:var(--select); color:var(--select-fg); font-size:var(--fs-xs); }
 .mw-alert[hidden] { display:none; }
 .mw-alert span { flex:1; }
 .mw-body { flex:1; min-height:0; position:relative; }
 .mw-editor { position:absolute; inset:0; }
 .mw-preview { position:absolute; inset:0; overflow:auto; padding:14px 16px; }
-.mw-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted-fg); font-size:var(--fs-xs); }
+.mw-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:var(--fs-s); }
 @media (max-width:480px) {
   .mw-head { flex-wrap:wrap; }
   .mw-name { flex:1 1 130px; max-width:none; }
   .mw-grow { display:none; }
-  .mw-modes { margin-left:auto; min-height:28px; }
+  .mw-modes { margin-left:auto; }
 }
 
 /* 별도 메모 창 모드. 앱 셸이 나머지를 내리고(03-feature-modes.css), 이 창에서 메모가 어떻게

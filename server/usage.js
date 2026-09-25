@@ -7,15 +7,16 @@
 // 제공 API
 //   fetchAllUsage(prefs): 8종을 동시에 조회하고 같은 형식의 배열로 반환한다.
 //   PROVIDERS: 표시 순서가 아니라 목록 자체다. 정렬은 화면이 사용률로 한다.
-//   consumeCodexReset(requestId): Codex 초기화권 하나를 사용한다. 이 파일에서 유일하게 외부
-//   상태를 바꾸는 함수이고, 사용자의 확인을 받은 뒤에만 호출된다.
+//   consumeCodexReset(requestId) · consumeClaudeReset(grantId, requestId): 초기화권 하나를
+//   사용한다. 이 파일에서 외부 상태를 바꾸는 함수는 이 둘뿐이고, 사용자의 확인을 받은 뒤에만
+//   호출된다.
 //
 // 의존 대상
 //   Node 의 fetch·fs·child_process 만. 서버의 다른 모듈을 호출하지 않는다. 이 파일은
 //   상태를 갖지 않는 수집기이고, 저장·주기·중계는 usage-handlers 가 맡는다.
 //
 // 유지 조건
-//   보내는 것은 읽기 요청뿐이다. 예외는 consumeCodexReset 하나이고, 사용자가 직접 누른
+//   보내는 것은 읽기 요청뿐이다. 예외는 두 consume 함수이고, 사용자가 직접 누른
 //   경우에만 실행된다. 수집 회차에서 외부 상태를 바꾸지 않는다.
 //   토큰을 갱신하지 않는다. 갱신 요청은 서버가 refresh token 을 재발급할 수 있고, 그러면
 //   사용 중인 Claude Code·Codex 의 로그인이 그 시점에 끊긴다. 읽기만 하고 만료된 토큰은
@@ -117,7 +118,14 @@ async function getJson(url, headers, init) {
 
 // ── claude ───────────────────────────────────────────────────────────────────
 
-const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+// cedar_ember=1 을 붙여야 응답에 초기화권 블록(cedar_ember)이 들어온다. Claude Code 2.1.281 이
+// 같은 쿼리로 부른다. skip_spend=1 도 Claude Code 와 같게 둔다.
+const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1";
+const CLAUDE_HEADERS = {
+  "anthropic-beta": "oauth-2025-04-20",
+  // Claude Code CLI 와 같은 식별자로 호출한다. 이 엔드포인트의 계약이다.
+  "User-Agent": "claude-code/2.1.0",
+};
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 
 function execText(cmd, args) {
@@ -167,12 +175,7 @@ async function fetchClaude() {
   const cred = await claudeToken();
   if (!cred) return fail("claude", "missing-credentials");
   if (cred.expiresAt && cred.expiresAt <= Date.now()) return fail("claude", "stale-token");
-  const res = await getJson(CLAUDE_USAGE_URL, {
-    Authorization: `Bearer ${cred.token}`,
-    "anthropic-beta": "oauth-2025-04-20",
-    // Claude Code CLI 와 같은 식별자로 호출한다. 이 엔드포인트의 계약이다.
-    "User-Agent": "claude-code/2.1.0",
-  });
+  const res = await getJson(CLAUDE_USAGE_URL, { Authorization: `Bearer ${cred.token}`, ...CLAUDE_HEADERS });
   if (res.status === 401 || res.status === 403) return fail("claude", "stale-token");
   if (res.status === 429) return backoff("claude", res);
   if (!res.data) return fail("claude", "server", `HTTP ${res.status}`);
@@ -183,7 +186,89 @@ async function fetchClaude() {
       { label: "Fable", window: claudeScopedWeekly(res.data, "fable") },
       { label: "Opus", window: claudeWindow(res.data.seven_day_opus, WEEK_MIN) },
     ].filter((one) => one.window),
+    ...claudeCredits(res.data.cedar_ember),
   });
+}
+
+// Claude 초기화권(cedar_ember). 초기화권은 grant 단위로 오고 grant 마다 남은 수가 있다. 화면에는
+// 합계를 적고, 사용할 때는 제공자가 next_grant_id 로 지목한 grant 를 쓴다. 지목하지 않은 grant
+// 로 요청하면 거절된다(not_next_grant).
+//
+// 한도에 걸린 동안에만 쓸 수 있는 grant 가 있다(use_requires_limit). 한도가 아닐 때 보내면
+// not_limited 가 오고 차감되지 않지만, 사용자 결정으로 그때는 버튼을 잠근다. 잠근 이유는
+// resetBlocked 로 넘기고 문구는 화면이 정한다.
+const CLAUDE_GRANT_ID = /^[a-z0-9_-]{1,40}$/;
+const CLAUDE_REQUEST_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function claudeCredits(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const grants = (Array.isArray(raw.grants) ? raw.grants : [])
+    .filter((one) => one && typeof one.id === "string" && CLAUDE_GRANT_ID.test(one.id)
+      && Number.isInteger(one.resets_left) && one.resets_left >= 0);
+  if (!grants.length) return {};
+  const out = { resetCredits: grants.reduce((sum, one) => sum + one.resets_left, 0) };
+  const next = grants.find((one) => one.id === raw.next_grant_id) || null;
+  if (next) {
+    out.resetGrantId = next.id;
+    const endsAt = toMs(next.ends_at);
+    if (endsAt) out.resetCreditExpiresAt = endsAt;
+  }
+  const cooldown = toMs(raw.cooldown_until);
+  let blocked = null;
+  if (!next || next.resets_left <= 0) blocked = "none";
+  else if (raw.eligible === false) blocked = "ineligible";
+  else if (next.paused === true) blocked = "paused";
+  else if (cooldown && cooldown > Date.now()) blocked = "cooldown";
+  else if (next.usable_now !== true && next.use_requires_limit !== false && raw.at_limit !== true) blocked = "needs-limit";
+  if (blocked) out.resetBlocked = blocked;
+  return out;
+}
+
+// 요청 경로의 조직 id. Claude Code 설정 파일(CLAUDE_CONFIG_DIR 가 있으면 그 안, 없으면 홈)의
+// oauthAccount.organizationUuid 에서 읽는다. Claude Code 본체가 이 값을 쓰는지는 확인하지 못했다.
+function claudeOrgId() {
+  const file = process.env.CLAUDE_CONFIG_DIR
+    ? path.join(process.env.CLAUDE_CONFIG_DIR, ".claude.json")
+    : home(".claude.json");
+  const data = readJson(file);
+  const id = data && data.oauthAccount && data.oauthAccount.organizationUuid;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+// Claude 초기화권 하나를 사용한다. Codex 와 같이 요청 id 가 중복 차감을 막는다. 답을 받지 못해
+// 다시 보낼 때는 같은 grant 와 같은 id 로 보내고, 그러면 already_used 로 돌아온다.
+//
+// 응답 result: reset · already_used · not_limited(한도 아님, 차감 없음) · cooldown ·
+// ineligible · unavailable.
+export async function consumeClaudeReset(grantId, requestId) {
+  const grant = String(grantId || "").trim();
+  const id = String(requestId || "").trim();
+  if (!CLAUDE_GRANT_ID.test(grant) || !CLAUDE_REQUEST_ID.test(id)) return { ok: false, outcome: "bad-request" };
+  const cred = await claudeToken();
+  if (!cred) return { ok: false, outcome: "missing-credentials" };
+  if (cred.expiresAt && cred.expiresAt <= Date.now()) return { ok: false, outcome: "stale-token" };
+  const org = claudeOrgId();
+  if (!org) return { ok: false, outcome: "missing-credentials" };
+  try {
+    const res = await fetch(`https://api.anthropic.com/api/organizations/${encodeURIComponent(org)}/reset_rate_limits`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cred.token}`, ...CLAUDE_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ program: "cedar_ember", grant_id: grant, request_id: id }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      // 본문은 버린다. 실패 응답에 계정 정보가 포함될 수 있고 이 값은 화면으로 전달된다.
+      try { await res.arrayBuffer(); } catch { /* 이미 닫힘 */ }
+      if (res.status === 401 || res.status === 403) return { ok: false, outcome: "stale-token" };
+      if (res.status === 429) return { ok: false, outcome: "rate_limited" };
+      return { ok: false, outcome: `http-${res.status}` };
+    }
+    const data = await res.json();
+    const code = data && typeof data.result === "string" ? data.result : "unknown";
+    return { ok: code === "reset", outcome: code };
+  } catch (err) {
+    return { ok: false, outcome: "network", detail: String((err && err.message) || err).slice(0, 200) };
+  }
 }
 
 // ── codex ────────────────────────────────────────────────────────────────────

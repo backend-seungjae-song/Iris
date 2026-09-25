@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { noteEmulatorReply } from "./emulator-bridge.js";
+import { snapshot } from "./runtime-state.js";
 
 import {
   answerUserAsk,
@@ -68,7 +69,8 @@ import {
 //   원시 상태 컨테이너는 노출하지 않고 모든 mutation을 각 owner 함수로 요청한다.
 //
 // 의존 대상
-//   browser-runtime·browser-state-owner·browser-commands owner와 node child-process에 의존하며,
+//   browser-runtime·browser-state-owner·browser-commands owner, runtime-state snapshot(원격 스페이스 검증)과
+//   node child-process에 의존하며,
 //   broadcast는 composition root에서 주입받고 transport나 다른 handler를 import하지 않는다.
 //
 // 유지 조건
@@ -87,15 +89,33 @@ export function initBrowserMessageHandlers(deps) {
   broadcastLocal = deps.broadcastLocal;
 }
 
-const REMOTE_BLOCKED_OPS = new Set(["tab.open", "tab.close", "dock", "tab.profile", "tab.rename", "tab.move", "bookmark.move",
-  "profiles.set", "profile.add", "profile.rename", "profile.remove", "profile.source", "space.defaultProfile"]);
+// AC5: 원격은 브라우저 상태를 열람만 한다. 막을 op 를 나열하면 새 op·빠뜨린 op(북마크 주소·기록처럼
+// 로컬 창이 나중에 여는 값)가 원격에 열리므로, 원격 창이 보기 위해 보내는 선택 op 만 허용한다.
+const REMOTE_VIEW_OPS = new Set(["tab.switch", "space.active", "group.collapse"]);
+// 원격 창의 webview 는 탐색할 때마다 이 둘을 보낸다. 오류를 알리면 탐색마다 토스트가 뜬다.
+const REMOTE_SILENT_OPS = new Set(["tab.navigate", "history.push"]);
+// 원격 선택 op 는 이미 있는 스페이스·탭·그룹만 가리킬 수 있다. 저장 쪽 mutate 는 없는 스페이스 키에 빈
+// 배열을 만들고(__proto__ 면 맵의 프로토타입을 바꾼다), 없는 이름이 activeSpace 가 되면 로컬 분리 창의
+// 탭 조회가 배열이 아닌 값을 받아 렌더가 멈춘다. 조회만 하는 함수로 먼저 확인한다.
+// 스페이스는 실행 중인 스페이스 id 와 공유 브라우저만 받는다. 경로 모양의 이름은 키 변환이 디렉터리 캐시를
+// 채우므로 원격 입력으로 조회하지 않는다.
+function remoteTargetExists(m) {
+  if (typeof m.space !== "string" || !m.space) return false;
+  const live = (snapshot().workspaces || []).some((w) => w.id === m.space);
+  if (m.op === "space.active") return live;
+  if (!live && m.space !== "__shared__") return false;
+  if (typeof m.id !== "string") return false;
+  const list = m.op === "tab.switch" ? spTabs(m.space) : m.op === "group.collapse" ? spGroups(m.space) : null;
+  return Array.isArray(list) && list.some((x) => x && x.id === m.id);
+}
 export function handleBrowserSync(ws, msg) {
   const m = msg && msg.mutation;
   if (!m || typeof m.op !== "string") return;
-  if (!ws._local && REMOTE_BLOCKED_OPS.has(m.op)) {
-    ws.send(JSON.stringify({ type: "control-error", message: "원격에서는 브라우저 탭 생성/도킹 불가(AC5)" }));
+  if (!ws._local && !REMOTE_VIEW_OPS.has(m.op)) {
+    if (!REMOTE_SILENT_OPS.has(m.op)) ws.send(JSON.stringify({ type: "control-error", message: "원격에서는 브라우저 상태를 바꿀 수 없습니다(AC5) — 열람만" }));
     return;
   }
+  if (!ws._local && !remoteTargetExists(m)) return;
   if (m.op === "tab.close" && m.id) {
     // 복원에 필요한 값은 여기서만 확보할 수 있다. 아래 bsMutate 가 실행되면 주소·프로필·그룹이 상태에서
     // 사라진다. 닫기는 전부 이 한 지점으로 모이므로(브라우저 탭바·센터 탭·⌃W·컨텍스트 메뉴)
@@ -103,13 +123,14 @@ export function handleBrowserSync(ws, msg) {
     if (recordClosedTab(m.id, m.navigationHistory)) broadcast(closedTabsWire());
     removeClosedTab(m.id);
   }
-  if (bsMutate(m)) broadcast({ type: "browser-state", state: bsWire() });
+  const mutation = !ws._local && m.op === "space.active" ? { ...m, skipLegacyMigrate: true } : m;
+  if (bsMutate(mutation)) broadcast({ type: "browser-state", state: bsWire() });
 }
 
 // ⌘⇧T: 방금 닫은 브라우저 탭을 복원한다. 무엇을 복원할지는 창이 정해 tabId 로 보내고
 // (센터 탭과 섞여 있어 더 최근 것이 무엇인지는 창만 안다), 서버는 그 항목을 스택에서 빼고 연다.
 export function handleTabReopen(ws, msg) {
-  // 원격에서는 탭을 만들지 않는다. tab.open 이 REMOTE_BLOCKED_OPS 인 것과 같은 경계다.
+  // 원격에서는 탭을 만들지 않는다. 원격 browser-sync 가 열람만 하는 것과 같은 경계다.
   if (!ws._local) return;
   const entry = takeClosedTab(msg && msg.tabId ? String(msg.tabId) : null);
   if (!entry) return;
@@ -251,6 +272,8 @@ export function handleBrowserMessage(ws, msg) {
   // AI 자동완성 로그인. 사용자가 모르는 사이에 실행되지 않도록 그때마다 알린다. 채웠으면 무엇을
   // 채웠는지, 못 했으면 왜 못 했는지(저장된 계정 없음 / 허용 안 됨)와 그 탭으로 가는 길을 준다.
   else if (msg.type === "ai-login-note") {
+    // 보내는 쪽은 로컬 Electron 메인 프로세스뿐이다. 원격이 보내면 가짜 로그인 안내가 로컬 창에 뜬다.
+    if (!ws._local) return;
     const id0 = tabIdOfWc(msg.wc); const m = id0 ? tabMeta(id0) : null;
     broadcast({ type: "ai-login-note", kind: msg.kind, origin: msg.origin || "",
       username: msg.username || null, accounts: msg.accounts || null,

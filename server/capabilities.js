@@ -6,12 +6,14 @@ import { handleUsage, initUsageHandlers, usageOnConnect } from "./usage-handlers
 import { handleUsageHistory, initUsageHistory, stopUsageHistory, usageHistoryOnConnect } from "./usage-history-handlers.js";
 import { initMemoService, handleMemoMessage, memosWire, memoNotesWire, archivesOut } from "./memo-service.js";
 import { handleMemolabState, handleMemolabUI } from "./memolab-store.js";
+import { handleLocaldev } from "./localdev-bridge.js";
+import { agentChatOnConnect, handleAgentChat, initAgentChat } from "./agent-chat.js";
 import { isPathAllowed as fsPathAllowed } from "./runtime-state.js";
+import { isLoopbackRequest } from "./http-handler.js";
 
 function runHttp(req, res, ctx) {
     const runMgr = ctx.runManager;
-    const ip = String(req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-    if (!(ip === "127.0.0.1" || ip === "::1")) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
+    if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
     let body = ""; req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on("end", () => {
       let j; try { j = JSON.parse(body || "{}"); } catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
@@ -60,6 +62,16 @@ export const capabilities = [
   {
     id: "sourcecontrol", wsPrefixes: ["git."],
     handle(ws, msg) { if (!msg.type.startsWith("git.")) return false; handleGit(ws, msg); return true; },
+  },
+  {
+    id: "localdev", wsPrefixes: ["localdev."],
+    handle: handleLocaldev,
+  },
+  {
+    id: "agentchat", wsPrefixes: ["agentchat."],
+    init(ctx) { initAgentChat(ctx); },
+    onConnect: agentChatOnConnect,
+    handle: handleAgentChat,
   },
   {
     id: "memolab", wsPrefixes: [],

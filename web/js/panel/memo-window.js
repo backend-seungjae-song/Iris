@@ -301,7 +301,7 @@ export function initMemoWindow() {
     mwEditor = monaco.editor.create($("#mw-editor"), {
       model: mwModel, theme: monacoTheme(), automaticLayout: true, fontSize: 12.5,
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
-      ...monacoPrefOpts("memo"), lineNumbers: "off", folding: false, accessibilitySupport: "off",
+      ...monacoPrefOpts("memo"), lineNumbers: "on", lineNumbersMinChars: 4, folding: false, accessibilitySupport: "off",
       quickSuggestions: false,
       suggestOnTriggerCharacters: false,
       wordBasedSuggestions: "off",

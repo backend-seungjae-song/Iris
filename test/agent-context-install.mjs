@@ -143,7 +143,7 @@ test("packaging keeps the installed launcher and its module boundary unpacked", 
   assert.ok(pkg.build.asarUnpack.includes("package.json"));
   assert.ok(pkg.build.asarUnpack.includes("server/**"));
   assert.match(shippedCheck, /\["bin\/agent-context\.mjs", \.\.\.native/);
-  const health = appInstaller.indexOf('if ! pgrep -f "$APP/Contents/MacOS/Iris"');
+  const health = appInstaller.indexOf('running || rollback "새 앱이 서버 준비 중에 종료됨"');
   const guidance = appInstaller.indexOf('node scripts/install-agent-context.mjs --app "$APP"');
   const discardBackup = appInstaller.indexOf('[ -n "$OLD" ] && rm -rf "$OLD"');
   assert.ok(health >= 0 && guidance > health && discardBackup > guidance,

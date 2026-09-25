@@ -24,7 +24,7 @@ async function until(fn) {
   throw new Error("서버 관측 시간 초과");
 }
 
-for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sourcecontrol"], ["archive"]]) {
+for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sourcecontrol"], ["archive"], ["localdev"]]) {
   test(`T1 실제 서버: hidden=${JSON.stringify(hidden)}`, { timeout: 15000 }, async (t) => {
     const home = fs.mkdtempSync(path.join(base, "feature-server-"));
     const on = !hidden.includes("usage");
@@ -91,7 +91,7 @@ for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sour
     assert.equal(response.type, on ? "usage.state" : "control-error");
     if (!on) assert.match(response.message, /모르는 메시지: usage.get/);
     // 켜진 기능은 그 기능의 실제 응답(허용되지 않은 경로라도 git-error 로 답한다)을 기다린다.
-    for (const [id, type, replies] of [["sourcecontrol", "git.status", ["git-status", "git-error"]], ["archive", "archive.list", ["archives"]]]) {
+    for (const [id, type, replies] of [["sourcecontrol", "git.status", ["git-status", "git-error"]], ["archive", "archive.list", ["archives"]], ["localdev", "localdev.status", ["localdev.status"]]]) {
       messages.length = 0;
       ws.send(JSON.stringify({ type, path: home }));
       const answer = await until(() => messages.find((m) => replies.includes(m.type) || m.type === "control-error"));
@@ -99,6 +99,8 @@ for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sour
       else {
         assert.ok(replies.includes(answer.type), `${type} → ${answer.type}`);
         if (id === "archive") assert.ok(Array.isArray(answer.items), "archives 는 items 배열을 든다");
+        // 외부 네트워크는 probe 가 막으므로 라우터에 닿지 못한 응답이 와야 한다.
+        else if (id === "localdev") assert.equal(answer.ok, false, "localdev 는 라우터에 못 닿으면 실패로 답한다");
         else assert.equal(answer.path, home, "git 응답은 요청한 경로를 든다");
       }
     }

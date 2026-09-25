@@ -1,5 +1,5 @@
 /* 분리 브라우저 창·탭 그룹·주소줄·페이지 대화상자 */
-/* 이 이름을 만드는 곳: main.js · browser/pick.js · browser/tabs.js */
+/* 이 이름을 만드는 곳: main.js · browser/pick.js · browser/tabs.js · browser/bookmarks.js(#url-sug) */
 /* 분리 브라우저 창(?mode=browser): 콘솔 크롬을 숨기고 브라우저만 전체 창으로. 콘솔의 도킹
    브라우저 경로는 그대로 두고, 이 모드에서만 레이아웃과 탭 소스를 서버 상태로 바꾼다. */
 body.browser-mode .sidebar, body.browser-mode .right,
@@ -16,117 +16,124 @@ body.browser-mode #wv-detach { display:none; }  /* 분리 창엔 분리 버튼 �
 }
 
 #wv-dock { display:none; }
-body.browser-mode #wv-dock { display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; }
+body.browser-mode #wv-dock { display:grid; }
 /* 탭 그룹(폴더). 칩 하나로 접고 펴며, 그룹에 속한 탭은 왼쪽 색띠로 소속을 표시한다. */
-.tgroup { display:flex; align-items:center; gap:6px; padding:0 10px; cursor:pointer; font-size:var(--fs-xs); color:var(--fg); white-space:nowrap; border-right:1px solid var(--border); background:var(--sidebar-accent);
-  transition:background var(--t-fade) var(--ease); }
-.tgroup:hover { background:var(--accent); }
-.tgroup .tgcount { color:var(--muted-fg); font-size:var(--fs-2xs); }
-/* 소속 띠(왼쪽)와 활성 표시(위)는 둘 다 box-shadow 라, 따로 쓰면 나중 규칙이 앞 규칙을 덮는다.
-   그러면 그룹 안 탭에서 활성 표시가 사라진다. 겹칠 때는 한 선언에 함께 쓴다. */
-.ctab.in-group { box-shadow:inset 3px 0 0 var(--ring); }
-.ctab.active.in-group { box-shadow:inset 0 2px 0 var(--primary), inset 3px 0 0 var(--ring); }
-.ctab.selected { background:var(--accent); color:var(--fg); outline:1px solid var(--ring); outline-offset:-1px; }
-.ctab.selected.in-group { box-shadow:inset 3px 0 0 var(--ring); }
-.ctab.selected.active.in-group { box-shadow:inset 0 2px 0 var(--primary), inset 3px 0 0 var(--ring); }
-.ctab-add { display:flex; align-items:center; justify-content:center; padding:0 13px; cursor:pointer; color:var(--muted-fg); font-size:var(--fs-lg); flex:none; border-right:1px solid var(--border);
-  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.ctab-add:hover { background:var(--sidebar-accent); color:var(--fg); }
+.tgroup { display:flex; align-items:center; gap:6px; padding:0 10px; font-size:var(--fs-s); color:var(--fg); white-space:nowrap; background:var(--select);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.tgroup:hover { background:var(--hover); }
+.tgroup .tgcount { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+/* 소속 띠(왼쪽)와 활성 표시(위, ::after)는 따로 그린다. */
+.ctab.in-group { box-shadow:inset 2px 0 0 var(--focus); }
+.ctab.selected { background:var(--select); color:var(--select-fg); outline:1px solid var(--focus); outline-offset:-1px; }
+.ctab-add { display:grid; place-items:center; align-self:center; width:26px; height:26px; border-radius:var(--r-s); color:var(--muted); font-size:var(--fs-h); flex:none;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.ctab-add:hover { background:var(--hover); color:var(--fg); }
 /* 페이지 배경은 크롬과 같이 흰색에서 시작한다. 배경을 직접 칠하지 않는 사이트(문서 뷰어·
    오래된 페이지·투명 배경을 쓰는 앱)에서는 뒤의 앱 팔레트(다크면 어두운 색)가 비친다.
    사이트가 자기 배경을 칠하면 그것이 이 위를 덮으므로 다크 테마 사이트는 그대로 다크로 보인다. */
 .wv-wrap webview { position:absolute; inset:0; width:100%; height:100%; display:none; border:0; background:#fff; }
 .wv-wrap webview.active { display:flex; }
-.browserview.picking .wv-wrap { outline:2px solid var(--ring); outline-offset:-2px; }
+.browserview.picking .wv-wrap { outline:2px solid var(--focus); outline-offset:-2px; }
 /* 크기를 지정하면 크롬 기기 모드와 같다. 화면 자체가 그 크기가 되어 가운데 놓이고, 남는 공간은
    빈 배경이다. 확대·축소는 걸지 않는다(배율을 걸면 크기 조절이 아니라 줌이 된다). */
-.wv-wrap.sized { background:var(--bg); overflow:auto; }
+.wv-wrap.sized { background:var(--surface); overflow:auto; }
 .wv-wrap.sized webview.active { inset:auto; left:var(--vleft); top:var(--vtop); width:var(--vw); height:var(--vh);
-  box-shadow:0 0 0 1px var(--border), var(--sh-mid); }
+  box-shadow:0 0 0 1px var(--line-strong); }
 /* 기본은 표시하지 않는 것이고, hidden 속성에만 의존하지 않는다. .wv-handle{display:flex} 가 UA 의
    [hidden]{display:none} 보다 우선해, 숨긴 손잡이가 공간만 차지한 채 다른 탭에서도 크기 조절
    커서를 가져간다. 크기를 지정한 탭에서만 나타나게 조건을 뒤집는다. */
 .wv-handle { display:none; position:absolute; z-index:6; align-items:center; justify-content:center; }
 .wv-wrap.sized .wv-handle:not([hidden]) { display:flex; }
-.wv-handle::before { content:""; background:var(--muted-fg); border-radius:var(--r-ctl); opacity:.5; }
-.wv-handle:hover::before { background:var(--primary); opacity:1; }
+.wv-handle::before { content:""; background:var(--muted); border-radius:2px; opacity:.5; }
+.wv-handle:hover::before { background:var(--accent); opacity:1; }
 #wvh-r { width:14px; cursor:ew-resize; }
 #wvh-r::before { width:4px; height:40px; }
 #wvh-b { height:14px; cursor:ns-resize; }
 #wvh-b::before { height:4px; width:40px; }
 #wvh-c { width:16px; height:16px; cursor:nwse-resize; }
-#wvh-c::before { width:8px; height:8px; border-radius:var(--r-ctl); }
-#wv-sizebadge { position:absolute; z-index:6; padding:2px 8px; border-radius:var(--r-pill); font-size:var(--fs-2xs);
-  background:var(--card); border:1px solid var(--border); color:var(--fg); pointer-events:none; white-space:nowrap; }
+#wvh-c::before { width:8px; height:8px; border-radius:2px; }
+#wv-sizebadge { position:absolute; z-index:6; padding:2px 6px; border-radius:var(--r-s); font:500 var(--fs-xs)/1.4 var(--mono);
+  background:var(--raised); border:1px solid var(--line); color:var(--fg-2); pointer-events:none; white-space:nowrap; }
 /* 끄는 동안 마우스 이벤트가 페이지로 가지 않게 덮는다. webview 는 별도 프로세스라 덮지 않으면 이벤트를 가져간다 */
 .wv-dragmask { position:absolute; inset:0; z-index:20; }
 /* 페이지 내 찾기(⌘F). 크롬처럼 페이지 위에 떠 있다. 흐름에 넣으면 막대가 뜰 때마다 페이지가
    아래로 밀려 보던 위치가 움직인다. 다이얼로그(z-index:40)보다는 아래에 둔다. 페이지가 무언가
    묻는 중이면 그쪽이 위에 있어야 한다. */
-.wv-find { position:absolute; z-index:30; top:8px; right:16px; display:flex; align-items:center; gap:2px;
-  padding:4px 4px 4px 10px; border-radius:var(--r-card); background:var(--card); color:var(--fg);
-  border:1px solid var(--border); box-shadow:var(--sh-mid); }
-.wv-find input { font:inherit; font-size:var(--fs-sm); width:210px; padding:4px 6px; background:transparent;
-  color:var(--fg); border:0; outline:none; }
-#wv-find-count { font-size:var(--fs-2xs); color:var(--muted-fg); min-width:38px; text-align:right; font-variant-numeric:tabular-nums; }
-#wv-find-count.none { color:#E5484D; }
-.wv-find .ico { padding:2px 7px; font-size:var(--fs-md); line-height:1.4; }
-/* 주소줄: 세 그룹(이동·주소·도구)으로 구분해 읽히게 한다. 채운 버튼과 회색 버튼이 뒤섞여
-   열 개가 나란히 있으면 어디를 봐야 할지 알 수 없다. 색은 지금 켜져 있는 것에만 쓴다. */
-.urlbar { display:flex; align-items:center; gap:8px; }
-.ub-nav, .ub-tools { display:flex; align-items:center; gap:2px; flex:none; }
-.ub-sep { width:1px; align-self:stretch; margin:4px 5px; background:var(--border); }
-/* 아이콘 버튼. 평소에는 배경 없이 글리프만 두고, 포인터가 올라올 때만 배경이 생긴다. */
-.ico { flex:none; width:28px; height:28px; display:flex; align-items:center; justify-content:center;
-  border:none; border-radius:var(--r-blk); background:none; color:var(--muted-fg); font-size:var(--fs-lg); line-height:1;
-  cursor:pointer; padding:0; transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.ico:hover { background:var(--muted); color:var(--fg); }
-.ico:disabled, .ico[disabled] { opacity:.35; cursor:default; background:none; }
-.ico.mono { font-size:var(--fs-xs); font-weight:var(--fw-bold); letter-spacing:-.5px; }
+.wv-find { position:absolute; z-index:30; top:8px; right:16px; display:flex; align-items:center; gap:2px; height:36px;
+  padding:0 4px 0 10px; border-radius:var(--r); background:var(--raised); color:var(--fg);
+  border:1px solid var(--line-strong); box-shadow:var(--menu-shadow); }
+.wv-find input { font:inherit; width:210px; height:26px; padding:0 6px; background:transparent; color:var(--fg); border:0; outline:none; }
+.wv-find input:focus-visible { box-shadow:none; }
+#wv-find-count { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); min-width:38px; text-align:right; }
+#wv-find-count.none { color:var(--pal-danger); }
+.wv-find .ico { font-size:var(--fs-h); }
+
+/* 아이콘 버튼(주소줄·찾기 막대). 평소에는 배경 없이 그림만 두고, 포인터가 올라올 때만 배경이 생긴다. */
+.ico { flex:none; width:26px; height:26px; display:grid; place-items:center; padding:1px 6px; border:0; border-radius:var(--r-s);
+  background:none; font:inherit; color:var(--muted); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.ico:hover { background:var(--hover); color:var(--fg); }
+.ico:active { transform:scale(.96); }
+.ico:disabled, .ico[disabled] { color:var(--faint); background:none; }
+
+/* 주소줄: 이동 · 주소 · 도구 세 묶음을 한 줄에 둔다. 색은 켜져 있는 것(북마크 별·크기 지정)에만 쓴다. */
+.urlbar { display:flex; align-items:center; gap:8px; flex:none; padding:8px 10px; border-bottom:1px solid var(--line); }
+.ub-nav { display:flex; gap:2px; color:var(--muted); flex:none; }
+.ub-tools { display:flex; align-items:center; gap:2px; flex:none; }
+.ub-sep { width:1px; height:16px; background:var(--line); flex:none; margin:0 2px; }
+.urlbar svg { width:14px; height:14px; flex:none; display:block; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+/* 크기를 지정해 둔 상태. 지금 보는 것이 실제 크기가 아니라는 표시라 값을 글자로 붙이고 눈에 띄게 둔다. */
+.urlbar .ico.on { width:auto; display:flex; gap:5px; padding:0 8px; border:1px solid var(--accent); color:var(--accent); font:500 var(--fs-s)/1 var(--mono); }
 /* 프로필은 값(어느 계정인가)을 갖고 있으므로 글자를 남긴다. 이름이 붙은 유일한 버튼이다. */
-.chip { flex:none; height:28px; display:flex; align-items:center; gap:4px; border:1px solid var(--border);
-  border-radius:var(--r-pill); background:var(--card); color:var(--fg); font:inherit; font-size:var(--fs-xs); font-weight:var(--fw-med);
-  padding:0 10px; cursor:pointer; max-width:170px; overflow:hidden; white-space:nowrap;
-  transition:border-color var(--t-fade) var(--ease); }
-.chip:hover { border-color:var(--ring); }
-/* 크기를 지정해 둔 상태. 지금 보는 것이 실제 크기가 아니라는 표시라 눈에 띄어야 한다 */
-.chip.on { border-color:var(--primary); color:var(--primary); }
-/* 제안 목록은 주소창 입력칸에 붙어야 한다. .urlbar 전체를 기준으로 두면 버튼까지 포함한 폭이라
-   왼쪽 끝이 창 끝에서 시작한다. 입력칸만 감싼 래퍼를 기준 박스로 둔다. */
-/* 주소칸은 하나의 알약이다. 별표는 그 안에 넣는다. 크롬과 같은 위치이고 바깥 버튼이 하나 줄어든다. */
-.url-wrap { flex:1; min-width:0; position:relative; display:flex; align-items:center;
-  background:var(--card); border:1px solid transparent; border-radius:var(--r-pill); padding-right:2px;
-  transition:background var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease); }
-.url-wrap:hover { border-color:var(--border); }
-.url-wrap:focus-within { background:var(--bg); border-color:var(--ring); }
-.urlbar input { flex:1; min-width:0; width:100%; background:none; border:none; border-radius:var(--r-pill);
-  color:var(--fg); padding:7px 6px 7px 14px; font:inherit; font-size:var(--fs-sm); outline:none; }
-.urlbar input::placeholder { color:var(--muted-fg); }
-.ico.in-url { width:26px; height:26px; font-size:var(--fs-md); }
-.btn { border:none; border-radius:var(--r-blk); padding:0 14px; font-weight:var(--fw-semi); font-size:var(--fs-sm); cursor:pointer; background:var(--primary); color:var(--primary-fg); flex:none;
-  transition:opacity var(--t-fade) var(--ease); }
-.btn:hover { opacity:.9; }
-.browser-note { color:var(--muted-fg); font-size:var(--fs-2xs); text-align:center; }
+.chip { height:24px; display:flex; align-items:center; gap:5px; padding:0 8px; border-radius:var(--r-s); border:1px solid var(--line);
+  background:none; font:inherit; font-size:var(--fs-s); color:var(--fg-2); flex:none; white-space:nowrap; cursor:pointer; max-width:170px; overflow:hidden;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.chip:hover { background:var(--hover); color:var(--fg); }
+.chip:active { transform:scale(.96); }
+.urlbar .chip svg { width:13px; height:13px; color:var(--muted); }
+.chip span { overflow:hidden; text-overflow:ellipsis; }
+.chip.on { border-color:var(--accent); color:var(--accent); }
+/* 제안 목록의 기준 박스는 입력칸만 감싼 래퍼다. .urlbar 전체를 기준으로 두면 버튼까지 포함한 폭이라
+   왼쪽 끝이 창 끝에서 시작한다. 주소칸 안에 별표를 넣는다(크롬과 같은 위치). */
+.url-wrap { flex:1; min-width:0; height:28px; position:relative; display:flex; align-items:center; gap:8px; padding:0 10px;
+  border-radius:var(--r); background:var(--raised); border:1px solid var(--line); color:var(--fg-2); font-size:var(--fs);
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.url-wrap:focus-within { border-color:var(--focus); }
+.urlbar .url-lead { width:13px; height:13px; color:var(--faint); }
+.urlbar input { flex:1; min-width:0; height:100%; padding:0; border:0; background:none; font:inherit; letter-spacing:inherit; color:var(--fg); outline:none; }
+/* 포커스는 칸 테두리(:focus-within)가 보여 준다. 안쪽 입력칸에 전역 링까지 그리면 두 겹이 된다. */
+.urlbar input:focus-visible { box-shadow:none; }
+/* 별은 주소 끝에 붙는다. 누르는 자리는 20px 이고 음수 여백으로 그림 폭(14px)만큼만 차지한다. */
+.urlbar .ico.in-url { width:20px; height:20px; padding:0; margin:0 -3px 0 auto; letter-spacing:inherit; color:var(--faint); cursor:auto; }
+.urlbar .ico.in-url:hover { background:none; color:var(--fg); }
+#wv-bookmark.on { color:var(--pal-yellow-pop); }
+#url-sug { position:absolute; z-index:60; top:100%; left:-1px; right:-1px; margin-top:4px; max-height:260px; overflow:auto;
+  background:var(--raised); border:1px solid var(--line-strong); border-radius:var(--r); box-shadow:var(--menu-shadow); padding:4px; }
+#url-sug .sug { height:var(--row); display:flex; align-items:center; padding:0 8px; border-radius:var(--r-s); font-size:var(--fs);
+  color:var(--fg-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+#url-sug .sug:hover { background:var(--hover); color:var(--fg); }
+#url-sug .sug.on { background:var(--select); color:var(--select-fg); }
+.browser-note { color:var(--faint); font-size:var(--fs-s); text-align:center; }
 /* 페이지가 묻는 것(alert/confirm/prompt). 예전엔 창에 붙는 네이티브 시트라 다른 탭을 보고 있어도
    그 위에 떴고 창 전체가 막혔다. 이건 그 탭의 페이지 위에만 덮이고, 다른 탭·다른 창은 멀쩡하다. */
 .wv-dialog { position:absolute; inset:0; z-index:40; display:flex; align-items:center; justify-content:center;
-  background:rgb(var(--pal-shadow) / .5); backdrop-filter:blur(1.5px); }
-.wv-dialog .wd-card { width:min(400px, 84%); background:var(--card); color:var(--fg);
-  border:1px solid var(--border); border-radius:var(--r-card); box-shadow:var(--sh-high);
-  padding:14px 14px 12px; animation:wd-card-in var(--t-reg) var(--ease); }
+  background:rgb(var(--pal-shadow) / .5); }
+.wv-dialog .wd-card { width:min(400px, 84%); background:var(--raised); color:var(--fg);
+  border:1px solid var(--line-strong); border-radius:var(--r); box-shadow:var(--menu-shadow);
+  padding:14px 14px 12px; animation:wd-card-in var(--t) var(--ease); }
 @keyframes wd-card-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
-.wv-dialog .wd-host { font-size:var(--fs-2xs); color:var(--muted-fg); margin-bottom:6px; }
-.wv-dialog .wd-msg { font-size:var(--fs-sm); line-height:1.5; word-break:break-word; white-space:pre-wrap;
+.wv-dialog .wd-host { font:500 var(--fs-xs)/1.4 var(--mono); color:var(--faint); margin-bottom:6px; }
+.wv-dialog .wd-msg { font-size:var(--fs); line-height:1.5; word-break:break-word; white-space:pre-wrap;
   max-height:220px; overflow:auto; }
-.wv-dialog .wd-in { width:100%; box-sizing:border-box; margin-top:12px; font:inherit; font-size:var(--fs-sm);
-  background:var(--bg); border:1px solid var(--border); border-radius:var(--r-ctl); color:var(--fg); padding:7px 9px;
-  outline:none; transition:border-color var(--t-fade) var(--ease); }
-.wv-dialog .wd-in:focus { border-color:var(--primary); }
+.wv-dialog .wd-in { width:100%; box-sizing:border-box; height:28px; margin-top:12px; font:inherit;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r); color:var(--fg); padding:0 10px;
+  outline:none; transition:border-color var(--t) var(--ease); }
+.wv-dialog .wd-in:focus { border-color:var(--focus); }
+.wv-dialog .wd-in:focus-visible { box-shadow:none; }
 .wv-dialog .wd-btns { display:flex; justify-content:flex-end; gap:6px; margin-top:12px; }
-/* 단추는 콘솔 쪽 확인창과 같은 크기·모양이다. 같은 동작을 하는 요소는 같게 보여야 한다. */
-.wv-dialog button { font:inherit; font-size:var(--fs-xs); padding:4px 12px; border:1px solid var(--border);
-  border-radius:var(--r-ctl); background:var(--bg); color:var(--muted-fg); cursor:pointer;
-  transition:background var(--t-fade) var(--ease), color var(--t-fade) var(--ease); }
-.wv-dialog button:hover { background:var(--accent); color:var(--fg); }
-.wv-dialog button.hot { background:var(--primary); color:var(--primary-fg); border-color:var(--primary); font-weight:var(--fw-semi); }
-.ctab .cask { flex:0 0 auto; color:var(--on-accent); font-weight:var(--fw-bold); }
+.wv-dialog button { height:24px; padding:0 10px; border:1px solid var(--line); border-radius:var(--r-s); background:none;
+  font:inherit; font-size:var(--fs-s); color:var(--fg-2); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
+.wv-dialog button:hover { background:var(--hover); color:var(--fg); }
+.wv-dialog button.hot { background:var(--accent); color:var(--pal-ink); border-color:var(--accent); font-weight:600; }
+.wv-dialog button.hot:hover { background:var(--focus); border-color:var(--focus); color:var(--pal-ink); }

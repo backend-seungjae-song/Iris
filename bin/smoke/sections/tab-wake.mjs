@@ -15,8 +15,17 @@ console.log("[2h3] 잠든 탭 깨우기");
 // 중단시킨다.
 check("잠든 탭에 명령이 오면 실패시키지 않고 깨워서 다시 태운다", () =>
   /wakeSleepingTab\(asleep\)/.test(browserCommands)
-  && /waitForTabWc\(asleep, 12000\)\.then\(\(\) => \{ runBrowserCmd\(cmd, args, session, true, runId\)/
+  && /waitForTabWc\(asleep, 12000\)\.then\(\(wc\) => \{[\s\S]{0,400}?runBrowserCmd\(cmd, args, session, true, runId\)/
     .test(browserCommands));
+
+// 깨우지 못한 채 다시 태우면 wc 없는 대상으로 떨어져 "탭이 없다"고 답한다. 탭은 있고 깨우지 못한 것이다.
+check("깨우지 못하면 그 사실을 알린다", () =>
+  /if \(!wc\) \{\s*resolve\(\{ ok: false, error: `잠든 탭 @[^`]*깨우지 못했습니다/.test(browserCommands));
+
+// 새 탭도 만든 직후에는 활성 탭도 최근 명령 대상도 아니다. 깨우라고 알리지 않으면 사용자가 다른
+// 스페이스를 보고 있을 때 아무 창도 띄우지 않아 생성이 시간 초과로 끝난다.
+check("새 탭은 만들자마자 깨우라고 알린다", () =>
+  /bsMutate\(\{ op: "tab\.open"[\s\S]{0,900}?wakeSleepingTab\(id\);\s*waitForTabWc\(id, 12000\)/.test(browserCommands));
 
 // 잠든 탭은 두 경로로 들어온다. 지목(--tab)이면 tg.tabId 로, 고정·그룹이면 resolveTarget 이
 // notReady 를 반환해 tg.waitTab 으로 들어온다. 한쪽만 처리하면 나머지 절반이 실패한다.
@@ -71,6 +80,9 @@ await checkAsync("깨울 자격은 지금 webview 를 쥔 창 하나뿐", async 
     ["분리 창인데 도킹돼 있다", { browserMode: true, docked: true }, false],
     ["분리 창이 쥐고 있다", { browserMode: true, docked: false }, true],
     ["공유 탭은 공유 창 몫", { sp: "__shared__", docked: true }, false],
+    ["공유 창이 공유 탭을 깨운다", { boundSpace: "__shared__", browserMode: true, sp: "__shared__", docked: true }, true],
+    ["분리 상태여도 공유 탭은 공유 창이 깨운다", { boundSpace: "__shared__", browserMode: true, sp: "__shared__", docked: false }, true],
+    ["분리 창은 공유 탭을 깨우지 않는다", { browserMode: true, sp: "__shared__", docked: false }, false],
     ["접은 스페이스는 안 되살린다", { liveSpace: false, docked: true }, false],
   ];
   const wrong = [];

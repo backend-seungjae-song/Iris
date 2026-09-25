@@ -50,7 +50,7 @@ const ALLOWED_HOSTS = new Set([
   "opensource.org", "www.w3.org", "developer.mozilla.org", "www.chromium.org",
   "source.chromium.org", "bugs.chromium.org", "chromedevtools.github.io",
   "support.google.com", "security.googleblog.com", "developers.googleblog.com", "developer.chrome.com", "pptr.dev",
-  "developer.android.com",
+  "developer.android.com", "apps.apple.com",
   "github.io", "xtermjs.org", "microsoft.github.io", "vercel.com", "www.gstatic.com",
   "fonts.googleapis.com", "fonts.gstatic.com", "openfontlicense.org", "tailscale.com", "www.anthropic.com",
   // 구독 사용량을 물어보는 제공자 엔드포인트 (server/usage.js)
@@ -64,6 +64,8 @@ const ALLOWED_HOSTS = new Set([
   "www.google.com", "accounts.google.com", "accounts.youtube.com", "myaccount.google.com", "mail.google.com", "naver.com", "m.naver.com",
   // 픽스처로 쓰는 일반 이름들. 특정 회사가 아니다
   "shop.com", "other.com", "a.com", "b.com", "c.com",
+  // 원격·루프백 판정 검사가 거부돼야 하는 예로 쓰는 가짜 주소(test/loopback-origin-gate.mjs). 기기 주소가 아니다
+  "127.0.0.2", "127.0.0.1.nip.io", "100.64.0.2", "100.101.102.103", "100.101.102.104",
 ]);
 
 // 파일 이름에 낀 `@`(icon_16x16@2x.png, node-pty@1.1.0.patch)는 메일이 아니다.

@@ -14,7 +14,8 @@
 //
 // 유지 조건
 //   foreground-tab/background-tab 은 호스트의 ac-open-tab 으로 보내고 new-window 만 Electron 팝업을
-//   허용한다. openerWc 를 빼면 새 탭이 부모 프로필을 잃는다.
+//   허용한다. openerWc 를 빼면 새 탭이 부모 프로필을 잃는다. 스크립트의 window.open 은 openerScript 가
+//   표식을 붙여 new-window 로 오게 한다. 탭은 사이트에 창 참조를 돌려주지 못하기 때문이다.
 //   로컬 링크(file:)는 브라우저 탭으로 열지 않고 앱으로 넘긴다(ac-open-local). 표·문서는 브라우저가
 //   렌더링하지 못해 아무 일도 일어나지 않는다. 넘기는 것은 여는 쪽 페이지가 로컬일 때뿐이다. 원격 페이지가
 //   지정한 file: 을 받으면 외부 페이지의 요청으로 이 기계의 파일이 앱 화면에 뜬다.
@@ -43,6 +44,8 @@ function createWebviewLifecycle({
   dialogScript,
   webAuthnScript,
   botcheckScript,
+  // 스크립트가 연 새 창을 팝업으로 받게 하는 window.open 표식. 빠지면 사이트가 null 을 받아 팝업 차단으로 본다.
+  openerScript = "",
   registerSessionPrimer,
   // main-frame 탐색을 부착 정책에 알린다(로그인 호스트 진입 시 즉시 detach). url null 은 탐색 종료.
   noteNavigation = () => false,
@@ -63,6 +66,10 @@ function createWebviewLifecycle({
   // 앱이 렌더링하는 링크인지 판정한다. 확장자 표는 렌더러가 소유하고 여기는 복사본만 본다.
   appDrawsLink = () => false,
 }) {
+  // 결제·본인인증 모듈은 빈 창을 이름과 함께 먼저 열고(window.open("", "이름")) 폼을 그 이름으로
+  // 제출한다. 빈 창은 about:blank 로 오며 여는 페이지의 출처를 물려받을 뿐 다른 곳을 불러오지 않는다.
+  // 막으면 사이트가 null 을 받아 팝업 차단으로 본다.
+  const isBlankPopup = (u) => /^about:blank(#.*)?$/i.test(String(u || ""));
   const SAFE_POPUP_WINDOW_OPTIONS = {
     alwaysOnTop: false, closable: true, focusable: true, frame: true, fullscreen: false, kiosk: false,
     modal: false, movable: true, opacity: 1, show: true, simpleFullscreen: false, skipTaskbar: false,
@@ -143,6 +150,8 @@ function createWebviewLifecycle({
             { source: botcheckScript, runImmediately: true }).catch(() => {});
           d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
             { source: dlgSrc, runImmediately: true }).catch(() => {});
+          if (openerScript) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+            { source: openerScript, runImmediately: true }).catch(() => {});
           // 교차 출처 iframe은 별도 프로세스·별도 타깃(OOPIF)이라 위 주입이 적용되지 않는다. 그 안에서
           // 뜬 확인창은 앱의 확인창으로 바뀌지 않고, 크롬은 교차 출처 프레임의 네이티브 확인창을 무시하므로
           // confirm 이 묻지 않고 false 가 되어 그 프레임의 버튼이 동작하지 않는다(확인 결과: 다른 출처의
@@ -162,6 +171,8 @@ function createWebviewLifecycle({
             { source: dlgSrc, runImmediately: true }, sid).catch(() => {});
           d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
             { source: webAuthnScript, runImmediately: true }, sid).catch(() => {});
+          if (openerScript) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+            { source: openerScript, runImmediately: true }, sid).catch(() => {});
         });
         wc.once("destroyed", () => { registerSessionPrimer(wc.id, null); forgetAttachPolicy(wc.id); });
         // 수신기는 붙기 전에 걸어 둔다. debugger 는 EventEmitter 라 attach 전에도 걸 수 있고, 이렇게
@@ -186,14 +197,15 @@ function createWebviewLifecycle({
         });
         wc.on("did-stop-loading", () => { try { noteNavigation(wc.id, null); } catch {} });
         // CDP 가 없는 사람 탭에도 같은 스크립트가 있어야 앱 안 확인창·패스키 알림·사람 확인 실패
-        // 알림이 유지된다. 문서 시작 전 창은 잃지만(dom-ready 전에 뜬 확인창은 네이티브 시트),
+        // 알림과 스크립트 팝업이 유지된다. 문서 시작 전 창은 잃지만(dom-ready 전에 뜬 확인창은 네이티브 시트),
         // 세 스크립트는 자기 표식으로 두 번 실행을 막으므로 나중에 CDP 가 붙어도 겹치지 않는다.
         const injectHuman = (frame) => {
           if (!frame || wc.isDestroyed()) return;
           let attached = false;
           try { attached = dbg.isAttached(); } catch {}
           if (attached) return;   // CDP 세션이 있으면 document-start 주입이 이미 걸려 있다
-          for (const src of [webAuthnScript, botcheckScript, dlgSrc]) {
+          for (const src of [webAuthnScript, botcheckScript, dlgSrc, openerScript]) {
+            if (!src) continue;
             try { const p = frame.executeJavaScript(src, true); if (p && p.catch) p.catch(() => {}); } catch {}
           }
         };
@@ -226,7 +238,7 @@ function createWebviewLifecycle({
         } catch {}
       });
       wc.setWindowOpenHandler(({ url, disposition }) => {
-        if (!/^https?:/i.test(url || "")) {
+        if (!/^https?:/i.test(url || "") && !(disposition === "new-window" && isBlankPopup(url))) {
           // 로컬 링크의 새 탭 요청(target=_blank·⌘클릭·가운데클릭). 여기서 차단하면 아무 일도
           // 일어나지 않아 눌리지 않는 링크로 보인다. 어디로 보낼지는 렌더러가 정한다.
           if (isFileUrl(url) && pageIsLocal()) toHost("ac-open-local", { target: String(url) });
@@ -234,7 +246,7 @@ function createWebviewLifecycle({
         }
         // "새 탭으로 열기"는 앱 브라우저의 탭이어야 한다. target=_blank·가운데클릭은 disposition이
         // foreground-tab/background-tab으로 오는데, 이걸 팝업 창으로 열면 별도 Electron 창이 뜬다
-        // 그러면 흰 화면만 나오는 창이 뜬다. OAuth처럼 크기·이름을 준 window.open만 new-window로 온다.
+        // 그러면 흰 화면만 나오는 창이 뜬다. 스크립트의 window.open 은 openerScript 표식 때문에 new-window 로 온다.
         if (disposition === "foreground-tab" || disposition === "background-tab") {
           const host = wc.hostWebContents;
           if (host && !host.isDestroyed()) {
@@ -280,7 +292,7 @@ function createWebviewLifecycle({
           // 부모와 같은 규칙을 그 자리에서 건다. http(s) 아닌 주소는 창으로 열지 않는다.
           try {
             cwc.setWindowOpenHandler(({ url: childUrl }) => {
-              if (!/^https?:/i.test(String(childUrl || ""))) return { action: "deny" };
+              if (!/^https?:/i.test(String(childUrl || "")) && !isBlankPopup(childUrl)) return { action: "deny" };
               const byAi = aiDriving ? !!aiDriving(cwc.id) : false;
               return { action: "allow",
                 overrideBrowserWindowOptions: byAi ? { ...SAFE_POPUP_WINDOW_OPTIONS, show: false } : SAFE_POPUP_WINDOW_OPTIONS };

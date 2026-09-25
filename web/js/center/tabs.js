@@ -36,6 +36,10 @@ import { sendPtyResize, terminalBarePathToken } from "../panel/xterm-wiring.js";
 import { fitTerminal, getCropEnabled, setCropEnabled } from "../panel/terminal.js";
 import { fileKindOf, fileKinds, tabNeedsContent } from "../core/file-kinds.js";
 import { initFileRouting, openBrowser } from "./file-routing.js";
+import { openFilePalette } from "./file-palette.js";
+import { reopenLastClosed } from "./closed-tabs.js";
+import { bindingOf, formatBinding, subscribeKeymap } from "../core/keymap.js";
+import { getSpaces } from "../herdr/state.js";
 import { isTabDirty } from "./tab-close.js";
 import {
   addTab, ensureTabSpace, getActiveTabId, getCenterSpace, getCurrentTabs, getTabs,
@@ -95,6 +99,31 @@ export function initCenterTabs(deps) {
     syncWatchDirs, newBrowserTab,
     getHostHome, getCurTarget, getLastAgents, getSelectedSpaceId,
   });
+  wireCenterEmpty();
+}
+
+// 열린 탭이 없을 때의 행동 줄. 단축키와 같은 함수를 부르고, 적힌 키는 단축키 표에서 읽는다
+// (사용자가 바꾼 키가 그대로 보여야 한다).
+function wireCenterEmpty() {
+  const acts = { "file-search": openFilePalette, browser: openBrowser, "reopen-tab": reopenLastClosed };
+  centerEmpty.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-empty-act]");
+    const act = btn && acts[btn.dataset.emptyAct];
+    if (act) act();
+  });
+  const paintKeys = () => {
+    for (const el of centerEmpty.querySelectorAll("[data-empty-key]")) {
+      el.textContent = formatBinding(bindingOf(el.dataset.emptyKey));
+    }
+  };
+  paintKeys();
+  subscribeKeymap(paintKeys);
+}
+
+function paintCenterEmptyTitle(spaceId) {
+  const el = centerEmpty.querySelector("#center-empty-title"); if (!el) return;
+  const s = spaceId ? getSpaces().find((x) => x.id === spaceId) : null;
+  el.textContent = s && s.label ? `${s.label}에 열린 탭이 없습니다` : "열린 탭이 없습니다";
 }
 
 function openSharedBrowserFromButton() {
@@ -151,6 +180,13 @@ export function startTabRename(nameEl, cur, onCommit) {
   inp.addEventListener("dblclick", (ev) => ev.stopPropagation());
 }
 
+// 탭 앞머리 종류 그림과 닫기 그림.
+const TAB_KIND = {
+  browser: '<svg class="i ckind" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  file: '<svg class="i ckind" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+};
+export const TAB_CLOSE = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+
 export function renderTabs() {
   callHook("memo.render"); // 스페이스가 바뀌면 쪽지도 그 스페이스 것으로 (메모를 끄면 아무 일도 없다)
   const centerSpace = getCenterSpace();
@@ -166,8 +202,9 @@ export function renderTabs() {
     const ai = busy.length ? `<span class="cai" title="${esc(busy.join(", "))} 세션이 지금 이 탭을 조작 중">●${busy.length > 1 ? busy.length : ""}</span>` : "";
     const status = getWebviewStatus(t.id);
     const sleeping = t.kind === "browser" && !!(status && status.sleeping);
-    const sleep = sleeping ? '<span class="csleep" title="메모리를 회수한 잠자는 탭 · 클릭하면 다시 엽니다">◌</span>' : "";
-    return `<div class="ctab${t.id === act ? " active" : ""}${d ? " dirty" : ""}${busy.length ? " ai-held" : ""}" data-tab="${esc(t.id)}" title="${sleeping ? "잠자는 탭 · 클릭하면 다시 엽니다" : ""}">${d ? '<span class="cdirty"></span>' : ""}${sleep}${ai}<span class="cname">${esc(label)}</span><button class="cclose" data-close="${esc(t.id)}">✕</button></div>`;
+    const sleep = sleeping ? '<span class="csleep" title="메모리를 회수한 잠자는 탭 · 클릭하면 다시 엽니다"></span>' : "";
+    const lead = sleeping ? sleep : (t.kind === "browser" ? TAB_KIND.browser : TAB_KIND.file);
+    return `<div class="ctab${t.id === act ? " active" : ""}${d ? " dirty" : ""}${busy.length ? " ai-held" : ""}${sleeping ? " sleeping" : ""}" data-tab="${esc(t.id)}" title="${sleeping ? "잠자는 탭 · 클릭하면 다시 엽니다" : ""}">${lead}${d ? '<span class="cdirty" title="저장 안 됨"></span>' : ""}${ai}<span class="cname">${esc(label)}</span><button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기">${TAB_CLOSE}</button></div>`;
   }).join("");
   syncAiGlow();
   updateCenterVisibility();
@@ -181,6 +218,7 @@ export function showActiveTab() {
   const t = curTabs().find((x) => x.id === getActiveTabId(centerSpace));
   withFileViewTransition(t && isFileLikeKind(t.kind) ? t : null, {}, (renderToken) => {
     centerEmpty.hidden = !!t;
+    if (!t) paintCenterEmptyTitle(centerSpace);
     fileview.hidden = !(t && t.kind === "file");
     browserview.hidden = !(t && t.kind === "browser");
     // 나머지 화면은 그 종류를 추가한 기능이 표에 등록한다. 로드되지 않은 기능의 화면은 표에

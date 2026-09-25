@@ -5,17 +5,15 @@
 .ml-panel { min-width: 0; }
 .ml-head {
   flex: none; display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; border-bottom: 1px solid var(--sidebar-border);
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
 }
-.ml-title { font-size: var(--fs-xs); font-weight: var(--fw-semi); color: var(--fg); }
-/* 글자 색은 --muted-fg 다. --muted 는 이 팔레트에서 면 색(#16293A)이라, 그것을 글자에
-   쓰면 사이드바 바탕과 대비 1.3 이 되어 손을 얹기 전에는 안 보인다.
-   메모랩 지면의 팔레트에서는 --muted 가 글자 등급이라 이름만 보고 옮겨 적으면 걸린다. */
+.ml-title { font-size: var(--fs-s); font-weight: var(--fw-semi); color: var(--fg); }
+/* 앱과 메모랩 지면은 각각 자기 팔레트에서 --muted 를 보조 글자색으로 정의한다. */
 .ml-open {
-  margin-left: auto; background: transparent; border: 1px solid var(--sidebar-border);
+  margin-left: auto; background: transparent; border: 1px solid var(--line);
   border-radius: var(--r-blk);
-  color: var(--muted-fg); font: inherit; font-size: var(--fs-2xs); padding: 3px 8px; cursor: pointer;
-  transition: color var(--t-fade) var(--ease), border-color var(--t-fade) var(--ease);
+  color: var(--muted); font: inherit; font-size: var(--fs-xs); padding: 3px 8px; cursor: pointer;
+  transition: color var(--t) var(--ease), border-color var(--t) var(--ease);
 }
 .ml-open:hover { color: var(--fg); border-color: var(--fg); }
 /* 지면은 자기 배경을 스스로 칠한다. 여기서 다시 칠하면 두 겹이 어긋난다 */

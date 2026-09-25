@@ -1,11 +1,11 @@
-// 포커스 스페이스의 파일 트리와 Spaces 목록을 렌더하고 파일 reveal을 이어 간다.
+// 포커스 스페이스의 파일 트리와 Spaces · Agents 목록을 렌더하고 파일 reveal을 이어 간다.
 //
 // 소유 범위
 //   Explorer DOM 참조·클릭 배선, 트리 포커스, 생성 뒤 포커스 예약, 비동기 reveal 상태와
 //   파일별 git 상태·아이콘 표현.
 //
 // 제공 API
-//   initTree, 트리·Spaces 렌더와 디렉터리 요청/무효화, Explorer DOM 접근자,
+//   initTree, 트리·Spaces 렌더와 디렉터리 요청/무효화, Explorer DOM 접근자, 에이전트 줄 등록(registerSpaceAgents),
 //   생성 포커스·git 상태 갱신, reveal 시작·취소·fs 응답 처리, 펼친 디렉터리 목록과 extOf.
 //
 // 의존 대상
@@ -25,8 +25,10 @@
 import { spaceRootFor } from "../center/file-palette.js";
 import { openFile } from "../center/file-routing.js";
 import { getActiveTabId, getCenterSpace, getTabs } from "../center/tab-store.js";
+import { STATE_LABEL, spaceState } from "../core/agent-state.js";
+import { getLastAgents } from "../herdr/state.js";
 
-let $, esc, wsSend, statusClass, orderedSpaces, getIsLocal, getSelectedSpaceId;
+let $, esc, wsSend, orderedSpaces, getIsLocal, getSelectedSpaceId;
 let getActiveFile, setActiveFile, saveCollapsed, syncWatchDirs;
 let collapsed, dirCache;
 let spaceList, fileTree, explorerSpace, fileAdd, folderAdd;
@@ -36,14 +38,15 @@ let pendingReveal = null;
 let revealTokenSeq = 0;
 const gitStatus = {}; // 절대경로 → git 상태 문자(M/A/U/D). 백엔드 fs.list가 채움.
 
-// VSCode식 파일 아이콘(언어색) + 폴더 아이콘. 최소 인라인 SVG.
-const LANG_COLOR = { js:"#e5c07b", jsx:"#e5c07b", mjs:"#e5c07b", ts:"#4a9eda", tsx:"#4a9eda", json:"#cb8b3a", md:"#6a9955", markdown:"#6a9955", py:"#4a9eda", html:"#e37933", css:"#4a9eda", scss:"#c6538c", sh:"#89e051", zsh:"#89e051", swift:"#f05138", go:"#00add8", rs:"#dea584", toml:"#9c9c9c", yml:"#cb171e", yaml:"#cb171e", lock:"#8a8a8a", env:"#d4b942", txt:"#9aa0a6", sql:"#e38c00", png:"#a074c4", jpg:"#a074c4", svg:"#ffb13b" };
+// 트리 줄의 선 아이콘. 접기 삼각형은 열리면 CSS 가 돌린다.
+const SVG_TOG = '<svg class="i caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+const SVG_DIR = '<svg class="i ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const SVG_FILE = '<svg class="i ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+const SVG_GRIP = '<svg class="i grip" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/></svg>';
 export const extOf = (n) => { const i = n.lastIndexOf("."); return i > 0 ? n.slice(i + 1).toLowerCase() : ""; };
-function fileIcon(name) { const c = LANG_COLOR[extOf(name)] || "var(--muted-fg)"; return `<svg width="13" height="13" viewBox="0 0 16 16" fill="${c}"><path d="M4 1.3h4.6L12 4.6V14a.7.7 0 0 1-.7.7H4a.7.7 0 0 1-.7-.7V2a.7.7 0 0 1 .7-.7z" opacity=".92"/></svg>`; }
-function dirIcon() { return `<svg width="13" height="13" viewBox="0 0 16 16" fill="#7c9cbf"><path d="M1.6 3.4h4.2l1.2 1.4h7.4a.6.6 0 0 1 .6.6v7a.6.6 0 0 1-.6.6H1.6a.6.6 0 0 1-.6-.6V4a.6.6 0 0 1 .6-.6z"/></svg>`; }
 
 export function initTree(deps) {
-  ({ $, esc, wsSend, statusClass, orderedSpaces, getIsLocal, getSelectedSpaceId,
+  ({ $, esc, wsSend, orderedSpaces, getIsLocal, getSelectedSpaceId,
     getActiveFile, setActiveFile, saveCollapsed, syncWatchDirs, collapsed, dirCache } = deps);
   spaceList = $("#space-list"); fileTree = $("#file-tree"); explorerSpace = $("#explorer-space");
   fileAdd = $("#file-add"); folderAdd = $("#folder-add");
@@ -70,10 +73,10 @@ function renderDir(dirPath, depth) {
   return `<ul class="ftree">` + entries.map((e) => {
     if (e.dir) {
       const open = !collapsed.dirs.has(e.path) && dirCache.has(e.path);
-      return `<li><div class="fitem dir${treeFocusPath === e.path ? " focused" : ""}" data-dir="${esc(e.path)}" style="padding-left:${pad}px"><span class="caret${open ? " open" : ""}" style="width:10px">▶</span><span class="ficon">${dirIcon(open)}</span><span class="fname">${esc(e.name)}</span></div>${open ? renderDir(e.path, depth + 1) : ""}</li>`;
+      return `<li><div class="fitem dir${treeFocusPath === e.path ? " focused" : ""}" data-dir="${esc(e.path)}" style="padding-left:${pad}px">${open ? SVG_TOG.replace('class="i caret"', 'class="i caret open"') : SVG_TOG}${SVG_DIR}<span class="fname">${esc(e.name)}</span></div>${open ? renderDir(e.path, depth + 1) : ""}</li>`;
     }
     const g = gitStatus[e.path];
-    return `<li><div class="fitem file${getActiveFile() === e.path ? " active" : ""}${treeFocusPath === e.path ? " focused" : ""}${g ? " git-" + g : ""}" data-file="${esc(e.path)}" style="padding-left:${pad + 14}px"><span class="ficon">${fileIcon(e.name)}</span><span class="fname">${esc(e.name)}</span>${g ? `<span class="gbadge">${g}</span>` : ""}</div></li>`;
+    return `<li><div class="fitem file${getActiveFile() === e.path ? " active" : ""}${treeFocusPath === e.path ? " focused" : ""}${g ? " git-" + g : ""}" data-file="${esc(e.path)}" style="padding-left:${pad + 14}px">${SVG_FILE}<span class="fname">${esc(e.name)}</span>${g ? `<span class="gbadge">${g}</span>` : ""}</div></li>`;
   }).join("") + `</ul>`;
 }
 
@@ -87,15 +90,36 @@ export function renderFileTree() {
   fileTree.innerHTML = renderDir(s.folder, 0);
 }
 
+// 스페이스 줄마다 바로 아래에 그 스페이스의 에이전트 줄을 끼운다. 에이전트 줄은 herdr/agents 가
+// 등록한 함수가 만들고, 등록한 쪽이 없으면 스페이스 줄만 남는다. herdr 는 앱 셸이라 이름 훅
+// (core/hooks.js, 기능만 채운다) 대신 context-menu 의 registerAgentRenderer 와 같은 등록으로 잇는다.
+// rows(spaceId) → { count, open, html }, hold() → 참이면 지금 다시 그리지 않는다.
+let spaceAgents = null;
+export function registerSpaceAgents(provider) { spaceAgents = provider; }
+
 export function renderSpaces() {
+  // 에이전트 이름을 제자리에서 고치는 중이면 다시 그리지 않는다. 그리면 입력칸이 사라진다.
+  if (spaceAgents && spaceAgents.hold()) return;
   const list = orderedSpaces();
   // 스페이스 생성은 셸을 만드는 작업이라 로컬에서만 가능하다(AC5). 원격에서는 버튼을 두지 않는다.
   const addBtn = $("#space-add"); if (addBtn) addBtn.hidden = !getIsLocal();
   if (!list.length) { spaceList.innerHTML = `<div class="fempty">Space 없음</div>`; return; }
-  spaceList.innerHTML = list.map((s) => `
-    <div class="space-row${s.id === getSelectedSpaceId() ? " sel" : ""}" draggable="true" data-space="${esc(s.id)}" data-folder="${esc(s.folder || "")}">
-      <span class="grip">⠿</span><span class="space-name">${esc(s.label)}</span><span class="dot ${statusClass(s.status)}"></span>
-    </div>`).join("");
+  spaceList.innerHTML = list.map((s) => {
+    const sel = s.id === getSelectedSpaceId();
+    const st = spaceState(s.status, getLastAgents(), s.id);
+    const ag = spaceAgents ? spaceAgents.rows(s.id) : null;
+    const count = (ag && ag.count) || 0;
+    const open = !!(ag && ag.open);
+    const tog = count
+      ? `<button class="space-tog${open ? " open" : ""}" type="button" data-space-tog="${esc(s.id)}" aria-expanded="${open}" title="에이전트 ${open ? "접기" : "펼치기"}">${SVG_TOG.replace(" caret", "")}</button>`
+      : `<span class="space-tog-spacer" aria-hidden="true"></span>`;
+    return `<div class="space-row${sel ? " sel" : ""}" draggable="true" data-space="${esc(s.id)}" data-folder="${esc(s.folder || "")}">`
+      + `${SVG_GRIP}${tog}<span class="space-name">${esc(s.label)}</span>`
+      + (!open && count ? `<span class="space-count" title="접힌 에이전트">${count}</span>` : "")
+      + (sel ? `<span class="kbd" title="스페이스 이동">⌥⇧↑↓</span>` : "")
+      + `<span class="dot ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span></div>`
+      + ((ag && ag.html) || "");
+  }).join("");
 }
 
 export function requestDir(p) { if (p && !dirCache.has(p)) { dirCache.set(p, "loading"); wsSend({ type: "fs.list", path: p }); } }

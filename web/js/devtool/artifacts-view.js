@@ -66,6 +66,9 @@ function clock(ms) {
 //   preview: { path, what, name, ... }. 서버가 준 그대로
 //   dirPreview: 지금 보는 것이 어느 폴더 안이면 그 폴더의 목록(없으면 null)
 //   canTrash: 이 창에 휴지통 통로가 있는가(없으면 지우는 버튼을 안 그린다)
+// 펼침 표시. 펼친 줄은 CSS 가 90도 돌린다(.art-kind.open · .art-day.open).
+const CARET = `<svg class="i art-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`;
+
 export function artifactsPane(model) {
   const m = model || {};
   const kinds = Array.isArray(m.kinds) ? m.kinds : [];
@@ -73,10 +76,10 @@ export function artifactsPane(model) {
   const canTrash = m.canTrash !== false;
   const parts = [];
 
-  parts.push(`<div class="km-pane-h"><div class="km-pane-t">부산물</div>
+  parts.push(`<div class="km-phead"><span class="km-h2">부산물</span><span class="km-sp"></span>
     <button class="km-btn" id="art-refresh">다시 세기</button>
     ${canTrash && total.count
-      ? `<button class="km-btn" id="art-empty-all">전부 비우기</button>`
+      ? `<button class="km-btn danger" id="art-empty-all">전부 비우기</button>`
       : ""}</div>`);
   parts.push(`<div class="km-note">Iris 가 만든 파일입니다. 비우면 휴지통으로 갑니다 — ${
     kinds.length ? `모두 ${esc(total.count)}개 · ${esc(humanBytes(total.bytes))}` : "세는 중"}</div>`);
@@ -95,14 +98,13 @@ export function artifactsPane(model) {
     const empty = !kind.count;
     parts.push(`<div class="art-kind${open ? " open" : ""}">
       <button class="art-head" data-art-kind="${esc(kind.id)}" aria-expanded="${open ? "true" : "false"}">
-        <span class="art-caret">${open ? "▾" : "▸"}</span>
-        <span class="art-n">${esc(kind.label)}</span>
-        <span class="art-d">${esc(kind.desc || "")}</span>
+        ${CARET}
+        <span class="km-tx"><span class="km-tn">${esc(kind.label)}</span><span class="km-td">${esc(kind.desc || "")}</span></span>
         <span class="art-c">${empty ? "비어 있음" : `${esc(kind.count)}개 · ${esc(humanBytes(kind.bytes))}`}</span>
       </button>
       ${canTrash && !empty
-        ? `<button class="km-undo" data-art-empty="${esc(kind.id)}">비우기</button>`
-        : '<span class="km-undo-space"></span>'}
+        ? `<button class="km-btn ghost art-act" data-art-empty="${esc(kind.id)}">비우기</button>`
+        : '<span class="art-act-space"></span>'}
     </div>`);
     if (open) parts.push(dayRows(m, kind, canTrash));
   }
@@ -120,13 +122,13 @@ function dayRows(m, kind, canTrash) {
     const open = m.openDay === day.date;
     out.push(`<div class="art-day${open ? " open" : ""}">
       <button class="art-day-h" data-art-day="${esc(day.date)}" aria-expanded="${open ? "true" : "false"}">
-        <span class="art-caret">${open ? "▾" : "▸"}</span>
+        ${CARET}
         <span class="art-date">${esc(day.date)}</span>
         <span class="art-c">${esc(day.count)}개 · ${esc(humanBytes(day.bytes))}</span>
       </button>
       ${canTrash
-        ? `<button class="km-undo" data-art-day-empty="${esc(day.date)}">비우기</button>`
-        : '<span class="km-undo-space"></span>'}
+        ? `<button class="km-btn ghost art-act" data-art-day-empty="${esc(day.date)}">비우기</button>`
+        : '<span class="art-act-space"></span>'}
     </div>`);
     if (open) out.push(entryRows(m, kind, day, canTrash));
   }
@@ -148,7 +150,7 @@ function entryRows(m, kind, day, canTrash) {
         row.dir ? ` <span class="art-sub">${esc(row.count)}개</span>` : ""}</button>
       <span class="art-s">${esc(humanBytes(row.bytes))}</span>
       <span class="art-t">${esc(clock(row.mtime))}</span>
-      ${canTrash ? `<button class="km-undo" data-art-del="${esc(row.path)}">지우기</button>` : ""}
+      ${canTrash ? `<button class="km-btn ghost art-act" data-art-del="${esc(row.path)}">지우기</button>` : ""}
     </div>`);
     if (!picked) continue;
     // 폴더 목록은 그대로 두고 그 아래에 고른 파일을 편다. 목록이 사라지면 옆 파일로 넘어갈 수 없다.
@@ -168,7 +170,7 @@ function under(preview, dirPath) {
 
 function previewBlock(p) {
   const head = `<div class="art-pv-h"><span class="art-pv-n">${esc(p.name || "")}</span>
-    <button class="km-btn" id="art-preview-close">닫기</button></div>`;
+    <button class="km-btn ghost" id="art-preview-close">닫기</button></div>`;
   if (p.error) return `<div class="art-pv">${head}<div class="km-empty">${esc(p.error)}</div></div>`;
   if (p.what === "image") {
     return `<div class="art-pv">${head}<img class="art-pv-img" alt="${esc(p.name || "")}"

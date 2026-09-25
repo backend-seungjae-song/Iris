@@ -35,6 +35,7 @@ import {
   sleepDeadSpaceWebviews, wakeWebview,
 } from "./webview.js";
 import { addTab, ensureTabSpace, getTabs, getTabSpaces } from "../center/tab-store.js";
+import { callHook } from "../core/hooks.js";
 
 let BROWSER_MODE = false;
 let BOUND_SPACE = null;
@@ -83,12 +84,14 @@ function aiTabsOwnedHere() {
   return out;
 }
 
-// 서버가 탭을 깨워 달라고 알렸을 때, 이 창이 그 탭의 소유자인가. 규칙은 aiTabsOwnedHere 와
-// 같아야 한다. 자격을 넓히면 같은 탭에 webview 가 둘 생기고 wc 가 겹친다(위 주석 참조).
+// 서버가 탭을 깨워 달라고 알렸을 때, 이 창이 그 탭의 소유자인가. 스페이스 탭의 규칙은
+// aiTabsOwnedHere 와 같아야 한다. 자격을 넓히면 같은 탭에 webview 가 둘 생기고 wc 가 겹친다(위 주석 참조).
+// 공유 탭은 공유 창만 띄우므로 도킹 상태와 무관하게 공유 창이 깨운다. 여기서도 빼면 지목받은 공유 탭은
+// 아무 창도 깨우지 않아 명령이 시간 초과로 끝난다.
 export function wakeOwnedHere({ boundSpace, browserMode, docked, sp, liveSpace }) {
+  if (sp === "__shared__") return boundSpace === "__shared__";
   if (boundSpace) return false;                        // 공유 창은 스페이스 탭의 소유자가 아니다
   if (browserMode ? docked : !docked) return false;    // 지금 webview 를 가진 창이 아니다
-  if (sp === "__shared__") return false;               // 공유 탭은 공유 창이 띄운다
   return !!liveSpace;                                  // 접은 스페이스는 복원하지 않는다
 }
 
@@ -159,6 +162,7 @@ export function applyBrowserState(st) {
   migrateTabProfileRefs(getBrowserState());
   renderBookmarks(); renderUrlDatalist(); syncBookmarkStar();
   updateProfileBtn();                  // 계정 목록이 늦게 와도 버튼 라벨이 따라온다
+  callHook("accounts.stateChanged");  // 계정 화면의 "쓰는 스페이스" 칩이 서버의 기본 계정을 따라온다
   reconcileBrowserMode();                                     // 분리창: 탭/webview를 서버 상태에 동기화
   reconcileDocTabs();                                         // 분리창: docx/sheet 탭을 자체 에디터로 동기화
   if (typeof reconcileConsoleDock === "function") reconcileConsoleDock(); // 콘솔: 도킹 상태 반영(슬라이스 4)

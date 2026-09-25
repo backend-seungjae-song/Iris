@@ -54,16 +54,50 @@ const REASONS = {
   "network": "연결 실패",
 };
 
-// 제공자가 돌려주는 네 답. 실제로 일어난 일을 그대로 적는다. 권이 나가지 않은 경우와
-// 나간 경우가 화면에서 같아 보이면 사용자가 다시 누르게 된다.
-const RESET_OUTCOMES = {
+// 초기화권을 제공하는 제공자별 계약. 결과 문구는 실제로 일어난 일을 그대로 적는다. 차감된
+// 경우와 차감되지 않은 경우가 화면에서 같아 보이면 사용자가 다시 누르게 된다.
+const COMMON_OUTCOMES = {
   reset: "초기화됨",
-  nothing_to_reset: "풀 창이 없어 권은 그대로",
-  no_credit: "남은 권 없음",
-  already_redeemed: "이미 쓴 요청",
   "missing-credentials": "로그인 필요",
   "stale-token": "토큰 만료",
   network: "연결 실패",
+};
+const RESETS = {
+  codex: {
+    message: "usage.codexReset",
+    outcomes: {
+      ...COMMON_OUTCOMES,
+      nothing_to_reset: "초기화할 한도가 없어 차감 안 됨",
+      no_credit: "남은 초기화권 없음",
+      already_redeemed: "이미 처리된 요청",
+    },
+    ask: (have) => `초기화권 1개를 사용합니다. 사용 후 ${Math.max(0, have - 1)}개 남습니다.\n`
+      + "초기화할 한도가 없으면 차감되지 않습니다.\n"
+      + "사용한 초기화권은 되돌릴 수 없습니다. 계속할까요?",
+  },
+  claude: {
+    message: "usage.claudeReset",
+    outcomes: {
+      ...COMMON_OUTCOMES,
+      already_used: "이미 처리된 요청",
+      not_limited: "한도에 걸리지 않아 차감 안 됨",
+      cooldown: "잠시 뒤 다시 시도",
+      ineligible: "이 계정은 사용할 수 없음",
+      unavailable: "지금 사용할 수 없음",
+      rate_limited: "요청 과다",
+    },
+    ask: (have) => `초기화권 1개를 사용합니다. 사용 후 ${Math.max(0, have - 1)}개 남습니다.\n`
+      + "사용한 초기화권은 되돌릴 수 없습니다. 계속할까요?",
+  },
+};
+// 서버가 버튼을 잠근 이유(resetBlocked). Claude 초기화권은 한도에 걸린 동안에만 쓸 수 있는
+// 경우가 있어 그때는 누를 수 없게 한다.
+const RESET_BLOCKED = {
+  "needs-limit": "한도 도달 시 사용 가능",
+  cooldown: "잠시 뒤 사용 가능",
+  paused: "일시정지됨",
+  ineligible: "이 계정은 사용할 수 없음",
+  none: "지금 사용할 수 없음",
 };
 
 const TICK_MS = 30000;        // 남은 시간 표시를 갱신하는 간격
@@ -79,17 +113,18 @@ let fetching = false;
 let prefs = { display: "used", mode: "verbose" };
 let panelOpen = false;
 let tick = null;
-// 초기화권을 쓰는 동안의 상태. armed = 한 번 눌러 확인을 기다리는 중, busy = 보내고 답
-// 기다리는 중, pending = 보냈는데 답을 받지 못한 요청.
-// requestId 는 무장하는 순간 한 번 만들고 답을 받을 때까지 유지한다. 답이 유실돼 다시
-// 보낼 때 새 id 를 만들면 제공자가 별개 소비로 계산해 권이 두 개 나간다. 같은 id 면
-// already_redeemed 로 돌아온다.
-let resetArmed = false;
-let resetBusy = false;
-let resetPending = false;
-let resetRequestId = "";
-let resetWait = null;
-let resetNote = "";
+// 초기화권을 쓰는 동안의 상태. 제공자마다 따로 갖는다. armed = 한 번 눌러 확인을 기다리는 중,
+// busy = 보내고 답 기다리는 중, pending = 보냈는데 답을 받지 못한 요청.
+// requestId(Claude 는 grantId 도)는 무장하는 순간 한 번 정하고 답을 받을 때까지 유지한다. 답이
+// 유실돼 다시 보낼 때 새 id 를 만들면 제공자가 별개 요청으로 계산해 초기화권이 두 개 차감된다.
+// 같은 id 면 이미 처리된 요청으로 돌아온다.
+const resetStates = {};
+function resetState(provider) {
+  if (!resetStates[provider]) {
+    resetStates[provider] = { armed: false, busy: false, pending: false, requestId: "", grantId: "", wait: null, note: "", noteTimer: null, hint: "" };
+  }
+  return resetStates[provider];
+}
 
 // ── 값 다루기 ────────────────────────────────────────────────────────────────
 
@@ -195,7 +230,7 @@ function badge(provider) {
 function bar(used, width) {
   const track = el("span", "usg-bar");
   if (width) track.style.width = `${width}px`;
-  const fill = el("span", `usg-fill ${heatClass(used)}`.trim());
+  const fill = el("i", `usg-fill ${heatClass(used)}`.trim());
   fill.style.width = `${shownPercent(used)}%`;
   track.appendChild(fill);
   return track;
@@ -313,94 +348,123 @@ function row(provider) {
   return line;
 }
 
-// Codex 전용: 잠긴 창을 즉시 푸는 초기화권.
+// 한도를 즉시 푸는 초기화권(Codex·Claude).
 //
-// 개수는 하나만 표시한다. 제공자는 가진 수와 지금 적용되는 수를 따로 주는데, 둘을 나란히 적으면
-// "3개인데 왜 0개" 가 된다. 권 셋은 모두 유효하고 없는 것은 권이 아니라 적용 대상인데, 두 수를
-// 함께 표시하면 권을 쓸 수 없는 것처럼 읽힌다.
+// 개수는 하나만 표시한다. Codex 는 가진 수와 지금 적용되는 수를 따로 주는데, 둘을 나란히 적으면
+// "3개인데 왜 0개" 가 된다. 가진 초기화권은 모두 유효하고 없는 것은 적용 대상인데, 두 수를 함께
+// 표시하면 초기화권을 쓸 수 없는 것처럼 읽힌다.
 //
-// 적용되는 수로 버튼을 잠그지도 않는다. 이유는 넷이다. 쓸 대상이 없으면 제공자가
-// nothing_to_reset 을 돌려주고 권은 그대로라 눌러도 손해가 없고, 확인이 두 겹이라 실수로 나가지
-// 않으며, 조회 값이 틀린 계정에서는 영영 못 쓰는 길이 생기고, 긴 작업을 맡기기 전에 미리 눌러
-// 두려는 경우를 막을 이유가 없다.
+// Codex 는 적용되는 수로 버튼을 잠그지 않는다. 쓸 대상이 없으면 제공자가 nothing_to_reset 을
+// 돌려주고 차감하지 않아 눌러도 손해가 없고, 확인이 두 겹이라 실수로 나가지 않으며, 조회 값이
+// 틀린 계정에서는 영영 못 쓰는 길이 생긴다. Claude 는 서버가 넘긴 resetBlocked 가 있으면
+// 잠근다(사용자 결정: 한도에 걸리지 않았을 때는 누를 수 없게).
 function creditRow(provider) {
-  if (provider.provider !== "codex") return null;
+  const spec = RESETS[provider.provider];
+  if (!spec) return null;
   const have = provider.resetCredits;
   if (typeof have !== "number") return null;
+  const state = resetState(provider.provider);
 
   const wrap = el("div", "usg-credit");
-  const text = el("span", "usg-credit-t", `초기화권 ${have}개`);
-  wrap.appendChild(text);
+  wrap.appendChild(el("span", "usg-credit-t", `초기화권 ${have}개`));
 
   const expires = remainLabel(provider.resetCreditExpiresAt);
   if (expires) wrap.appendChild(el("span", "usg-credit-n", `${expires} 뒤 만료`));
 
-  if (resetNote) {
-    wrap.appendChild(el("span", "usg-credit-n", resetNote));
+  if (state.note) {
+    wrap.appendChild(el("span", "usg-credit-n", state.note));
     return wrap;
   }
   if (have <= 0) return wrap;
 
-  // 권 하나가 소비되는 조작이라 두 단계로 확인한다. 첫 누름은 무슨 일이 일어나는지 버튼에 적고,
-  // 두 번째 누름에서 모달이 뜬다. 되돌릴 수 없는 것은 되물어야 한다.
-  const button = el("button", `usg-credit-b${resetArmed ? " armed" : ""}`,
-    resetBusy ? "쓰는 중" : resetArmed ? "권 1개 씁니다 · 한 번 더" : "지금 초기화");
+  const blocked = provider.provider === "claude" ? provider.resetBlocked : null;
+  if (blocked) {
+    const button = el("button", "usg-credit-b", RESET_BLOCKED[blocked] || RESET_BLOCKED.none);
+    button.type = "button";
+    button.disabled = true;
+    wrap.appendChild(button);
+    return wrap;
+  }
+
+  if (state.hint) wrap.appendChild(el("span", "usg-credit-n", state.hint));
+
+  // 초기화권 하나가 차감되는 조작이라 두 단계로 확인한다. 첫 누름은 무슨 일이 일어나는지 버튼에
+  // 적고, 두 번째 누름에서 모달이 뜬다. 되돌릴 수 없는 것은 되물어야 한다.
+  const button = el("button", `usg-credit-b${state.armed ? " armed" : ""}`,
+    state.busy ? "사용 중" : state.armed ? "초기화권 1개 사용 · 한 번 더" : "지금 초기화");
   button.type = "button";
-  button.disabled = resetBusy;
+  button.dataset.provider = provider.provider;
+  button.disabled = state.busy;
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (resetBusy) return;
+    if (state.busy) return;
     const hadFocus = document.activeElement === button;
-    if (!resetArmed) {
-      resetArmed = true;
-      // 답을 받지 못한 요청이 있으면 그 id 를 그대로 다시 쓴다.
-      if (!resetPending || !resetRequestId) {
-        resetRequestId = `iris-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    if (!state.armed) {
+      state.armed = true;
+      // 답을 받지 못한 요청이 있으면 그 id(와 grant)를 그대로 다시 쓴다.
+      if (!state.pending || !state.requestId) {
+        state.requestId = `iris-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        state.grantId = provider.resetGrantId || "";
       }
       draw();
-      refocusCredit(hadFocus);
+      refocusCredit(provider.provider, hadFocus);
       return;
     }
-    // 모달에는 확실한 것만 적는다. 잠긴 창이 없으면 제공자가 권을 쓰지 않고 돌려보낸다.
-    const ask = `초기화권 1개를 씁니다. 남는 것 ${Math.max(0, have - 1)}개.\n`
-      + "적용할 대상이 없으면 권은 그대로 남습니다.\n"
-      + "쓴 권은 되돌릴 수 없습니다. 계속할까요?";
-    if (!confirm(ask)) {
-      resetArmed = false;
+    if (!confirm(spec.ask(have))) {
+      state.armed = false;
       draw();
-      refocusCredit(hadFocus);
+      refocusCredit(provider.provider, hadFocus);
       return;
     }
-    resetArmed = false;
-    resetBusy = true;
-    resetPending = true;
+    state.armed = false;
+    state.busy = true;
+    state.pending = true;
+    state.hint = "";
     draw();
-    wsSend({ type: "usage.codexReset", requestId: resetRequestId });
-    // 답이 오지 않으면 버튼이 "쓰는 중" 으로 남는다. 상한을 두고 풀되 요청은 pending 으로
+    wsSend({ type: spec.message, requestId: state.requestId, grantId: state.grantId });
+    // 답이 오지 않으면 버튼이 "사용 중" 으로 남는다. 상한을 두고 풀되 요청은 pending 으로
     // 남겨 둔다. 다시 누를 때 같은 id 로 나가야 이중 차감이 발생하지 않는다.
-    clearTimeout(resetWait);
-    resetWait = setTimeout(() => {
-      if (!resetBusy) return;
-      resetBusy = false;
-      resetNote = "답이 없음 · 다시 눌러 확인";
+    clearTimeout(state.wait);
+    state.wait = setTimeout(() => {
+      if (!state.busy) return;
+      state.busy = false;
+      // 결과 문구(note)로 두면 버튼이 그려지지 않아 다시 누를 수 없다. 버튼 옆 안내로 둔다.
+      state.hint = "답이 없음 · 다시 누르면 같은 요청으로 확인";
       draw();
     }, RESET_WAIT_MS);
   });
   wrap.appendChild(button);
-  if (resetArmed && !resetBusy) {
+  if (state.armed && !state.busy) {
     const cancel = el("button", "usg-credit-b ghost", "취소");
     cancel.type = "button";
-    cancel.addEventListener("click", (event) => { event.stopPropagation(); resetArmed = false; draw(); });
+    cancel.addEventListener("click", (event) => { event.stopPropagation(); state.armed = false; draw(); });
     wrap.appendChild(cancel);
   }
   return wrap;
 }
 
 // 다시 그리면 누르던 버튼이 사라진다. 키보드로 조작하던 사용자는 포커스를 잃는다.
-function refocusCredit(had) {
+function refocusCredit(provider, had) {
   if (!had || !mounted || !mounted.panel) return;
-  const next = mounted.panel.querySelector(".usg-credit-b:not([disabled])");
+  const next = mounted.panel.querySelector(`.usg-credit-b[data-provider="${provider}"]:not([disabled])`);
   if (next) next.focus();
+}
+
+// 서버의 답. 답이 왔으므로 이 요청은 끝났고 다음 시도는 새 id 로 나가야 한다.
+function onResetAnswer(provider, msg) {
+  const state = resetState(provider);
+  clearTimeout(state.wait);
+  state.busy = false;
+  state.armed = false;
+  state.pending = false;
+  state.requestId = "";
+  state.grantId = "";
+  state.hint = "";
+  state.note = RESETS[provider].outcomes[msg.outcome] || (msg.ok ? "초기화됨" : "실패");
+  draw();
+  // 결과 문구는 잠깐만 표시한다. 계속 남아 있으면 다음에 열었을 때 방금 일어난 일로 읽힌다.
+  clearTimeout(state.noteTimer);
+  state.noteTimer = setTimeout(() => { state.note = ""; draw(); }, 8000);
 }
 
 function setPref(patch) {
@@ -475,8 +539,10 @@ function setOpen(next) {
   // 닫으면 확인 대기를 푼다. 열어 둔 채 잊은 확인이 다음에 한 번만 눌러도 나가면 안 된다.
   // 답을 받지 못한 요청 id 는 남긴다. 다음 시도가 같은 id 로 나가야 권이 두 번 나가지 않는다.
   if (!panelOpen) {
-    resetArmed = false;
-    if (!resetBusy && !resetPending) resetRequestId = "";
+    for (const state of Object.values(resetStates)) {
+      state.armed = false;
+      if (!state.busy && !state.pending) { state.requestId = ""; state.grantId = ""; }
+    }
   }
   // 열 때 값이 묵었으면 한 번 물어본다. 열 때마다 부르면 제공자가 429 로 막고, 그러면
   // 그 뒤로 한동안 아무 값도 받지 못한다. 화면을 여는 행동 자체가 값을 지우는 셈이 된다.
@@ -535,18 +601,8 @@ export function initCapability(ctx) {
         draw();
       },
       "usage.history": (msg) => setHistory(msg),
-      "usage.codexReset": (msg) => {
-        clearTimeout(resetWait);
-        resetBusy = false;
-        resetArmed = false;
-        // 답이 왔으므로 이 요청은 끝났다. 다음 시도는 새 id 로 나가야 한다.
-        resetPending = false;
-        resetRequestId = "";
-        resetNote = RESET_OUTCOMES[msg.outcome] || (msg.ok ? "초기화됨" : "실패");
-        draw();
-        // 결과 문구는 잠깐만 표시한다. 계속 남아 있으면 다음에 열었을 때 방금 일어난 일로 읽힌다.
-        setTimeout(() => { resetNote = ""; draw(); }, 8000);
-      },
+      "usage.codexReset": (msg) => onResetAnswer("codex", msg),
+      "usage.claudeReset": (msg) => onResetAnswer("claude", msg),
     },
   };
 }

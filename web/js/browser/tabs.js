@@ -65,7 +65,7 @@ function tabLead(t) {
   const doc = fileKindById(t.kind);
   if (doc) return `<span class="cfav cfav-txt">${doc.docIcon || "📄"}</span>`;
   const st = getWebviewStatus(t.id) || {};
-  if (st.sleeping) return '<span class="csleep" title="메모리를 회수한 잠자는 탭 · 클릭하면 다시 엽니다">◌</span>';
+  if (st.sleeping) return '<span class="csleep" title="메모리를 회수한 잠자는 탭 · 클릭하면 다시 엽니다"></span>';
   if (st.loading) return `<span class="cspin" title="불러오는 중"></span>`;
   if (st.audible) return `<span class="caudio" title="소리 재생 중">🔊</span>`;
   if (st.icon) return `<img class="cfav" src="${esc(st.icon)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'cfav cfav-txt',textContent:this.dataset.i||'·'}))" data-i="${esc(favLetter(t))}">`;
@@ -97,8 +97,8 @@ function tabChip(t, act) {
   // markTabDirty로 나중에 DOM에 끼워 넣어도 다음 브로드캐스트에 곧바로 지워진다.
   const local = isFileKindId(t.kind) && getTabs(boundSpace()).find((x) => x.id === t.id);
   const dirty = local && isTabDirty(local);
-  const cls = [t.id === act ? "active" : "", t.group ? "in-group" : "", selTabs.has(t.id) ? "selected" : "", st.loading ? "loading" : "", busy.length ? "ai-held" : "", dirty ? "dirty" : ""].filter(Boolean).join(" ");
-  return `<div class="ctab${cls ? " " + cls : ""}" draggable="true" data-tab="${esc(t.id)}" title="더블클릭: 이름 변경 · 우클릭: 메뉴 · 드래그: 순서 변경 · Ctrl/⇧+클릭: 다중 선택">${dirty ? '<span class="cdirty"></span>' : ""}${tabLead(t)}${asking}${ai}<span class="cname">${esc(t.name || t.title || "브라우저")}</span><button class="cclose" data-close="${esc(t.id)}">✕</button></div>`;
+  const cls = [t.id === act ? "active" : "", st.sleeping ? "sleeping" : "", t.group ? "in-group" : "", selTabs.has(t.id) ? "selected" : "", st.loading ? "loading" : "", busy.length ? "ai-held" : "", dirty ? "dirty" : ""].filter(Boolean).join(" ");
+  return `<div class="ctab${cls ? " " + cls : ""}" draggable="true" data-tab="${esc(t.id)}" title="더블클릭: 이름 변경 · 우클릭: 메뉴 · 드래그: 순서 변경 · Ctrl/⇧+클릭: 다중 선택">${dirty ? '<span class="cdirty"></span>' : ""}${tabLead(t)}${asking}${ai}<span class="cname">${esc(t.name || t.title || "브라우저")}</span><button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
 }
 // 그룹 → 그 그룹의 탭 → … → 그룹 없는 탭 순으로 렌더한다. 접힌 그룹은 칩만 남고 탭이 숨는다
 // (webview는 유지되므로 로그인·스크롤 상태는 그대로이고, 렌더에서만 감춘다).

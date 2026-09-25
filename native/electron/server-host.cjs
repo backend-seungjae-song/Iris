@@ -80,6 +80,14 @@ function samePath(a, b) {
   return na.toLowerCase() === nb.toLowerCase();   // 대소문자 무시 볼륨
 }
 
+// /healthz 응답이 그 포트·상태 폴더의 Iris 서버인지. 앱이 붙을 서버를 고를 때와 설치 스크립트가
+// 새 앱의 서버가 떴는지 볼 때 같은 기준을 쓴다.
+function healthMatches(health, { port, stateDir }) {
+  if (!health || health.ok !== true) return false;
+  if (Number(health.port) !== Number(port)) return false;
+  return samePath(health.stateDir, stateDir);
+}
+
 // 그 포트에 이미 서버가 있는가. 없으면(연결 거부) null, 있으면 그쪽이 알려준 것.
 function probe(port) {
   return new Promise((resolve) => {
@@ -143,9 +151,7 @@ class ServerHost {
   // 모두 같은 포트에 있을 수 있다. 그 서버에 붙으면 사용자는 자기 탭·북마크가 사라진 화면을 보고
   // 다른 인스턴스의 상태를 수정하게 된다. 상태 폴더가 정체성이므로 그 값으로 구분한다.
   matches(health) {
-    if (!health || health.ok !== true) return false;
-    if (Number(health.port) !== Number(this.port)) return false;
-    return samePath(health.stateDir, this.stateDir);
+    return healthMatches(health, { port: this.port, stateDir: this.stateDir });
   }
 
   // 앱이 켜질 때 한 번. 이미 있으면 붙고, 없으면 띄운다.
@@ -325,4 +331,4 @@ class ServerHost {
   }
 }
 
-module.exports = { ServerHost, probe, resolveServerRoot, resolveRuntime };
+module.exports = { ServerHost, probe, healthMatches, resolveServerRoot, resolveRuntime };

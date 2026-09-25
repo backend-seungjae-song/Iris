@@ -10,8 +10,8 @@
 //
 // 유지 조건
 //   split 의 자식 하나만 늘어나고 나머지는 px 이다. 늘어나는 자식은 center 를 보이는 자식, 없으면 tools 를
-//   보이는 자식, 없으면 마지막 자식이다. 이 규칙이 "채팅 폭은 그대로, 가운데가 늘어난다"와 전체형 화면이
-//   가운데까지 늘어나는 동작을 낸다.
+//   보이는 자식, 없으면 접히지 않은 마지막 자식, 모두 접혔으면 마지막 자식이다. 이 규칙이 "채팅 폭은
+//   그대로, 가운데가 늘어난다"와 전체형 화면이 가운데까지 늘어나는 동작을 낸다.
 //   크기는 자식마다 키별로 둔다. 그 자식에서 지금 도구 화면이 보이면 "tools:<화면 id>", 아니면 "base".
 //   도구마다 폭을 따로 기억하던 동작과 같다.
 //   트리는 값으로만 다룬다. 바꾸는 함수는 새 트리를 돌려준다.
@@ -24,23 +24,27 @@ const MIN_FLEX = 160;
 const MIN_FIXED = 60;
 const DEFAULT_SIZE = { row: 300, col: 220 };
 
-export const SHELL_REGIONS = ["explorer", "spaces", "agents", "tools", "center", "chat"];
+export const SHELL_REGIONS = ["explorer", "spaces", "tools", "center", "chat"];
+// 앱 셸에서 없어진 영역. 스페이스와 에이전트가 한 구역(spaces)으로 합쳐지면서 agents 가 빠졌다.
+// 저장본에 남은 이 이름은 정규화에서 지운다. 기능 영역처럼 남겨 두면 아무도 채우지 않는 자리가 된다.
+const RETIRED_REGIONS = new Set(["agents"]);
 
 const leaf = (id) => ({ t: "leaf", id });
 const kid = (node, base) => ({ node, size: base == null ? {} : { base } });
 
-// 지금 화면과 같은 배치. sizes 는 옛 저장값에서 옮겨 온 px 이다.
+// 기본 배치. sizes 는 옛 저장값에서 옮겨 온 px 이다. 사이드바는 Spaces · Agents 가 위, 탐색기가 아래이고
+// 마지막 자식인 탐색기가 남은 높이를 받는다. explorerH 는 탐색기 아래에 다른 칸이 놓여
+// 탐색기가 늘어나지 않게 될 때 쓴다.
 export function defaultTree(sizes = {}) {
   const left = kid({ t: "stack", kids: [leaf("tools"), { t: "split", dir: "col", kids: [
+    kid(leaf("spaces"), 350),
     kid(leaf("explorer"), sizes.explorerH ?? 270),
-    kid(leaf("spaces"), sizes.spacesH ?? 182),
-    kid(leaf("agents"), null),
-  ] }] }, sizes.sidebarW ?? 280);
+  ] }] }, sizes.sidebarW ?? 272);
   for (const [panel, px] of Object.entries(sizes.toolW || {})) left.size["tools:" + panel] = px;
   return { t: "split", dir: "row", kids: [
     left,
     kid(leaf("center"), null),
-    kid(leaf("chat"), sizes.chatW ?? 420),
+    kid(leaf("chat"), sizes.chatW ?? 400),
   ] };
 }
 
@@ -60,6 +64,7 @@ export function normalizeTree(tree, { registered = [], fallback } = {}) {
     if (!node || typeof node !== "object") return null;
     if (node.t === "leaf") {
       if (typeof node.id !== "string" || !/^[\w.-]{1,40}$/.test(node.id) || seen.has(node.id)) return null;
+      if (RETIRED_REGIONS.has(node.id)) return null;
       seen.add(node.id); return leaf(node.id);
     }
     if (node.t === "stack") {
@@ -105,7 +110,7 @@ function appendRoot(tree, id, px) {
 
 // ---- 계산 ----
 
-// ctx: { visible(id), collapsedPx(id) → px|null, toolKey: "tools:<id>"|null, pick: Map(pathKey → 자식 번호),
+// ctx: { visible(id), collapsedPx(id) → px|null, toolKey: "tools:<id>"|null, toolBaseW: 그 도구판의 기본 폭|null, pick: Map(pathKey → 자식 번호),
 //        prefer(id) }. 편집 화면은 모든 영역을 visible 로 계산하고, 겹친 자리에서는 prefer(실제로 보이는 것)를
 //        먼저 고른다.
 function makeQuery(ctx) {
@@ -153,12 +158,15 @@ export function computeLayout(tree, box, ctx) {
     const along = row ? r.w : r.h;
     let flex = vis.findIndex(({ k, j }) => q.shows(k.node, [...path, j], "center"));
     if (flex < 0) flex = vis.findIndex(({ k, j }) => q.shows(k.node, [...path, j], "tools"));
+    const fixedOf = vis.map(({ k }) => (!row && k.node.t === "leaf" && ctx.collapsedPx ? ctx.collapsedPx(k.node.id) : null));
+    // 접힌 칸은 머리 높이로 고정이므로 남은 자리는 접히지 않은 마지막 칸이 받는다.
+    if (flex < 0) flex = fixedOf.map((f) => f == null).lastIndexOf(true);
     if (flex < 0) flex = vis.length - 1;
     const items = vis.map(({ k, j }, n) => {
       const p = [...path, j];
-      const fixed = !row && k.node.t === "leaf" && ctx.collapsedPx ? ctx.collapsedPx(k.node.id) : null;
+      const fixed = fixedOf[n];
       const key = sizeKey(q, k.node, p, ctx);
-      const px = fixed ?? k.size[key] ?? k.size.base ?? DEFAULT_SIZE[node.dir];
+      const px = fixed ?? k.size[key] ?? (key !== "base" ? ctx.toolBaseW : null) ?? k.size.base ?? DEFAULT_SIZE[node.dir];
       return { j, p, node: k.node, key, px: n === flex ? 0 : px, fixed: fixed != null, flex: n === flex };
     });
     // 고정 크기의 합이 자리를 넘으면 늘어나는 자식에게 최소폭을 남기고 비율대로 줄인다.

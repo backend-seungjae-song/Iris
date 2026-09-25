@@ -121,6 +121,7 @@ function createWebviewLifecycleProbe() {
     dialogScript: (id, port) => `dialog:${id}:${port}`,
     webAuthnScript: "webauthn",
     botcheckScript: "botcheck",
+    openerScript: "opener",
     registerSessionPrimer: (_id, parent, child) => { primers.parent = parent; primers.child = child; },
     noteFrameOrigin: () => {},
     dropChildSession: () => {},
@@ -164,9 +165,10 @@ await checkAsync("webview lifecycle은 자식 타깃에 스크립트 한 벌만 
   }
   probe.prime();
   const parentScripts = probe.commands.filter((item) => !item.sessionId && item.method === "Page.addScriptToEvaluateOnNewDocument");
-  if (parentScripts.length !== 3 || parentScripts.some((item) => item.params.runImmediately !== true)) {
+  if (parentScripts.length !== 4 || parentScripts.some((item) => item.params.runImmediately !== true)) {
     throw new Error(`부모 document-start 주입이 ${parentScripts.length}벌`);
   }
+  if (!parentScripts.some((item) => item.params.source === "opener")) throw new Error("window.open 표식이 부모 문서에 빠졌다");
   if (!probe.commands.some((item) => !item.sessionId && item.method === "Target.setAutoAttach")
       || !probe.commands.some((item) => !item.sessionId && item.method === "Page.enable")) {
     throw new Error("탭 생성 순간 자식 타깃·프레임 목록을 열지 않는다");
@@ -177,10 +179,11 @@ await checkAsync("webview lifecycle은 자식 타깃에 스크립트 한 벌만 
   await Promise.resolve();
   const child = probe.commands.filter((item) => item.sessionId === "child-1");
   const childScripts = child.filter((item) => item.method === "Page.addScriptToEvaluateOnNewDocument");
-  if (child.length !== 3 || childScripts.length !== 2 || childScripts.some((item) => item.params.runImmediately !== true)) {
+  if (child.length !== 4 || childScripts.length !== 3 || childScripts.some((item) => item.params.runImmediately !== true)) {
     throw new Error(`같은 자식 타깃에 명령 ${child.length}건·스크립트 ${childScripts.length}벌`);
   }
   if (!childScripts.some((item) => item.params.source === "webauthn")) throw new Error("자식 프레임 WebAuthn 알림이 빠졌다");
+  if (!childScripts.some((item) => item.params.source === "opener")) throw new Error("교차 출처 iframe 의 window.open 표식이 빠졌다");
   if (!child.some((item) => item.method === "Target.setAutoAttach")) throw new Error("중첩 자식 자동 부착이 없다");
   return true;
 });
@@ -250,8 +253,45 @@ check("새 탭은 탭으로, 팝업만 창으로 — 그리고 프로필을 물�
   }
   const file = openHandler({ url: "file:///etc/passwd", disposition: "new-window" });
   if (file.action !== "deny") throw new Error("http(s) 아닌 주소를 연다");
+  // 결제·본인인증 모듈은 빈 창을 이름과 함께 열고 폼을 그 창으로 제출한다. 막으면 사이트가 null 을 받는다.
+  const blank = openHandler({ url: "about:blank", disposition: "new-window" });
+  if (blank.action !== "allow") throw new Error("스크립트가 연 빈 팝업 창을 막는다");
+  const blankTab = openHandler({ url: "about:blank", disposition: "foreground-tab" });
+  if (blankTab.action !== "deny") throw new Error("빈 새 탭 요청을 창으로 연다");
   if (sent.length !== 2) throw new Error("팝업·차단 경로가 탭으로 샌다");
   return true;
+});
+// 크기 없는 window.open(url) 은 target=_blank 링크와 같은 foreground-tab 요청으로 와서 탭으로 열리고,
+// 사이트는 null 을 받아 "팝업 차단" 알림을 띄운다. 표식 스크립트를 실제로 실행해 스크립트 호출만
+// 팝업(new-window)으로 분류되게 표식을 붙이는지, 반환값을 버리는 호출은 그대로 두는지 확인한다.
+check("스크립트 window.open 은 팝업 표식을 달고 noopener·_self 는 그대로", () => {
+  const { OPENER_SCRIPT } = require_("../native/electron/browser-hardening.cjs");
+  const calls = [];
+  const win = { open: function (u, t, f) { calls.push([u, t, f]); return "handle"; } };
+  new Function("window", OPENER_SCRIPT)(win);
+  if (win.open("https://pay.example/", undefined, undefined) !== "handle") throw new Error("원래 반환값을 돌려주지 않는다");
+  win.open("", "payWin");
+  win.open("https://a.example/", "x", "width=400");
+  win.open("https://a.example/", "_blank", "noopener");
+  win.open("https://a.example/", "_self");
+  const want = [
+    ["https://pay.example/", undefined, "iris-opener"],
+    ["", "payWin", "iris-opener"],
+    ["https://a.example/", "x", "width=400,iris-opener"],
+    ["https://a.example/", "_blank", "noopener"],
+    ["https://a.example/", "_self", undefined],
+  ];
+  const got = JSON.stringify(calls), exp = JSON.stringify(want);
+  if (got !== exp) throw new Error(`표식 결과 ${got}`);
+  new Function("window", OPENER_SCRIPT)(win);   // 두 번 주입돼도 표식은 한 번만 붙는다
+  calls.length = 0; win.open("https://a.example/");
+  if (calls[0][2] !== "iris-opener") throw new Error(`두 번 주입 뒤 표식 ${calls[0][2]}`);
+  return true;
+});
+check("window.open 표식은 실제 웹뷰 훅과 사람 탭 주입에 연결된다", () => {
+  const main = read("native/electron/main.cjs");
+  return /openerScript: OPENER_SCRIPT,/.test(main)
+    && /for \(const src of \[webAuthnScript, botcheckScript, dlgSrc, openerScript\]\)/.test(webviewLifecycleSource);
 });
 // 사람이 누른 경우와 AI 가 조작한 경우는 결과가 달라야 한다. 소스에 분기가 있는지가 아니라
 // 두 경우를 실제로 실행해 확인한다. AI 가 연 팝업은 보이지 않게 만들어져야 하고, 새 탭은

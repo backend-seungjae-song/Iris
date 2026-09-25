@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +11,7 @@ import {
   openDialogAsk,
   plannedAnswer,
 } from "./browser-runtime.js";
-import { portWithLegacy } from "./env.cjs";
+import { allowedOriginHosts, host, portWithLegacy, remote } from "./env.cjs";
 import { resolvePickSource } from "./pick-source.js";
 import { handleFeatureState } from "./feature-state.js";
 
@@ -30,7 +31,8 @@ import { handleFeatureState } from "./feature-state.js";
 // 유지 조건
 //   /pick-source는 로컬 오리진의 소스 위치만 응답하고 파일 내용은 싣지 않는다.
 //   /dialog-ask가 Origin gate보다 먼저인 순서, loopback + Tailscale 100.64/10 허용 범위,
-//   DNS rebinding Origin 차단, AC5 로컬 POST gate, route 응답·CORS·MIME·cache 타이밍을 보존한다.
+//   프록시 헤더 요청 거부, 자기 origin 정확 일치, 로컬 판정은 isLoopbackRequest 하나,
+//   AC5 로컬 POST gate, route 응답·CORS·MIME·cache 타이밍을 보존한다.
 //
 // 영향 범위
 //   server/index.js의 createServer/WSS verifyClient/bind와 browser-runtime dialog owner,
@@ -51,8 +53,8 @@ export const PORT = portWithLegacy();
 // 원격(AC4~6): REMOTE=1이면 0.0.0.0 바인딩해 Tailscale IP로 폰이 접속.
 // 단 접속 IP를 localhost + Tailscale 대역으로만 허용해 미인증 외부 주체를 차단(AC6).
 // 로컬 전용(기본)은 127.0.0.1.
-export const REMOTE = process.env.REMOTE === "1";
-export const HOST = process.env.HOST || (REMOTE ? "0.0.0.0" : "127.0.0.1");
+export const REMOTE = remote();
+export const HOST = host();
 
 // AC6 강제: 허용 대역 = 루프백 + Tailscale CGNAT(100.64.0.0/10). 그 외 원격 주소는 거부.
 // Tailscale은 tailnet에 가입한 기기에만 100.x 주소를 부여하므로 기기 소속이 인증 역할을 한다.
@@ -68,35 +70,67 @@ export function isAllowedRemote(rawIp) {
   if (m) { const o = Number(m[1]); return o >= 64 && o <= 127; }
   return false;
 }
-// Origin 검사: cross-site + DNS rebinding 차단. Origin.host === Host(요청 헤더) 대조는 rebinding을
-// 막지 못한다. 공격자가 자기 도메인을 loopback으로 rebinding하면 Origin과 Host가 둘 다 그 도메인이라
-// 일치해 통과한다. 그래서 Host 헤더(공격자 제어 가능)가 아니라 신뢰 대역의 리터럴 IP·loopback으로만
-// Origin 호스트를 허용한다. DNS 이름 Origin(attacker.com, 100.64.attacker.example)은 전부 탈락.
-// MagicDNS 이름 등으로 접속하는 경우만 IRIS_ALLOWED_ORIGIN_HOSTS로 명시 허용.
-function isTrustedOriginHost(host) {
-  // URL.hostname은 IPv6를 대괄호째("[::1]") 반환하므로 두 형태 모두 인정.
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return true;
-  // 엄격한 4-옥텟 IPv4 리터럴만 인정(DNS 이름 배제). loopback(127/8) + Tailscale CGNAT(100.64/10).
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const oct = m.slice(1).map(Number);
-  if (oct.some((n) => n > 255)) return false;
-  if (oct[0] === 127) return true;
-  if (oct[0] === 100 && oct[1] >= 64 && oct[1] <= 127) return true;
-  return false;
+// 로컬 판정의 정본. 터미널·실행·/browser-cmd·기능 설정 쓰기처럼 이 기기 사람만 해야 하는 일은
+// 전부 이 함수로 판정한다. 소켓 주소만 보면 같은 기기의 리버스 프록시가 외부 요청을 루프백으로
+// 넘길 때 원격 요청이 로컬이 된다. 프록시 헤더가 있으면 로컬이 아니다(connectionAllowed 가 이미
+// 거부하지만, 이 함수만 따로 불러도 같은 답을 내야 한다).
+const PROXY_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip"];
+function hasProxyHeaders(req) {
+  const h = req.headers || {};
+  return PROXY_HEADERS.some((name) => h[name] !== undefined);
 }
-function originAllowed(req) {
+// Node 는 헤더가 maxHeadersCount(기본 1000)를 넘으면 뒤쪽 헤더를 조용히 버리고 요청을 계속 처리한다.
+// 그러면 짧은 헤더를 잔뜩 앞에 채워 프록시가 붙인 X-Forwarded-For 를 버려지게 만들 수 있어, 개수 제한을
+// 없애 모든 헤더를 보게 한다. 전체 크기는 Node 의 헤더 바이트 제한(기본 16KiB)이 계속 막는다.
+// WS 업그레이드도 같은 서버의 파서를 쓰므로 이 설정 하나로 둘 다 덮는다.
+export function hardenHeaderParsing(server) {
+  server.maxHeadersCount = 0;
+  return server;
+}
+export function isLoopbackRequest(req) {
+  const ip = normalizeIp(req.socket?.remoteAddress);
+  return (ip === "127.0.0.1" || ip === "::1") && !hasProxyHeaders(req);
+}
+// 이 Mac 이 tailnet 에서 받은 주소. 폰은 이 주소로 들어오므로 그 origin 을 자기 origin 으로 본다.
+// tailscale up/down 으로 바뀌므로 요청마다 읽는다.
+export function selfTailscaleIps() {
+  const out = [];
+  let ifaces;
+  // 조회가 실패하면 tailnet origin 을 자기 것으로 확인할 수 없으므로 거부 쪽(빈 목록)으로 둔다.
+  // 여기서 던지면 요청 처리 밖으로 새어 서버가 멈출 수 있다.
+  try { ifaces = os.networkInterfaces(); } catch (e) { console.warn("[origin] networkInterfaces 실패:", e?.message || e); return out; }
+  for (const list of Object.values(ifaces)) {
+    for (const a of list || []) {
+      if (a.family === "IPv4" && a.address.startsWith("100.") && isAllowedRemote(a.address)) out.push(a.address);
+    }
+  }
+  return out;
+}
+// Origin 검사: cross-site + DNS rebinding 차단. Host 헤더는 공격자가 정할 수 있어서 대조 기준이 되지
+// 못한다(자기 도메인을 루프백으로 rebinding 하면 Origin·Host 가 같아진다). 그래서 이 서버 자신의
+// origin 과 스킴·호스트·포트까지 정확히 같을 때만 받는다. 127/8 전체나 다른 포트를 받으면 같은
+// 기기의 다른 로컬 서버가 띄운 페이지가 이 서버에 명령을 보낼 수 있다.
+// MagicDNS 이름 등으로 접속하는 경우만 IRIS_ALLOWED_ORIGIN_HOSTS 로 호스트 이름을 명시해 허용한다.
+export function originAllowed(req, tailscaleIps = null) {
   const o = req.headers?.origin;
-  if (!o) return true; // 네이티브 클라이언트(curl 등)는 Origin이 없음
-  let host;
-  try { host = new URL(o).hostname; } catch { return false; }
-  if (isTrustedOriginHost(host)) return true;
-  const extra = (process.env.IRIS_ALLOWED_ORIGIN_HOSTS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  return extra.includes(host);
+  if (!o) return true; // 네이티브 클라이언트(curl·CLI·MCP)는 Origin 이 없다
+  let url;
+  try { url = new URL(o); } catch { return false; }
+  if (allowedOriginHosts().includes(url.hostname)) return true;
+  const hosts = ["127.0.0.1", "localhost", "[::1]"];
+  const self = new Set(hosts.map((h) => new URL(`http://${h}:${PORT}`).origin));
+  if (self.has(url.origin)) return true;
+  // Tailscale 주소는 Origin 이 100.x 일 때만 읽는다.
+  if (!/^100\./.test(url.hostname)) return false;
+  const ts = tailscaleIps || selfTailscaleIps();
+  return ts.some((ip) => new URL(`http://${ip}:${PORT}`).origin === url.origin);
 }
 // IP 필터는 REMOTE 플래그·바인딩과 무관하게 항상 적용한다. HOST=0.0.0.0 으로 잘못 설정해도
-// 미인증 외부 주체를 막는다(AC6). 허용 = 루프백 + Tailscale 대역, 그리고 Origin 통과.
+// 미인증 외부 주체를 막는다(AC6). 허용 = 루프백 + Tailscale 대역, 프록시 헤더 없음, Origin 통과.
+// 프록시를 거쳐 들어오는 정당한 클라이언트는 없다. 앱 창은 127.0.0.1 로, CLI·MCP 는 직접 POST 로,
+// 폰은 tailnet 주소로 직접 들어온다.
 export function connectionAllowed(req) {
+  if (hasProxyHeaders(req)) return false;
   if (!isAllowedRemote(req.socket?.remoteAddress)) return false;
   return originAllowed(req);
 }
@@ -123,13 +157,12 @@ export function createHttpHandler({ irisHome, capabilityHost }) {
   // 동작하지 않는다(확인 결과: https 사이트의 취소 버튼이 반응하지 않았다). 대신 아래 두 단계로 막는다.
   // 루프백 IP, 그리고 wc가 실제로 그 Origin을 띄우고 있는 탭인지.
   if (req.method === "GET" && pathname === "/dialog-ask") {
-    const ip = normalizeIp(req.socket?.remoteAddress);
     // 실패 응답에도 CORS를 붙인다. 없으면 페이지 쪽에서 상태코드조차 못 보고 NetworkError가 되어
     // 원인을 알 수 없게 된다.
     const deny = (code, why) => {
       res.writeHead(code, { "content-type": "text/plain", "access-control-allow-origin": "*" }).end(why);
     };
-    if (!(ip === "127.0.0.1" || ip === "::1")) { deny(403, "local only"); return; }
+    if (!isLoopbackRequest(req)) { deny(403, "local only"); return; }
     const q = new URL(req.url, "http://127.0.0.1").searchParams;
     const wc = Number(q.get("wc") || 0);
     // 다른 탭의 wc를 사칭해 그 탭 이름으로 대화상자를 띄우는 것을 막는다. 묻는 페이지의 Origin이
@@ -172,15 +205,13 @@ export function createHttpHandler({ irisHome, capabilityHost }) {
   // /dialog-ask 를 제외한 나머지는 종전대로 오리진·원격 게이트를 통과해야 한다.
   if (!connectionAllowed(req)) { res.writeHead(403).end("forbidden"); return; }
   if (pathname === "/features") {
-    const ip = normalizeIp(req.socket?.remoteAddress);
-    handleFeatureState(req, res, ip === "127.0.0.1" || ip === "::1");
+    handleFeatureState(req, res, isLoopbackRequest(req));
     return;
   }
   if (capabilityHost?.http(req, res, pathname)) return;
   // AI→브라우저 제어: iris-browser CLI가 POST /browser-cmd로 명령을 보낸다. 로컬(루프백) 전용(AC5).
   if (req.method === "POST" && pathname === "/browser-cmd") {
-    const ip = normalizeIp(req.socket?.remoteAddress);
-    if (!(ip === "127.0.0.1" || ip === "::1")) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
+    if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
     let body = ""; req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on("end", async () => {
       let j; try { j = JSON.parse(body || "{}"); } catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
@@ -193,8 +224,7 @@ export function createHttpHandler({ irisHome, capabilityHost }) {
   // 요소 지목 시 소스 위치를 찾는다. 지목한 시점에 앱이 한 번 찾아 블록에 싣는다. 받는 쪽이 다시
   // grep 하지 않게 하기 위해서다. 실행 출력과 같은 등급이라 루프백에만 연다.
   if (req.method === "POST" && pathname === "/pick-source") {
-    const ip = normalizeIp(req.socket?.remoteAddress);
-    if (!(ip === "127.0.0.1" || ip === "::1")) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
+    if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
     let body = ""; req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on("end", async () => {
       let j; try { j = JSON.parse(body || "{}"); } catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }

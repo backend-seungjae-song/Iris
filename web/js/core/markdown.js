@@ -5,8 +5,10 @@
 //
 // 제공 API
 //   initMarkdown({ esc }): HTML escape 함수를 받는다. main 이 한 번 호출한다.
-//   mdToHtml(src): 헤딩·강조·코드·리스트·링크·인용·hr을 HTML로 변환한다.
+//   mdToHtml(src): 헤딩·강조·코드·리스트·링크·인용·hr을 HTML로 변환한다. 링크에는 data-md-link 를 붙여
+//   앱 셸이 누름을 Iris 안에서 열도록 가로챈다(main.js).
 //   isMarkdownExtension(ext): md·markdown 확장자의 공통 판정.
+//   markdownWebLink(href): 앱 셸이 Iris 안에서 열 링크 주소, 아니면 null.
 //
 // 의존 대상
 //   esc 를 init 에서 주입받는다. main 에서 import 하지 않는다. core 가 main 을 참조하면 순환이 생긴다.
@@ -22,6 +24,19 @@ let escapeHtml = null;
 
 export function isMarkdownExtension(ext) {
   return /^(md|markdown)$/i.test(String(ext || ""));
+}
+
+// 마크다운 링크 중 앱 셸이 Iris 안에서 열 주소. 웹 주소만 연다. file 은 기본 앱에 맡긴다. 메모는 원격도
+// 쓸 수 있어 file 을 열면 작업 폴더 밖 파일이 편집기에 열리고 저장 허용까지 얻는다.
+export function markdownWebLink(href) {
+  const s = String(href || "");
+  return /^https?:\/\//i.test(s) ? s : null;
+}
+
+// 스크립트를 실행하는 주소는 링크로 만들지 않는다. 브라우저는 주소 앞머리의 공백·제어 문자를 무시하고
+// 읽으므로(예: "java\tscript:") 그 문자를 뺀 뒤에 판정한다.
+function scriptHref(href) {
+  return /^(javascript|vbscript|data):/i.test(String(href).replace(/[\u0000-\u0020]/g, ""));
 }
 
 export function initMarkdown(deps) {
@@ -43,7 +58,9 @@ export function mdToHtml(src) {
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, "$1<em>$2</em>")
       .replace(/~~([^~]+)~~/g, "<del>$1</del>")
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, href) => (scriptHref(href)
+        ? `<a data-md-link>${text}</a>`
+        : `<a href="${href}" target="_blank" rel="noopener" data-md-link>${text}</a>`))
       .replace(new RegExp(`${placeholder}(\\d+)${placeholder}`, "g"), (match, index) => codes[Number(index)]);
   };
   const isTableSep = (s) => s.includes("|") && s.includes("-") && /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(s);

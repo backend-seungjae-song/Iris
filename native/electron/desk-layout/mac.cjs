@@ -3,7 +3,7 @@
 //
 // 소유 범위
 //   JXA 스크립트(list·apply·restore-desktops·running)의 조립·실행·직렬화. 창 전환기
-//   (switcher-jxa.js·window-catalog.cjs)와 목적이 겹치지만 코드는 공유하지 않는다
+//   (switcher-jxa.cjs·window-catalog.cjs)와 목적이 겹치지만 코드는 공유하지 않는다
 //   (두 기능이 같은 파일을 공유하지 않는다). CG·AX·CGS·System Events를 다루는 부분은 이 파일 안에 새로 쓴다.
 //
 // 제공 API

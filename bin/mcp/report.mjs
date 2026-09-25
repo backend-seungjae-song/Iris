@@ -1435,10 +1435,8 @@ figure{margin:0;display:flex;flex-direction:column;align-items:flex-start}
 .fr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
  padding:4px;opacity:0;pointer-events:none;transition:opacity .22s ease}
 .fr.on{opacity:1;pointer-events:auto}
-/* 동작 줄이기 설정에서도 이 겹침은 유지한다. 0.22초 투명도 변화라 어지럼의 원인이 아니고, 두 장을
-   같은 영역에서 겹쳐 보는 것이 이 보고서에서 비교가 성립하는 방식이다. 화면 전체를 움직이는
-   스크롤 애니메이션만 설정을 따른다. */
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+/* 두 장을 같은 영역에서 겹쳐 보는 것이 이 보고서에서 비교가 성립하는 방식이다. 이 겹침과 스크롤
+   애니메이션은 OS 의 동작 줄이기 설정과 무관하게 유지한다. */
 /* 캡션 몫을 상수로 빼면 캡션이 길어질 때 그림+캡션이 트랙을 넘고, .fr이 수직 중앙정렬이라
  넘친 양의 절반이 아래로 가 캡션 마지막 줄이 잘린다(확인 결과: 1440x900에서 장면 87장
    중 16장이 12~21px 초과, 창을 키우면 사라짐. 판정 인용문이 3~4줄이면 캡션이 62~79px다).
