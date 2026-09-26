@@ -127,13 +127,16 @@ async function probe(harden) {
     let buf = ""; sock.on("data", (d) => { buf += d; }); sock.on("end", () => resolve(buf)); sock.on("error", reject);
   });
   await new Promise((r) => server.close(r));
-  const [, payload = ""] = body.split("\r\n\r\n");
-  return JSON.parse(payload);
+  const [head, payload = ""] = body.split("\r\n\r\n");
+  const status = Number(head.split(" ")[1]);
+  return status === 200 ? JSON.parse(payload) : { status };
 }
 
 test("헤더를 채워 프록시 헤더를 밀어내도 로컬로 판정하지 않는다", async () => {
+  // 넘친 헤더를 Node 22.22·24.18 은 잘라 버리고(우회 성립), 22.23 부터는 431 로 거부한다. 어느 쪽이든 받는다.
   const unguarded = await probe(false);
-  assert.deepEqual(unguarded, { local: true, allowed: true }, "제한을 둔 서버에서는 우회가 성립해야 이 검사가 의미가 있다");
+  if (!("status" in unguarded)) assert.deepEqual(unguarded, { local: true, allowed: true }, "제한을 둔 서버에서는 우회가 성립해야 이 검사가 의미가 있다");
+  else assert.equal(unguarded.status, 431);
   assert.deepEqual(await probe(true), { local: false, allowed: false });
 });
 
