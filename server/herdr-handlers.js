@@ -18,7 +18,7 @@ import { requestRecompute as recompute } from "./runtime-state.js";
 //   read 응답 지연 [400, 1200, 2600, 5000] 및 focus/close 뒤 recompute 시점을 보존한다.
 //
 // 영향 범위
-//   server/index.js의 WebSocket dispatch·close와 browser-runtime.js의 app-pick relay,
+//   server/index.js의 WebSocket dispatch·close와 browser-runtime.js의 app-pick relay, pickrec-relay.js의 지목 전달,
 //   workspace-runtime.js의 scroll event 연결, web의 terminal/control 소비자,
 //   bin/smoke.mjs relay 소유 검사 및 test/terminal-env-isolation.mjs의 PTY 경계.
 
@@ -44,16 +44,17 @@ export function initHerdrHandlers(deps) {
 // 대상 창은 사용자가 직전에 입력하던 창이다. 분리 창에서 요소를 고르는 동작은 직전까지
 // 입력하던 채팅에 붙이려는 동작이다. 그 창이 없으면 터미널이 연결된 콘솔 중 하나를 쓴다.
 // 터미널이 연결된 콘솔이 없으면 전체에 전달한다.
-export function relayToOneConsole(msg) {
-  const consoles = ptyMgr.clients().filter((c) => c.readyState === 1 && c._local);
-  if (!consoles.length) { broadcastLocal(msg); return; }
+// uiOnly: 지목처럼 앱 UI에만 가야 하는 내용. 인증 안 된 로컬 연결로는 보내지 않음
+export function relayToOneConsole(msg, { uiOnly = false } = {}) {
+  const consoles = ptyMgr.clients().filter((c) => c.readyState === 1 && c._local && (!uiOnly || c._ui));
+  if (!consoles.length) { if (!uiOnly) broadcastLocal(msg); return; }
   const target = consoles.includes(lastTypedConsole) ? lastTypedConsole : consoles[0];
   try { target.send(JSON.stringify(msg)); } catch {}
 }
 
 // 조종(AC2): 클라이언트가 대상 세션에 채팅을 보내고 응답을 같은 화면에서 받는다.
 // capability 경계: 이 서버가 herdr로 내보내는 조종 동작을 화이트리스트로 고정한다.
-// 지금 허용: 기존 세션에 메시지 전송(agent.send)·pane 읽기. 금지(구조적): 신규 작업 시작·임의
+// 지금 허용: 기존 세션에 메시지 전송(agent.prompt)·pane 읽기. 금지(구조적): 신규 작업 시작·임의
 // 셸 실행(AC5). 원격 블록에서 인증 등급별로 이 경계를 더 좁힌다(미인증=읽기만, AC6).
 const CONTROL_CAPS = { read: true, send: true, startTask: false, shell: false };
 
@@ -95,18 +96,38 @@ function enqueueFocus(ws, operation) {
   return focusQueue;
 }
 
+// 입력 대상 변경 기록. 사용자 입력은 herdr 포커스 pane 으로 가므로 엉뚱한 세션에 들어간 입력의 경위 추적용
+function logFocus(kind, id, origin) {
+  const from = typeof origin === "string" && /^[\w-]{1,32}$/.test(origin) ? origin : "unknown";
+  console.log(`[focus] ${new Date().toISOString()} ${kind} ${String(id).replace(/[^\w:.-]/g, "?").slice(0, 64)} ← ${from}`);
+}
+
 // 사이드바 선택은 해당 pane만 표시한다. 같은 pane 재선택으로 zoom을 풀지 않는다.
 export function handleFocus(ws, msg) {
   if (!ws._local || !msg.target) return;
+  logFocus("pane", msg.target, msg.origin);
   const client = herdr;
-  return enqueueFocus(ws, () => client.paneZoom(msg.target, "on"));
+  return enqueueFocus(ws, async () => {
+    const pane = await client.paneGet(msg.target);
+    if (!pane.tab_id) throw new Error("herdr pane has no tab");
+    await client.tabFocus(pane.tab_id);
+    await client.paneZoom(msg.target, "on");
+  });
 }
 
 // 세션 없는 탭 전환도 pane 선택과 같은 순서를 따른다.
 export function handleTabFocus(ws, msg) {
   if (!ws._local || !msg.tabId) return;
+  logFocus("tab", msg.tabId, msg.origin);
   const client = herdr;
   return enqueueFocus(ws, () => client.tabFocus(msg.tabId));
+}
+
+export function handleWorkspaceFocus(ws, msg) {
+  if (!ws._local || !msg.workspaceId) return;
+  logFocus("workspace", msg.workspaceId, msg.origin);
+  const client = herdr;
+  return enqueueFocus(ws, () => client.workspaceFocus(msg.workspaceId));
 }
 
 // 세션 닫기는 화면이 가리킨 terminal identity까지 대조하고 해당 pane 하나에만 적용한다.

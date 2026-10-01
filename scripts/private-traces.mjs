@@ -51,8 +51,10 @@ const ALLOWED_HOSTS = new Set([
   "source.chromium.org", "bugs.chromium.org", "chromedevtools.github.io",
   "support.google.com", "security.googleblog.com", "developers.googleblog.com", "developer.chrome.com", "pptr.dev",
   "developer.android.com", "apps.apple.com",
+  "schemas.android.com", "play.google.com", "flutter.dev", "dart.dev", "pub.dev",
+  "easing.dev", "easings.co", "suggestqueries.google.com", "www.figma.com", "figma.com",
   "github.io", "xtermjs.org", "microsoft.github.io", "vercel.com", "www.gstatic.com",
-  "fonts.googleapis.com", "fonts.gstatic.com", "openfontlicense.org", "tailscale.com", "www.anthropic.com",
+  "fonts.googleapis.com", "fonts.gstatic.com", "openfontlicense.org", "tailscale.com", "login.tailscale.com", "www.anthropic.com",
   // 구독 사용량을 물어보는 제공자 엔드포인트 (server/usage.js)
   "api.anthropic.com", "chatgpt.com", "cloudcode-pa.googleapis.com", "opencode.ai",
   "api.kimi.com", "platform.minimax.io", "cli-chat-proxy.grok.com", "auth.x.ai",

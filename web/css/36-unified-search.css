@@ -1,0 +1,29 @@
+.sidebar-head > .unified-search-trigger { order:10; flex:none; }
+.unified-search-trigger svg { width:14px; height:14px; }
+/* 선택안의 글자 굵기·줄 높이·자간·숫자 폭(400, 1.5, normal, 비례 숫자)으로 그린다. 앱 기본은 500, 1.45, -.005em, 고정폭 숫자다. */
+.unified-search { width:min(580px, 92vw); border-radius:var(--r-card); box-shadow:var(--menu-shadow); font-weight:400; line-height:1.5; letter-spacing:normal; font-variant-numeric:normal; }
+.unified-search-input { flex:none; height:40px; margin:10px; padding:0 12px; gap:10px; border:1px solid var(--focus); border-radius:var(--r); background:var(--surface); color:var(--muted); }
+.unified-search-input svg { width:14px; height:14px; }
+.unified-search-input input { font:var(--fs-h) var(--sans); }
+.unified-search-input input::-webkit-search-cancel-button { display:none; }
+.unified-search-close { flex:none; background:none; cursor:pointer; line-height:1; }
+.unified-search-close:hover { color:var(--fg); border-color:var(--line-strong); }
+.unified-search-categories { flex:none; display:flex; gap:4px; padding:0 10px 8px; overflow-x:auto; }
+.unified-search-categories [aria-pressed="true"] { background:var(--select); color:var(--fg); }
+.unified-search-results { min-height:60px; overflow-y:auto; padding:0 10px 10px; display:grid; grid-template-columns:minmax(0, 1fr); align-content:start; gap:2px; }
+.unified-search-result { width:100%; display:flex; align-items:center; gap:10px; text-align:left; background:none; border:0; border-radius:var(--r); color:var(--fg); padding:7px 8px; cursor:pointer; font:inherit; }
+.unified-search-result:hover { background:var(--hover); }
+.unified-search-result.selected { background:var(--select); }
+.unified-search-tile { width:30px; height:30px; flex:none; display:grid; place-items:center; border-radius:var(--r); background:var(--select); color:var(--fg-2); }
+.unified-search-result.selected .unified-search-tile { background:var(--pal-babyblue); color:var(--pal-ink); }
+.unified-search-result-text { display:flex; flex:1; min-width:0; flex-direction:column; }
+.unified-search-result-text strong { font-weight:400; font-size:var(--fs); }
+.unified-search-result-text strong, .unified-search-result-text small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.unified-search-result-text small { color:var(--muted); font-size:var(--fs-s); }
+.unified-search-kind { flex:none; color:var(--faint); font-size:var(--fs-xs); padding:1px 7px; border:1px solid var(--line); border-radius:var(--r-pill); }
+.unified-search-empty { padding:15px 8px; color:var(--muted); }
+.unified-search-empty strong { display:block; color:var(--fg); font-weight:600; }
+.unified-search mark { background:rgb(var(--pal-babyblue-rgb) / .22); color:var(--fg); border-radius:2px; padding:0 1px; }
+.unified-search-footer { flex:none; display:flex; align-items:center; gap:12px; border-top:1px solid var(--line); padding:8px 12px; color:var(--faint); font-size:var(--fs-s); }
+.unified-search-footer .kbd { margin-right:4px; }
+.unified-search-status { margin-left:auto; }

@@ -247,7 +247,7 @@ console.log("\n[10j] 보고 있지 않은 탭도 QA 대상");
   });
   // 카메라는 처음 요청할 때 macOS 권한 창이 뜬다. AI 가 조작해서 발생한 요청이면 묻지 않고 거절한다.
   check("AI 가 밟은 카메라 요청은 권한 창을 안 띄운다", () =>
-    /if \(_wc && !_wc\.isDestroyed\(\) && aiDriving\(_wc\.id\)\) \{ callback\(false\); return; \}/
+    /const askCamera = \(wc, callback\) => \{[\s\S]{0,120}if \(wc && !wc\.isDestroyed\(\) && aiDriving\(wc\.id\)\) \{ callback\(false\); return; \}/
       .test(read("native/electron/profile-session-policy.cjs")));
   // 전체화면·포인터 잠금은 허용하는 순간 화면과 커서 전체를 내주므로, 사용자가 눌렀을 때만 허용한다.
   check("AI 가 밟은 전체화면·포인터 잠금은 안 준다", () => {

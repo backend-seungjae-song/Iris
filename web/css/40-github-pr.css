@@ -1,0 +1,74 @@
+.gpr-branch { display:flex; align-items:center; min-height:24px; padding:0 var(--pad) 8px; gap:6px; min-width:0; }
+.gpr-branch-text, .gpr-branch-error { font-size:var(--fs-xs); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gpr-branch-error, .gpr-error { color:var(--pal-danger); }
+/* 깃 패널의 PR 카드: 번호와 상태 → 제목 → 검사 결과와 대상 브랜치 */
+.gpr-branch-open { width:100%; min-width:0; display:flex; flex-direction:column; gap:4px; padding:10px; text-align:left; font:inherit; color:var(--fg); cursor:pointer;
+  background:var(--raised); border:1px solid var(--line-strong); border-radius:var(--r-blk); transition:border-color var(--t) var(--ease), transform .12s var(--ease); }
+.gpr-branch-open:hover { border-color:var(--focus); }
+.gpr-branch-open:active { transform:scale(.97); }
+.gpr-card-top { display:flex; align-items:center; gap:6px; font-size:var(--fs-s); color:var(--muted); }
+.gpr-card-number { font-family:var(--mono); margin-right:auto; }
+.gpr-card-title { font-size:var(--fs); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom:4px; }
+.gpr-card-checks { display:flex; gap:8px; font:var(--fs-xs) var(--mono); color:var(--muted); }
+.gpr-card-checks .failed { color:var(--pal-danger); }
+.gpr-card-checks .passed { color:var(--st-working); }
+.gpr-card-checks .running { color:var(--pal-yellow-pop); }
+.gpr-state { flex:none; display:inline-flex; align-items:center; font-size:var(--fs-s); font-weight:600; padding:2px 9px; border-radius:var(--r-pill); background:rgb(var(--pal-mint-pop-rgb) / .12); color:var(--st-working); }
+.gpr-state[data-state="merged"] { background:rgb(var(--pal-babyblue-rgb) / .12); color:var(--pal-babyblue); }
+.gpr-state[data-state="closed"], .gpr-state[data-state="draft"] { background:var(--select); color:var(--muted); }
+.githubprview { position:absolute; inset:0; min-width:0; overflow:hidden; }
+.gpr-page { height:100%; overflow:auto; color:var(--fg); font-size:var(--fs-s); }
+.gpr-head { padding:16px 20px 12px; border-bottom:1px solid var(--line); }
+.gpr-eyebrow { color:var(--muted); font-size:var(--fs-s); }
+.gpr-head h2 { margin:6px 0 8px; font-size:15px; font-weight:600; letter-spacing:-.01em; }
+.gpr-meta { display:flex; align-items:center; flex-wrap:wrap; gap:8px; color:var(--muted); }
+.gpr-branches { font-family:var(--mono); }
+.gpr-meta [data-gpr-open] { margin-left:auto; }
+.gpr-tabs { display:flex; gap:2px; padding:0 14px; height:36px; align-items:stretch; border-bottom:1px solid var(--line); }
+.gpr-tab { appearance:none; display:flex; align-items:center; gap:5px; border:0; border-bottom:2px solid transparent; background:none; color:var(--muted); padding:0 8px; font:inherit; cursor:pointer; }
+.gpr-tab.on { color:var(--fg); border-color:var(--accent); }
+.gpr-tab:hover { color:var(--fg); }
+.gpr-tab span { color:var(--faint); font:var(--fs-xs) var(--mono); }
+.gpr-body { padding:12px 20px 32px; }
+.gpr-body h3 { margin:0 0 10px; font-size:var(--fs-s); }
+.gpr-description, .gpr-event { padding:12px 0; border-bottom:1px solid var(--line); }
+.gpr-markdown { overflow-wrap:anywhere; line-height:1.5; }
+.gpr-markdown h1, .gpr-markdown h2, .gpr-markdown h3, .gpr-markdown h4 { margin:1em 0 .5em; font-weight:600; line-height:1.3; }
+.gpr-markdown h1 { font-size:1.7em; }
+.gpr-markdown h2 { font-size:1.4em; }
+.gpr-markdown h3 { font-size:1.18em; }
+.gpr-markdown h4 { font-size:1em; }
+.gpr-markdown p { margin:.6em 0; }
+.gpr-markdown ul, .gpr-markdown ol { margin:.5em 0; padding-left:1.6em; }
+.gpr-markdown code { font-family:var(--mono); background:var(--raised); border-radius:var(--r); padding:.12em .38em; }
+.gpr-markdown pre { max-width:100%; overflow:auto; padding:12px; background:var(--raised); border-radius:var(--r); }
+.gpr-markdown pre code { padding:0; }
+.gpr-markdown blockquote { margin:.6em 0; padding:.2em 1em; border-left:2px solid var(--line); color:var(--muted); }
+.gpr-markdown a { color:var(--ai); }
+.gpr-markdown hr { border:0; border-top:1px solid var(--line); }
+.gpr-markdown table { border-collapse:collapse; display:block; max-width:100%; overflow:auto; }
+.gpr-markdown th, .gpr-markdown td { border:1px solid var(--line); padding:5px 10px; }
+.gpr-event-head, .gpr-check-head { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.gpr-event-head time { color:var(--faint); }
+.gpr-check-summary { display:flex; gap:14px; margin:0 0 10px; color:var(--muted); }
+.gpr-check-summary b { font-weight:600; color:var(--fg); margin-right:3px; }
+.gpr-check-summary .failed b { color:var(--pal-danger); }
+.gpr-check { border:1px solid var(--line); border-radius:var(--r-blk); margin-bottom:8px; overflow:hidden; }
+.gpr-check.failed { border-color:rgb(var(--pal-danger-rgb) / .35); }
+.gpr-check-head { padding:9px 12px; font-size:var(--fs); }
+.gpr-check-head strong { flex:1; min-width:120px; font-weight:400; }
+.gpr-check-state { width:14px; text-align:center; font-weight:600; }
+.gpr-check-state.passed { color:var(--st-working); }
+.gpr-check-state.failed { color:var(--pal-danger); }
+.gpr-check-state.running { color:var(--pal-yellow-pop); }
+.gpr-check > .gpr-hint, .gpr-check > .gpr-error { margin:0; padding:0 12px 12px; }
+.gpr-log { padding:0 12px 12px; }
+.gpr-log pre { overflow:auto; max-height:280px; margin:0 0 10px; padding:10px 12px; background:var(--pal-term-bg); border-radius:var(--r); color:var(--pal-term-fg); font:11.5px/1.7 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+.gpr-file { display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; font-family:var(--mono); }
+.gpr-file-count { flex:none; color:var(--muted); }
+.gpr-empty, .gpr-hint { color:var(--muted); }
+.gpr-notice { margin:0 20px 16px; padding:8px 0; border-top:1px solid var(--line); color:var(--fg-2); }
+
+.gpr-file { width:100%; text-align:left; font:inherit; color:inherit; cursor:pointer; border:0; border-bottom:1px solid var(--line); background:none; }
+.gpr-file:hover { background:var(--hover); }
+.gpr-file:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }

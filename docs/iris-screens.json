@@ -184,6 +184,20 @@
       "surfaceIds": []
     },
     {
+      "name": "휴대폰 원격 제어",
+      "kind": "rail",
+      "entry": "remote",
+      "rootIds": [
+        "remote-panel"
+      ],
+      "surfaceIds": [
+        "remote-body",
+        "remote-status",
+        "remote-detail",
+        "remote-action"
+      ]
+    },
+    {
       "name": "설정",
       "kind": "rail",
       "entry": "keymap",

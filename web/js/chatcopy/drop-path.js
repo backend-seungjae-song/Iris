@@ -43,7 +43,7 @@ export function insertDroppedPaths(files, { acHost, showToast }) {
     const p = (acHost && acHost.getDroppedPath) ? acHost.getDroppedPath(f) : "";
     if (p) paths.push(p); // 따옴표 없이 절대경로 그대로
   }
-  if (!paths.length) { showToast("드롭한 파일 경로를 읽지 못했습니다"); return; }
+  if (!paths.length) { showToast("드롭한 파일 경로를 읽지 못했습니다", { level: "err" }); return; }
   const xterm = getXterm();
   if (xterm) { xterm.paste(paths.join(" ") + " "); xterm.focus(); }
 }

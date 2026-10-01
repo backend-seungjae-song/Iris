@@ -65,11 +65,18 @@ function createWebviewLifecycle({
   holdAiCausality,
   // 앱이 렌더링하는 링크인지 판정한다. 확장자 표는 렌더러가 소유하고 여기는 복사본만 본다.
   appDrawsLink = () => false,
+  // 새 창으로 여는 앱 주소(mailto:·zoommtg: 등). 사람에게 물어 설치된 앱으로 넘긴다. 앱 주소가 아니면 무시.
+  // 요청한 프레임은 주지 않아 referrer(정책 적용 뒤 origin, no-referrer 면 빈 값)를 함께 넘긴다.
+  openAppUrl = () => {},
+  // 페이지의 beforeunload 가 이동을 막을 때 나갈지 묻는다. true 면 나간다.
+  confirmLeave = () => false,
 }) {
   // 결제·본인인증 모듈은 빈 창을 이름과 함께 먼저 열고(window.open("", "이름")) 폼을 그 이름으로
   // 제출한다. 빈 창은 about:blank 로 오며 여는 페이지의 출처를 물려받을 뿐 다른 곳을 불러오지 않는다.
   // 막으면 사이트가 null 을 받아 팝업 차단으로 본다.
   const isBlankPopup = (u) => /^about:blank(#.*)?$/i.test(String(u || ""));
+  // 로그인 팝업이 닫힌 뒤 opener 가 스스로 이동하는지 기다리는 시간. 이동이 없을 때만 reload 한다.
+  const POPUP_LOGIN_RELOAD_DELAY_MS = 3000;
   const SAFE_POPUP_WINDOW_OPTIONS = {
     alwaysOnTop: false, closable: true, focusable: true, frame: true, fullscreen: false, kiosk: false,
     modal: false, movable: true, opacity: 1, show: true, simpleFullscreen: false, skipTaskbar: false,
@@ -237,12 +244,15 @@ function createWebviewLifecycle({
           ev.preventDefault();
         } catch {}
       });
-      wc.setWindowOpenHandler(({ url, disposition }) => {
+      // 처리하지 않으면 Electron 은 묻지 않고 이동·새로고침을 취소해 링크가 눌리지 않는 것처럼 보인다. 크롬처럼 묻는다.
+      wc.on("will-prevent-unload", (ev) => { try { if (confirmLeave(wc, null)) ev.preventDefault(); } catch {} });
+      wc.setWindowOpenHandler(({ url, disposition, referrer }) => {
         if (!/^https?:/i.test(url || "") && !(disposition === "new-window" && isBlankPopup(url))) {
           // 로컬 링크의 새 탭 요청(target=_blank·⌘클릭·가운데클릭). 여기서 차단하면 아무 일도
           // 일어나지 않아 눌리지 않는 링크로 보인다. 어디로 보낼지는 렌더러가 정한다.
           if (isFileUrl(url) && pageIsLocal()) toHost("ac-open-local", { target: String(url) });
-          return { action: "deny" };  // 그 밖의 scheme 은 그대로 차단
+          else if (!isFileUrl(url)) { try { openAppUrl(wc, String(url || ""), referrer && referrer.url); } catch {} }
+          return { action: "deny" };
         }
         // "새 탭으로 열기"는 앱 브라우저의 탭이어야 한다. target=_blank·가운데클릭은 disposition이
         // foreground-tab/background-tab으로 오는데, 이걸 팝업 창으로 열면 별도 Electron 창이 뜬다
@@ -275,6 +285,7 @@ function createWebviewLifecycle({
       wc.on("did-create-window", (childWin) => {
         try {
           const cwc = childWin.webContents; cwc.setBackgroundThrottling(!noThrottleOpt);
+          cwc.on("will-prevent-unload", (ev) => { try { if (confirmLeave(cwc, childWin)) ev.preventDefault(); } catch {} });
           // 사용자가 눌러 뜬 팝업은 앞으로 띄운다(뒤에 숨는 것 방지). 자동화가 연 팝업은 층위를 한 단계
           // 내려서 띄운다. showInactive 는 포커스 없이 띄우는 것일 뿐 다른 앱 창 위에 표시되기 때문이다
           // (확인 결과). 층위를 내린 창은 다른 앱의 보통 창보다 아래에 있으면서도 계속 그린다
@@ -291,8 +302,11 @@ function createWebviewLifecycle({
           // 적용되지 않는다. 정책이 없는 창은 항상 앞으로 표시된다.
           // 부모와 같은 규칙을 그 자리에서 건다. http(s) 아닌 주소는 창으로 열지 않는다.
           try {
-            cwc.setWindowOpenHandler(({ url: childUrl }) => {
-              if (!/^https?:/i.test(String(childUrl || "")) && !isBlankPopup(childUrl)) return { action: "deny" };
+            cwc.setWindowOpenHandler(({ url: childUrl, referrer }) => {
+              if (!/^https?:/i.test(String(childUrl || "")) && !isBlankPopup(childUrl)) {
+                if (!isFileUrl(childUrl)) { try { openAppUrl(cwc, String(childUrl || ""), referrer && referrer.url); } catch {} }
+                return { action: "deny" };
+              }
               const byAi = aiDriving ? !!aiDriving(cwc.id) : false;
               return { action: "allow",
                 overrideBrowserWindowOptions: byAi ? { ...SAFE_POPUP_WINDOW_OPTIONS, show: false } : SAFE_POPUP_WINDOW_OPTIONS };
@@ -346,8 +360,23 @@ function createWebviewLifecycle({
           try { openerHost = new URL(wc.getURL()).host; } catch {}
           cwc.on("did-navigate", (_ev, u) => { try { if (openerHost && new URL(u).host === openerHost) reachedOpenerOrigin = true; } catch {} });
           childWin.on("closed", () => {
-            // 콜백(opener 도메인) 도달 후 닫힘 = 로그인 완료 → 토큰 저장 완료 대기 후 opener reload. 미도달이면 skip.
-            if (reachedOpenerOrigin) setTimeout(() => { try { if (!wc.isDestroyed()) wc.reload(); } catch {} }, 350);
+            // 콜백(opener 도메인) 도달 후 닫힘 = 로그인 완료 → opener reload. 미도달이면 skip.
+            // 사이트가 결과를 받아 스스로 이동하면 reload 하지 않는다. Figma 는 팝업이 닫힌 뒤 opener 에서 로그인을
+            // 마무리하고 이동하는데, 그 사이 reload 가 끼면 마무리 요청이 끊겨 로그아웃 상태로 남는다.
+            if (!reachedOpenerOrigin || wc.isDestroyed()) return;
+            let moved = false;
+            const onStart = (_ev, _u, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) moved = true; };
+            const onInPage = (_ev, _u, isMainFrame) => { if (isMainFrame) moved = true; };
+            wc.on("did-start-navigation", onStart);
+            wc.on("did-navigate-in-page", onInPage);
+            setTimeout(() => {
+              try {
+                if (wc.isDestroyed()) return;
+                wc.off("did-start-navigation", onStart);
+                wc.off("did-navigate-in-page", onInPage);
+                if (!moved) wc.reload();
+              } catch {}
+            }, POPUP_LOGIN_RELOAD_DELAY_MS);
           });
         } catch {}
       });

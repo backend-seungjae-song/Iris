@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {HerdrClient} from '../server/herdr.js';
-import {handleFocus,handleTabFocus,initHerdrHandlers} from '../server/herdr-handlers.js';
+import {handleFocus,handleTabFocus,handleWorkspaceFocus,initHerdrHandlers} from '../server/herdr-handlers.js';
 import {initRuntimeState} from '../server/runtime-state.js';
 const {createMainWindow}=createRequire(import.meta.url)('../native/electron/main-window.cjs');
 
@@ -27,16 +27,20 @@ test('pane-only focus requests use on rather than a toggle',async()=>{
   assert.ok(sent.every(s=>s.method==='pane.zoom'));
 });
 
-test('one local agent selection focuses a single pane; remote and failures do not silently fall back',async()=>{
+test('one local agent selection focuses its tab before zooming its pane',async()=>{
   const calls=[];const messages=[];let updates=0;
   initRuntimeState({scheduleRecompute:async()=>{updates++}});
-  initHerdrHandlers({herdr:{paneZoom:async(pane,mode)=>{calls.push({pane,mode});if(pane==='missing')throw Error('missing pane')} }});
+  initHerdrHandlers({herdr:{
+    paneGet:async pane=>{if(pane==='missing')throw Error('missing pane');return {tab_id:`${pane}-tab`}},
+    tabFocus:async tab=>{calls.push({tab})},
+    paneZoom:async(pane,mode)=>{calls.push({pane,mode})},
+  }});
   const ws={_local:true,readyState:1,send:message=>messages.push(JSON.parse(message))};
-  handleFocus(ws,{target:'parent'});await new Promise(resolve=>setImmediate(resolve));
-  assert.deepEqual(calls,[{pane:'parent',mode:'on'}]);assert.equal(updates,1);
+  await handleFocus(ws,{target:'parent'});
+  assert.deepEqual(calls,[{tab:'parent-tab'},{pane:'parent',mode:'on'}]);assert.equal(updates,1);
   handleFocus({_local:false},{target:'child'});handleFocus(ws,{});
-  assert.equal(calls.length,1);
-  handleFocus(ws,{target:'missing'});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls.length,2);
+  await handleFocus(ws,{target:'missing'});
   assert.deepEqual(messages,[{type:'control-error',message:'missing pane'}]);assert.equal(updates,1);
 });
 
@@ -46,6 +50,7 @@ test('rapid parent/child/tab selections preserve arrival order even when the fir
   const gate=new Promise(resolve=>{release=resolve});
   initRuntimeState({scheduleRecompute:async()=>{}});
   initHerdrHandlers({herdr:{
+    paneGet:async pane=>({tab_id:`${pane}-tab`}),
     paneZoom:async pane=>{calls.push(pane);if(pane==='child')await gate;focused=pane},
     tabFocus:async tab=>{calls.push(tab);focused=tab},
   }});
@@ -54,16 +59,29 @@ test('rapid parent/child/tab selections preserve arrival order even when the fir
   const second=handleFocus(ws,{target:'parent'});
   const third=handleTabFocus(ws,{tabId:'other-tab'});
   await new Promise(resolve=>setImmediate(resolve));
-  assert.deepEqual(calls,['child'],'later selections cannot overtake an unfinished focus');
+  assert.deepEqual(calls,['child-tab','child'],'later selections cannot overtake an unfinished focus');
   release();await Promise.all([first,second,third]);
-  assert.deepEqual(calls,['child','parent','other-tab']);assert.equal(focused,'other-tab');
+  assert.deepEqual(calls,['child-tab','child','parent-tab','parent','other-tab']);assert.equal(focused,'other-tab');
 });
 
 test('a failed selection does not prevent the next queued selection',async()=>{
   const errors=[];let focused;
   initRuntimeState({scheduleRecompute:async()=>{}});
-  initHerdrHandlers({herdr:{paneZoom:async pane=>{if(pane==='gone')throw Error('pane gone');focused=pane}}});
+  initHerdrHandlers({herdr:{
+    paneGet:async pane=>{if(pane==='gone')throw Error('pane gone');return {tab_id:`${pane}-tab`}},
+    tabFocus:async()=>{},paneZoom:async pane=>{focused=pane},
+  }});
   const ws={_local:true,readyState:1,send:m=>errors.push(JSON.parse(m))};
   await Promise.all([handleFocus(ws,{target:'gone'}),handleFocus(ws,{target:'parent'})]);
   assert.equal(focused,'parent');assert.deepEqual(errors,[{type:'control-error',message:'pane gone'}]);
+});
+
+test('empty workspace selection reaches Herdr and remote clients cannot focus it',async()=>{
+  const calls=[];let updates=0;
+  initRuntimeState({scheduleRecompute:async()=>{updates++}});
+  initHerdrHandlers({herdr:{workspaceFocus:async id=>calls.push(id)}});
+  const ws={_local:true,readyState:1,send:()=>assert.fail('unexpected focus error')};
+  await handleWorkspaceFocus(ws,{workspaceId:'w2'});
+  await handleWorkspaceFocus({_local:false},{workspaceId:'w3'});
+  assert.deepEqual(calls,['w2']);assert.equal(updates,1);
 });

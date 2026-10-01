@@ -34,7 +34,7 @@ const ENTER_DELAY_MS = 500;
 
 let ctx;
 let $root, $list, $toggle, $compose, $input, $latest, $hint, $head;
-const modes = loadModes();          // paneId → "chat"
+const modes = loadModes();          // paneId → "chat" | "term"
 let view = null;                    // { key, paneId, agentId, kind, messages, hasOlder, loadingOlder, status, reason, sub }
 const expanded = new Set();         // 펼친 도구 묶음·도구·생각 줄 key
 const turnCache = new Map();        // turn key → { sig, html }
@@ -136,6 +136,12 @@ export function initCapability(c) {
   provide("agentchat.sync", () => sync());
   provide("agentchat.toggle", () => { toggleByKey(); });
   provide("agentchat.openSubagent", (info) => openSubagent(info));
+  // herdr/agents.js 가 부모 에이전트 줄을 누를 때 호출한다. 이 pane 의 서브에이전트 보기를 닫았으면 true 를 반환한다.
+  provide("agentchat.closeSubagent", (paneId) => {
+    if (!view?.agentId || view.paneId !== paneId) return false;
+    closeSubagent();
+    return true;
+  });
   sync();
   return {
     ws: {
@@ -147,15 +153,21 @@ export function initCapability(c) {
   };
 }
 
+// 고른 적 없는 pane 의 보기: 다른 세션이 띄운 자식 에이전트는 채팅, 나머지는 터미널
+function isChat(a) {
+  const mode = modes.get(a.paneId);
+  return mode ? mode === "chat" : !!a.parentPaneId;
+}
+
 function toggleMode() {
   const a = currentAgent();
   if (!agentKind(a)) return;
-  setMode(a.paneId, modes.get(a.paneId) !== "chat");
+  setMode(a.paneId, !isChat(a));
 }
 
 function setMode(paneId, chat) {
   if (!paneId) return;
-  if (chat) modes.set(paneId, "chat"); else modes.delete(paneId);
+  modes.set(paneId, chat ? "chat" : "term");
   saveModes();
   sync();
   if (chat) setTimeout(() => $input?.focus(), 0);
@@ -168,7 +180,7 @@ function sync() {
   const a = currentAgent();
   const kind = agentKind(a);
   $toggle.hidden = !kind;
-  const chat = !!kind && modes.get(a.paneId) === "chat";
+  const chat = !!kind && isChat(a);
   $toggle.classList.toggle("on", chat);
   $toggle.setAttribute("aria-pressed", String(chat));
   $toggle.innerHTML = chat ? ICON_TERM : ICON_CHAT;
@@ -353,7 +365,7 @@ function submit() {
   if (!text.trim()) return;
   const paneId = view.paneId;
   // 터미널 입력은 지금 오른쪽에 붙은 pane 으로 간다. 다른 pane 을 보고 있으면 보내지 않는다.
-  if (ctx.getCurTarget() !== paneId) { ctx.showToast("보고 있는 pane 이 바뀌어 보내지 않았습니다"); return; }
+  if (ctx.getCurTarget() !== paneId) { ctx.showToast("보고 있는 pane 이 바뀌어 보내지 않았습니다", { level: "warn" }); return; }
   $input.value = "";
   autosize();
   const [clear, payload, enter] = ptyChunks(text);

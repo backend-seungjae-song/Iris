@@ -1,7 +1,7 @@
 // 모바일 앱 표면(Iris 에뮬레이터 탭의 iOS 시뮬레이터·Android 기기). 사람이 직접 조작하듯 앱을 조종한다.
 //
 // 소유 범위
-//   idb·adb 호출, 켜져 있는 기기 목록과 세션별 기기 고정, 접근성 트리 읽기와 요소 참조(@a1),
+//   idb·adb 호출, 켜져 있는 기기 목록과 세션별 등록 기기, 접근성 트리 읽기와 요소 참조(@a1),
 //   화면 찍기, 그리고 app_* 도구 전부.
 //
 // 제공 API
@@ -14,7 +14,7 @@
 //
 // 유지 조건
 //   대상은 Iris 에뮬레이터 탭에 열린 기기뿐이다. Iris 앱이 꺼져 있으면 앱 도구는 거절한다. 기기를 따로
-//   켜라고 안내하지 않는다. 고정하지 않으면 이 세션 스페이스의 탭 기기를 쓴다. 고정은 프로세스를 다시 띄워도 남는다.
+//   켜라고 안내하지 않는다. 등록 기기가 없으면 이 세션만의 에뮬레이터를 켜서 쓴다. 등록 목록은 프로세스를 다시 띄워도 남는다.
 //   요소 참조는 그 스냅샷 순간에만 유효하다. 앱에는 탭이 없고 도구 인자는 기기다.
 //   좌표는 플랫폼마다 단위가 다르다(iOS 는 포인트, Android 는 픽셀). 스냅샷·탭·스와이프가 같은 기기의
 //   단위를 쓰므로 섞이지 않는다.
@@ -32,13 +32,13 @@ import childProcess from "node:child_process";
 import { stateHome } from "../../server/state-home.cjs";
 import { artifactDir } from "../../server/artifacts-home.cjs";
 import { adbPath } from "../../server/adb-path.js";
+import { MAX_APP_TARGETS, appDeviceTargetId, resolveAppDeviceTarget } from "../../server/app-targets.js";
 import { writeMarks } from "./report.mjs";
 
 const IRIS_HOME = stateHome();
 
-// 기기 여럿을 동시에 조작하는 일이 흔하다. 브라우저 쪽은 서버가 나눠 처리하지만
-// 앱은 서버를 거치지 않으므로 상한을 여기서 함께 둔다.
-export const MAX_DEVICES = 4;
+// 기기 여럿을 동시에 조작하는 일이 흔하다. 서버 저장소와 MCP 응답이 같은 상한을 쓴다.
+export const MAX_DEVICES = MAX_APP_TARGETS;
 
 // ── iOS 시뮬레이터 ──
 // 브라우저와 같은 방식을 앱에도 쓴다. idb가 접근성 트리를 주므로
@@ -71,13 +71,16 @@ const isIosUdid = (u) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 // 앱 도구는 Iris 에뮬레이터 탭에 열린 기기만 조작한다. 켜져 있기만 한 기기를 잡으면 에이전트가
 // 사용자가 보지 않는 기기에서 확인하고, 없으면 기기를 따로 켜서 진행한다(사용자 확인 결과).
 // 탭 목록은 서버가 창에 물어 준다(server/emulator-bridge.js). 조작은 그 기기에 idb·adb 로 직접 한다.
-let serverCall = async () => ({ ok: false, error: "Iris 서버 호출이 연결되지 않았습니다." });
+const noServerCall = async () => ({ ok: false, error: "Iris 서버 호출이 연결되지 않았습니다." });
+let serverCall = noServerCall;
 let lastOpenError = null;
+let lastDeviceError = null;
 async function irisTabs() {
   const r = await serverCall("app-devices", {});
   if (!r || !r.ok) return { ok: false, error: (r && r.error) || "Iris 에뮬레이터 탭 목록을 받지 못했습니다.", tabs: [] };
   const tabs = ((r.data && r.data.tabs) || []).map((t) => ({ name: t.name || "", udid: t.udid,
-    platform: isIosUdid(t.udid) ? "ios" : "android", space: t.space, mine: !!t.mine }));
+    persistentId: t.persistentId || null,
+    platform: isIosUdid(t.udid) ? "ios" : "android", space: t.space, mine: !!t.mine, own: !!t.owner && !!t.mine }));
   return { ok: true, tabs };
 }
 async function bootedTargets() { return (await irisTabs()).tabs; }
@@ -88,71 +91,106 @@ async function openIrisTab(device) {
   lastOpenError = (r && r.error) || "Iris 에뮬레이터 탭을 열지 못했습니다.";
   return null;
 }
-// 이 세션이 고정한 기기. 파일에 남겨 프로세스를 다시 띄워도 같은 기기를 계속 쓴다.
-// 고정이 없으면 이 세션 스페이스의 탭 기기를 쓴다. 다른 스페이스의 탭 기기는 고정하거나 device 로 지정해야 쓴다.
-const APP_TARGET_PATH = path.join(IRIS_HOME, "app-targets.json");
-function readAppTargets() {
-  try { return JSON.parse(fs.readFileSync(APP_TARGET_PATH, "utf8")) || {}; } catch { return {}; }
+// 상태 파일은 서버 한 곳만 쓴다. MCP는 브라우저 명령 경로로 조회·교체한다.
+async function registeredDeviceState(session) {
+  if (!session) return { ok: true, devices: [] };
+  const r = await serverCall("app-targets-get", {});
+  if (!r?.ok) return { ok: false, devices: [], error: r?.error || "등록 기기 목록을 읽지 못했습니다." };
+  return { ok: true, devices: Array.isArray(r.data?.devices) ? r.data.devices.slice(0, MAX_DEVICES) : [] };
 }
-function pinnedDevice(session) {
-  if (!session) return null;
-  const v = readAppTargets()[session];
-  return v && typeof v === "string" ? v : null;
-}
-function setPinnedDevice(session, udid) {
-  if (!session) return null;
-  const all = readAppTargets();
-  if (udid) all[session] = udid; else delete all[session];
-  try {
-    fs.mkdirSync(IRIS_HOME, { recursive: true });
-    fs.writeFileSync(APP_TARGET_PATH + ".tmp", JSON.stringify(all), { mode: 0o600 });
-    fs.renameSync(APP_TARGET_PATH + ".tmp", APP_TARGET_PATH);
-  } catch {}
-  return udid || null;
+async function registeredDevices(session) { return (await registeredDeviceState(session)).devices; }
+async function replaceRegisteredDevices(session, devices) {
+  if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음)." };
+  return serverCall("app-targets-set", { devices });
 }
 // 세션 해석기는 createAppSurface가 주입받는다. 모듈 헬퍼(simTarget·simTargetError)도 같은 것을 쓴다.
 let sessionOf = async () => null;
-// 왜 대상이 없는지는 상황마다 다르다. "없다"고만 말하면 고정해 둔 기기의 탭이 닫힌 것인지,
+// 왜 대상이 없는지는 상황마다 다르다. "없다"고만 말하면 등록한 기기의 탭이 닫힌 것인지,
 // Iris 가 꺼진 것인지 알 수 없어 사람이 엉뚱한 데를 본다. 어느 경우에도 기기를 따로 켜라고 하지 않는다.
 async function simTargetError(want) {
   const r = await irisTabs();
   if (!r.ok) return r.error;
+  if (lastDeviceError) return lastDeviceError;
   const list = r.tabs;
   const names = list.map((t) => `${t.name || t.udid}(${t.udid})`).join(" · ");
   if (want != null && String(want).trim()) {
     return `Iris 에뮬레이터 탭에 열린 기기가 아닙니다: ${want}.` + (list.length ? ` 열린 기기: ${names}.` : "")
-      + " 다른 기기를 쓰려면 app_target에 그 기기를 주면 이 세션 스페이스의 탭을 그 기기로 바꿉니다.";
+      + " 다른 기기를 쓰려면 app_target에 그 기기를 주면 이 세션의 에뮬레이터 탭을 그 기기로 바꿉니다.";
   }
-  const pin = pinnedDevice(await sessionOf());
-  if (pin && !list.some((t) => t.udid === pin)) {
-    return `고정해 둔 기기(${pin})가 열린 Iris 에뮬레이터 탭이 없습니다. app_target으로 다시 고정하거나 clear로 놓으세요.`
+  const registration = await registeredDeviceState(await sessionOf());
+  if (!registration.ok) return registration.error;
+  const registered = registration.devices;
+  if (registered.length > 1) {
+    const labels = registered.map((udid) => {
+      const target = resolveAppDeviceTarget(udid, list);
+      return `${target?.name || udid}(${target?.udid || udid})`;
+    });
+    return `이 세션에 기기가 ${registered.length}대 등록돼 있습니다: ${labels.join(" · ")}. app_* 도구에 device를 적으세요.`;
+  }
+  const pin = registered[0];
+  if (/^emulator-\d+$/.test(pin || "")) {
+    return `이전에 시리얼(${pin})로 등록한 Android 기기는 확인할 수 없습니다. Iris 기기 화면에서 다시 지목하거나 app_target에 AVD 이름을 적으세요.`;
+  }
+  if (pin && !resolveAppDeviceTarget(pin, list)) {
+    return `등록한 기기(${pin})가 열린 Iris 에뮬레이터 탭이 없습니다. app_target으로 다시 등록하거나 clear로 놓으세요.`
       + (list.length ? ` 열린 기기: ${names}.` : "");
   }
   return lastOpenError || "Iris 에뮬레이터 탭을 열지 못했습니다.";
 }
 // 적어준 값(udid 전체·앞자리·기기 이름) 하나를 탭에 열린 기기의 udid로. 없으면 null.
 async function findDevice(want) {
+  lastDeviceError = null;
   const w = String(want || "").trim(); if (!w) return null;
   const list = await bootedTargets();
-  const hit = list.find((t) => t.udid === w) || list.find((t) => t.name === w)
-    || list.find((t) => t.udid.toLowerCase().startsWith(w.toLowerCase()));
-  return hit ? hit.udid : null;
+  if (w.startsWith("avd:")) return resolveVerifiedDevice(w, list);
+  const exact = list.find((t) => t.udid === w);
+  if (exact) return exact.udid;
+  let matches = list.filter((t) => t.name === w);
+  if (!matches.length) matches = list.filter((t) => t.udid.toLowerCase().startsWith(w.toLowerCase()));
+  if (matches.length > 1) {
+    lastDeviceError = `기기가 여러 대 일치합니다: ${w}. app_targets에서 정확한 UDID를 확인해 지정하세요.`;
+    return null;
+  }
+  return matches[0]?.udid || null;
 }
-// want를 주면 탭에 열린 그 기기. 없으면 이 세션이 고정한 기기, 그것도 없으면 이 세션 스페이스의 탭 기기.
-// 그 탭도 없으면 이 세션 스페이스에 탭을 열어 기본 기기를 켠다.
+
+async function verifyAvdTarget(target, serial) {
+  if (!target.startsWith("avd:")) return true;
+  const expected = target.slice(4);
+  const result = await adb(["-s", serial, "emu", "avd", "name"], { timeout: 5000 });
+  const lines = String(result.out || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (result.ok && lines[0] === expected && lines.slice(1).includes("OK")) return true;
+  lastDeviceError = `지목한 Android AVD(${expected})와 실행 중인 기기를 확인하지 못했습니다. Iris 기기 목록을 새로 고침한 뒤 다시 지목하세요.`;
+  return false;
+}
+
+async function resolveVerifiedDevice(target, list) {
+  const device = resolveAppDeviceTarget(target, list);
+  return device && await verifyAvdTarget(target, device.udid) ? device.udid : null;
+}
+// want를 주면 탭에 열린 그 기기. 없으면 이 세션에 등록된 한 대, 그것도 없으면 이 세션 소유 탭의 기기.
+// 그 탭도 없으면 다른 화면이 쓰지 않는 기기로 이 세션의 탭을 연다(서버가 한도를 확인하고 등록한다).
 async function simTarget(want) {
+  lastDeviceError = null;
   if (want != null && String(want).trim()) return findDevice(want);
-  const pin = pinnedDevice(await sessionOf());
+  const registration = await registeredDeviceState(await sessionOf());
+  if (!registration.ok) { lastOpenError = registration.error; return null; }
+  const registered = registration.devices;
   const r = await irisTabs();
   if (!r.ok) { lastOpenError = r.error; return null; }
   const list = r.tabs;
+  if (registered.length > 1) return null;
+  const pin = registered[0];
   if (pin) {
-    if (list.some((t) => t.udid === pin)) return pin;   // 아직 탭에 열려 있으면 그것만 쓴다
-    // 고정한 기기의 탭이 닫혔다. 조용히 다른 기기로 갈아타지 않는다. 사용자가 모르는 사이에 대상이 바뀌는 동작을 막는다.
+    const target = await resolveVerifiedDevice(pin, list);
+    if (target) return target;
+    // 등록한 기기의 탭이 닫혔다. 조용히 다른 기기로 갈아타지 않는다. 사용자가 모르는 사이에 대상이 바뀌는 동작을 막는다.
     return null;
   }
-  const mine = list.find((t) => t.mine);
-  if (mine) return mine.udid;
+  // 등록한 기기가 없으면 이 세션만의 에뮬레이터를 쓴다. 이미 켠 것이 있으면 그것을, 없으면 다른 세션이 쓰지 않는 기기를 켜고
+  // 서버가 이 세션에 등록한다. 스페이스 공용 탭(사람이 연 탭)은 다른 세션도 쓰므로 가져오지 않는다.
+  const own = list.find((t) => t.own);
+  if (own) return own.udid;
   return openIrisTab(null);
 }
 // 스냅샷이 준 참조(@a1…)는 그 스냅샷 순간에만 유효하다. 화면이 바뀌면 다시 뜬다.
@@ -293,42 +331,116 @@ function appIdent(udid, app) {
 }
 export function createAppSurface({ currentSession, journal, addReceipt, call }) {
   sessionOf = currentSession;
-  if (typeof call === "function") serverCall = call;
+  // 표면마다 자기 호출만. 호출 없이 만든 표면이 앞 표면의 실서버 호출을 이어받아 실제 앱·기기에 닿는 것 방지
+  serverCall = typeof call === "function" ? call : noServerCall;
+  let targetQueue = Promise.resolve();
+  const serializeTarget = (run) => (args) => {
+    const result = targetQueue.then(() => run(args));
+    targetQueue = result.catch(() => {});
+    return result;
+  };
   const TOOLS = [
-  { name: "app_targets", desc: "Iris 에뮬레이터 탭에 열린 기기 목록(iOS 시뮬레이터·Android) — 기기 이름, udid(Android는 adb 시리얼), platform, 이 세션 스페이스의 탭인지(mine). 앱 도구는 이 기기들만 조작한다. 여러 대를 동시에 조작하려면 여기서 얻은 값을 device에 넣는다(최대 4, 스페이스마다 탭 하나).",
+  { name: "app_targets", desc: "Iris 에뮬레이터 탭에 열린 기기와 이 세션에 등록된 기본 대상 목록. 등록 기기가 한 대면 device 없는 app_* 명령이 그 기기로 가고, 여러 대면 device를 반드시 적는다.",
     schema: {}, app: true,
     run: async () => {
       const session = await currentSession();
       const r = await irisTabs();
       if (!r.ok) return { ok: false, error: r.error };
       const list = r.tabs;
-      const pin = pinnedDevice(session);
-      return { ok: true, data: { count: list.length, pinned: pin,
-        targets: list.map((t) => ({ ...t, pinned: t.udid === pin })),
-        note: !list.length ? "열린 에뮬레이터 탭이 없습니다 — 다른 app_* 도구를 부르면 이 세션 스페이스에 탭을 열어 기본 기기를 켭니다. 특정 기기가 필요하면 app_target에 그 기기를 주세요."
-          : !pin && list.length > 1 ? "기기가 여럿입니다 — 지정 없는 명령은 이 세션 스페이스의 탭(mine)으로 갑니다. 다른 기기를 쓰려면 app_target으로 고정하세요." : undefined } };
+      const registration = await registeredDeviceState(session);
+      if (!registration.ok) return { ok: false, error: registration.error };
+      const registered = registration.devices;
+      return { ok: true, data: { count: list.length, registered,
+        targets: list.map((t) => ({ ...t, registered: registered.some((pin) => resolveAppDeviceTarget(pin, list) === t) })),
+        note: !list.length ? "열린 에뮬레이터 탭이 없습니다 — 다른 app_* 도구를 부르면 이 세션의 에뮬레이터를 켭니다. 특정 기기가 필요하면 app_target에 그 기기를 주세요."
+          : registered.length > 1 ? "등록 기기가 여러 대입니다 — app_* 도구에 device를 적으세요."
+          : !registered.length && list.length > 1 ? "등록 기기가 없습니다 — 지정 없는 명령은 이 세션만의 에뮬레이터를 켜서 씁니다." : undefined } };
     } },
-  { name: "app_target", desc: "이 세션이 쓸 기기를 고정한다. 고정하면 지정 없는 app_* 명령이 항상 그 기기로 간다. Iris 탭에 열려 있지 않은 기기를 주면 이 세션 스페이스의 에뮬레이터 탭을 그 기기로 바꿔 켠 뒤 고정한다(기기 이름은 Iris 모바일 화면의 목록 이름). device 없이 부르면 조회, clear로 해제. 고정은 프로세스가 다시 떠도 유지된다.",
-    schema: { device: { type: "string", description: "app_targets가 준 udid·시리얼(앞자리만 적어도 됨) 또는 기기 이름(예: iPhone 16, Pixel_API_35)" }, clear: { type: "boolean" } }, app: true,
-    run: async (a) => {
+  { name: "app_target", desc: "이 세션의 등록 기기를 한 대로 교체한다. additional은 기존 대상을 유지하며 같은 모델·런타임의 사용하지 않는 기기를 먼저 열고, 없으면 생성해 등록한다(최대 4대). device 없이 조회하고 clear로 모두 해제한다.",
+    schema: { device: { type: "string", description: "app_targets가 준 udid·시리얼(앞자리만 적어도 됨) 또는 기기 이름. additional에서는 원본 기기이며, 생략하면 등록·소유 기기가 한 대일 때 그 기기, 없으면 기본 기기를 쓴다." }, clear: { type: "boolean" }, additional: { type: "boolean", description: "같은 모델·런타임 기기를 한 대 더 열고 기존 등록 기기를 유지한다." } }, app: true,
+    run: serializeTarget(async (a) => {
       const session = await currentSession();
-      if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음) — 고정은 herdr pane 안에서만 됩니다." };
-      if (a.clear) { setPinnedDevice(session, null); return { ok: true, data: { session, pinned: null, note: "고정을 놓았습니다 — 이제 이 세션 스페이스의 탭 기기를 씁니다." } }; }
+      if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음) — 기기 등록은 herdr pane 안에서만 됩니다." };
+      if (a.additional && a.clear) return { ok: false, error: "additional과 clear는 함께 쓸 수 없습니다." };
+      if (a.additional) {
+        lastDeviceError = null;
+        const registration = await registeredDeviceState(session);
+        if (!registration.ok) return { ok: false, error: registration.error };
+        const current = await irisTabs();
+        if (!current.ok) return { ok: false, error: current.error };
+        const retained = [...registration.devices];
+        try {
+          for (const tab of current.tabs.filter((tab) => tab.own)) {
+            const target = appDeviceTargetId(tab);
+            if (!await verifyAvdTarget(target, tab.udid)) return { ok: false, error: lastDeviceError };
+            if (!retained.includes(target)) retained.push(target);
+          }
+        } catch (error) { return { ok: false, error: error.message }; }
+        if (retained.length >= MAX_DEVICES) return { ok: false, error: `등록·소유 기기는 최대 ${MAX_DEVICES}대입니다. 추가 전에 기기 등록을 해제하고 소유 탭을 닫으세요.` };
+        let source = a.device == null ? "" : String(a.device).trim();
+        if (!source && retained.length > 1) return { ok: false, error: "원본 기기가 여러 대입니다. additional에 device를 함께 적으세요." };
+        if (!source) source = retained[0] || "";
+        if (source) {
+          const found = await findDevice(source);
+          if (lastDeviceError) return { ok: false, error: lastDeviceError };
+          if (found) {
+            const tab = current.tabs.find((tab) => tab.udid === found);
+            try { source = appDeviceTargetId(tab || { udid: found }); }
+            catch (error) { return { ok: false, error: error.message }; }
+            if (!await verifyAvdTarget(source, found)) return { ok: false, error: lastDeviceError };
+          } else if (/^emulator-\d+$/.test(source)) {
+            return { ok: false, error: "Android 원본 기기의 AVD 이름을 확인하지 못했습니다. Iris 기기 화면에서 다시 지목하세요." };
+          }
+        }
+        const opened = await serverCall("app-open", { additional: true,
+          ...(source ? { device: source.startsWith("avd:") ? source.slice(4) : source } : {}) });
+        if (!opened?.ok) return opened || { ok: false, error: "Iris 에뮬레이터 탭을 열지 못했습니다." };
+        const after = await irisTabs();
+        if (!after.ok) return { ok: false, error: after.error };
+        const tab = after.tabs.find((tab) => tab.udid === opened.data?.udid && tab.own);
+        if (!tab) return { ok: false, error: "추가한 기기의 세션 소유 탭을 확인하지 못했습니다." };
+        let targetId;
+        try { targetId = appDeviceTargetId(tab); }
+        catch (error) { return { ok: false, error: error.message }; }
+        if (!await verifyAvdTarget(targetId, tab.udid)) return { ok: false, error: lastDeviceError };
+        if (retained.includes(targetId)) return { ok: false, error: "기존 기기가 응답되어 추가 기기를 등록하지 못했습니다." };
+        const registered = [...retained, targetId];
+        const saved = await replaceRegisteredDevices(session, registered);
+        if (!saved?.ok) return saved || { ok: false, error: "기기 등록을 저장하지 못했습니다." };
+        return { ok: true, data: { session, registered, udid: tab.udid, name: tab.name,
+          note: registered.length > 1 ? "등록 기기가 여러 대입니다. app_* 도구에 device를 적으세요." : "지정 없는 app_* 명령은 이제 이 기기로 갑니다." } };
+      }
+      if (a.clear) {
+        const saved = await replaceRegisteredDevices(session, []);
+        return saved?.ok ? { ok: true, data: { session, registered: [], note: "등록 기기를 모두 지웠습니다." } } : saved;
+      }
       if (a.device == null || !String(a.device).trim()) {
-        const pin = pinnedDevice(session);
+        const registration = await registeredDeviceState(session);
+        if (!registration.ok) return { ok: false, error: registration.error };
+        const registered = registration.devices;
         const r = await irisTabs();
         if (!r.ok) return { ok: false, error: r.error };
-        return { ok: true, data: { session, pinned: pin,
-          alive: pin ? r.tabs.some((t) => t.udid === pin) : null, targets: r.tabs } };
+        return { ok: true, data: { session, registered,
+          alive: registered.map((udid) => ({ udid, alive: !!resolveAppDeviceTarget(udid, r.tabs) })), targets: r.tabs } };
       }
-      // 탭에 없는 기기면 에이전트가 따로 켜지 않고 Iris 가 이 세션 스페이스의 탭에서 켠다.
-      const u = (await findDevice(a.device)) || (await openIrisTab(a.device));
+      // 탭에 없는 기기면 에이전트가 따로 켜지 않고 Iris 가 이 세션의 탭에서 켠다.
+      const requested = String(a.device).trim();
+      const found = await findDevice(requested);
+      if (lastDeviceError) return { ok: false, error: lastDeviceError };
+      const u = found || (await openIrisTab(requested.startsWith("avd:") ? requested.slice(4) : requested));
       if (!u) return { ok: false, error: lastOpenError || `그 기기를 열지 못했습니다: ${a.device}.` };
-      setPinnedDevice(session, u);
-      const list = await bootedTargets();
+      const current = await irisTabs();
+      if (!current.ok) return { ok: false, error: current.error };
+      const list = current.tabs;
       const t = list.find((x) => x.udid === u);
-      return { ok: true, data: { session, pinned: u, name: t ? t.name : "", note: "지정 없는 app_* 명령은 이제 이 기기로만 갑니다." } };
-    } },
+      let targetId;
+      try { targetId = appDeviceTargetId(t || { udid: u }); }
+      catch (error) { return { ok: false, error: error.message }; }
+      if (!await verifyAvdTarget(targetId, u)) return { ok: false, error: lastDeviceError };
+      const saved = await replaceRegisteredDevices(session, [targetId]);
+      if (!saved?.ok) return saved || { ok: false, error: "기기 등록을 저장하지 못했습니다." };
+      return { ok: true, data: { session, registered: [targetId], name: t ? t.name : "", note: "지정 없는 app_* 명령은 이제 이 기기로 갑니다." } };
+    }) },
   { name: "app_snapshot", desc: "지금 기기 화면에 무엇이 있는지 — 요소 참조(@a1…)·유형·이름·값. 무엇을 만질지 모를 때 먼저 쓴다. 참조는 이 스냅샷 순간에만 유효하다. 좌표는 iOS는 포인트, Android는 픽셀이다.",
     schema: {}, app: true,
     run: async (a) => {
@@ -478,6 +590,10 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
       // 값은 담지 않는다. 비밀이 섞일 수 있으므로 길이만 남긴다(브라우저 트레이스와 같은 규칙).
       const j = await journal({ kind: "accepted", source: "app", cmd: t.name.slice(4),
         target: String(target).slice(0, 120), url: dev ? "app://" + dev : undefined });
+      // 다음 조작을 시작하기 전에 앞 조작의 감시를 끝낸다. 감시를 계속하면 이번 조작이 띄운 화면을
+      // 앞 조작의 알림으로 잘못 기록한다.
+      if (dev) await stopWatch(dev);
+      const before = dev ? await appTree(dev).catch(() => null) : null;
       const r = await inner(a, C);
       await journal({ kind: "completed", source: "app", cmd: t.name.slice(4),
         call_id: j && j.call_id, target: String(target).slice(0, 120),
@@ -485,8 +601,93 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
         ok: !!(r && r.ok),
         error: r && !r.ok ? String(r.error || "").slice(0, 200) : undefined,
         detail: r && r.ok ? r.data : undefined });
+      if (dev && before && r && r.ok) startWatch(dev, before);
       return r;
     };
   }
-  return { tools: TOOLS, bootedTargets, simTarget, pinnedDevice, MAX_DEVICES };
+  // 토스트처럼 잠깐 나타났다 사라지는 알림을 찾는다. 누른 뒤 1초쯤 지나 나타나고 3초 안에 사라져서,
+  // 다음 도구를 부를 때는 화면에 없다. 그래서 알림을 확인한 기록(receipt)이 하나도 없는 회차가 나왔고,
+  // 결과는 글로만 적혔다(2026-09-28).
+  //
+  // 조작이 끝나면 9초 동안 접근성 트리를 반복해서 읽는다. 조작 전에 없던 요소가 나타나면 그때 화면을
+  // 찍고, 9초 안에 그 요소가 없어지면 알림으로 판단해 QA 기록 파일에 남긴다. 없어질 때까지 기다리는 이유는
+  // 새 화면처럼 계속 남아 있는 요소를 알림으로 잘못 판단하지 않기 위해서다. 요소 네 개 이상이 같이
+  // 나타났다 없어지면 화면이 바뀐 것으로 보고 기록하지 않는다.
+  const WATCH_MS = 9000, MOMENT_MAX_PARTS = 3;
+  const watches = new Map();   // 기기 → { stop, done }
+  const delivered = [];        // 다음 앱 도구 결과에 함께 알려 줄 알림
+  const keysOf = (tree) => {
+    const m = new Map();
+    for (const e of tree) {
+      if (!appVisible(e) || e.type === "Application" || e.type === "GenericElement") continue;
+      const nm = appName(e); if (nm) m.set(e.type + "\u0000" + nm, e);
+    }
+    return m;
+  };
+  // 화면의 같은 위치에 같은 종류의 요소가 조작 전에도 있었으면 글자만 바뀐 것이다. 보유 주사위 수가
+  // 늘거나 버튼 이름이 바뀌는 경우가 여기에 해당한다. 이름만 비교하면 이런 변화까지 알림으로 잘못
+  // 판단한다("주사위 4", "확인").
+  const spotOf = (e) => e.type + "\u0000" + ["x", "y", "width", "height"].map((k) => Math.round(e.frame[k])).join(",");
+  async function watch(u, before, w) {
+    const seen = new Set(keysOf(before).keys());
+    const spots = new Set([...keysOf(before).values()].map(spotOf));
+    const groups = [];         // 같은 순간에 나타난 요소 묶음
+    const t0 = Date.now();
+    while (!w.stop && Date.now() - t0 < WATCH_MS) {
+      const tree = await appTree(u).catch(() => null);
+      if (!tree) break;
+      const now = Date.now(), cur = keysOf(tree);
+      const fresh = [...cur.keys()].filter((k) => !seen.has(k) && !spots.has(spotOf(cur.get(k))));
+      // 위치는 조작 전 화면의 것만 기록해 둔다. 감시 중에 나타난 위치까지 더하면, 같은 위치에 알림이
+      // 연달아 나타날 때 두 번째 알림을 글자 변화로 잘못 판단한다. 출석에서 알림이 두 개 나타났는데
+      // 하나만 기록됐다.
+      cur.forEach((e, k) => seen.add(k));
+      if (fresh.length) {
+        const app = tree.find((e) => e.type === "Application");
+        const parts = fresh.map((k) => cur.get(k));
+        const text = parts.map((e) => appName(e)).join("\n");
+        const shot = parts.length <= MOMENT_MAX_PARTS ? await appShot(u, {
+          marks: parts.map((e) => appMark(e.frame, "잠깐 뜬 알림", "#FFB020")),
+          frame: app && app.frame, caption: "잠깐 뜬 알림: " + text }).catch(() => null) : null;
+        groups.push({ keys: fresh, text, first: now, last: now, shot, url: appIdent(u, app) });
+      }
+      for (const g of groups) {
+        if (g.gone) continue;
+        if (g.keys.some((k) => cur.has(k))) g.last = now;
+        else g.gone = now;
+      }
+    }
+    for (const g of groups) {
+      const moment = g.gone && g.keys.length <= MOMENT_MAX_PARTS;
+      if (!moment) { if (g.shot) { try { fs.unlinkSync(g.shot); fs.rmSync(g.shot + ".marks.json", { force: true }); fs.rmSync(g.shot + ".caption.txt", { force: true }); } catch {} } continue; }
+      const lived = g.last - g.first;
+      const j = g.shot ? await journal({ kind: "artifact", source: "moment", shot: g.shot,
+        caption: "잠깐 뜬 알림: " + g.text, url: g.url,
+        detail: { 문구: g.text, 떠있던초: Number((lived / 1000).toFixed(1)) } }) : null;
+      delivered.push({ text: g.text, lived, shot: (j && j.shot) || g.shot, journaled: !!j,
+        note: g.shot ? undefined : "찍지 못했다" });
+    }
+  }
+  function startWatch(u, before) {
+    const w = { stop: false };
+    w.done = watch(u, before, w).catch(() => {});
+    watches.set(u, w);
+  }
+  async function stopWatch(u) {
+    const w = watches.get(u); if (!w) return;
+    w.stop = true; watches.delete(u);
+    await w.done;
+  }
+  // 감시는 조작 결과를 돌려준 뒤에도 계속된다. 그 사이에 찾은 알림은 다음 앱 도구의 결과에 함께 넣어
+  // 알린다.
+  for (const t of TOOLS) {
+    if (!t.app) continue;
+    const inner = t.run;
+    t.run = async (a, C) => {
+      const r = await inner(a, C);
+      if (delivered.length && r && r.data && typeof r.data === "object") r.data.moments = delivered.splice(0);
+      return r;
+    };
+  }
+  return { tools: TOOLS, bootedTargets, simTarget, registeredDevices, MAX_DEVICES };
 }

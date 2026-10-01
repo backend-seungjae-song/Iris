@@ -20,6 +20,8 @@
 //   browser/webview, devtool/source-control의 현재 herdr snapshot 조회 계약.
 //   현재 목록 확인: node bin/importers.mjs web/js/herdr/state.js
 
+import { callHook } from "../core/hooks.js";
+
 let lastAgents = [];
 let spaces = [];
 let tabsByWorkspace = {};
@@ -28,6 +30,7 @@ export function replaceHerdrState(message) {
   lastAgents = message.agents || [];
   if (message.workspaces) spaces = message.workspaces;
   if (message.tabs) tabsByWorkspace = message.tabs;
+  callHook("notifications.state", message);
 }
 
 export function getLastAgents() { return lastAgents; }

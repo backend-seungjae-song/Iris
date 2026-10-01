@@ -77,13 +77,14 @@ export function spaceCtxItems(id) {
     { label: "이 스페이스로 이동", act: () => focusSpace(id) },
     ...(getIsLocal() ? createItems(id) : []),
     { sep: true },
-    { label: "폴더 경로 복사", disabled: !s?.folder, act: () => { copyText(s.folder).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다")); } },
+    { label: "폴더 경로 복사", disabled: !s?.folder, act: () => { copyText(s.folder).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } },
     callHook("archive.spaceItem", id, name),
+    ...(callHook("worktrees.spaceItems", id) || []),
     { sep: true },
-    { label: "이 스페이스 닫기", danger: true, disabled: !getIsLocal(), act: () => {
+    { label: "이 스페이스 닫기", danger: true, disabled: !getIsLocal(), act: async () => {
       const n = (getLastAgents() || []).filter((a) => a.workspaceId === id).length;
-      const warn = n ? `\n이 스페이스의 에이전트 ${n}개가 함께 종료됩니다.` : "";
-      if (!confirm(`스페이스 "${name}"을(를) 닫을까요?${warn}\n되돌릴 수 없습니다.`)) return;
+      const warn = n ? `이 스페이스의 에이전트 ${n}개가 함께 종료됩니다.\n` : "";
+      if (!await askConfirm(`스페이스 "${name}"을(를) 닫을까요?`, `${warn}되돌릴 수 없습니다.`)) return;
       wsSend({ type: "space.close", workspaceId: id });
     } },
   ];
@@ -92,12 +93,12 @@ export function spaceCtxItems(id) {
 export function hideCtxMenu() { ctxmenu.hidden = true; ctxmenu.innerHTML = ""; }
 
 async function createFsEntry(destDir, kind) {
-  if (!getIsLocal()) { showToast("원격에서는 파일이나 폴더를 만들 수 없습니다"); return; }
-  if (!destDir) { showToast("먼저 스페이스를 선택하세요"); return; }
+  if (!getIsLocal()) { showToast("원격에서는 파일이나 폴더를 만들 수 없습니다", { level: "warn" }); return; }
+  if (!destDir) { showToast("먼저 스페이스를 선택하세요", { level: "warn" }); return; }
   const isFile = kind === "file";
   const name = await askText(isFile ? "새 파일" : "새 폴더", "", `${relPath(destDir)} 안에 만듭니다`);
   if (name === null) return;
-  if (!name.trim()) { showToast("이름을 입력하세요"); return; }
+  if (!name.trim()) { showToast("이름을 입력하세요", { level: "warn" }); return; }
   wsSend({ type: "fs.op", op: kind === "file" ? "create-file" : "create-dir", destDir, name: name.trim() });
 }
 
@@ -158,11 +159,11 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
   items.push({ sep: true });
   items.push({ label: "Finder에서 보기", act: () => window.acHost?.revealInFinder(absPath) });
   items.push({ sep: true });
-  items.push({ label: "상대 경로 복사", act: () => { copyText(relPath(absPath)).then((ok) => showToast(ok ? "상대 경로 복사됨" : "상대 경로를 복사하지 못했습니다")); } });
-  items.push({ label: "경로 복사", act: () => { copyText(absPath).then((ok) => showToast(ok ? "경로 복사됨" : "경로를 복사하지 못했습니다")); } });
+  items.push({ label: "상대 경로 복사", act: () => { copyText(relPath(absPath)).then((ok) => showToast(ok ? "상대 경로 복사됨" : "상대 경로를 복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } });
+  items.push({ label: "경로 복사", act: () => { copyText(absPath).then((ok) => showToast(ok ? "경로 복사됨" : "경로를 복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } });
   items.push({ sep: true });
-  items.push({ label: "잘라내기", act: () => { fileClip = { path: absPath, mode: "cut" }; showToast("잘라내기: " + relPath(absPath)); } });
-  items.push({ label: "복사", act: () => { fileClip = { path: absPath, mode: "copy" }; showToast("복사: " + relPath(absPath)); } });
+  items.push({ label: "잘라내기", act: () => { fileClip = { path: absPath, mode: "cut" }; showToast("잘라내기: " + relPath(absPath), { level: "info", near: "action" }); } });
+  items.push({ label: "복사", act: () => { fileClip = { path: absPath, mode: "copy" }; showToast("복사: " + relPath(absPath), { level: "info", near: "action" }); } });
   items.push({ label: "붙여넣기", disabled: !fileClip, act: () => {
     if (!fileClip) return;
     wsSend({ type: "fs.op", op: fileClip.mode === "cut" ? "move" : "copy", src: fileClip.path, destDir });
@@ -175,21 +176,21 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
     if (name && name.trim() && name.trim() !== cur) wsSend({ type: "fs.op", op: "rename", path: absPath, name: name.trim() });
   } });
   items.push({ label: "삭제(휴지통)", danger: true, act: async () => {
-    if (hasActiveCloseDialog()) return showToast("다른 저장 확인이 진행 중입니다");
+    if (hasActiveCloseDialog()) return showToast("다른 저장 확인이 진행 중입니다", { level: "warn" });
     const initialIdentity = await filePathIdentity(absPath);
-    if (!initialIdentity || !initialIdentity.ok) { showToast("삭제 중단: 대상 파일을 확인할 수 없습니다"); return; }
+    if (!initialIdentity || !initialIdentity.ok) { showToast("삭제 중단: 대상 파일을 확인할 수 없습니다", { level: "warn" }); return; }
     const initialAffectedTabs = await collectAffectedTabs(absPath);
     const initialDirtyTabs = initialAffectedTabs.filter((target) => isTabDirty(target.tabRef));
     let choice = "discard";
     if (initialDirtyTabs.length) {
-      if (hasActiveCloseDialog()) return showToast("다른 저장 확인이 진행 중입니다");
+      if (hasActiveCloseDialog()) return showToast("다른 저장 확인이 진행 중입니다", { level: "warn" });
       choice = await chooseDirtyAction("삭제 전에 저장할까요?", initialDirtyTabs.map((target) => target.tabRef.label || target.tabRef.path).join("\n"));
       if (choice === "cancel") return;
-    } else if (!confirm(`휴지통으로 이동할까요?\n${relPath(absPath)}`)) return;
+    } else if (!await askConfirm("휴지통으로 이동할까요?", relPath(absPath))) return;
 
     const currentIdentity = await filePathIdentity(absPath);
     if (!samePathIdentity(initialIdentity, currentIdentity)) {
-      showToast("삭제 중단: 확인하는 동안 대상 파일이 변경되었거나 사라졌습니다");
+      showToast("삭제 중단: 확인하는 동안 대상 파일이 변경되었거나 사라졌습니다", { level: "warn" });
       return;
     }
     const freshAffectedTabs = await collectAffectedTabs(absPath);
@@ -201,20 +202,20 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
     const dirtySetChanged = freshDirtyTabs.length !== initialDirtyRefs.size
       || freshDirtyTabs.some((target) => !initialDirtyRefs.has(target.tabRef));
     if (affectedSetChanged || dirtySetChanged) {
-      showToast("삭제 중단: 확인하는 동안 영향받는 탭이나 미저장 상태가 변경되었습니다");
+      showToast("삭제 중단: 확인하는 동안 영향받는 탭이나 미저장 상태가 변경되었습니다", { level: "warn" });
       return;
     }
     if (choice === "save") {
       const saveResults = await Promise.allSettled(freshDirtyTabs.map((target) => saveTabForClose(target.tabRef, target.space)));
       if (saveResults.some((result) => result.status === "rejected") || freshDirtyTabs.some((target) => isTabDirty(target.tabRef))) {
-        showToast("삭제 중단: 저장하지 못한 탭이 남아 있습니다");
+        showToast("삭제 중단: 저장하지 못한 탭이 남아 있습니다", { level: "err" });
         return;
       }
     }
     const res = await window.acHost?.trashItem(absPath);
-    if (!res || !res.ok) { showToast("삭제 실패: " + (res && res.error || "알 수 없음")); return; }
+    if (!res || !res.ok) { showToast("삭제 실패", { level: "err", detail: String(res && res.error || "알 수 없음") }); return; }
     removeTabsNow(freshAffectedTabs);
-    const parent = absPath.slice(0, absPath.lastIndexOf("/")); invalidateDir(parent); requestDir(parent); renderFileTree(); showToast("휴지통으로 이동됨");
+    const parent = absPath.slice(0, absPath.lastIndexOf("/")); invalidateDir(parent); requestDir(parent); renderFileTree(); showToast("휴지통으로 이동됨", { level: "ok" });
   } });
   if (Array.isArray(extra)) items.push(...extra);
   showCtx(x, y, items);
@@ -253,20 +254,21 @@ export function showCtx(x, y, rawItems) {
 // 프롬프트가 필요한 곳은 전부 이 함수를 쓴다. 취소하면 null.
 export function askText(title, def = "", note = "") {
   return new Promise((resolve) => {
+    const previous = document.activeElement;
     const wrap = document.createElement("div");
     wrap.className = "askwrap";
-    wrap.innerHTML = `<div class="askbox">
-      <div class="asktitle">${esc(title)}</div>
-      ${note ? `<div class="asknote">${esc(note)}</div>` : ""}
+    wrap.innerHTML = `<div class="dim"></div><div class="modal"><div class="mdl" role="dialog" aria-modal="true">
+      <div class="tt">${esc(title)}</div>
+      ${note ? `<div class="tb">${esc(note)}</div>` : ""}
       <input type="text" />
-      <div class="askrow"><button data-a="cancel">취소</button><button class="primary" data-a="ok">확인</button></div>
-    </div>`;
+      <div class="mdl-row"><span class="hint"><span class="kc">esc</span>취소 <span class="kc">⏎</span>확인</span><button data-a="cancel">취소</button><button class="primary" data-a="ok">확인</button></div>
+    </div></div>`;
     const inp = wrap.querySelector("input");
     inp.value = def;
     let done = false;
-    const finish = (v) => { if (done) return; done = true; wrap.remove(); resolve(v); };
+    const finish = (v) => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(v); };
     wrap.addEventListener("click", (e) => {
-      if (e.target === wrap) return finish(null);                       // 바깥 클릭 = 취소
+      if (e.target === wrap || e.target.classList?.contains("dim")) return finish(null); // 바깥 클릭 = 취소
       const b = e.target.closest("button"); if (!b) return;
       finish(b.dataset.a === "ok" ? inp.value : null);
     });
@@ -285,17 +287,18 @@ export function askText(title, def = "", note = "") {
 // window.alert 호출도 이 두 함수로 온다.
 export function askConfirm(title, note = "") {
   return new Promise((resolve) => {
+    const previous = document.activeElement;
     const wrap = document.createElement("div");
     wrap.className = "askwrap";
-    wrap.innerHTML = `<div class="askbox">
-      <div class="asktitle">${esc(title)}</div>
-      ${note ? `<div class="asknote">${esc(note)}</div>` : ""}
-      <div class="askrow"><button data-a="cancel">취소</button><button class="primary" data-a="ok">확인</button></div>
-    </div>`;
+    wrap.innerHTML = `<div class="dim"></div><div class="modal"><div class="mdl" role="dialog" aria-modal="true">
+      <div class="tt">${esc(title)}</div>
+      ${note ? `<div class="tb">${esc(note)}</div>` : ""}
+      <div class="mdl-row"><span class="hint"><span class="kc">esc</span>취소</span><button data-a="cancel">취소</button><button class="primary" data-a="ok">확인</button></div>
+    </div></div>`;
     let done = false;
-    const finish = (v) => { if (done) return; done = true; wrap.remove(); resolve(v); };
+    const finish = (v) => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(v); };
     wrap.addEventListener("click", (e) => {
-      if (e.target === wrap) return finish(false);
+      if (e.target === wrap || e.target.classList?.contains("dim")) return finish(false);
       const b = e.target.closest("button"); if (!b) return;
       finish(b.dataset.a === "ok");
     });
@@ -304,25 +307,26 @@ export function askConfirm(title, note = "") {
       e.stopPropagation();
     });
     document.body.appendChild(wrap);
-    wrap.tabIndex = -1; wrap.focus();
+    wrap.tabIndex = -1; wrap.querySelector('[data-a="ok"]')?.focus();
   });
 }
 
 export function askInfo(title, note = "") {
   return new Promise((resolve) => {
+    const previous = document.activeElement;
     const wrap = document.createElement("div");
     wrap.className = "askwrap";
-    wrap.innerHTML = `<div class="askbox">
-      <div class="asktitle">${esc(title)}</div>
-      ${note ? `<div class="asknote">${esc(note)}</div>` : ""}
-      <div class="askrow"><button class="primary" data-a="ok">확인</button></div>
-    </div>`;
+    wrap.innerHTML = `<div class="dim"></div><div class="modal"><div class="mdl" role="dialog" aria-modal="true">
+      <div class="tt">${esc(title)}</div>
+      ${note ? `<div class="tb">${esc(note)}</div>` : ""}
+      <div class="mdl-row"><span class="hint"><span class="kc">esc</span>닫기 <span class="kc">⏎</span>확인</span><button class="primary" data-a="ok">확인</button></div>
+    </div></div>`;
     let done = false;
-    const finish = () => { if (done) return; done = true; wrap.remove(); resolve(); };
-    wrap.addEventListener("click", (e) => { if (e.target === wrap || e.target.closest("button")) finish(); });
+    const finish = () => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(); };
+    wrap.addEventListener("click", (e) => { if (e.target === wrap || e.target.classList?.contains("dim") || e.target.closest("button")) finish(); });
     wrap.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); finish(); } e.stopPropagation(); });
     document.body.appendChild(wrap);
-    wrap.tabIndex = -1; wrap.focus();
+    wrap.tabIndex = -1; wrap.querySelector('[data-a="ok"]')?.focus();
   });
 }
 
@@ -359,18 +363,18 @@ function wireContextMenu() {
   // Spaces 목록 클릭: 스페이스 포커싱(Explorer·Agents·센터 연동)과 그 에이전트 줄 접기·펴기.
   // 줄 앞 삼각형은 접기만 하고 포커스를 옮기지 않으므로 herdr/agents 가 따로 받는다.
   spaceList.addEventListener("click", (e) => {
-    if (e.target.closest("[data-space-tog]")) return;
+    if (e.target.closest("[data-space-tog], [data-worktree-action]")) return;
     const row = e.target.closest(".space-row");
     if (!row) return;
     if (spaceRowClick) spaceRowClick(row.dataset.space, focusSpace);
     else focusSpace(row.dataset.space);
   });
 
-  // ＋ 새 스페이스: herdr와 같게 경로를 직접 지정한다. cwd 없이 만들면 herdr가 호출자(=서버)의 cwd를
+  // ＋ 새 스페이스: 폴더를 반드시 받는다(newSpace). cwd 없이 만들면 herdr가 호출자(=서버)의 cwd를
   // 물려줘서 Explorer·git·실행이 전부 엉뚱한 폴더를 가리키는 스페이스가 되므로, 폴더는 반드시 받는다.
   // 이름은 여기서 정하지 않는다. herdr가 그 스페이스의 현재 폴더 이름을 붙이고, pane에서 cd 하면
   // 이름도 따라간다. 여기서든 서버에서든 이름을 붙이면 herdr에 고정되어 더는 따라가지 않는다.
-  $("#space-add")?.addEventListener("click", (e) => { e.stopPropagation(); newSpace(); });
+  $("#space-add")?.addEventListener("click", (e) => { e.stopPropagation(); if (!callHook("worktrees.add", e, newSpace)) newSpace(); });
 
   // 스페이스 우클릭: 닫기. 그 스페이스의 탭·에이전트가 전부 종료되는 비가역 조작이라 한 번 묻는다.
   // 줄이 아닌 빈 영역에서도 받는다. 목록이 비었거나 아래쪽 빈 영역을 눌렀을 때 아무 일도
@@ -384,6 +388,7 @@ function wireContextMenu() {
     if (!row) {
       showCtx(e.clientX, e.clientY, [
         { label: "새 스페이스", disabled: !getIsLocal(), act: () => newSpace() },
+        ...(callHook("worktrees.emptyItems") || []),
       ]);
       return;
     }
@@ -405,6 +410,13 @@ function wireContextMenu() {
 
 async function newSpace() {
   if (!getIsLocal()) return;
+  // 앱에서는 Finder 폴더 창으로 고른다. 폴더 창을 띄울 수 없는 일반 브라우저에서만 경로를 입력받는다.
+  if (window.acHost?.pickFolder) {
+    const r = await window.acHost.pickFolder(spaceRoot() || undefined);
+    if (r && r.ok && r.path) wsSend({ type: "space.create", cwd: r.path });
+    else if (r && !r.canceled) showToast("폴더 창을 열지 못했습니다", { level: "err", detail: String(r.error || "알 수 없는 오류") });
+    return;
+  }
   const cwd = await askText("새 스페이스 폴더", spaceRoot() ? spaceRoot() + "/" : "~/", "경로를 입력하세요(~ 로 시작해도 됩니다)");
   if (cwd === null) return;                              // 취소
   const p = cwd.trim();

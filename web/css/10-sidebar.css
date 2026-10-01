@@ -3,7 +3,8 @@
 .sidebar { width:272px; flex:none; background:var(--chrome); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
 .sidebar-head { display:flex; align-items:center; gap:8px; padding:12px var(--pad) 8px; }
 .brand { font-weight:650; font-size:var(--fs-h); letter-spacing:-.018em; font-family:var(--sans); }
-.sidebar-head .conn { margin-left:auto; width:6px; height:6px; border-radius:50%; background:var(--faint); }
+.sidebar-head .brand { margin-right:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.sidebar-head .conn { flex:none; width:6px; height:6px; border-radius:50%; background:var(--faint); }
 .sidebar-head .conn.on { background:var(--ok); }
 
 /* 크롬 UI(사이드바·탭바·툴바)에서는 드래그가 텍스트를 선택하지 않게 한다. 탭·라벨을 끌다가 선택되는 것을 막는다.
@@ -24,8 +25,11 @@ input, textarea, .ctab-rename-in, .md-body, .editor-wrap, .xterm, #term, .ctxmen
 .panel-head .caret.open { transform:rotate(90deg); }
 .panel-title { font:600 var(--fs-s)/1 var(--sans); text-transform:none; letter-spacing:0; color:var(--fg-2); }
 .panel-head .meta { font-size:var(--fs-xs); color:var(--faint); font-family:var(--mono); }
+/* mono 숫자는 줄 상자 위쪽에 그려져 화살표·제목보다 1px 뜨고, ▶ 는 대체 글꼴로 그려져 숫자보다 1px 내려간다. */
+.meta-count { position:relative; top:1px; }
+.meta-run { position:relative; top:-1px; }
 .panel-actions { margin-left:auto; display:flex; gap:2px; }
-.panel-actions .add, .panel-actions .explorer-action { width:22px; height:22px; display:grid; place-items:center; padding:1px 6px; border:0; border-radius:var(--r-s);
+.panel-actions .add, .panel-actions .explorer-action { width:22px; height:22px; display:grid; place-items:center; padding:0; border:0; border-radius:var(--r-s);
   background:none; font:inherit; color:var(--muted); cursor:pointer;
   transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
 .panel-actions .add:hover, .panel-actions .explorer-action:hover { background:var(--hover); color:var(--fg); }

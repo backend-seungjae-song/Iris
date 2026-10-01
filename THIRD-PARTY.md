@@ -89,7 +89,7 @@ esbuild 등 만드는 도구라 나가지 않는다). 그 트리는 전부 허�
 
 | 라이선스 | 패키지 수 | 비고 |
 | --- | --- | --- |
-| MIT | 99 | |
+| MIT | 100 | |
 | ISC | 13 | |
 | Apache-2.0 | 9 | `@docx-editor.dev/core`, `@docx-editor.dev/i18n`, `@puppeteer/browsers`, `chromium-bidi`, `crc-32`, `emf-converter`, `puppeteer-core`, `readdir-glob`, `webdriver-bidi-protocol` |
 | BSD-3-Clause | 3 | `devtools-protocol`, `duplexer2`, `ieee754` |
@@ -111,5 +111,5 @@ peer 인 `typescript` 는 실행 중에 불리지 않아 싣지 않는다. 패�
 
 측정: pnpm 9.12.2. 이때의 직접 의존성은 이것들이었다:
 `@docx-editor.dev/core`, `@xterm/addon-fit`, `@xterm/xterm`, `exceljs`, `jszip`,
-`monaco-editor`, `node-pty`, `puppeteer-core`, `tldts`, `ws`, `zod`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
+`monaco-editor`, `node-pty`, `puppeteer-core`, `tldts`, `uqr`, `ws`, `zod`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
 smoke가 막는다(다시 재고 이 절과 목록을 함께 고칠 것).

@@ -186,21 +186,21 @@ function onClick(e) {
   // 왼쪽 버튼으로 여는 경우에만 있다.
   if (add) { e.stopPropagation(); const r = add.getBoundingClientRect(); openCreateMenu(r.left, r.bottom + 4); return; }
   const tab = e.target.closest(".htab");
-  if (tab) wsSend({ type: "tab-focus", tabId: tab.dataset.tab });
+  if (tab) wsSend({ type: "tab-focus", tabId: tab.dataset.tab, origin: "tabstrip" });
 }
 
 function closeTab(tabId) {
   if (!tabId) return;
-  if (!getIsLocal()) { showToast("원격에서는 터미널 탭을 닫을 수 없습니다"); return; }
+  if (!getIsLocal()) { showToast("원격에서는 터미널 탭을 닫을 수 없습니다", { level: "warn" }); return; }
   wsSend({ type: "tab-close", tabId });
 }
 
 // 새 탭에서 무엇을 띄울지 이 메뉴에서 고른다. 탭 생성·이름 입력·명령 입력의 세 단계를
 // 한 단계로 줄인다.
 export function openCreateMenu(x, y, spaceId) {
-  if (!getIsLocal()) { showToast("원격에서는 터미널 탭을 만들 수 없습니다"); return; }
+  if (!getIsLocal()) { showToast("원격에서는 터미널 탭을 만들 수 없습니다", { level: "warn" }); return; }
   const space = spaceId || currentSpace();
-  if (!space) { showToast("먼저 스페이스를 선택하세요"); return; }
+  if (!space) { showToast("먼저 스페이스를 선택하세요", { level: "warn" }); return; }
   showCtx(x, y, createItems(space));
 }
 

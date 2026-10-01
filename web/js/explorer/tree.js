@@ -26,6 +26,7 @@ import { spaceRootFor } from "../center/file-palette.js";
 import { openFile } from "../center/file-routing.js";
 import { getActiveTabId, getCenterSpace, getTabs } from "../center/tab-store.js";
 import { STATE_LABEL, spaceState } from "../core/agent-state.js";
+import { callHook } from "../core/hooks.js";
 import { getLastAgents } from "../herdr/state.js";
 
 let $, esc, wsSend, orderedSpaces, getIsLocal, getSelectedSpaceId;
@@ -104,13 +105,13 @@ export function renderSpaces() {
   // 스페이스 생성은 셸을 만드는 작업이라 로컬에서만 가능하다(AC5). 원격에서는 버튼을 두지 않는다.
   const addBtn = $("#space-add"); if (addBtn) addBtn.hidden = !getIsLocal();
   if (!list.length) { spaceList.innerHTML = `<div class="fempty">Space 없음</div>`; return; }
-  spaceList.innerHTML = list.map((s) => {
+  const renderSpace = (s, afterRow = "") => {
     const sel = s.id === getSelectedSpaceId();
     const st = spaceState(s.status, getLastAgents(), s.id);
     const ag = spaceAgents ? spaceAgents.rows(s.id) : null;
     const count = (ag && ag.count) || 0;
     const open = !!(ag && ag.open);
-    const tog = count
+    const tog = (count || ag?.hasChildren)
       ? `<button class="space-tog${open ? " open" : ""}" type="button" data-space-tog="${esc(s.id)}" aria-expanded="${open}" title="에이전트 ${open ? "접기" : "펼치기"}">${SVG_TOG.replace(" caret", "")}</button>`
       : `<span class="space-tog-spacer" aria-hidden="true"></span>`;
     return `<div class="space-row${sel ? " sel" : ""}" draggable="true" data-space="${esc(s.id)}" data-folder="${esc(s.folder || "")}">`
@@ -118,8 +119,9 @@ export function renderSpaces() {
       + (!open && count ? `<span class="space-count" title="접힌 에이전트">${count}</span>` : "")
       + (sel ? `<span class="kbd" title="스페이스 이동">⌥⇧↑↓</span>` : "")
       + `<span class="dot ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span></div>`
-      + ((ag && ag.html) || "");
-  }).join("");
+      + afterRow + ((ag && ag.html) || "");
+  };
+  spaceList.innerHTML = callHook("worktrees.renderSpaces", list, renderSpace) ?? list.map((s) => renderSpace(s)).join("");
 }
 
 export function requestDir(p) { if (p && !dirCache.has(p)) { dirCache.set(p, "loading"); wsSend({ type: "fs.list", path: p }); } }

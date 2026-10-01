@@ -1,0 +1,73 @@
+/* Git Worktree 목록·대화상자의 최소 배치.
+   소유 범위: wt-* DOM 배치.
+   제공 API: 38-worktrees.css.
+   의존 대상: Iris 색·글자·간격 토큰과 기존 space-row/askbox/dropdown.
+   유지 조건: 기존 스페이스·에이전트 행의 선택과 상태 표현을 유지한다.
+   영향 범위: web/js/worktrees/boot.js. */
+.wt-loc-branch { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); }
+.wt-stat { margin-left:auto; flex:none; font:var(--fs-xs)/1 var(--mono); color:var(--faint); font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+.wt-action { margin-left:auto; display:grid; place-items:center; border:0; background:none; color:var(--muted); border-radius:var(--r-s); cursor:pointer; flex:none; min-width:22px; height:22px; padding:0; }
+.wt-action:hover { background:var(--hover); color:var(--fg); }
+.wt-action:active { transform:scale(.97); }
+.wt-meta { padding:0 8px 2px 26px; font:var(--fs-xs)/1.25 var(--mono); color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 새 worktree: 묶음 끝 한 줄을 누르면 그 자리에서 이름을 입력한다. */
+.wt-add { cursor:pointer; }
+.wt-add svg { width:12px; height:12px; }
+.wt-compose { padding:2px 0 4px; }
+.wt-compose-input { height:22px; }
+.wt-compose-hint { padding:3px 2px 0; font-size:var(--fs-xs); line-height:1.45; color:var(--faint); }
+.wt-compose-hint > span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wt-compose-hint b { font:500 var(--fs-xs) var(--mono); color:var(--muted); }
+.wt-compose-error { color:var(--pal-danger); }
+
+/* 목록 아래 한 줄: 고른 스페이스의 현재 브랜치 */
+.wt-current { flex:none; display:flex; align-items:center; gap:6px; height:28px; padding:0 var(--pad); border-top:1px solid var(--line);
+  color:var(--fg-2); font:var(--fs-s) var(--mono); white-space:nowrap; }
+.wt-current svg { width:12px; height:12px; flex:none; color:var(--faint); }
+.wt-current-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.wt-current-none { font-family:var(--sans); color:var(--faint); }
+.panel.collapsed > .wt-current { display:none; }
+
+.wt-dialog .askbox label { display:block; margin-top:10px; color:var(--fg-2); }
+.wt-dialog .askbox label > input { display:block; width:100%; }
+.wt-dialog .cc-dd { margin-top:4px; }
+.wt-error { color:var(--pal-danger); margin-top:8px; }
+
+/* 폴더가 지워진 스페이스 */
+.wt-gone { flex:none; margin-left:6px; padding:0 5px; border-radius:var(--r-s); font-size:var(--fs-xs); line-height:16px; color:var(--pal-danger); background:var(--hover); }
+
+/* 스페이스 안에서 워크트리별 세션을 묶는다. 하위 에이전트의 들여쓰기는 기존 렌더러가 유지한다. */
+.wt-space-groups { margin:2px 0 8px 16px; }
+.wt-group { margin:4px 0 8px; min-width:0; }
+.wt-group-head { display:flex; align-items:center; gap:2px; min-height:24px; padding-right:4px; }
+.wt-group-toggle { display:flex; align-items:center; gap:5px; flex:1; min-width:0; border:0; border-radius:var(--r-s); padding:3px 0;
+  color:var(--fg-2); background:none; font:var(--fs-s)/18px var(--sans); text-align:left; cursor:pointer; }
+.wt-group-toggle:hover { background:var(--hover); }
+.wt-group-toggle > .i { width:12px; height:12px; flex:none; color:var(--faint); }
+.wt-caret { width:10px; height:10px; display:grid; place-items:center; flex:none; color:var(--faint); transition:transform var(--t) var(--ease); }
+.wt-caret.open { transform:rotate(90deg); }
+.wt-caret .i { width:10px; height:10px; }
+.wt-group-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wt-group-head > .wt-action { margin-left:0; }
+.wt-group-head .wt-action .i { width:12px; height:12px; }
+.wt-group-meta { display:flex; align-items:center; gap:5px; padding-left:34px; color:var(--faint); font:var(--fs-xs)/15px var(--mono); }
+.wt-group-sessions { margin:5px 0 0 21px; padding-left:4px; border-left:1px solid var(--tree-line); }
+.wt-group-sessions:empty { display:none; }
+.wt-group-sessions .agent-tree-row { padding-left:calc(var(--agent-indent) - 15px); }
+.wt-group-sessions .agent-tree-row .guide { left:calc(var(--agent-guide) - 15px); }
+.wt-terminal-session { width:100%; height:var(--row); display:flex; gap:6px; align-items:center; border:0; padding:0 8px 0 7px;
+  border-radius:var(--r-s); color:var(--muted); background:none; font:var(--fs)/1 var(--sans); text-align:left; cursor:pointer; }
+.wt-terminal-session .srow-name { white-space:nowrap; }
+.wt-terminal-session:hover { background:var(--hover); color:var(--fg); }
+.wt-terminal-session.sel { background:var(--select); color:var(--select-fg); }
+.wt-terminal-spacer { width:23px; flex:none; }
+.wt-terminal-sign { color:var(--faint); }
+.wt-terminal-sign .i { width:12px; height:12px; }
+.wt-group-toggle:focus-visible, .wt-action:focus-visible, .wt-terminal-session:focus-visible { outline:1px solid var(--focus); outline-offset:1px; }
+
+.wt-new { display:flex; align-items:center; gap:6px; width:100%; min-height:var(--row); padding:0 4px; border:0; border-radius:var(--r-s);
+  background:none; color:var(--faint); font:var(--fs)/1 var(--sans); text-align:left; cursor:pointer; }
+.wt-new .i { width:12px; height:12px; }
+.wt-new:hover, .wt-session-menu .ci:focus { background:var(--hover); color:var(--fg); }
+.wt-new:focus-visible { outline:1px solid var(--focus); }

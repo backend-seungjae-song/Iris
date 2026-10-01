@@ -181,16 +181,20 @@ test("DOM 배선은 토글 클릭을 선택으로 흘리지 않고 reveal 때 �
   const clickRow = (target) => listeners.get("click")({ target: {
     closest: (selector) => selector === ".srow" ? {dataset: {target}} : null,
   }});
-  // 하위가 있는 줄은 누를 때마다 접힘이 바뀐다. 고르지 않은 줄이면 고르면서 바꾼다.
+  // 이동하는 클릭은 이동만 한다. 하위 목록 접힘은 이미 고른 줄을 다시 누를 때만 바뀐다.
   clickRow("root");
   assert.deepEqual(selected, ["root"], "다른 에이전트의 첫 클릭은 즉시 한 번 선택한다");
-  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/, "첫 클릭도 펼친 가지를 접는다");
+  assert.match(list.innerHTML, />검증 담당<\/span>/, "이동하는 첫 클릭은 펼친 가지를 접지 않는다");
   clickRow("root");
-  assert.deepEqual(selected, ["root"], "같은 에이전트를 다시 누르면 재이동 없이 편다");
-  assert.match(list.innerHTML, />검증 담당<\/span>/);
+  assert.deepEqual(selected, ["root"], "같은 에이전트를 다시 누르면 재이동 없이 접는다");
+  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/);
   clickRow("root");
-  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/, "같은 행을 다시 누르면 다시 접는다");
+  assert.match(list.innerHTML, />검증 담당<\/span>/, "같은 행을 다시 누르면 다시 편다");
   clickRow("root");
+  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/);
   clickRow("child");
   assert.deepEqual(selected, ["root", "child"], "자식으로 이동도 첫 클릭 한 번이다");
+  clickRow("root");
+  assert.deepEqual(selected, ["root", "child", "root"]);
+  assert.doesNotMatch(list.innerHTML, />검증 담당<\/span>/, "접힌 가지의 에이전트로 이동해도 펴지 않는다");
 });

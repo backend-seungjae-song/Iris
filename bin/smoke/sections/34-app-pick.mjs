@@ -10,12 +10,12 @@ import { tmpdir } from "node:os";
 
 import { check, checkAsync, fnBody, read, readAll, require_ } from "../core.mjs";
 import {
-  accountsView, allCss, allServer, appPick, browserRuntime, browserStateOwner, cdpCmdCaptureSource,
+  accountsView, allCss, allServer, appPick, browserCommands, browserRuntime, browserStateOwner, cdpCmdCaptureSource,
   cdpCmdInputSource, cdpCmdInspectSource, cdpCmdNativeSource, cdpLayoutSource,
   cdpSessionSource, cdpTransportSource, cdpUploadSource, chromeHandoffIpcSource,
   credentialIpcSource, credentialServiceSource, css, downloadHookSource, herdrAgents,
   herdrHandlers, httpHandler, main, mainJs, memoPanel, memoStorePanel, nativeAx, pick,
-  pickHost, pickModeSource, profiles, serverIndexSource, textEditor, tree, web, webviewFactory,
+  pickBoot, pickHost, pickModeSource, profiles, serverIndexSource, textEditor, tree, web, webviewFactory,
   workspaceHandlers, workspaceRuntime,
 } from "../sources.mjs";
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
@@ -286,27 +286,39 @@ check("사람을 부르는 길이 있다", () => {
     && /type: "ai-ask"/.test(commands)
     && /msg\.type === "ai-ask-answer"/.test(si)
     && /tabAllowed\(session, tabId\)\.ok/.test(commands) // 남의 탭으로 부르지 않는다
-    && /"ai-ask": dispatchWs\(handleAiAskMessage\)/.test(mainJs)
+    && /"ai-ask": dispatchWs\(consoleOnly\(handleAiAskMessage\)\)/.test(mainJs)
     && /browser_ask_user/.test(mcp)
     && /case "ask":/.test(cli);
 });
-// 알림은 우측 상단이다. 위 30px는 드래그용 타이틀바.
-check("알림은 우측 상단", () => /\.noticestack \{ position:fixed; right:16px; top:38px;/.test(css("19-terminal"))
-  && !/\.noticestack \{ position:fixed; right:16px; bottom:16px;/.test(allCss));
+// 브라우저 영역이 보이면 그 위쪽에 맞추고, 숨겨져 있으면 채팅 탭줄 또는 머리 아래에 맞춘다.
+check("알림은 보이는 브라우저 또는 채팅 영역에 맞춘다", () => /\.iris-notices \{ position:fixed; z-index:450; top:var\(--notice-top, 38px\); right:var\(--notice-right, 12px\);/.test(css("19-terminal"))
+  && /document\.body\.append\(host\)/.test(read("web/js/core/notice-center.js"))
+  && /anchorNotices\(\[\{ element: \$\("#wv-stack"\), edge: "top" \}, \$\("#htabs"\), \$\("#right \.right-head"\)\]\)/.test(read("web/js/main.js"))
+  && /anchors\.map\([\s\S]*?shownRect\(element\)[\s\S]*?\.find\(\(\{ rect \}\) => rect\)/.test(read("web/js/core/notice-center.js"))
+  && /rect\[anchor\.edge\] \+ 8/.test(read("web/js/core/notice-center.js"))
+  && !/id="copied-toast"|id="noticestack"/.test(read("web/index.html")));
 // 분리창이 콘솔에 시키는 것(요소·앱 위젯·탭·그룹·사이트)은 콘솔 하나에만 간다. 전체에 뿌리면
 // 콘솔 창이 둘일 때 같은 글이 채팅에 두 번 들어간다. 콘솔마다 herdr에 따로 붙지만 붙는 세션은
 // 하나라 두 창의 주입이 같은 채팅에 쌓인다.
 check("분리창이 보낸 것은 콘솔 하나에만 들어간다", () => {
+  const relay = read("server/pickrec-relay.js");
   return /function relayToOneConsole/.test(herdrHandlers)
     && /const consoles = ptyMgr\.clients\(\)\.filter/.test(herdrHandlers)
     && /consoles\.includes\(lastTypedConsole\) \? lastTypedConsole : consoles\[0\]/.test(herdrHandlers)
-    && /if \(ws\._local\) relayToOneConsole\(\{ type: "pick-relay"/.test(srvSpace)
+    && /options\.relay \|\| relayToOneConsole/.test(relay)
+    && /type: "pickrec\.deliver"/.test(relay)
     && /relayToOneConsole\(\{ type: "app-pick", pick \}\)/.test(browserRuntime)
-    && /if \(ws\._local\) relayToOneConsole\(\{ type: "tab-pick-relay"/.test(srvSpace)
-    && /if \(ws\._local\) relayToOneConsole\(\{ type: "group-pick-relay"/.test(srvSpace)
-    && /if \(ws\._local\) relayToOneConsole\(\{ type: "site-pick-relay"/.test(srvSpace)
-    && !/broadcast\(\{ type: "pick-relay"/.test(allServer);
+    && !/broadcast\(\{ type: "pickrec\.deliver"/.test(allServer);
 });
+// 로컬 WS만으로는 앱과 같은 사용자 계정의 셸을 구별할 수 없다. 송신 소켓의 UI 인증을 서버가
+// 확인하고, 옛 로컬 전용 relay를 콘솔이 소비하지 않아야 셸이 콘솔을 대리인으로 쓸 수 없다.
+check("분리창 지목 relay는 UI 인증을 확인한 뒤에만 대기 지정을 만든다", () =>
+  /if \(!ws\._local \|\| !ws\._ui\)/.test(read("server/pickrec-relay.js"))
+  && /type: "pickrec\.relay", kind: "element"/.test(pick)
+  && /type: "pickrec\.relay", kind: "tab"/.test(pickHost)
+  && /type: "pickrec\.relay", kind: "group"/.test(pickHost)
+  && /"pickrec\.deliver"/.test(pickBoot)
+  && !/"pick-relay"|"tab-pick-relay"|"group-pick-relay"/.test(pickBoot));
 // 콘솔 여부는 터미널이 붙어 있는지로 판정한다. 분리 브라우저 창은 pty를 붙이지 않는다.
 check("콘솔 목록은 pty가 쥐고 있다", () => {
   const p = read("server/pty.js");
@@ -363,10 +375,12 @@ check("지목받은 탭 폴백은 되돌아오지 않는다", () => {
 });
 check("그룹 권한은 로컬 UI에서만 생긴다", () => {
   const si = read("server/browser-message-handlers.js");
-  const calls = (allServer.match(/grantGroup\(/g) || []).length;
-  const seg = sliceFrom(si, '"browser-group-grant"', 400, "그룹 권한은 로컬 UI에서만 생긴다");
+  const seg = sliceFrom(si, '"browser-group-grant"', 900, "그룹 권한은 로컬 UI에서만 생긴다");
+  const activation = sliceFrom(browserCommands, 'cmd === "prompt-targets"', 900, "그룹 권한은 로컬 UI에서만 생긴다 활성화");
   // 루프백만으로는 앱과 다른 로컬 프로세스를 구별할 수 없어, 앱만 아는 토큰(ws._ui)까지 요구한다.
-  return calls === 2 && /if \(ws\._local && ws\._ui && msg\.pane && msg\.space && msg\.group\)/.test(seg);
+  return /if \(ws\._local && ws\._ui && msg\.pane && msg\.space && msg\.group\)/.test(seg)
+    && /issuePromptTarget/.test(seg) && !/grantGroup\(|replaceDesignatedGroups\(/.test(seg)
+    && /replaceGroups\(records\)/.test(activation);
 });
 // 접은 상태가 창을 다시 열면 초기화되어 매번 다시 접어야 했다.
 check("접힘 상태가 남는다", () =>
@@ -414,7 +428,7 @@ check("서버가 다시 뜨면 열린 탭을 전부 다시 알린다", () => {
 // 동안 CDP 가 붙은 채로 남는다.
 check("막힌 것을 푸는 명령은 줄을 서지 않는다", () => {
   const seg = sliceBetween(cdpc, "const QUEUE_BYPASS", "async function cdpExecRaw", "막힌 것을 푸는 명령은 줄을 서지 않는다");
-  return /QUEUE_BYPASS = new Set\(\["dialog", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff"\]\)/.test(seg)
+  return /QUEUE_BYPASS = new Set\(\["dialog", "dialoginfo", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff"\]\)/.test(seg)
     && /if \(QUEUE_BYPASS\.has\(cmd\)\) return guard\(withCmdTimeout/.test(seg);
 });
 // 사람을 부르는 서버 명령은 알림을 띄우기 전에 그 탭의 CDP 를 뗀다. 유휴 창을 기다리면 사람이
@@ -432,8 +446,9 @@ check("cdpstate 는 부착 정책을 건드리지 않고 답한다", () => {
 });
 check("사람을 부르면 알림 전에 handoff 를 보낸다", () => {
   const seg = fnBody(read("server/browser-commands.js"), "askUser");
-  const at = seg.indexOf('execOnWc("handoff", {}, wc).catch(() => {})');
-  const notice = seg.indexOf('broadcast({ type: "ai-ask"');
+  const proceed = sliceBetween(seg, "const proceed =", "const wc =", "사람을 부르면 알림 전에 handoff 를 보낸다");
+  const at = proceed.indexOf('execOnWc("handoff", {}, wc).catch(() => {})');
+  const notice = proceed.indexOf('broadcast({ type: "ai-ask"');
   return at >= 0 && notice >= 0 && at < notice;
 });
 // 확인 창(alert/confirm)은 탭이 아니라 창에 붙는다. 다른 탭을 보고 있으면 관계없는 페이지 위에
@@ -762,7 +777,8 @@ await checkAsync("기기를 고르는 도구는 스코프 밖 참조로 죽지 �
 
 // 앱 도구의 대상은 Iris 에뮬레이터 탭에 열린 기기뿐이다. 켜져 있기만 한 기기를 잡으면 에이전트가
 // 사용자가 보지 않는 기기에서 확인하고, 없으면 기기를 따로 켜서 진행했다(사용자 확인 결과).
-// 서버 호출을 가짜로 바꿔 규칙을 실행으로 확인한다: 자기 스페이스 탭 → 없으면 탭 열기 → 탭 밖 기기는 거절.
+// 서버 호출을 가짜로 바꿔 규칙을 실행으로 확인한다: 이 세션 소유 탭 → 없으면 이 세션 탭 열기 → 탭 밖 기기는 거절.
+// 스페이스 공용 탭은 같은 스페이스의 다른 세션도 쓰므로 등록 없는 세션이 가져가지 않는다.
 await checkAsync("앱 도구는 Iris 에뮬레이터 탭의 기기만 대상으로 한다", async () => {
   const src = read("bin/mcp/app.mjs");
   if (/idb\(\["list-targets"/.test(src) || /adb\(\["devices"/.test(src)) throw new Error("앱 도구가 켜진 기기를 직접 훑는다 — 대상은 Iris 탭에서만 받는다");
@@ -780,11 +796,49 @@ await checkAsync("앱 도구는 Iris 에뮬레이터 탭의 기기만 대상으�
   if (!listed.ok || listed.data.count !== 0) throw new Error("탭이 없는데 기기가 잡힌다");
   if ((await surface.simTarget()) !== "emulator-5554" || !calls.includes("app-open")) throw new Error("탭이 없을 때 Iris 에 탭을 열지 않는다");
   tabs = [{ space: "s2", tab: "t2", udid: "E92D2EB4-A044-461A-B685-0B6034FF0D59", name: "iPhone 16", mine: false },
-    { space: "s1", tab: "t1", udid: "emulator-5554", name: "Pixel", mine: true }];
+    { space: "s1", tab: "t1", udid: "emulator-5554", name: "Pixel", mine: true, owner: "pane-1" }];
   calls.length = 0;
-  if ((await surface.simTarget()) !== "emulator-5554" || calls.includes("app-open")) throw new Error("이 세션 스페이스의 탭 기기를 고르지 않는다");
+  if ((await surface.simTarget()) !== "emulator-5554" || calls.includes("app-open")) throw new Error("이 세션 소유 탭 기기를 고르지 않는다");
   if ((await surface.simTarget("iPhone 16")) !== "E92D2EB4-A044-461A-B685-0B6034FF0D59") throw new Error("탭에 열린 다른 기기를 이름으로 못 고른다");
   if ((await surface.simTarget("iPhone SE")) !== null) throw new Error("탭 밖 기기를 대상으로 받는다");
+  tabs = [{ space: "s1", tab: "t3", udid: "IOS-SHARED", name: "iPhone 15", mine: true }];
+  calls.length = 0;
+  await surface.simTarget();
+  if (!calls.includes("app-open")) throw new Error("등록 없는 세션이 스페이스 공용 탭 기기를 가져간다");
+  return true;
+});
+
+await checkAsync("등록 기기 0·1·2대와 device 명시가 서로 다른 규칙을 따른다", async () => {
+  const { createAppSurface } = await import(new URL("../../mcp/app.mjs", import.meta.url).href);
+  const tabs = [
+    { space: "s1", tab: "t1", udid: "emulator-5554", name: "Pixel", persistentId: "Pixel_API_35", mine: true, owner: "pane-1" },
+    { space: "s2", tab: "t2", udid: "IOS-0001", name: "iPhone", mine: false },
+  ];
+  const make = (registered, failGet = false) => createAppSurface({
+    currentSession: async () => "pane-1", journal: async () => null, addReceipt: () => ({ id: "r" }),
+    call: async (cmd) => {
+      if (cmd === "app-devices") return { ok: true, data: { tabs } };
+      if (cmd === "app-targets-get") return failGet ? { ok: false, error: "등록 저장소 읽기 실패" }
+        : { ok: true, data: { devices: registered } };
+      if (cmd === "app-targets-set") return { ok: true, data: { devices: registered } };
+      return { ok: false, error: "예상하지 않은 명령" };
+    },
+  });
+  if ((await make([]).simTarget()) !== "emulator-5554") throw new Error("0대일 때 이 세션 소유 탭을 쓰지 않는다");
+  if ((await make(["IOS-0001"]).simTarget()) !== "IOS-0001") throw new Error("1대 등록을 기본 대상으로 쓰지 않는다");
+  if ((await make(["MISSING"]).simTarget()) !== null) throw new Error("닫힌 등록 기기에서 다른 기기로 넘어갔다");
+  const many = make(["avd:Pixel_API_35", "IOS-0001"]);
+  if ((await many.simTarget()) !== null) throw new Error("2대 등록인데 device 없는 호출을 받아들였다");
+  if ((await many.simTarget("iPhone")) !== "IOS-0001") throw new Error("device 명시를 등록 목록과 함께 쓰지 못한다");
+  const rejected = await many.tools.find((tool) => tool.name === "app_snapshot").run({});
+  if (rejected.ok || !/Pixel\(emulator-5554\)/.test(rejected.error || "")
+    || !/iPhone\(IOS-0001\)/.test(rejected.error || "") || !/device를 적으세요/.test(rejected.error || "")) {
+    throw new Error(`여러 기기 거절 안내가 부족하다: ${rejected.error || "(없음)"}`);
+  }
+  const failed = make([], true);
+  if ((await failed.simTarget()) !== null) throw new Error("등록 목록 조회 실패를 0대로 오인해 폴백했다");
+  const failedTool = await failed.tools.find((tool) => tool.name === "app_snapshot").run({});
+  if (failedTool.ok || !/등록 저장소 읽기 실패/.test(failedTool.error || "")) throw new Error("등록 조회 실패 이유가 사라졌다");
   return true;
 });
 

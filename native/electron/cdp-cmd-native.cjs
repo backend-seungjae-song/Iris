@@ -33,6 +33,13 @@ function createNativeCommands({
   os,
 }) {
   return {
+    async dialoginfo(_send, wc) {
+      const value = observation.dialogOpen(wc.id);
+      return { ok: true, dialog: value ? {
+        kind: value.type,
+        message: String(value.message || "").slice(0, 300),
+      } : null };
+    },
     // 지금 떠 있는 확인 창을 닫는다. 이 명령이 없으면 창이 뜬 동안 다른 명령을 실행할 수 없다.
     // 브라우저 층 명령이라 페이지가 멈춰 있어도 동작한다.
     async dialog(send, wc, args) {

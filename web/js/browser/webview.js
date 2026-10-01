@@ -256,7 +256,7 @@ export function wakeWebview(tabId) {
   if (sleeping) {
     bNote.textContent = "잠자던 탭을 다시 여는 중… 입력·스크롤 상태는 페이지에 따라 복원되지 않을 수 있습니다.";
     bNote.hidden = false;
-    try { showToast("잠자던 탭을 다시 엽니다 · 페이지 입력/스크롤은 초기화될 수 있습니다."); } catch {}
+    try { showToast("잠자던 탭을 다시 엽니다 · 페이지 입력/스크롤은 초기화될 수 있습니다.", { level: "info" }); } catch {}
   }
   return rec;
 }

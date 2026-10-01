@@ -26,7 +26,7 @@
 //   이 API를 바꾸면 import 하는 파일도 함께 바꿔야 한다:
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/bookmarks.js
 import { bsMutate, curBmSpace, getBrowserState } from "./state.js";
-import { activeWv } from "./webview.js";
+import { activeBrowserId, activeWv } from "./webview.js";
 import { wireReorder } from "../core/reorder.js";
 import { callHook } from "../core/hooks.js";
 
@@ -43,20 +43,25 @@ export function initBookmarks(deps) {
 // 호출하게 되고, 그러면 구문 검사와 테스트는 통과한 채 주소창을 누를 때만 실패한다.
 // goUrl 은 main 이 소유한다. 주소 확정은 탭·webview 흐름이라 이 모듈의 책임이 아니다.
 export function wireUrlBar({ goUrl }) {
-  urlInput.addEventListener("input", () => { sugTyped = urlInput.value; sugIdx = -1; openSug(sugTyped); });
+  const update = () => { sugTyped = urlInput.value; sugIdx = -1; openSug(sugTyped); };
+  urlInput.addEventListener("input", (ev) => { if (!sugComposing && !ev.isComposing) update(); });
+  urlInput.addEventListener("compositionstart", () => { sugComposing = true; closeSug(); });
+  urlInput.addEventListener("compositionend", () => { sugComposing = false; update(); });
   urlInput.addEventListener("focus", () => { sugTyped = urlInput.value; });
-  urlInput.addEventListener("blur", () => setTimeout(closeSug, 120)); // 항목 클릭이 먼저 처리되게
+  urlInput.addEventListener("blur", () => { cancelSuggestRequest(); setTimeout(() => { if (document.activeElement !== urlInput) closeSug(); }, 120); });
   urlInput.addEventListener("keydown", (ev) => {
+    if (sugComposing || ev.isComposing || ev.keyCode === 229) return;
     const k = ev.code || "";
     if (k === "ArrowDown") { ev.preventDefault(); moveSug(+1); return; }
     if (k === "ArrowUp") { ev.preventDefault(); moveSug(-1); return; }
     // 제안을 훑던 중의 Esc는 원래 치던 값으로 되돌리고 목록만 닫는다. 포커스는 주소창에 남는다.
     if (k === "Escape" && sugOpen()) { ev.preventDefault(); ev.stopPropagation(); urlInput.value = sugTyped; closeSug(); urlInput.focus(); return; }
-    if (k === "Enter" || k === "NumpadEnter") { closeSug(); goUrl(); }
+    if (k === "Escape") { cancelSuggestRequest(); return; }
+    if (k === "Enter" || k === "NumpadEnter") { acceptSug(); closeSug(); goUrl(); }
   });
   $("#url-sug").addEventListener("mousedown", (ev) => {
     const it = ev.target.closest(".sug"); if (!it) return;
-    ev.preventDefault(); urlInput.value = sugItems[+it.dataset.i] || urlInput.value; closeSug(); goUrl();
+    ev.preventDefault(); sugIdx = +it.dataset.i; acceptSug(); closeSug(); goUrl();
   });
 }
 
@@ -75,20 +80,51 @@ export function currentUrl() { const r = activeWv(); return r ? r.url : ""; }
 export function bmForSpace() { const sp = curBmSpace(), state = getBrowserState(); return (sp && state.bookmarksBySpace && Array.isArray(state.bookmarksBySpace[sp])) ? state.bookmarksBySpace[sp] : []; }
 // 주소창 제안 목록. datalist는 화살표 이동이 입력창에 반영되는 방식도, Esc 복귀도 제어할 수 없어
 // 직접 그린다. 규칙: 위아래로 옮기면 그 후보가 입력창에 그대로 들어가고, Esc는 원래 치던 값으로 되돌린다.
-let sugItems = [], sugIdx = -1, sugTyped = "";
+let sugItems = [], sugIdx = -1, sugTyped = "", sugQueries = [], sugComposing = false;
+let sugTimer = null, sugRequest = 0;
+let sugSpace = null;
 export function urlPool() { return [...new Set([...bookmarks.map((b) => b.url), ...historyFor(curBmSpace())])]; }
 export function sugOpen() { return !$("#url-sug").hidden; }
-export function renderUrlDatalist() { if (sugOpen()) openSug(sugTyped); } // 목록이 바뀌면 열려 있을 때만 다시 그린다
-export function closeSug() { const box = $("#url-sug"); box.hidden = true; box.innerHTML = ""; sugItems = []; sugIdx = -1; }
+export function renderUrlDatalist() { if (sugSpace !== curBmSpace()) closeSug(); else if (sugOpen()) showSug(sugTyped); }
+function cancelSuggestRequest() { clearTimeout(sugTimer); sugTimer = null; sugRequest++; }
+export function closeSug() { cancelSuggestRequest(); const box = $("#url-sug"); box.hidden = true; box.innerHTML = ""; sugItems = []; sugQueries = []; sugIdx = -1; }
+function acceptSug() {
+  const item = sugItems[sugIdx];
+  if (item) urlInput.value = item.search ? "https://www.google.com/search?q=" + encodeURIComponent(item.value) : item.value;
+}
 function paintSug() {
   const box = $("#url-sug");
-  box.innerHTML = sugItems.map((u, i) => `<div class="sug${i === sugIdx ? " on" : ""}" data-i="${i}">${esc(u)}</div>`).join("");
+  box.innerHTML = sugItems.map((item, i) => `<div class="sug${i === sugIdx ? " on" : ""}" data-i="${i}"${item.search ? ' title="Google 검색"' : ""}>${esc(item.value)}</div>`).join("");
   const on = box.querySelector(".sug.on"); if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
 }
 export function openSug(q) {
+  cancelSuggestRequest(); sugSpace = curBmSpace(); sugQueries = []; showSug(q);
+  if (!String(q || "").trim() || sugComposing) return;
+  const request = sugRequest, space = curBmSpace(), tab = activeBrowserId();
+  const stillCurrent = () => request === sugRequest && space === curBmSpace() && tab === activeBrowserId()
+    && !sugComposing && document.activeElement === urlInput
+    && (urlInput.value === q || urlInput.value === sugItems[sugIdx]?.value);
+  sugTimer = setTimeout(async () => {
+    sugTimer = null;
+    try {
+      if (!stillCurrent()) { if (request === sugRequest) closeSug(); return; }
+      const result = await callHook("searchsuggest.query", q);
+      // 탭 전환은 input 이벤트 없이 주소창 값을 바꾼다. 방향키로 고른 후보만 같은 요청으로 유지한다.
+      if (!stillCurrent()) { if (request === sugRequest) closeSug(); return; }
+      sugQueries = Array.isArray(result) ? [...new Set(result.filter((v) => typeof v === "string" && v.trim()))].slice(0, 8) : [];
+      showSug(q);
+    } catch {} // 추천을 받을 수 없어도 기록·북마크를 계속 쓸 수 있다.
+  }, 180);
+}
+function showSug(q) {
   const s = String(q || "").trim().toLowerCase();
-  sugItems = urlPool().filter((u) => !s || u.toLowerCase().includes(s)).slice(0, 8);
-  if (!sugItems.length) { closeSug(); return; }
+  const selected = sugItems[sugIdx];
+  const pool = urlPool().filter((u) => !s || u.toLowerCase().includes(s));
+  const local = pool.slice(0, sugQueries.length ? 4 : 8).map((value) => ({ value, search: false }));
+  if (selected && !selected.search && pool.includes(selected.value) && !local.some((item) => item.value === selected.value)) local.push(selected);
+  sugItems = [...local, ...sugQueries.map((value) => ({ value, search: true }))].slice(0, 8);
+  sugIdx = selected ? sugItems.findIndex((item) => item.value === selected.value && item.search === selected.search) : -1;
+  if (!sugItems.length) { $("#url-sug").hidden = true; $("#url-sug").innerHTML = ""; return; }
   $("#url-sug").hidden = false; paintSug();
 }
 // 인덱스 -1 = "원래 치던 값". 목록 끝을 넘으면 거기로 돌아와 원문을 다시 보여준다.
@@ -97,7 +133,7 @@ export function moveSug(d) {
   if (!sugItems.length) return;
   const n = sugItems.length + 1;
   sugIdx = ((sugIdx + 1 + d) % n + n) % n - 1;
-  urlInput.value = sugIdx < 0 ? sugTyped : sugItems[sugIdx];
+  urlInput.value = sugIdx < 0 ? sugTyped : sugItems[sugIdx].value;
   paintSug();
 }
 // ── 북마크바 ─────────────────────────────────────────────────────────

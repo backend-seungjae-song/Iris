@@ -59,7 +59,13 @@ echo "node $*" >> "$MOCK_LOG"`);
   executable(path.join(mocks, "npx"), 'echo "npx $*" >> "$MOCK_LOG"');
   executable(path.join(mocks, "codesign"), `echo "codesign $*" >> "$MOCK_LOG"\n${codesign === "pass" ? "exit 0" : "exit 41"}`);
   executable(path.join(mocks, "osascript"), `echo "quit" >> "$MOCK_LOG"\n${quit === "pass" ? '/bin/rm -f "$MOCK_STATE/running"' : ":"}`);
-  executable(path.join(mocks, "sleep"), ":");
+  executable(path.join(mocks, "sleep"), quit === "delayed" ? `
+count=0
+[ ! -f "$MOCK_STATE/waits" ] || count=$(cat "$MOCK_STATE/waits")
+count=$((count + 1))
+echo "$count" > "$MOCK_STATE/waits"
+if [ "$count" -ge 20 ]; then /bin/rm -f "$MOCK_STATE/running"; fi
+` : ":");
   executable(path.join(mocks, "ditto"), copy === "pass"
     ? 'echo "ditto" >> "$MOCK_LOG"\n/bin/cp -R "$1" "$2"'
     : 'echo "ditto" >> "$MOCK_LOG"\n/bin/mkdir -p "$2/Contents"\necho partial > "$2/Contents/version"\nexit 43');
@@ -181,4 +187,13 @@ test("source-root marker는 서명 전 afterPack만 소유한다", () => {
   assert.doesNotMatch(installer, /\.source-root/);
   assert.match(afterPack, /fs\.writeFileSync\(path\.join\(resources, "\.source-root"\)/);
   assert.equal(pkg.build.afterPack, "scripts/after-pack.cjs");
+});
+
+
+test("에뮬레이터 정리 20초 뒤 종료되는 앱도 교체를 완료한다", (t) => {
+  const h = harness(t, { quit: "delayed" });
+  assert.equal(h.result.status, 0, h.result.stdout + h.result.stderr);
+  assert.equal(installedVersion(h.app), "new");
+  assert.equal(h.running, true);
+  assert.equal(count(h.events, "quit"), 1);
 });

@@ -7,8 +7,8 @@ import test from "node:test";
 import { installAgentContext } from "../scripts/install-agent-context.mjs";
 
 const REQUIRED = [
-  "bin/agent-context.mjs", "bin/agent-run.mjs", "server/agent-lineage.js", "server/codex-session.js", "server/env.cjs",
-  "server/herdr-session.cjs", "server/herdr.js", "server/state-home.cjs",
+  "bin/agent-context.mjs", "bin/iris-session.mjs", "bin/agent-run.mjs", "server/agent-lineage.js", "server/agent-session-path.js", "server/codex-session.js", "server/env.cjs",
+  "server/herdr-session.cjs", "server/herdr.js", "server/prompt-targets.js", "server/state-home.cjs",
 ];
 
 function fixture(t, name = "install") {
@@ -22,11 +22,27 @@ function fixture(t, name = "install") {
     fs.writeFileSync(file, "fixture\n");
   }
   fs.writeFileSync(path.join(unpacked, "package.json"), JSON.stringify({ type: "module" }));
+  const executable = path.join(appPath, "Contents", "MacOS", "Iris");
+  fs.mkdirSync(path.dirname(executable), { recursive: true });
+  fs.writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   return { root, appPath, unpacked, codexHome: path.join(root, "codex home"), claudeHome: path.join(root, "claude home") };
 }
 
 function skill(home) {
   return path.join(home, "skills", "iris-agent-context", "SKILL.md");
+}
+
+function writeHookConfigs(f) {
+  fs.mkdirSync(f.codexHome, { recursive: true });
+  fs.mkdirSync(f.claudeHome, { recursive: true });
+  fs.writeFileSync(path.join(f.codexHome, "hooks.json"), JSON.stringify({ keep: "codex", hooks: { UserPromptSubmit: [
+    { hooks: [{ type: "command", command: "personal-codex", timeout: 9 }] },
+  ] } }, null, 2) + "\n");
+  fs.writeFileSync(path.join(f.claudeHome, "settings.json"), JSON.stringify({ keep: "claude", hooks: { Stop: [
+    { hooks: [{ type: "command", command: "personal-claude" }] },
+  ], UserPromptSubmit: [
+    { hooks: [{ type: "command", command: "personal-prompt", timeout: 4 }] },
+  ] } }, null, 2) + "\n");
 }
 
 test("fresh install writes discoverable managed guidance for Codex and Claude", (t) => {
@@ -58,6 +74,157 @@ test("reinstall is idempotent and preserves unrelated personal files", (t) => {
   assert.deepEqual(result.changed, []);
   assert.equal(fs.readFileSync(skill(f.codexHome), "utf8"), before);
   assert.equal(fs.readFileSync(personal, "utf8"), "personal guidance\n");
+});
+
+test("managed session and prompt hooks are merged for each agent and backed up once", (t) => {
+  const f = fixture(t, "hooks");
+  writeHookConfigs(f);
+  const codexFile = path.join(f.codexHome, "hooks.json");
+  const claudeFile = path.join(f.claudeHome, "settings.json");
+  const codexBefore = fs.readFileSync(codexFile, "utf8");
+  const claudeBefore = fs.readFileSync(claudeFile, "utf8");
+
+  const first = installAgentContext({ ...f, addHooks: true });
+  assert.equal(first.hookChanged.length, 2);
+  const codex = JSON.parse(fs.readFileSync(codexFile, "utf8"));
+  const claude = JSON.parse(fs.readFileSync(claudeFile, "utf8"));
+  assert.equal(codex.keep, "codex");
+  assert.equal(claude.keep, "claude");
+  assert.equal(claude.hooks.Stop[0].hooks[0].command, "personal-claude");
+  assert.equal(codex.hooks.UserPromptSubmit[0].hooks[0].command, "personal-codex");
+  assert.equal(claude.hooks.UserPromptSubmit[0].hooks[0].command, "personal-prompt");
+  for (const [runtime, data] of [["codex", codex], ["claude", claude]]) {
+    for (const event of ["SessionStart", "UserPromptSubmit"]) {
+      const managed = data.hooks[event].filter((entry) => entry.hooks.some((hook) => hook.command.includes("IRIS_AGENT_CONTEXT_PROMPT_TARGETS=1")));
+      assert.equal(managed.length, 1);
+      assert.equal(managed[0].hooks[0].timeout, 5);
+      assert.match(managed[0].hooks[0].command, /ELECTRON_RUN_AS_NODE=1/);
+      assert.match(managed[0].hooks[0].command, /Contents\/MacOS\/Iris'/);
+      assert.match(managed[0].hooks[0].command, new RegExp(`app\\.asar\\.unpacked/bin/agent-context\\.mjs' prompt-targets --runtime ${runtime}$`));
+    }
+  }
+  assert.equal(fs.readFileSync(codexFile + ".iris-agent-context.bak", "utf8"), codexBefore);
+  assert.equal(fs.readFileSync(claudeFile + ".iris-agent-context.bak", "utf8"), claudeBefore);
+  const afterFirst = [fs.readFileSync(codexFile, "utf8"), fs.readFileSync(claudeFile, "utf8")];
+  assert.ok(afterFirst.every((text) => text.endsWith("\n") && text.includes('\n  "')));
+
+  const second = installAgentContext({ ...f, addHooks: true });
+  assert.deepEqual(second.hookChanged, []);
+  assert.deepEqual([fs.readFileSync(codexFile, "utf8"), fs.readFileSync(claudeFile, "utf8")], afterFirst);
+  assert.equal(fs.readFileSync(codexFile + ".iris-agent-context.bak", "utf8"), codexBefore);
+  assert.equal(fs.readFileSync(claudeFile + ".iris-agent-context.bak", "utf8"), claudeBefore);
+});
+
+test("absent agent folders and broken hook configs are reported and never created or rewritten", (t) => {
+  const f = fixture(t, "hook-skip");
+  fs.mkdirSync(f.claudeHome, { recursive: true });
+  const claudeFile = path.join(f.claudeHome, "settings.json");
+  fs.writeFileSync(claudeFile, "{ broken\n");
+  const result = installAgentContext({ ...f, addHooks: true });
+  assert.equal(fs.existsSync(path.join(f.codexHome, "hooks.json")), false);
+  assert.equal(fs.readFileSync(claudeFile, "utf8"), "{ broken\n");
+  assert.match(result.hooks.find((item) => item.runtime === "Codex").skipped, /폴더가 없어/);
+  assert.match(result.hooks.find((item) => item.runtime === "Claude").skipped, /JSON이 깨져/);
+  assert.equal(fs.existsSync(claudeFile + ".iris-agent-context.bak"), false);
+});
+
+test("a missing hook config is created only when hooks are requested and the agent folder exists", (t) => {
+  const f = fixture(t, "hook-create");
+  fs.mkdirSync(f.codexHome, { recursive: true });
+  fs.mkdirSync(f.claudeHome, { recursive: true });
+  const codexFile = path.join(f.codexHome, "hooks.json");
+  const claudeFile = path.join(f.claudeHome, "settings.json");
+  const plain = installAgentContext(f);
+  assert.deepEqual(plain.hookMissing, [claudeFile, codexFile]);
+  assert.equal(fs.existsSync(codexFile) || fs.existsSync(claudeFile), false);
+  assert.deepEqual(installAgentContext({ ...f, check: true }).hookMissing, [claudeFile, codexFile]);
+
+  const added = installAgentContext({ ...f, addHooks: true });
+  assert.deepEqual(added.hookChanged, [claudeFile, codexFile]);
+  for (const file of [codexFile, claudeFile]) {
+    const hooks = JSON.parse(fs.readFileSync(file, "utf8")).hooks;
+    assert.equal(hooks.UserPromptSubmit.length, 1);
+    assert.equal(hooks.SessionStart.length, 1);
+    assert.match(hooks.UserPromptSubmit[0].hooks[0].command, /IRIS_AGENT_CONTEXT_PROMPT_TARGETS=1/);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(fs.existsSync(file + ".iris-agent-context.bak"), false);
+  }
+  assert.deepEqual(installAgentContext({ ...f, check: true }).hookMissing, []);
+});
+
+test("without --hooks an existing Iris hook is refreshed but a personal-only config gains nothing", (t) => {
+  const f = fixture(t, "hook-refresh");
+  writeHookConfigs(f);
+  const codexFile = path.join(f.codexHome, "hooks.json");
+  const claudeFile = path.join(f.claudeHome, "settings.json");
+  const codexBefore = fs.readFileSync(codexFile, "utf8");
+  const oldHook = { type: "command", command: "IRIS_AGENT_CONTEXT_PROMPT_TARGETS=1 old-app-path", timeout: 1 };
+  const claude = JSON.parse(fs.readFileSync(claudeFile, "utf8"));
+  claude.hooks.UserPromptSubmit.push({ hooks: [oldHook] });
+  fs.writeFileSync(claudeFile, JSON.stringify(claude, null, 2) + "\n");
+
+  const result = installAgentContext(f);
+  assert.deepEqual(result.hookMissing, [codexFile]);
+  assert.deepEqual(result.hookChanged, [claudeFile]);
+  assert.equal(fs.readFileSync(codexFile, "utf8"), codexBefore);
+  const entries = JSON.parse(fs.readFileSync(claudeFile, "utf8")).hooks.UserPromptSubmit;
+  assert.equal(entries.length, 2);
+  assert.match(entries[1].hooks[0].command, /app\.asar\.unpacked\/bin\/agent-context\.mjs' prompt-targets --runtime claude$/);
+  assert.equal(entries[1].hooks[0].timeout, 5);
+  assert.equal(JSON.parse(fs.readFileSync(claudeFile, "utf8")).hooks.SessionStart.length, 1);
+});
+
+test("wrong hook field types are reported without replacing user values", (t) => {
+  const f = fixture(t, "hook-shape");
+  fs.mkdirSync(f.codexHome, { recursive: true });
+  fs.mkdirSync(f.claudeHome, { recursive: true });
+  const codexFile = path.join(f.codexHome, "hooks.json");
+  const claudeFile = path.join(f.claudeHome, "settings.json");
+  fs.writeFileSync(codexFile, '{"hooks":{"UserPromptSubmit":{"mine":true}}}\n');
+  fs.writeFileSync(claudeFile, '{"hooks":"mine"}\n');
+  const result = installAgentContext(f);
+  assert.equal(fs.readFileSync(codexFile, "utf8"), '{"hooks":{"UserPromptSubmit":{"mine":true}}}\n');
+  assert.equal(fs.readFileSync(claudeFile, "utf8"), '{"hooks":"mine"}\n');
+  assert.match(result.hooks.find((item) => item.runtime === "Codex").skipped, /배열이 아니라/);
+  assert.match(result.hooks.find((item) => item.runtime === "Claude").skipped, /객체가 아니라/);
+});
+
+test("check compares managed hooks without writing settings or backups", (t) => {
+  const f = fixture(t, "hook-check");
+  writeHookConfigs(f);
+  const codexFile = path.join(f.codexHome, "hooks.json");
+  const claudeFile = path.join(f.claudeHome, "settings.json");
+  const before = [fs.readFileSync(codexFile, "utf8"), fs.readFileSync(claudeFile, "utf8")];
+  const missing = installAgentContext({ ...f, check: true });
+  assert.equal(missing.hookMissing.length, 2);
+  assert.deepEqual([fs.readFileSync(codexFile, "utf8"), fs.readFileSync(claudeFile, "utf8")], before);
+  assert.equal(fs.existsSync(codexFile + ".iris-agent-context.bak"), false);
+  installAgentContext({ ...f, addHooks: true });
+  const current = installAgentContext({ ...f, check: true });
+  assert.deepEqual([current.hookChanged, current.hookMissing], [[], []]);
+});
+
+test("outdated and duplicate Iris entries become one entry without moving personal hooks", (t) => {
+  const f = fixture(t, "hook-update");
+  fs.mkdirSync(f.codexHome, { recursive: true });
+  fs.mkdirSync(f.claudeHome, { recursive: true });
+  const oldHook = { type: "command", command: "IRIS_AGENT_CONTEXT_PROMPT_TARGETS=1 old", timeout: 1 };
+  const old = { hooks: [oldHook] };
+  const mixed = { hooks: [oldHook, { type: "command", command: "personal-in-same-group" }] };
+  const personal = { hooks: [{ type: "command", command: "personal" }] };
+  fs.writeFileSync(path.join(f.codexHome, "hooks.json"), JSON.stringify({ hooks: { UserPromptSubmit: [mixed, personal, old] } }, null, 2) + "\n");
+  fs.writeFileSync(path.join(f.claudeHome, "settings.json"), JSON.stringify({ hooks: { UserPromptSubmit: [mixed, personal, old] } }, null, 2) + "\n");
+  installAgentContext({ ...f, addHooks: true });
+  for (const file of [path.join(f.codexHome, "hooks.json"), path.join(f.claudeHome, "settings.json")]) {
+    const hooks = JSON.parse(fs.readFileSync(file, "utf8")).hooks;
+    const entries = hooks.UserPromptSubmit;
+    assert.equal(entries.length, 2);
+    assert.match(entries[0].hooks[0].command, /IRIS_AGENT_CONTEXT_PROMPT_TARGETS=1/);
+    assert.equal(entries[0].hooks[0].timeout, 5);
+    assert.equal(entries[0].hooks[1].command, "personal-in-same-group");
+    assert.equal(entries[1].hooks[0].command, "personal");
+    assert.equal(hooks.SessionStart.length, 1);
+  }
 });
 
 test("check mode reports missing or outdated guidance without writing", (t) => {
@@ -142,10 +309,39 @@ test("packaging keeps the installed launcher and its module boundary unpacked", 
   assert.ok(pkg.build.asarUnpack.includes("bin/agent-context.mjs"));
   assert.ok(pkg.build.asarUnpack.includes("package.json"));
   assert.ok(pkg.build.asarUnpack.includes("server/**"));
-  assert.match(shippedCheck, /\["bin\/agent-context\.mjs", \.\.\.native/);
+  assert.ok(pkg.build.files.includes("bin/iris-session.mjs"));
+  assert.ok(pkg.build.asarUnpack.includes("bin/iris-session.mjs"));
+  assert.match(shippedCheck, /\["bin\/agent-context\.mjs", "bin\/iris-session\.mjs", \.\.\.native/);
   const health = appInstaller.indexOf('running || rollback "새 앱이 서버 준비 중에 종료됨"');
   const guidance = appInstaller.indexOf('node scripts/install-agent-context.mjs --app "$APP"');
   const discardBackup = appInstaller.indexOf('[ -n "$OLD" ] && rm -rf "$OLD"');
   assert.ok(health >= 0 && guidance > health && discardBackup > guidance,
     "guidance must install from the verified app before the recoverable backup is discarded");
+});
+
+test("중복된 Herdr 세션 등록만 제거하고 다른 개인 훅은 보존한다", (t) => {
+  const f = fixture(t, "registration");
+  writeHookConfigs(f);
+  for (const [home, name] of [[f.codexHome, "hooks.json"], [f.claudeHome, "settings.json"]]) {
+    const file = path.join(home, name);
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    data.hooks.SessionStart = [{ hooks: [
+      { type: "command", command: "bash '/home/you/herdr-agent-state.sh' session" },
+      { type: "command", command: "personal-start" },
+    ] }];
+    data.hooks.SessionEnd = [{ hooks: [
+      { type: "command", command: "python3 ~/.claude/hooks/herdr-session-register.py" },
+      { type: "command", command: "personal-end" },
+    ] }];
+    fs.writeFileSync(file, JSON.stringify(data));
+  }
+  installAgentContext({ ...f, addHooks: true });
+  for (const [home, name] of [[f.codexHome, "hooks.json"], [f.claudeHome, "settings.json"]]) {
+    const data = JSON.parse(fs.readFileSync(path.join(home, name), "utf8"));
+    const commands = Object.values(data.hooks).flatMap(g => g.flatMap(i => i.hooks.map(h => h.command)));
+    assert.ok(commands.includes("personal-start"));
+    assert.ok(commands.includes("personal-end"));
+    assert.ok(!commands.some(c => c.includes("herdr-agent-state.sh") || c.includes("herdr-session-register.py")));
+    assert.equal(data.hooks.SessionStart.flatMap(i => i.hooks).filter(h => h.command.includes("IRIS_AGENT_CONTEXT")).length, 1);
+  }
 });

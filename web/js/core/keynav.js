@@ -228,7 +228,7 @@ function flatAgents() { return orderedSpaces().flatMap((s) => agentsOfSpace(s.id
 export function cycleAgent(dir) {
   const target = nextRootAgentPane(flatAgents(), getCurTarget(), dir);
   if (!target) return;
-  selectSession(target);
+  selectSession(target, false, "key-agent");
   revealAgentRow(target);
 }
 
@@ -267,7 +267,7 @@ export function cycleCenterTab(dir) {
   let i = arr.findIndex((t) => t.tabId === curTabId); if (i < 0) i = 0;
   i = (i + dir + arr.length) % arr.length;
   lastTabBySpace[sp] = arr[i].tabId;
-  wsSend({ type: "tab-focus", tabId: arr[i].tabId }); // 세션 유무 무관 tab_id로 herdr 탭 포커스 → attach 화면 전환, 그 탭에 입력 가능
+  wsSend({ type: "tab-focus", tabId: arr[i].tabId, origin: "key-tab" }); // 세션 유무 무관 tab_id로 herdr 탭 포커스 → attach 화면 전환, 그 탭에 입력 가능
 }
 
 // 새 herdr 터미널 탭을 현재 스페이스(없으면 선택된 에이전트의 스페이스)에 만든다. 원격에서는 만들 수 없다.

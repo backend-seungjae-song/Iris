@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { noteEmulatorReply } from "./emulator-bridge.js";
 import { snapshot } from "./runtime-state.js";
+import { issuePromptTarget } from "./prompt-targets.js";
 
 import {
   answerUserAsk,
+  pendingUserNotices,
+  setUserInterfaceFocus,
   execOnWc,
   noteAppPick,
   noteBrowserPick,
@@ -11,29 +14,20 @@ import {
 import {
   groups as spGroups,
   mutate as bsMutate,
+  storageSpaceOfTab,
   tabs as spTabs,
   wire as bsWire,
 } from "./browser-state-owner.js";
 import {
-  addPin,
-  adoptGroup,
   answerDialogAsk,
   broadcastAiTargets,
   broadcastTabHandles,
-  designateGroup,
-  designateTab,
-  designatedHandles,
-  dropPin,
-  endChat,
   getPickMode,
-  grantTab,
   groupHandleFor,
   groupTabIds,
   handleFor,
   hasTab,
   metaOfWc,
-  noteChatTab,
-  persistGrants,
   regTab,
   registerCdpExecutor,
   closedTabsWire,
@@ -45,11 +39,11 @@ import {
   setActiveTab,
   setDialogPlan,
   setFrameOrigins,
-  setLastTab,
   setPickModeState,
   setProfiles,
   setTabDialog,
   tabCount,
+  tabExistsInState,
   tabGroupOf,
   tabIdOfWc,
   tabIsShowing,
@@ -165,11 +159,13 @@ export function handleBrowserMessage(ws, msg) {
   // Android 기기(adb 시리얼, UUID 모양이 아니다)는 가져올 창이 없어 Simulator 를 열지 않고 안내만 한다.
   else if (msg.type === "focus-app") {
     if (ws._local && msg.device && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(msg.device))) {
-      try { ws.send(JSON.stringify({ type: "toast", text: `Android 기기(${String(msg.device).slice(0, 40)}) 화면에서 진행하세요. 창을 앞으로 가져오지 못합니다.` })); } catch {}
+      try { ws.send(JSON.stringify({ type: "toast", level: "warn", title: "기기 화면에서 진행하세요",
+        text: `Android 기기(${String(msg.device).slice(0, 40)}) 화면에서 진행하세요. 창을 앞으로 가져오지 못합니다.` })); } catch {}
     }
     else if (ws._local) {
       try { execFileSync("open", ["-a", "Simulator"], { timeout: 4000 }); }
-      catch (e) { try { ws.send(JSON.stringify({ type: "toast", text: "시뮬레이터를 앞으로 못 가져왔습니다: " + String(e.message || e) })); } catch {} }
+      catch (e) { try { ws.send(JSON.stringify({ type: "toast", level: "err", title: "시뮬레이터를 앞으로 못 가져왔습니다",
+        detail: String(e.message || e), text: "시뮬레이터를 앞으로 못 가져왔습니다" })); } catch {} }
     }
   }
   else if (msg.type === "emulator-reply") {
@@ -183,38 +179,37 @@ export function handleBrowserMessage(ws, msg) {
       setProfiles(msg.profiles);
     }
   }
-  else if (msg.type === "ui-auth") { ws._ui = !!(ws._local && uiTokenOk(msg.token)); try { ws.send(JSON.stringify({ type: "ui-auth", ok: !!ws._ui })); } catch {} }
+  else if (msg.type === "ui-auth") {
+    ws._ui = !!(ws._local && uiTokenOk(msg.token));
+    if (ws._ui) setUserInterfaceFocus(ws, !!msg.focused);
+    try {
+      const notices = ws._ui ? pendingUserNotices() : [];
+      ws.send(JSON.stringify({ type: "ui-auth", ok: !!ws._ui,
+        ...(ws._ui ? { pendingAskIds: notices.map((notice) => notice.id) } : {}) }));
+      for (const notice of notices) ws.send(JSON.stringify(notice));
+    } catch {}
+  }
   else if (msg.type === "chat-submitted") {
-    // 사용자가 프롬프트를 제출했다 = 이 얘기가 끝났다. 다음 지목부터는 새 대상이다.
-    if (ws._local && msg.pane) endChat(msg.pane);
+    // 옛 클라이언트의 제출 경계. 대상 교체는 UserPromptSubmit의 nonce 검증 결과로만 수행한다.
   }
   else if (msg.type === "browser-target-set") {
-    // 사용자가 앱에서 직접 지목한 것만 스페이스 경계를 넘을 수 있다(공유 창 포함). AI는 이 경로를 못 쓴다.
-    // 창은 wc로 지정해 보내지만 서버는 받는 즉시 정체성으로 바꾼다. 지목은 오래 유지되는 값이라
-    // 그 순간의 번호로 보관하면 앱이 재시작할 때 사라진다.
+    // UI는 권한 대신 한 번 쓸 대기 지정을 만든다. AI가 이 메시지를 흉내 내도 ws._ui가 없어 거절된다.
     const pickedId = msg && msg.tabId ? msg.tabId : tabIdOfWc(msg && msg.wc);
-    // 요소 선택과 탭 지목은 다른 동작이다. 요소 선택은 이 탭의 특정 요소를 보라는 뜻이지
-    // 앞으로 이 탭에서 작업하라는 뜻이 아니다. 둘을 같은 경로로 처리하면 요소를 고를 때마다
-    // 제어 대상이 그 탭으로 넘어가고 지목 알림도 함께 붙는다. 요소 선택은
-    // 쓸 수 있게 등록만 하고(권한), 고정은 사용자가 탭을 직접 지목했을 때만 한다.
     const byPick = msg && msg.via === "pick";
-    if (ws._local && ws._ui && msg.pane && pickedId && hasTab(pickedId)) {
-      // 권한과 대상은 다르다. 요소 선택은 권한만 부여해 그 탭을 조작할 수 있게 하지만,
-      // 지정 없는 명령의 대상(lastTab)은 그대로 둔다. 여기서 lastTab까지 옮기면
-      // 요소 하나를 고를 때마다 다음 무지정 명령과 화면의 사용 탭 표시가 그 탭으로 넘어간다.
-      // 권한만으로도 그 탭은 held에 들어가 보호되고(heldTabsOf), 세션에 제 탭이 하나도 없으면
-      // 지목받은 탭이 대상이 되므로 대상을 미리 옮길 이유가 없다.
-      if (byPick) { noteChatTab(msg.pane, pickedId); grantTab(msg.pane, pickedId); broadcastAiTargets(); }
-      else { designateTab(msg.pane, pickedId); addPin(msg.pane, pickedId); setLastTab(String(msg.pane), pickedId); persistGrants(); }
-      // 핸들은 서버가 발급한다. 창이 아는 wc 숫자를 붙이면 터미널에서 부를 수 없는 이름이 남는다.
-      // 요소 선택에는 이 알림을 보내지 않는다. 선택 블록이 이미 등록 사실과 핸들을 담고 있다.
-      if (!byPick) {
-        const meta = tabMeta(pickedId) || {};
-        const t = spTabs(meta.space).find((x) => x.id === pickedId);
-        try { ws.send(JSON.stringify({ type: "tab-granted", pane: msg.pane,
-          handle: handleFor(pickedId), name: (t && t.name) || "",
-          title: meta.title || "", url: meta.url || "",
-          all: designatedHandles(msg.pane) })); } catch {}
+    // 잠든 탭(webview 없음)도 저장된 탭이면 받음. 명령 때 서버가 깨움
+    if (ws._local && ws._ui && msg.pane && pickedId && (hasTab(pickedId) || (!byPick && tabExistsInState(pickedId)))) {
+      const handle = handleFor(pickedId);
+      const meta = tabMeta(pickedId) || {};
+      const t = spTabs(meta.space || storageSpaceOfTab(pickedId)).find((x) => x.id === pickedId);
+      try {
+        const pending = issuePromptTarget({ pane: msg.pane, kind: byPick ? "element" : "tab",
+          ref: `@${handle}`, target: { tabId: pickedId }, label: (t && t.name) || meta.title || (t && t.title) || "" });
+        ws.send(JSON.stringify({ type: "target-pending", ok: true, kind: byPick ? "element" : "tab",
+          request: msg.request || null, pane: msg.pane, delimiter: pending.delimiter,
+          handle, name: (t && t.name) || "", title: meta.title || (t && t.title) || "", url: meta.url || (t && t.url) || "" }));
+      } catch (error) {
+        try { ws.send(JSON.stringify({ type: "target-pending", ok: false, kind: byPick ? "element" : "tab",
+          request: msg.request || null, error: String(error?.message || error) })); } catch {}
       }
     }
   }
@@ -222,19 +217,14 @@ export function handleBrowserMessage(ws, msg) {
   // 로컬 UI 전용이다. AI는 스스로 권한을 넓힐 수 없다.
   else if (msg.type === "browser-group-grant") {
     if (ws._local && ws._ui && msg.pane && msg.space && msg.group) {
-      designateGroup(msg.pane, msg.space, msg.group);
-      adoptGroup(msg.pane, msg.space, msg.group); // 이제 이 그룹이 이 세션의 그룹이다
-      // 그룹을 지목했는데 탭 하나에 고정하면 그룹 안에서 여러 탭을 쓸 수 없다.
-      // 이전 고정을 풀고, 대신 그룹의 첫 탭에서 시작하게 둔다(고정 없이 그룹 안에서 고름).
-      dropPin(msg.pane, null);
-      const firstId = groupTabIds(String(msg.space), String(msg.group)).find((id) => wcOfTabId(id));
-      if (firstId) setLastTab(String(msg.pane), firstId);
-      persistGrants();
-      broadcastAiTargets();
-      // 핸들은 서버가 발급한다. 창이 임의로 만들면 실제로 부를 수 없는 이름이 붙는다.
       const g = spGroups(String(msg.space)).find((x) => x.id === String(msg.group));
-      try { ws.send(JSON.stringify({ type: "group-granted", pane: msg.pane, space: msg.space, group: msg.group,
-        handle: groupHandleFor(String(msg.space), String(msg.group)), label: (g && g.name) || String(msg.group),
+      const handle = groupHandleFor(String(msg.space), String(msg.group));
+      try {
+        const pending = issuePromptTarget({ pane: msg.pane, kind: "group", ref: `@${handle}`,
+          target: { space: String(msg.space), group: String(msg.group) }, label: (g && g.name) || String(msg.group) });
+        ws.send(JSON.stringify({ type: "target-pending", ok: true, kind: "group", pane: msg.pane,
+        delimiter: pending.delimiter, handle, space: msg.space, group: msg.group,
+        label: (g && g.name) || String(msg.group),
         // 이름은 사용자가 직접 붙인 것만 보낸다. 페이지 제목은 계속 바뀌므로 이름이 아니다.
         // 안 붙였으면 빈 값으로 두고 핸들만 남긴다.
         tabs: groupTabIds(String(msg.space), String(msg.group)).map((id) => {
@@ -245,7 +235,11 @@ export function handleBrowserMessage(ws, msg) {
           const live = tabMeta(id) || {};
           return { handle: h, name: (t && t.name) || "", url: live.url || (t && t.url) || "",
             showing: tabIsShowing(live.space, id) };
-        }).filter(Boolean) })); } catch {}
+        }).filter(Boolean) }));
+      } catch (error) {
+        try { ws.send(JSON.stringify({ type: "target-pending", ok: false, kind: "group",
+          error: String(error?.message || error) })); } catch {}
+      }
     }
   }
   // 메모가 디스크에 저장됐음을 보낸 창에 알린다. 그래야 저장 상태를 실제 결과로 표시할 수 있다.
@@ -255,7 +249,7 @@ export function handleBrowserMessage(ws, msg) {
     if (!ws._local) return;
     const want = msg.op === "toggle" ? !getPickMode() : !!msg.on;
     // 고를 대상이 없으면 켜지 않는다. 창별로 하던 안내를 이 한 곳으로 모았다.
-    if (want && tabCount() === 0 && !msg.hasSheetContext && !msg.hasDocxContext) { ws.send(JSON.stringify({ type: "control-error", message: "브라우저 탭을 먼저 열어주세요." })); return; }
+    if (want && tabCount() === 0 && !msg.hasSheetContext && !msg.hasDocxContext && !msg.hasEmulatorContext) { ws.send(JSON.stringify({ type: "control-error", message: "브라우저 탭을 먼저 열어주세요." })); return; }
     setPickModeState(want);
   }
   else if (msg.type === "cdp-executor-register") {

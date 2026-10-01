@@ -326,8 +326,13 @@ function handleMemoNoteMessage(ws, msg) {
   return false;
 }
 
+// 메모 쓰기 요청 목록. 로컬 연결 전용
+const MEMO_WRITE_TYPES = new Set(["memo.set", "memo.archive", "memo.archive.delete", "memo.archive.block.delete"]);
+
 export function handleMemoMessage(ws, msg) {
   if (handleMemoNoteMessage(ws, msg)) return true;
+  // 원격 연결의 메모 쓰기 거부. 서버 루프백 고정과 별개의 이중 방어
+  if (MEMO_WRITE_TYPES.has(msg.type) && !ws._local) return true;
 
   if (msg.type === "memo.set") {
     const from = String(msg.space || ""); if (!from) return true;

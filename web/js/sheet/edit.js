@@ -414,7 +414,7 @@ export function svPick(t, r, c) {
 // 요구한다.
 export async function svInsert(t, axis, at) {
   const sh = svSheet(t); if (!sh) return;
-  if (isSheetTabDirty(t)) { showToast("저장하지 않은 편집이 있습니다. 먼저 저장한 뒤 다시 시도하세요"); return; }
+  if (isSheetTabDirty(t)) { showToast("저장하지 않은 편집이 있습니다. 먼저 저장한 뒤 다시 시도하세요", { level: "warn" }); return; }
   const note = $("#sv-note");
   if (note) note.textContent = axis === "row" ? "행 삽입하는 중…" : "열 삽입하는 중…";
   try {
@@ -423,14 +423,14 @@ export async function svInsert(t, axis, at) {
     await requestFileContent(t.path, "insert", getCenterSpace(), t.id);
     if (note) { note.textContent = "삽입했습니다"; setTimeout(() => { if (note.isConnected) note.textContent = ""; }, 1500); }
   } catch (e) {
-    showToast("삽입 실패: " + e.message);
+    showToast("삽입 실패", { level: "err", detail: String(e.message) });
     if (note) note.textContent = "";
   }
 }
 
 export async function svDelete(t, axis, at, count) {
   const sh = svSheet(t); if (!sh) return;
-  if (isSheetTabDirty(t)) { showToast("저장하지 않은 편집이 있습니다. 먼저 저장한 뒤 다시 시도하세요"); return; }
+  if (isSheetTabDirty(t)) { showToast("저장하지 않은 편집이 있습니다. 먼저 저장한 뒤 다시 시도하세요", { level: "warn" }); return; }
   const note = $("#sv-note");
   if (note) note.textContent = axis === "row" ? "행 삭제하는 중…" : "열 삭제하는 중…";
   try {
@@ -439,7 +439,7 @@ export async function svDelete(t, axis, at, count) {
     await requestFileContent(t.path, "delete", getCenterSpace(), t.id);
     if (note) { note.textContent = "삭제했습니다"; setTimeout(() => { if (note.isConnected) note.textContent = ""; }, 1500); }
   } catch (e) {
-    showToast("삭제 실패: " + e.message);
+    showToast("삭제 실패", { level: "err", detail: String(e.message) });
     if (note) note.textContent = "";
   }
 }
@@ -494,7 +494,7 @@ export function svSave(t) {
   })().catch((error) => {
     if (t._svSaving === saving) t._svSaving = null;
     const note = $("#sv-note"); if (note) note.textContent = "저장 실패: " + error.message;
-    showToast("저장 실패: " + error.message);
+    showToast("저장 실패", { level: "err", detail: String(error.message) });
     throw error;
   }).finally(() => { if (t._saveInFlight === completion) t._saveInFlight = null; });
   saving.promise = completion;
@@ -789,5 +789,4 @@ export function svHas(t, prop) {
 const SV_FMT = {
   "fmt-bold": ["b", 1], "fmt-ital": ["i", 1], "fmt-unde": ["u", 1], "fmt-strk": ["st", 1],
 };
-
 

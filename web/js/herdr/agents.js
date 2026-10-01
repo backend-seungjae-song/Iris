@@ -90,7 +90,7 @@ export function initAgents(deps) {
       const paneId = info.dataset.subPane;
       const parent = agentByPane(paneId);
       if (!parent) return;
-      if (paneId !== getCurTarget()) selectSession(paneId);
+      if (paneId !== getCurTarget()) selectSession(paneId, false, "subagent-row");
       callHook("agentchat.openSubagent", {
         paneId, agentId: info.dataset.subAgent, parentLabel: nameOf(parent),
         description: info.dataset.subDesc || "", agentType: info.dataset.subType || "",
@@ -101,10 +101,11 @@ export function initAgents(deps) {
     if (!row) return;
     const target = row.dataset.target;
     const agent = agentByPane(target);
+    // 서브에이전트 보기가 열려 있으면 부모 줄 클릭은 그 보기를 닫는 데만 쓰고 하위 목록은 접지 않는다.
+    if (target === getCurTarget() && callHook("agentchat.closeSubagent", target)) return;
     const hasChildren = agent?.subagents?.length || getLastAgents().some((a) => a.parentPaneId === target);
-    // 하위가 있는 줄은 누를 때마다 접기·펴기가 바뀐다. 고르지 않은 줄이면 고르면서 바꾼다.
-    if (!(hasChildren && agent)) { selectSession(target); return; }
-    if (target !== getCurTarget()) selectSession(target);
+    // 고르지 않은 줄은 이동만. 하위 목록 접기·펴기는 이미 고른 줄을 다시 누를 때만
+    if (target !== getCurTarget() || !(hasChildren && agent)) { selectSession(target, false, "sidebar"); return; }
     toggleAgentBranch(agentBranchKey(agent));
   });
   agentList.addEventListener("dragstart", (e) => {
@@ -163,12 +164,12 @@ export function initAgents(deps) {
       : a.status === "working" ? null : null;
     const local = getIsLocal();
     showCtx(e.clientX, e.clientY, [
-      { label: "이 세션 보기", act: () => selectSession(a.paneId, true) },
+      { label: "이 세션 보기", act: () => selectSession(a.paneId, true, "menu") },
       { label: "이름 바꾸기", disabled: !local || !a.tabId, act: async () => {
         const v = await askText("세션 이름", nm);
         if (v !== null && v !== "" && v !== nm) wsSend({ type: "tab.rename", tabId: a.tabId, label: v });
       } },
-      { label: "작업 폴더 복사", disabled: !a.cwd, act: () => { copyText(a.cwd).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다")); } },
+      { label: "작업 폴더 복사", disabled: !a.cwd, act: () => { copyText(a.cwd).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } },
       { sep: true },
       ...(local && a.workspaceId ? createItems(a.workspaceId) : []),
       { sep: true },
@@ -205,11 +206,14 @@ function toggleSpaceAgents(spaceId) {
 // 스페이스 줄 누름: 포커스를 옮기고, 누르기 전과 반대 접힘 상태로 끝낸다. 포커스 이동은 고른
 // 에이전트를 보이려고 접힌 그룹을 펴므로, 펴진 뒤에 원하는 상태를 다시 적는다.
 // 에이전트가 없는 스페이스는 접을 것이 없고, 접으면 터미널 탭 추가 줄만 사라진다.
+// 다른 스페이스에서 펼쳐진 스페이스를 누르면 이동만 하고 접지 않는다.
 function spaceRowClicked(spaceId, focus) {
   const id = spk(spaceId);
   const wasOpen = !collapsed.groups.has(id);
+  const moved = spaceId !== getSelectedSpaceId();
   focus(spaceId);
   if (!agentsOfSpace(spaceId).length) return;
+  if (moved && wasOpen) return;
   if (wasOpen) collapsed.groups.add(id); else collapsed.groups.delete(id);
   saveCollapsed();
   renderAgents();
@@ -222,7 +226,6 @@ function spaceAgents(spaceId) {
   const add = gopen && getIsLocal() && spaceId === getSelectedSpaceId()
     ? `<div class="agent-add-row" data-add="${esc(spaceId)}" title="이 스페이스에 터미널 탭 만들기"><span class="agent-add-spacer" aria-hidden="true"></span><svg class="i agent-add-plus" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>터미널 탭</div>`
     : "";
-  if (!ags.length) return { count: 0, open: gopen, html: add };
   const forest = buildAgentForest(ags);
   const tabCounts = new Map();
   for (const a of ags) if (a.tabId) tabCounts.set(a.tabId, (tabCounts.get(a.tabId) || 0) + 1);
@@ -236,7 +239,7 @@ function spaceAgents(spaceId) {
     }
     return false;
   });
-  const rows = visible.map(({ node, depth }, rowIndex) => {
+  const chunks = visible.map(({ node, depth }, rowIndex) => {
     const a = node.agent;
     const chg = changedInfo.get(agentKey(a));
     const native = Array.isArray(a.subagents) ? a.subagents : [];
@@ -249,7 +252,9 @@ function spaceAgents(spaceId) {
     const toggle = treeToggle(hasChildren, open, key, label);
     const st = agentState(a.status, a.question);
     const nativeRows = open ? renderNativeRows(native, depth + 1, key, a.paneId, a.agent) : "";
-    return `<div class="srow agent-tree-row${depth > 0 ? " sub" : ""}${depth > 0 && !hasNext[rowIndex] ? " last" : ""}${a.paneId === getCurTarget() ? " sel" : ""}${chg ? " changed" : ""}${hasNext[rowIndex] ? " has-next" : ""}" style="${rowIndent(depth)}" data-depth="${depth}" data-target="${esc(a.paneId)}" data-tree-parent="${esc(treeParent)}"${draggable ? ` draggable="true" data-tab="${esc(a.tabId)}" data-space="${esc(spaceId)}"` : ""}>
+    let root = node;
+    while (root.parent) root = root.parent;
+    const html = `<div class="srow agent-tree-row${depth > 0 ? " sub" : ""}${depth > 0 && !hasNext[rowIndex] ? " last" : ""}${a.paneId === getCurTarget() ? " sel" : ""}${chg ? " changed" : ""}${hasNext[rowIndex] ? " has-next" : ""}" style="${rowIndent(depth)}" data-depth="${depth}" data-target="${esc(a.paneId)}" data-tree-parent="${esc(treeParent)}"${draggable ? ` draggable="true" data-tab="${esc(a.tabId)}" data-space="${esc(spaceId)}"` : ""}>
         ${depth > 0 ? `<span class="guide" aria-hidden="true"></span>` : ""}
         ${toggle}
         <span class="dot ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span>
@@ -258,8 +263,10 @@ function spaceAgents(spaceId) {
         ${agentMark(a.agent)}
         ${chg ? `<span class="srow-chg" title="돌아와 보니 바뀐 세션"></span>` : ""}
       </div>${nativeRows}`;
-  }).join("");
-  return { count: ags.length, open: gopen, html: rows + add };
+    return { agent: a, root: root.agent, html };
+  });
+  return callHook("worktrees.groupAgents", { spaceId, open: gopen, rows: chunks, count: ags.length })
+    ?? { count: ags.length, open: gopen, html: chunks.map((row) => row.html).join("") + add };
 }
 
 // 에이전트 줄은 스페이스 이름 아래에서 한 단 들어가고, 하위 에이전트는 한 단씩 더 들어간다.
@@ -314,6 +321,7 @@ export function revealAgentRow(paneId) {
       if (collapsedAgentBranches.delete(key)) rerender = true;
     }
   }
+  if (callHook("worktrees.revealAgent", { spaceId: a?.workspaceId, paneId })) rerender = true;
   if (rerender) renderAgents();
   const row = agentList.querySelector(`.srow[data-target="${cssEsc(paneId)}"]`);
   if (!row) return;

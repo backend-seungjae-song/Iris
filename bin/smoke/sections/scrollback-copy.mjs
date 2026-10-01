@@ -218,7 +218,7 @@ check("스크롤 선택은 조용한 실제 휠 경로만 쓴다", () => {
 check("서버 기록이 어긋나도 빈손으로 끝나지 않는다", () =>
   /function localSelectionText\(st\)[\s\S]*?IrisScrollbackCopy\.pickRows/.test(chatCopyEdge)
   && /const text = localSelectionText\(st\);[\s\S]*?return \{ text, degraded \}/.test(chatCopyEdge)
-  && /got\.degraded[\s\S]*?화면에서 본 만큼만/.test(chatCopyBoot)
+  && /got\.degraded[\s\S]*?화면에서 본 범위만 복사했습니다/.test(chatCopyBoot)
   && /순서가 어긋났을 수 있습니다/.test(chatCopyEdge));
 // 품질 저하를 알리는 것만으로 막을 수 없는 경우가 있다. 한 번에 밴드보다 많이 스크롤하면 그 사이
 // 행이 그려지지 않아 누락되는데, pickRows가 누락을 빈 문자열로 바꾸므로 최종 텍스트에서 실제 빈

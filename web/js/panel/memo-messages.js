@@ -32,7 +32,7 @@ export function initMemoMessages({ showToast, spk, spaceLabel }) {
 function handleMemoNotesMessage(m) {
       setMemoNotes(m);
       if (document.body.classList.contains("mm-active")) callHook("memo.refresh");
-      if (m.error) showToast(m.error);
+      if (m.error) showToast("메모 목록을 불러오지 못했습니다", { level: "err", detail: String(m.error) });
 }
 
 function handleMemoNoteCreatedMessage(m) {
@@ -40,28 +40,28 @@ function handleMemoNoteCreatedMessage(m) {
       if (m.note?.id) Promise.resolve(window.acHost?.openLocalMemo?.({
         spaceKey: m.storageSpace || spk(m.space || pending?.space), noteId: m.note.id,
         spaceLabel: pending?.label || spaceLabel(m.space || pending?.space),
-      })).then((result) => { if (!result?.ok) showToast(result?.error || "메모 창을 열지 못했습니다."); });
+      })).then((result) => { if (!result?.ok) showToast("메모 창을 열지 못했습니다.", { level: "err", detail: String(result?.error || "원인 불명") }); });
 }
 
 function handleMemoNoteRestoredMessage(m) {
-      showToast(`“${m.note?.name || "메모"}” 복구됨`);
+      showToast(`“${m.note?.name || "메모"}” 복구됨`, { level: "ok" });
 }
 
 function handleMemoNoteArchivedMessage(m) {
-      showToast(m.empty ? "빈 메모는 보관하지 않았습니다." : `${m.date} 보관함에 저장했습니다.`);
+      showToast(m.empty ? "빈 메모는 보관하지 않았습니다." : `${m.date} 보관함에 저장했습니다.`, { level: "ok" });
 }
 
 function handleMemoConflictMessage(m) {
       if (applyMemoConflict(m)) {
-        showToast("동시에 바뀐 메모 두 버전을 모두 보존했습니다.");
-      } else showToast(m.message || "다른 창에서 메모가 먼저 바뀌었습니다.");
+        showToast("동시에 바뀐 메모 두 버전을 모두 보존했습니다.", { level: "ok" });
+      } else showToast(m.message || "다른 창에서 메모가 먼저 바뀌었습니다.", { level: "warn" });
 }
 
 function handleMemoErrorMessage(m) {
       if (applyMemoError(m) === "central") {
-        showToast(m.message || "중앙 메모를 저장하지 못했습니다. 초안은 이 창에 보존했습니다.");
+        showToast("중앙 메모를 저장하지 못했습니다. 초안은 이 창에 보존했습니다.", { level: "err", detail: String(m.message || "원인 불명") });
       } else {
-        showToast(m.message || "메모 작업에 실패했습니다.");
+        showToast("메모 작업에 실패했습니다.", { level: "err", detail: String(m.message || "원인 불명") });
       }
 }
 
@@ -71,8 +71,8 @@ function handleMemoArchivesMessage(m) {
 }
 
 function handleMemoArchivedMessage(m) {
-      if (m.empty) showToast("메모가 비어 있어 보관하지 않았습니다.");
-      else showToast(`${m.date} 보관함에 ${m.updated ? "이어 붙였습니다" : "담았습니다"}.`);
+      if (m.empty) showToast("메모가 비어 있어 보관하지 않았습니다.", { level: "info" });
+      else showToast(`${m.date} 보관함에 ${m.updated ? "이어 붙였습니다" : "담았습니다"}.`, { level: "info" });
 }
 
 function handleMemosMessage(m) {

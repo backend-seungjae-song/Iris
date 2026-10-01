@@ -54,22 +54,44 @@ test("Origin 은 자기 origin 만 허용하고, 없으면 허용한다", () => 
   }
 });
 
-test("이 Mac 의 Tailscale 주소는 자기 포트로만 허용한다", () => {
-  assert.equal(typeof gate.originAllowed, "function", "http-handler.js 가 originAllowed 를 내보내야 한다");
-  const ts = ["100.101.102.103"];
-  const ok = (origin) => gate.originAllowed(fakeReq({ headers: { origin } }), ts);
-  assert.equal(ok(`http://100.101.102.103:${PORT}`), true);
-  assert.equal(ok(`http://100.101.102.104:${PORT}`), false);
-  assert.equal(ok(`http://100.101.102.103:${PORT + 1}`), false);
-  assert.equal(ok(`https://100.101.102.103:${PORT}`), false);
+test("Tailscale 대역 주소는 소켓·Origin 모두 거부한다", () => {
+  // 이 서버는 루프백 전용. 외부 접속은 원격 게이트웨이만
+  for (const ip of ["100.64.0.2", "100.101.102.103", "100.127.255.254", ...selfTs]) {
+    assert.equal(connectionAllowed(fakeReq({ ip })), false, `소켓 ${ip}`);
+    assert.equal(connectionAllowed(fakeReq({ headers: { origin: `http://${ip}:${PORT}` } })), false, `Origin ${ip}`);
+  }
+  assert.equal(gate.selfTailscaleIps, undefined, "tailnet origin 허용 경로 제거");
+  assert.equal(gate.REMOTE, undefined, "REMOTE 상수 제거");
 });
 
-test("IRIS_ALLOWED_ORIGIN_HOSTS 로 명시한 이름은 종전대로 허용한다", () => {
-  const prev = process.env.IRIS_ALLOWED_ORIGIN_HOSTS;
-  process.env.IRIS_ALLOWED_ORIGIN_HOSTS = "mac.tailnet.example";
+test("REMOTE·HOST 를 지정해도 바인딩은 루프백", async () => {
+  const env = await import("../server/env.cjs");
+  const prev = { REMOTE: process.env.REMOTE, HOST: process.env.HOST };
+  process.env.REMOTE = "1"; process.env.HOST = "0.0.0.0";
   try {
-    assert.equal(connectionAllowed(fakeReq({ headers: { origin: `http://mac.tailnet.example:${PORT}` } })), true);
-    assert.equal(connectionAllowed(fakeReq({ headers: { origin: "http://other.tailnet.example" } })), false);
+    assert.equal(env.default.host(), "127.0.0.1");
+    assert.deepEqual(env.default.ignoredRemoteEnv(), ["REMOTE", "HOST"]);
+  } finally {
+    for (const [k, v] of Object.entries(prev)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+  assert.equal(gate.HOST, "127.0.0.1");
+});
+
+test("IRIS_ALLOWED_ORIGIN_HOSTS 는 http·이 서버 포트까지 같을 때만 허용한다", () => {
+  const prev = process.env.IRIS_ALLOWED_ORIGIN_HOSTS;
+  process.env.IRIS_ALLOWED_ORIGIN_HOSTS = "iris.localhost";
+  try {
+    const allowed = (origin) => connectionAllowed(fakeReq({ headers: { origin } }));
+    assert.equal(allowed(`http://iris.localhost:${PORT}`), true);
+    assert.equal(allowed(`http://iris.localhost:${PORT + 1}`), false, "다른 포트");
+    assert.equal(allowed(`https://iris.localhost:${PORT}`), false, "다른 스킴");
+    assert.equal(allowed("http://iris.localhost"), false, "포트 없음");
+    assert.equal(allowed(`http://other.localhost:${PORT}`), false, "다른 이름");
+    // 호스트 이름 형식 아닌 값 무시. 뒤에 붙는 포트가 경로로 해석돼 포트 제한이 풀리는 값
+    process.env.IRIS_ALLOWED_ORIGIN_HOSTS = "iris.localhost/,iris.localhost:8080/,u@iris.localhost";
+    assert.equal(allowed("http://iris.localhost"), false, "iris.localhost/ → 기본 포트 80");
+    assert.equal(allowed("http://iris.localhost:8080"), false, "iris.localhost:8080/");
+    assert.equal(allowed(`http://iris.localhost:${PORT}`), false, "userinfo 포함 값");
   } finally {
     if (prev === undefined) delete process.env.IRIS_ALLOWED_ORIGIN_HOSTS; else process.env.IRIS_ALLOWED_ORIGIN_HOSTS = prev;
   }
@@ -143,13 +165,4 @@ test("헤더를 채워 프록시 헤더를 밀어내도 로컬로 판정하지 �
 test("실제 서버는 헤더 개수 제한을 없앤 채 뜬다", () => {
   const src = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   assert.match(src, /const server = hardenHeaderParsing\(http\.createServer\(/);
-});
-
-test("인터페이스 조회가 실패하면 tailnet origin 을 거부하고 던지지 않는다", () => {
-  const orig = os.networkInterfaces;
-  os.networkInterfaces = () => { throw new Error("boom"); };
-  try {
-    assert.deepEqual(gate.selfTailscaleIps(), []);
-    assert.equal(connectionAllowed(fakeReq({ headers: { origin: `http://100.64.0.2:${PORT}` } })), false);
-  } finally { os.networkInterfaces = orig; }
 });

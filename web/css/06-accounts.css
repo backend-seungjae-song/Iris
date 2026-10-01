@@ -9,7 +9,7 @@
 .acct-panel { width:300px; background:var(--surface); }
 
 /* ---- 부품: 아이콘 단추 · 단추 · 입력 · 힌트 · 개수 · 칩 · 체크칸 · 회전 표시 ---- */
-.acct-ib { width:24px; height:24px; padding:1px 6px; display:grid; place-items:center; flex:none;
+.acct-ib { width:24px; height:24px; padding:0; display:grid; place-items:center; flex:none;
   border:0; border-radius:var(--r-s); background:none; color:var(--muted); font:inherit; cursor:pointer; }
 .acct-ib:hover { background:var(--hover); color:var(--fg); }
 .acct-ib:active { transform:scale(.94); }

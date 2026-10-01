@@ -60,6 +60,32 @@
 
 export const CAPABILITIES = [
   {
+    id: "diffreview", label: "Diff 의견", presets: ["dev"],
+    files: ["diff-review/boot.js", "diff-review/model.js"],
+    css: ["39-diff-review.css"], server: ["server/diff-review-handler.js"],
+    load: () => import("../diff-review/boot.js"),
+  },
+  {
+    id: "unifiedsearch", label: "통합 검색",
+    files: ["unified-search/boot.js", "unified-search/model.js"], css: ["36-unified-search.css"],
+    load: () => import("../unified-search/boot.js"),
+  },
+  {
+    id: "notifications", label: "알림",
+    files: ["notifications/boot.js", "notifications/model.js"], css: ["37-notifications.css"],
+    load: () => import("../notifications/boot.js"),
+  },
+  {
+    id: "worktrees", label: "Worktree", presets: ["dev"],
+    files: ["worktrees/boot.js"], css: ["38-worktrees.css"], server: ["server/worktree-handlers.js"],
+    load: () => import("../worktrees/boot.js"),
+  },
+  {
+    id: "githubpr", label: "GitHub PR", presets: ["dev"],
+    files: ["github-pr/boot.js", "github-pr/view.js"], css: ["40-github-pr.css"], server: ["server/github-pr-handler.js"],
+    load: () => import("../github-pr/boot.js"),
+  },
+  {
     id: "mdformat",
     windows: ["main", "memo", "browser"],
     files: ["center/md-format.js"],
@@ -194,9 +220,10 @@ export const CAPABILITIES = [
       title: "창 레이아웃 저장·복원을 켤까요?",
       items: [
         "다른 앱의 창을 옮기기 위해 손쉬운 사용 권한을 요청합니다",
-        "로그인할 때 Iris 가 자동으로 실행되고, 마지막으로 저장할 때 열려 있던 앱을 다시 엽니다",
         "ctrl+alt+S 로 지금 배치를 저장하고 ctrl+alt+R 로 되돌립니다",
-        "15분마다 창 배치를 모니터 수별로 저장합니다",
+        "창 배치는 직접 저장할 때만 모니터 수별로 저장합니다",
+        "Iris 를 다시 켜거나 모니터 수가 바뀌면 저장한 배치를 자동으로 복원합니다",
+        "로그인할 때 Iris 가 자동으로 실행되고, 저장할 때 열려 있던 앱을 다시 엽니다",
       ],
       after: "앱을 다시 시작하면 켜집니다. 켜질 때 손쉬운 사용 권한이 없으면 요청합니다.",
     },
@@ -230,6 +257,7 @@ export const CAPABILITIES = [
     // ⌘⇧E·⌘⇧A 가 두 창에서 모두 동작하므로 본 창과 분리 브라우저 창에 함께 포함한다.
     id: "pickrec",
     windows: ["main", "browser"],
+    server: ["server/pickrec-relay.js"],
     files: [
       "browser/pick-boot.js", "browser/app-pick.js", "browser/pick.js",
       "browser/pick-host.js", "browser/record.js",
@@ -290,6 +318,24 @@ export const CAPABILITIES = [
     css: [],
     label: "React 개발자 도구",
     load: () => import("../browser/extension-loader.js"),
+  },
+  {
+    id: "browserextensions",
+    native: true,
+    windows: ["main", "browser"],
+    files: ["browser/extensions.js"],
+    css: [],
+    label: "확장 프로그램",
+    load: () => import("../browser/extensions.js"),
+  },
+  {
+    id: "searchsuggest",
+    native: true,
+    windows: ["main", "browser"],
+    files: ["browser/search-suggest.js"],
+    css: [],
+    label: "Google 검색어 추천",
+    load: () => import("../browser/search-suggest.js"),
   },
   {
     id: "autofill",
@@ -378,11 +424,20 @@ export const CAPABILITIES = [
     // rail 화면은 기기 목록과 SDK 상태이고, 탭을 전용 창으로 분리할 수 있다(그 창이 page).
     id: "emulator",
     native: true,
-    files: ["emulator/boot.js", "emulator/pane.js", "emulator/devices-panel.js", "emulator/launch-button.js", "emulator/xcode-guidance.js", "emulator/android-guidance.js"],
+    server: ["server/emulator-targets.js"],
+    files: ["emulator/boot.js", "emulator/pane.js", "emulator/controls.js", "emulator/places.js", "emulator/agent-device.js", "emulator/devices-panel.js", "emulator/launch-button.js", "emulator/xcode-guidance.js", "emulator/android-guidance.js"],
     css: ["33-emulator.css"],
     page: "web/emulator-window",
     rail: "emulator",
     load: () => import("../emulator/boot.js"),
+  },
+  {
+    id: "remote",
+    files: ["remote/boot.js"],
+    css: ["41-remote.css"],
+    server: ["server/remote/index.js", "server/remote/local-api.js"],
+    rail: "remote",
+    load: () => import("../remote/boot.js"),
   },
 ];
 

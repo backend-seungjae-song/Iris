@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-// 설치된 Iris launcher를 Codex와 Claude가 찾을 수 있도록 각자의 skills 아래에 한 파일만 둔다.
-// 기존 전역 지침·설정은 열지 않고, 이 스크립트가 표식을 남긴 전용 파일만 다시 쓴다.
-// --check 는 아무것도 쓰지 않고 두 파일이 지금 내용과 같은지만 보고한다(다르면 exit 1).
+// 설치 대상: Iris launcher 안내와 Codex·Claude 세션 기록·지목 등록 훅
+// 갱신 범위: skill 전용 파일과 각 이벤트의 Iris 표식 항목 하나
+// 새 훅 조건: setup 확인 뒤 받은 --hooks
+// 기존 훅 처리: 새 앱 경로 갱신, 에이전트 폴더가 있을 때만 설정 파일 생성
+// --check: 파일 변경 없는 skill·훅 대조, 차이 또는 누락이면 exit 1
+// --hook-status: 파일 변경 없는 missing 또는 present 출력
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,15 +15,20 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE = path.join(HERE, "templates", "iris-agent-context", "SKILL.md");
 const MANAGED_MARKER = "<!-- iris-agent-context-managed:v1 -->";
 const SKILL_NAME = "iris-agent-context";
+const HOOK_MARKER = "IRIS_AGENT_CONTEXT_PROMPT_TARGETS=1";
+const HOOK_BACKUP_SUFFIX = ".iris-agent-context.bak";
 const REQUIRED_RUNTIME_FILES = [
   "bin/agent-context.mjs",
+  "bin/iris-session.mjs",
   "bin/agent-run.mjs",
   "package.json",
   "server/agent-lineage.js",
+  "server/agent-session-path.js",
   "server/codex-session.js",
   "server/env.cjs",
   "server/herdr-session.cjs",
   "server/herdr.js",
+  "server/prompt-targets.js",
   "server/state-home.cjs",
 ];
 
@@ -43,7 +51,10 @@ function preflightRuntime(appPath) {
   try { pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")); }
   catch { throw new Error("installed Iris agent context package.json is unreadable"); }
   if (pkg.type !== "module") throw new Error("installed Iris agent context package must declare type=module");
-  return { root, launcherPath: path.join(root, "bin", "agent-context.mjs"), runnerPath: path.join(root, "bin", "agent-run.mjs") };
+  const nodePath = path.join(appPath, "Contents", "MacOS", path.basename(appPath, ".app"));
+  try { fs.accessSync(nodePath, fs.constants.X_OK); }
+  catch { throw new Error(`installed Iris node runtime is unavailable: ${nodePath}`); }
+  return { root, nodePath, launcherPath: path.join(root, "bin", "agent-context.mjs"), runnerPath: path.join(root, "bin", "agent-run.mjs") };
 }
 
 function targetInfo(home, content, runtime) {
@@ -80,11 +91,102 @@ function installTargets(targets) {
   }
 }
 
+function hookEntry(command) {
+  return { hooks: [{ type: "command", command, timeout: 5 }] };
+}
+
+function containsHookMarker(item) {
+  return Array.isArray(item?.hooks) && item.hooks.some((hook) => typeof hook?.command === "string" && hook.command.includes(HOOK_MARKER));
+}
+
+function isManagedHook(hook) {
+  return typeof hook?.command === "string" && hook.command.includes(HOOK_MARKER);
+}
+
+function hookTargetInfo(file, runtime, command, nested, add) {
+  let previous;
+  let created = false;
+  try {
+    const own = fs.lstatSync(file);
+    if (own.isSymbolicLink()) return { runtime, target: file, skipped: "심볼릭 링크라 건드리지 않음", changed: true };
+    if (!own.isFile()) return { runtime, target: file, skipped: "일반 파일이 아니라 건드리지 않음", changed: true };
+    previous = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") return { runtime, target: file, skipped: String(error?.message || error), changed: true };
+    // 에이전트 폴더가 없으면 그 CLI를 쓰지 않는 것. 폴더를 만들지 않음
+    if (!fs.existsSync(path.dirname(file))) return { runtime, target: file, skipped: "에이전트 폴더가 없어 건너뜀", absent: true, changed: false };
+    previous = "{}\n";
+    created = true;
+  }
+  let data;
+  try { data = JSON.parse(previous); }
+  catch { return { runtime, target: file, skipped: "JSON이 깨져 있어 건드리지 않음", changed: true }; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { runtime, target: file, skipped: "JSON 최상위 값이 객체가 아니라 건드리지 않음", changed: true };
+  }
+  if (nested && data.hooks !== undefined && (!data.hooks || typeof data.hooks !== "object" || Array.isArray(data.hooks))) {
+    return { runtime, target: file, skipped: "hooks 값이 객체가 아니라 건드리지 않음", changed: true };
+  }
+  const owner = nested ? (data.hooks || (data.hooks = {})) : data;
+  const events = ["SessionStart", "UserPromptSubmit"];
+  for (const event of events) {
+    if (owner[event] !== undefined && !Array.isArray(owner[event])) {
+      return { runtime, target: file, skipped: `${event} 값이 배열이 아니라 건드리지 않음`, changed: true };
+    }
+  }
+  const alreadyManaged = events.some((event) => (owner[event] || []).some(containsHookMarker));
+  if (!add && !alreadyManaged) return { runtime, target: file, missing: true, changed: false };
+  // Iris가 ID와 기록 경로를 함께 등록한다. 구형 등록기는 공유 데몬의 pane 환경을 그대로 사용한다.
+  for (const event of ["SessionStart", "SessionEnd"]) {
+    if (!Array.isArray(owner[event])) continue;
+    owner[event] = owner[event].map((item) => ({ ...item, hooks: (item.hooks || []).filter((hook) => {
+      const command = String(hook.command || "");
+      return !(event === "SessionStart" && /^(?:bash|sh)\s+['"]?[^\n]*\/herdr-agent-state\.sh['"]?\s+session$/.test(command))
+        && !(event === "SessionEnd" && /^(?:python3|\/usr\/bin\/python3)\s+['"]?[^\n]*\/herdr-session-register\.py['"]?$/.test(command));
+    }) })).filter((item) => item.hooks.length);
+  }
+  for (const event of events) {
+    const next = [];
+    let placed = false;
+    for (const item of owner[event] || []) {
+      if (!containsHookMarker(item)) { next.push(item); continue; }
+      const hooks = [];
+      for (const hook of item.hooks) {
+        if (!isManagedHook(hook)) { hooks.push(hook); continue; }
+        if (!placed) { hooks.push(hookEntry(command).hooks[0]); placed = true; }
+      }
+      if (hooks.length) next.push({ ...item, hooks });
+    }
+    if (!placed) next.push(hookEntry(command));
+    owner[event] = next;
+  }
+  const content = JSON.stringify(data, null, 2) + "\n";
+  return { runtime, target: file, previous: created ? null : previous, content, created, changed: created || previous !== content };
+}
+
+function installHookTargets(targets) {
+  for (const item of targets) {
+    if (!item.changed || item.skipped) continue;
+    if (!item.created) {
+      const backup = item.target + HOOK_BACKUP_SUFFIX;
+      try { fs.copyFileSync(item.target, backup, fs.constants.COPYFILE_EXCL); }
+      catch (error) { if (error?.code !== "EEXIST") throw error; }
+    }
+    const temp = `${item.target}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
+    try {
+      fs.writeFileSync(temp, item.content, { mode: item.created ? 0o600 : fs.statSync(item.target).mode & 0o777 });
+      fs.renameSync(temp, item.target);
+    } finally {
+      try { fs.unlinkSync(temp); } catch {}
+    }
+  }
+}
+
 export function installAgentContext(options = {}) {
   const appPath = path.resolve(options.appPath || "/Applications/Iris.app");
   const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   const claudeHome = options.claudeHome || process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(os.homedir(), ".claude");
-  const { launcherPath, runnerPath } = preflightRuntime(appPath);
+  const { nodePath, launcherPath, runnerPath } = preflightRuntime(appPath);
   let template;
   try { template = fs.readFileSync(TEMPLATE, "utf8"); }
   catch { throw new Error(`Iris agent context skill template is unavailable: ${TEMPLATE}`); }
@@ -101,11 +203,24 @@ export function installAgentContext(options = {}) {
     targetInfo(codexHome, content, "Codex"),
     targetInfo(claudeHome, content, "Claude"),
   ];
-  if (!options.check) installTargets(targets);
+  const hookTargets = [
+    [claudeHome, "Claude", "claude"],
+    [codexHome, "Codex", "codex"],
+  ].map(([home, label, runtime]) => {
+    const command = `/usr/bin/env -u IRIS_STATE_DIR -u IRIS_PORT ${HOOK_MARKER} IRIS_AGENT_CONTEXT_RUNTIME=${runtime} ELECTRON_RUN_AS_NODE=1 ${shellQuote(nodePath)} ${shellQuote(launcherPath)} prompt-targets --runtime ${runtime}`;
+    return hookTargetInfo(path.join(home, label === "Claude" ? "settings.json" : "hooks.json"), label, command, true, !!options.addHooks);
+  });
+  if (!options.check) {
+    installTargets(targets);
+    installHookTargets(hookTargets);
+  }
   return {
     launcherPath,
     installed: targets.map((item) => item.target),
     changed: targets.filter((item) => item.changed).map((item) => item.target),
+    hooks: hookTargets.map(({ runtime, target, changed, skipped, missing, created }) => ({ runtime, target, changed, skipped, missing, created })),
+    hookChanged: hookTargets.filter((item) => item.changed).map((item) => item.target),
+    hookMissing: hookTargets.filter((item) => item.missing).map((item) => item.target),
   };
 }
 
@@ -115,21 +230,31 @@ function main() {
     "codex-home": { type: "string" },
     "claude-home": { type: "string" },
     check: { type: "boolean" },
+    hooks: { type: "boolean" },
+    "hook-status": { type: "boolean" },
   } });
   const result = installAgentContext({
     appPath: values.app,
     codexHome: values["codex-home"],
     claudeHome: values["claude-home"],
-    check: values.check,
+    check: values.check || values["hook-status"],
+    addHooks: values.hooks,
   });
+  if (values["hook-status"]) {
+    console.log(result.hookMissing.length ? "missing" : "present");
+    return;
+  }
   if (values.check) {
     const current = result.installed.length - result.changed.length;
-    console.log(`Agent context guidance check: ${current} up to date, ${result.changed.length} missing or outdated`);
+    console.log(`Agent context guidance check: ${current} up to date, ${result.changed.length} missing or outdated; hooks ${result.hookChanged.length || result.hookMissing.length ? "need update" : "up to date"}`);
     for (const target of result.changed) console.log(`  needs update: ${target}`);
-    if (result.changed.length) process.exitCode = 1;
+    for (const item of result.hooks) if (item.changed) console.log(`  hook ${item.skipped ? "skipped" : "needs update"}: ${item.target}${item.skipped ? ` (${item.skipped})` : ""}`);
+    for (const target of result.hookMissing) console.log(`  hook missing: ${target}`);
+    if (result.changed.length || result.hookChanged.length || result.hookMissing.length) process.exitCode = 1;
     return;
   }
   console.log(`Agent context guidance ready: ${result.changed.length} updated, ${result.installed.length} present`);
+  for (const item of result.hooks) console.log(`  ${item.runtime} hook: ${item.skipped || (item.missing ? "not installed (run with --hooks)" : item.created ? "created" : item.changed ? "updated" : "present")}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

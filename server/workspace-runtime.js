@@ -199,11 +199,13 @@ export async function buildWorkspaceSnapshot() {
 
 function handleHerdrEvent(ev) {
   // pane 집합이 바뀌는 이벤트면 구독도 갱신(새 pane의 status 변화를 받기 위해).
-  const t = ev?.type || (typeof ev?.event === "string" ? ev.event : ev?.event?.type) || "";
+  // 요청 구독명은 pane.moved이고 실제 lifecycle 이벤트명은 pane_moved다.
+  const raw = ev?.type || (typeof ev?.event === "string" ? ev.event : ev?.event?.type) || "";
+  const t = raw.replace(/^([a-z]+)_/, "$1.");
   // 스크롤은 관제 상태를 바꾸지 않는다. 여기서 차단하지 않으면 스크롤하는 내내 아래 debounce가
   // 재계산을 실행하므로, 이 return 으로 막는다.
   if (t === "pane.scroll_changed") return;
-  if (/pane\.(created|closed|exited)/.test(t)) {
+  if (/^pane\.(created|closed|exited|moved|agent_detected)$/.test(t)) {
     clearTimeout(resubTimer);
     resubTimer = setTimeout(() => herdr.refreshSubscription(), 300);
   }

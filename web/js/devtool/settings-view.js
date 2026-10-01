@@ -3,7 +3,7 @@
 // 소유 범위
 //   왼쪽 분류 목록과 오른쪽 내용의 배치, 그리고 이벤트 연결이 참조하는 이름들
 //   (data-km-rec · data-km-reset · data-km-sec · #km-reset-all · #km-search · data-set-toggle
-//    · data-set-screen · data-set-motion · data-sw-pick · data-sw-key · #sw-refresh · #sw-open-perm).
+//    · data-set-screen · data-set-motion · data-sw-pick · data-sw-key · #sw-refresh · #sw-open-perm · data-set-clear).
 //   부산물 분류의 이름은 artifacts-view.js 가 소유하고, 여기서는 그 함수를 부르기만 한다.
 //
 // 제공 API
@@ -43,7 +43,7 @@ export function escapeHtml(s) {
 }
 
 // model = { section, query, items, conflicts, changed, recording, toggles, screens, switcher }
-//   items: resolvedKeymap() 결과 { id, label, where, keys, lock, changed, defKeys }
+//   items: resolvedKeymap() 결과 { id, label, where, keys, lock, changed, defKeys } + 기능 줄의 note·noteBad(등록 상태)
 //   toggles: [{ id, name, desc, on, warn }]. 보안 분류의 스위치 목록
 //   screens: [{ id, label, on, lock }]. 편의 기능(rail 도구 화면). 목록은 rail 버튼에서 읽어 온다.
 //   switcher: { windows, picked, status, media }. 창 전환 분류의 창·선택·직접 읽은 아이콘과 권한
@@ -71,7 +71,7 @@ export function settingsMarkup(model) {
   }).join("");
 
   // 단축키는 검색 줄을 고정하고 목록만 스크롤한다. 나머지 분류는 판 전체가 스크롤한다.
-  const other = section === "features" ? screensPane(screens, model.presets || PRESETS, m.motion)
+  const other = section === "features" ? screensPane(screens, model.presets || PRESETS, m.motion, m.presetView || "full", m.presetMembers)
     : section === "windows" ? switcherPane(m.switcher)
     : section === "artifacts" ? artifactsPane(m.artifacts)
     : section === "security" ? securityPane(toggles)
@@ -146,6 +146,7 @@ function keysPane(m, items) {
       : item.changed ? `<span class="km-lead"><i class="km-chg" title="바꾼 조합"></i></span>` : `<span class="km-lead"></span>`;
     return `<div class="km-row${item.lock ? " locked" : ""}${item.changed ? " changed" : ""}"${item.lock ? ` title="${esc(item.lock)}"` : ""}>
       ${lead}<span class="km-label">${esc(item.label)}</span>
+      ${item.note ? `<span class="km-state${item.noteBad ? " bad" : ""}">${esc(item.note)}</span>` : ""}
       ${item.changed && !item.lock
         ? `<button class="km-undo" data-km-reset="${esc(item.id)}" title="기본값 ${esc(item.defKeys || "")} 으로">되돌리기</button>` : ""}
       ${item.lock
@@ -167,12 +168,13 @@ function keysPane(m, items) {
 
 // 안 쓰는 도구는 내려 둔다. 끈 화면은 rail 에서 사라지고 단축키로도 열리지 않는다. 버튼만
 // 감추고 경로를 열어 두면 끈 상태와 화면이 어긋난다(rail.js 가 그 판정을 갖는다).
-function presetRow(presets) {
+// 그룹 단추는 목록에 보일 기능만 거름(설정은 안 바꿈, 사용자 결정). 켜고 끄기는 줄마다의 스위치
+function presetRow(presets, view) {
   const esc = escapeHtml;
   if (!presets || !presets.length) return "";
-  // 프리셋은 켤 id 목록이다. 여기서 그리는 문자열은 코드에 있는 것뿐이다.
-  return `<div class="km-seg">`
-    + presets.map((p) => `<button data-set-preset="${esc(p.id)}" title="${esc(p.desc || "")}">${esc(p.label)}</button>`).join("")
+  return `<div class="km-seg" role="group" aria-label="보기">`
+    + presets.map((p) => `<button data-set-preset="${esc(p.id)}" aria-pressed="${p.id === view ? "true" : "false"}"`
+      + ` title="${esc(p.label)} 그룹의 기능만 보기">${esc(p.label)}</button>`).join("")
     + `</div>`;
 }
 
@@ -190,14 +192,16 @@ function motionToggleMarkup(motion) {
     </div>`;
 }
 
-function screensPane(screens, presets, motion) {
+function screensPane(allScreens, presets, motion, view, members) {
   const esc = escapeHtml;
+  // 항상 켜진 기능은 어느 보기에서나 보임
+  const screens = Array.isArray(members) ? allScreens.filter((t) => members.includes(t.id) || (t.lock && !t.readonly)) : allScreens;
   const motionRow = motionToggleMarkup(motion);
   const lockNote = featureLockNote();
   const onCount = screens.filter((t) => t.on || (t.lock && !t.readonly)).length;
   const head = `<div class="km-phead"><span class="km-h2">편의 기능</span>${
     screens.length ? `<span class="km-faint">${esc(screens.length)}개 중 ${esc(onCount)}개 켜짐</span>` : ""}<span class="km-sp"></span>${
-    lockNote ? "" : presetRow(presets)}</div>`;
+    presetRow(presets, view)}</div>`;
   if (!screens.length) {
     return `${head}<div>${motionRow}</div><div class="km-empty">편의 기능 목록을 읽지 못했습니다.</div>`;
   }
@@ -224,11 +228,11 @@ function screensPane(screens, presets, motion) {
 // 기본 꺼짐 기능을 켜기 전에 보여 주는 확인 창. 문구는 기능 표(capabilities.js 의 optIn)에 코드로 적힌 것뿐이다.
 export function optInConfirmMarkup(optIn) {
   const esc = escapeHtml;
-  return `<div class="askbox" role="dialog" aria-modal="true">
-      <div class="asktitle">${esc(optIn.title)}</div>
-      ${(optIn.items || []).map((item) => `<div class="asknote">· ${esc(item)}</div>`).join("")}
-      ${optIn.after ? `<div class="asknote">${esc(optIn.after)}</div>` : ""}
-      <div class="askrow"><button data-a="cancel">취소</button><button class="primary" data-a="ok">켜기</button></div>
+  return `<div class="mdl" role="dialog" aria-modal="true">
+      <div class="tt">${esc(optIn.title)}</div>
+      <div class="target">${(optIn.items || []).map((item) => `<div>${esc(item)}</div>`).join("")}</div>
+      ${optIn.after ? `<div class="tb">${esc(optIn.after)}</div>` : ""}
+      <div class="mdl-row"><span class="hint"><span class="kc">esc</span>취소</span><button data-a="cancel">취소</button><button class="primary" data-a="ok">켜기</button></div>
     </div>`;
 }
 
@@ -259,7 +263,8 @@ function switcherPane(model) {
   const parts = [`<section class="km-switcher">
     <div class="km-phead"><span class="km-h2">창 전환</span><span class="km-sp"></span>
       <button class="km-btn" id="sw-refresh">다시 읽기</button></div>
-    <div class="km-note km-sw-intro">체크한 창들 사이만 ⌥Tab으로 오갑니다. 하나도 없으면 콘솔과 브라우저를 토글합니다.</div>`];
+    <div class="km-note km-sw-intro">체크한 창들 사이만 ⌥Tab으로 오갑니다. 하나도 없으면 콘솔과 브라우저를 토글합니다.</div>`,
+    globalPriorityToggleMarkup(status)];
 
   const permissionUsesAppIcons = sharedReason === "화면 기록 권한 없음";
   const screenNotice = screenPermissionNotice(media && media.permission, permissionUsesAppIcons);
@@ -483,10 +488,26 @@ function switchFailureText(reason) {
   return String(reason);
 }
 
+// 고른 창이 있으면 이 옵션과 관계없이 전역으로 등록한다. 옵션은 고른 창이 없을 때의 다음 창 키만 바꾼다.
+function globalPriorityToggleMarkup(status) {
+  const on = !!(status && status.globalPriority);
+  const key = escapeHtml(acceleratorLabel(status && status.accelerators?.next, "⌥Tab"));
+  // 창 목록 줄처럼 켜짐·꺼짐 글자 없이 스위치를 오른쪽 끝에. 목록과 떨어진 설정 한 줄
+  return `<div class="km-toggle top km-sw-global">
+      <div class="km-tx">
+        <div class="km-tn">전역 우선 사용</div>
+        <div class="km-td">켜면 다른 앱이 앞에 있어도 ${key}를 Iris가 먼저 받아 Iris를 앞으로 가져옵니다. 체크한 창이 있으면 이 설정과 관계없이 전역으로 받습니다.</div>
+      </div>
+      <button class="km-sw${on ? " on" : ""}" data-sw-global=""
+        role="switch" aria-checked="${on ? "true" : "false"}" aria-label="전역 우선 사용"><i></i></button>
+    </div>`;
+}
+
 function switcherRegistrationWarning(status) {
-  if (!status || !status.pickedMode) return "";
+  if (!status || !(status.pickedMode || status.globalPriority)) return "";
   const nextFailed = status.registered?.next === false;
-  const prevFailed = status.registered?.prev === false;
+  // 고른 창이 없으면 이전 창 키는 등록하지 않는다(실패가 아니다).
+  const prevFailed = !!status.pickedMode && status.registered?.prev === false;
   if (!nextFailed && !prevFailed) return "";
   if (status.conflict === "internal:pick-mode") return "이 키는 요소 지목에 이미 쓰고 있습니다";
   if (status.conflict === "same-accelerator") return "다음 창 키와 이전 창 키가 같아 이전 창 키를 등록할 수 없습니다";
@@ -533,6 +554,7 @@ function securityPane(toggles) {
         <div class="km-tn">${esc(t.name)}</div>
         <div class="km-td">${esc(t.desc)}</div>
         ${t.warn ? `<div class="km-warn y km-warn-sm"><i class="km-warn-d"></i><span>${esc(t.warn)}</span></div>` : ""}
+        ${t.clear ? `<button class="km-btn" data-set-clear="${esc(t.clear.id)}">${esc(t.clear.label)}</button>` : ""}
       </div>
       <button class="km-sw${t.on ? " on" : ""}" data-set-toggle="${esc(t.id)}"
         role="switch" aria-checked="${t.on ? "true" : "false"}" aria-label="${esc(t.name)}"><i></i></button>

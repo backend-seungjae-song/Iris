@@ -108,8 +108,8 @@ const handoffRecent = new WeakMap();
 // now: 사람이 버튼을 눌러 연 것(확인 한 번 더 묻지 않고 바로 연다, 값도 싣는다)
 export function handoffToChrome(rec, reason, auto, now) {
   const chk = handoffCheck(rec);
-  if (!chk.ok) { showToast(chk.why); return; }
-  if (autofillBlocked(rec && rec.tabId)) { showToast("이 탭을 AI가 조작하는 중에는 넘길 수 없습니다."); return; }
+  if (!chk.ok) { showToast(chk.why, { level: "warn" }); return; }
+  if (autofillBlocked(rec && rec.tabId)) { showToast("이 탭을 AI가 조작하는 중에는 넘길 수 없습니다.", { level: "warn" }); return; }
   if (auto) {
     const last = handoffRecent.get(rec) || 0;
     if (Date.now() - last < 30000) return;   // 재시도 폭주로 창이 쏟아지지 않게

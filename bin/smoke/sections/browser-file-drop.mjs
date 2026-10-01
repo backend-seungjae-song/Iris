@@ -40,6 +40,16 @@ export const cases = {
       .replace(/^\s*\/\/.*$/gm, "");
     assert.doesNotMatch(source, /Google Chrome\.app|channel:\s*["']chrome/);
   },
+  async "환경변수에 일반 Chrome을 넣어도 드롭 검사가 실행을 거절한다"() {
+    const previous = process.env.IRIS_HEADLESS_SHELL;
+    try {
+      process.env.IRIS_HEADLESS_SHELL = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+      await assert.rejects(runBrowserFileDropRuntime(), /chrome-headless-shell/);
+    } finally {
+      if (previous === undefined) delete process.env.IRIS_HEADLESS_SHELL;
+      else process.env.IRIS_HEADLESS_SHELL = previous;
+    }
+  },
   "실제 Chromium 파일 드롭이 호스트·격리 게스트까지 도달하고 사이트 업로드를 보존한다": runBrowserFileDropRuntime,
 };
 

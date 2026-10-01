@@ -44,11 +44,21 @@ contextBridge.exposeInMainWorld("acHost", {
   setKeymap: (map) => ipcRenderer.send("ac-keymap", map),
   windowSwitcher: (payload) => ipcRenderer.invoke("ac-window-switcher", payload),
   onSwitcherState: (cb) => ipcRenderer.on("ac-switcher-state", (_e, value) => cb(value)),
+  // 고른 창 없이 전역으로 받은 ⌥Tab 을 Iris 창이 앞일 때 이 창의 기존 토글로 넘긴다.
+  onSwitcherToggle: (cb) => ipcRenderer.on("ac-switcher-toggle", () => cb()),
   // 탭별 프로필 파티션 세션 하드닝(UA/Client Hints) 보장. webview attach 전에 호출한다.
   ensureProfile: (partition) => ipcRenderer.send("ac-ensure-profile", partition),
   // Chrome 확장 로더는 고정 descriptor만 다룬다. renderer는 path나 extension id를 정하지 못한다.
   enableExtensionLoader: () => ipcRenderer.invoke("ac-extension-loader-enable"),
   waitForExtension: (partition) => ipcRenderer.invoke("ac-extension-loader-wait", partition),
+  browserExtensionsMenu: (payload) => ipcRenderer.invoke("ac-browser-extensions-menu", payload),
+  onExtensionCreateTab: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on("ac-extension-create-tab", listener);
+    return () => ipcRenderer.removeListener("ac-extension-create-tab", listener);
+  },
+  extensionTabCreated: (result) => ipcRenderer.send("ac-extension-tab-created", result),
+  searchSuggestions: (query) => ipcRenderer.invoke("ac-search-suggestions", query),
   // 실제 Chrome 미러. frame/meta payload는 화면에 전달할 뿐 로그로 남기지 않는다.
   browserHistoryExport: (wcId) => ipcRenderer.invoke("ac-browser-history-export", wcId),
   // restore는 webview의 최초 src load 전에 main에 맡겨야 한다. 동기 stage는 marker만 받고,
@@ -73,6 +83,8 @@ contextBridge.exposeInMainWorld("acHost", {
   onMirrorMeta: (cb) => ipcRenderer.on("mirror-meta", (_e, payload) => cb(payload)),
   // 설치된 Chrome/Brave/Edge 프로필 목록(그대로 가져오기용).
   listChromeProfiles: () => ipcRenderer.invoke("ac-list-chrome-profiles"),
+  // 목록이 비었을 때, macOS 가 브라우저 폴더 읽기를 막았으면 그 안내 문구(아니면 빈 문자열).
+  chromeDataBlocked: () => ipcRenderer.invoke("ac-chrome-data-blocked"),
   // 지정 Chrome 프로필의 쿠키(로그인 세션)를 지정 탭 파티션으로 가져온다.
   importChromeProfile: (id, partition, withPasswords) => ipcRenderer.invoke("ac-import-chrome-profile", { id, partition, withPasswords: withPasswords === true }),
   // 패스키 로그인은 이 창에서 끝낼 수 없다(플랫폼 인증기 없음). 연결된 실제 Chrome 계정
@@ -84,6 +96,8 @@ contextBridge.exposeInMainWorld("acHost", {
   openInChrome: (url) => ipcRenderer.send("ac-open-in-chrome", url),
   // 파일 트리 컨텍스트 메뉴. 파일 위치를 Finder에서 보여준다.
   revealInFinder: (p) => ipcRenderer.send("ac-reveal-in-finder", p),
+  // 새 스페이스의 작업 폴더 선택. macOS 폴더 창. 결과 { ok, path } 또는 { ok:false, canceled }.
+  pickFolder: (defaultPath) => ipcRenderer.invoke("ac-pick-folder", { defaultPath }),
   // 파일/폴더를 macOS 휴지통으로(되돌릴 수 있는 삭제). 결과 { ok, error }.
   trashItem: (p) => ipcRenderer.invoke("ac-trash-item", p),
   // 여러 개를 한 번에 휴지통으로. 결과 { ok, moved, failed:[{path,error}] }.
@@ -116,6 +130,8 @@ contextBridge.exposeInMainWorld("acHost", {
   saveCred: (partition, login) => ipcRenderer.invoke("ac-cred-save", { partition, ...(login || {}) }),
   // 로그인 편의 기능 스위치. 인자 없이 호출하면 현재 상태를 읽고, {on} 을 주면 변경한다.
   loginConvenience: (arg) => ipcRenderer.invoke("ac-login-convenience", arg || {}),
+  // 위치·화면 공유·마이크·파일 쓰기의 사용 여부와 사이트 기록. 인자 없으면 조회.
+  sitePermissions: (arg) => ipcRenderer.invoke("ac-site-permissions", arg || {}),
   // 계정 페이지. 파티션별 저장된 자격증명 요약(비번 제외)과 삭제.
   credsSummary: (partition) => ipcRenderer.invoke("ac-creds-summary", partition),
   clearCreds: (partition) => ipcRenderer.invoke("ac-clear-creds", partition),
@@ -145,6 +161,7 @@ contextBridge.exposeInMainWorld("acHost", {
   sketchSave: (bytes) => ipcRenderer.invoke("ac-sketch-save", { bytes }),
   // 창 레이아웃 기능을 끌 때 단축키·타이머·이 기능이 켠 로그인 항목을 되돌린다.
   deskLayoutDisable: () => ipcRenderer.invoke("ac-desklayout-disable"),
+  deskLayoutStatus: () => ipcRenderer.invoke("ac-desklayout-status"),
   // AI 자동완성 로그인 허용 목록. 사이트·아이디만 오가며 비번은 이 경로로 전달하지 않는다.
   aiLoginList: () => ipcRenderer.invoke("ac-ai-login-list"),
   aiLoginSources: (sources) => ipcRenderer.invoke("ac-ai-login-sources", { sources }),
@@ -162,6 +179,8 @@ contextBridge.exposeInMainWorld("acHost", {
   onRecNative: (cb) => ipcRenderer.on("ac-rec-native", (_e, ev) => cb(ev)), // 게스트 JS로 못 보는 시스템 이벤트(다운로드 등)
   // main 이 사용자에게 한 줄 알리는 경로. 취소된 동작이 버튼 오작동으로 보이지 않게 한다.
   onNativeNotice: (cb) => ipcRenderer.on("ac-native-notice", (_e, m) => cb(m)),
+  notify: (message) => ipcRenderer.send("ac-notify", message),
+  onNoticeActivated: (cb) => ipcRenderer.on("ac-notice-activate", (_e, m) => cb(m)),
   onOpenTab: (cb) => ipcRenderer.on("ac-open-tab", (_e, m) => cb(m)), // 게스트의 "새 탭으로 열기"를 별도 창이 아니라 앱의 탭으로 처리
   // 페이지 안에서 누른 로컬 링크. 브라우저가 렌더링하지 못하는 것(표·문서)과 앱이 렌더링하는 것(마크다운).
   onOpenLocal: (cb) => ipcRenderer.on("ac-open-local", (_e, m) => cb(m)),
@@ -177,11 +196,19 @@ contextBridge.exposeInMainWorld("acHost", {
   // 해제 함수를 돌려준다. 탭을 닫거나 창을 옮길 때마다 구독이 쌓이면 프레임이 여러 번 그려진다.
   emulator: {
     rpc: (method, params) => ipcRenderer.invoke("ac-emulator-rpc", { method, params }),
+    deviceCatalog: () => ipcRenderer.invoke("ac-emulator-device-catalog"),
+    createDevice: (args) => ipcRenderer.invoke("ac-emulator-device-create", args),
+    ensureDefaultDevice: () => ipcRenderer.invoke("ac-emulator-device-default"),
+    onSessionStopped: (cb) => subscribe("ac-emulator-session-stopped", cb),
+    onConnectRequested: (cb) => subscribe("ac-emulator-connect", cb),
     getSettings: () => ipcRenderer.invoke("ac-emulator-settings-get"),
     setSettings: (patch) => ipcRenderer.invoke("ac-emulator-settings-set", patch),
     pickSdkFolder: () => ipcRenderer.invoke("ac-emulator-pick-sdk"),
     androidAction: (action) => ipcRenderer.invoke("ac-emulator-android-action", action),
     xcodeAction: (action) => ipcRenderer.invoke("ac-emulator-xcode-action", action),
+    // 기기별 음량. use 는 저장값을 돌려주고 그 기기에 적용, set 은 저장 후 적용. 결과 { ok, volume(0~1), muted, error? }
+    useVolume: (args) => ipcRenderer.invoke("ac-emulator-volume-use", args),
+    setVolume: (args) => ipcRenderer.invoke("ac-emulator-volume-set", args),
     startFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStart", args),
     stopFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStop", args),
     startVideoStream: (args) => ipcRenderer.invoke("emulator:videoStreamStart", args),
@@ -195,6 +222,16 @@ contextBridge.exposeInMainWorld("acHost", {
     openWindow: (args) => ipcRenderer.invoke("ac-emulator-window-open", args),
     closeWindow: (args) => ipcRenderer.invoke("ac-emulator-window-close", args),
     onWindowClosed: (cb) => subscribe("ac-emulator-window-closed", cb),
+    onWindowBounds: (cb) => subscribe("ac-emulator-window-bounds", cb),
+    onQuitting: (cb) => subscribe("ac-emulator-quitting", cb),
+    requestControl: (args) => ipcRenderer.send("ac-emulator-control-request", args),
+    onControlRequest: (cb) => subscribe("ac-emulator-control-request", cb),
+    setPickState: (on) => ipcRenderer.send("ac-emulator-pick-state", !!on),
+    onPickState: (cb) => subscribe("ac-emulator-pick-state", cb),
+    setRecordState: (on) => ipcRenderer.send("ac-emulator-record-state", !!on),
+    onRecordState: (cb) => subscribe("ac-emulator-record-state", cb),
+    reportControl: (args) => ipcRenderer.send("ac-emulator-control-result", args),
+    onControlResult: (cb) => subscribe("ac-emulator-control-result", cb),
   },
 
   refocusConsole: () => ipcRenderer.send("ac-refocus-console"),

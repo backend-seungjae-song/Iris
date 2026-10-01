@@ -178,10 +178,13 @@ await checkAsync("capability가 켜질 때만 context action을 등록한다", a
     getWebviewEntries: () => translationEntries,
     showToast: () => {},
   });
-  if (registrations.length !== 1) throw new Error(`등록이 ${registrations.length}회다`);
+  if (registrations.length !== 3) throw new Error(`등록이 ${registrations.length}회다`);
   const action = registrations[0];
   if (action.name !== "pagetranslate.page" || action.label !== "이 페이지 번역") {
     throw new Error(JSON.stringify(action));
+  }
+  if (registrations[1].name !== "pagetranslate.autoOn" || registrations[2].name !== "pagetranslate.autoOff") {
+    throw new Error("자동 번역 설정 메뉴가 없다");
   }
   return true;
 });
@@ -379,8 +382,9 @@ check("실패 artifact와 googtrans 지속 상태를 정리한다", () => {
 
 check("success toast는 ok=true 결과에만 대응한다", () => {
   const init = segment(PAGE, "export function initCapability", "return {};");
-  return /if\s*\(result\.ok\)\s*showToast\("페이지를 한국어로 번역했습니다\."\)/.test(init)
-    && /else\s*\{[\s\S]*FAILURE_MESSAGES\[result\.code\]/.test(init);
+  return /if\s*\(result\.ok\)\s*showToast\("페이지를 한국어로 번역했습니다\."\s*,\s*\{ level: "ok" \}\)/.test(init)
+    && /else\s*\{\s*reportFailure\(result\)/.test(init)
+    && /showToast\(FAILURE_MESSAGES\[result\.code\][\s\S]*?level: "err"/.test(init);
 });
 
 check("context-menu shell과 registry는 번역이나 page mutation을 소유하지 않는다", () => {

@@ -249,7 +249,7 @@ function openGroupCtx(x, y, gid) {
     { label: `그룹 저장 (${mine.length}탭)`, disabled: !mine.length, act: () => {
       if (!mine.length) return;
       bsMutate({ op: "group.save", space: sp, id: gid, savedId: newId("s"), at: new Date().toISOString() });
-      showToast(`"${g.name}" 저장됨. 📁에서 다시 열 수 있습니다.`);
+  showToast(`"${g.name}" 저장됨. 📁에서 다시 열 수 있습니다.`, { level: "ok" });
     } },
     { sep: true },
     { label: "그룹만 해제 (탭 유지)", act: () => bsMutate({ op: "group.remove", space: sp, id: gid }) },
@@ -264,7 +264,7 @@ function openGroupCtx(x, y, gid) {
 // 저장된 그룹 목록. 어느 창에서든 열 수 있다(스페이스에 종속되지 않는다).
 function openSavedCtx(x, y) {
   const sp = boundSpace(), list = savedGroups();
-  if (!list.length) { showToast("저장된 그룹이 없습니다."); return; }
+  if (!list.length) { showToast("저장된 그룹이 없습니다.", { level: "info" }); return; }
   const items = [];
   for (const s of list) {
     items.push({ label: `📂 ${s.name} (${s.tabs.length}탭) 열기`, act: () => openSavedGroup(s, sp) });
@@ -285,7 +285,7 @@ function openSavedGroup(s, sp) {
     if (tb.name) bsMutate({ op: "tab.rename", space: sp, id, name: tb.name });
     bsMutate({ op: "tab.group", space: sp, id, group: gid });
   }
-  showToast(`"${s.name}" 열림: ${s.tabs.length}탭`);
+  showToast(`"${s.name}" 열림: ${s.tabs.length}탭`, { level: "ok" });
 }
 // 분리창 탭바 연결. 기존 최상위 `if (BROWSER_MODE) { … }` 와 같고, main 이 그 위치에서 부른다.
 // 선택 상태가 이 모듈에 있으므로 그 상태를 읽고 쓰는 리스너도 여기 있어야 한다.

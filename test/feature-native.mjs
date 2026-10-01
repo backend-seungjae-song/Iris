@@ -12,7 +12,7 @@ const { readFeatureState, featureOn } = require("../server/feature-state-read.cj
 const { bootNativeCapabilities } = require("../native/electron/capability-host.cjs");
 const { NATIVE_CAPABILITIES } = require("../native/electron/capabilities.cjs");
 
-function bootActualNative(hiddenFile, t) {
+async function bootActualNative(hiddenFile, t) {
   const base = process.env.IRIS_STATE_DIR || tmpdir();
   mkdirSync(base, { recursive: true });
   const home = mkdtempSync(path.join(base, "feature-native-"));
@@ -29,6 +29,7 @@ function bootActualNative(hiddenFile, t) {
   assert.ok(prefix, "main의 native 부팅 호출을 찾을 수 있어야 한다");
   const channels = new Map();
   const initialized = [];
+  const ready = [];
   const errors = [];
   const originalLoad = Module._load;
   const exitListeners = new Set(process.listeners("exit"));
@@ -40,7 +41,9 @@ function bootActualNative(hiddenFile, t) {
     if (!id) return mod;
     return { ...mod, initCapability(ctx) {
       initialized.push(id);
-      return mod.initCapability(ctx);
+      const result = mod.initCapability(ctx);
+      if (result?.ready) ready.push(result.ready);
+      return result;
     } };
   };
   const register = (channel, handler) => {
@@ -52,11 +55,15 @@ function bootActualNative(hiddenFile, t) {
     ipcMain: { handle: register, on: register },
     BrowserWindow: { getAllWindows: () => [] },
     stateDir: home,
+    stateHomeImpl: () => home,
+    webContents: { getAllWebContents: () => [] },
     isTrustedSender: () => false,
     shell: { openExternal() { throw new Error("외부 앱 실행 금지"); } },
     onSessionHardened: () => () => {},
+    forEachHardened: async () => {},
     log() {}, error() {},
   };
+  ctx.app.whenReady = () => Promise.resolve();
   let loaded;
   try {
     loaded = vm.runInNewContext(`${prefix} ctx, onError: (id, error) => errors.push({ id, error }) })`, {
@@ -68,20 +75,21 @@ function bootActualNative(hiddenFile, t) {
       if (!exitListeners.has(listener)) process.removeListener("exit", listener);
     }
   }
+  await Promise.all(ready);
   assert.deepEqual(errors, [], "켜진 실제 모듈의 init이 성공해야 한다");
   return { loaded, initialized, channels };
 }
 
-test("T2: main의 hidden 판정은 chromemirror require·init·IPC를 모두 막는다", (t) => {
-  const result = bootActualNative(JSON.stringify({ version: 1, revision: 1, hidden: ["chromemirror"] }), t);
-  const enabled = ["detachtab", "emulator", "extensionloader", "sketch"];
+test("T2: main의 hidden 판정은 chromemirror require·init·IPC를 모두 막는다", async (t) => {
+  const result = await bootActualNative(JSON.stringify({ version: 1, revision: 1, hidden: ["chromemirror"] }), t);
+  const enabled = NATIVE_CAPABILITIES.filter((cap) => !cap.optIn && cap.id !== "chromemirror").map((cap) => cap.id);
   assert.deepEqual(result.loaded, enabled);
   assert.deepEqual(result.initialized, enabled);
   for (const cap of NATIVE_CAPABILITIES) {
     assert.equal(!!require.cache[cap.module], enabled.includes(cap.id), `${cap.id} require.cache`);
   }
   assert.deepEqual([...result.channels.keys()].filter((id) => /mirror|live-chrome/.test(id)), []);
-  for (const channel of ["ac-detach-tab", "ac-tabdrag-start", "ac-emulator-rpc", "ac-extension-loader-enable", "ac-sketch-shot"]) {
+  for (const channel of ["ac-detach-tab", "ac-tabdrag-start", "ac-emulator-rpc", "ac-extension-loader-enable", "ac-browser-extensions-menu", "ac-search-suggestions", "ac-sketch-shot"]) {
     assert.equal(result.channels.has(channel), true, `${channel} 등록`);
   }
 });
@@ -91,8 +99,8 @@ for (const [name, content] of [
   ["파일 없음", null],
   ["파일 파손", "{broken"],
 ]) {
-  test(`T2: ${name}이면 기본 꺼짐이 아닌 native 가 모두 init되고 IPC를 등록한다`, (t) => {
-    const result = bootActualNative(content, t);
+  test(`T2: ${name}이면 기본 꺼짐이 아닌 native 가 모두 init되고 IPC를 등록한다`, async (t) => {
+    const result = await bootActualNative(content, t);
     const all = NATIVE_CAPABILITIES.filter((cap) => !cap.optIn).map((cap) => cap.id);
     assert.deepEqual(result.loaded, all);
     assert.deepEqual(result.initialized, all);
@@ -103,16 +111,18 @@ for (const [name, content] of [
     assert.ok(result.channels.has("ac-detach-tab"));
     assert.ok(result.channels.has("ac-emulator-rpc"));
     assert.ok(result.channels.has("ac-extension-loader-enable"));
+    assert.ok(result.channels.has("ac-browser-extensions-menu"));
+    assert.ok(result.channels.has("ac-search-suggestions"));
     assert.ok(result.channels.has("ac-sketch-shot"));
   });
 }
 
-test("T2: 기본 꺼짐 기능은 사용자가 켠 목록(shown)에 있을 때만, 그리고 hidden 에 없을 때만 로드된다", (t) => {
+test("T2: 기본 꺼짐 기능은 사용자가 켠 목록(shown)에 있을 때만, 그리고 hidden 에 없을 때만 로드된다", async (t) => {
   const optIn = NATIVE_CAPABILITIES.filter((cap) => cap.optIn).map((cap) => cap.id);
   assert.ok(optIn.includes("desklayout"), "desklayout 은 기본 꺼짐");
-  const shown = bootActualNative(JSON.stringify({ version: 1, revision: 3, hidden: [], shown: optIn }), t);
+  const shown = await bootActualNative(JSON.stringify({ version: 1, revision: 3, hidden: [], shown: optIn }), t);
   assert.deepEqual(shown.loaded, NATIVE_CAPABILITIES.map((cap) => cap.id));
   assert.ok(shown.channels.has("ac-desklayout-disable"));
-  const both = bootActualNative(JSON.stringify({ version: 1, revision: 4, hidden: optIn, shown: optIn }), t);
+  const both = await bootActualNative(JSON.stringify({ version: 1, revision: 4, hidden: optIn, shown: optIn }), t);
   assert.deepEqual(both.loaded, NATIVE_CAPABILITIES.filter((cap) => !cap.optIn).map((cap) => cap.id));
 });

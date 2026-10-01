@@ -12,12 +12,12 @@
 //
 // 유지 조건
 //   지금 스페이스에 에뮬레이터 탭이 없으면 기본 기기로 바로 연다(onOpen(null) → 설정의 기본 기기,
-//   자동이면 켜진 기기 우선). 탭이 있으면 기기 목록을 띄우고 고른 기기로 그 탭을 바꾼다.
+//   자동이면 iPhone 13 우선). 탭이 있으면 기기 목록을 띄우고 고른 기기의 화면을 연다.
 //
 // 영향 범위
 //   web/js/emulator/boot.js.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/emulator/launch-button.js
-import { deviceLabel, runtimeLabel } from "./devices-panel.js";
+import { deviceLabel, runtimeLabel, deviceRunnable, deviceReadiness } from "./devices-panel.js";
 
 const ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"'
   + ' stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -29,7 +29,8 @@ export function mountLaunchButton({ host, hasTab, onOpen }) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "sidebar-toggle emu-launch";
-  btn.title = "모바일 에뮬레이터 켜기. 탭이 열려 있으면 기기를 고릅니다";
+  btn.title = "모바일 에뮬레이터 열기. 기기마다 독립된 화면을 엽니다";
+  btn.setAttribute("aria-label", "모바일 에뮬레이터 열기");
   btn.innerHTML = ICON;
   // 세션 점·이름 묶음(.sess) 앞, 머리 단추들 뒤에 둔다. 기준은 머리의 직계 자식이어야 insertBefore 가 된다.
   head.insertBefore(btn, head.querySelector(":scope > .sess"));
@@ -75,8 +76,8 @@ export function mountLaunchButton({ host, hasTab, onOpen }) {
     menu.replaceChildren();
     if (!devices.length) { menu.append(item("발견된 기기가 없습니다", "", null, true)); return; }
     for (const d of devices) {
-      menu.append(item(deviceLabel(d), d.runtime ? runtimeLabel(d.runtime) : "",
-        () => { closeMenu(); onOpen(d); }, d.isAvailable === false));
+      menu.append(item(deviceLabel(d), [runtimeLabel(d.runtime), deviceReadiness(d)].filter(Boolean).join(" · "),
+        () => { closeMenu(); onOpen(d); }, !deviceRunnable(d)));
     }
     // 화면 오른쪽을 넘으면 버튼 오른쪽 끝에 맞춘다.
     const w = menu.getBoundingClientRect().width;

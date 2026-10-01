@@ -32,9 +32,10 @@ for (const [name, re, source = web] of [
   ["요소선택 전달 ipc orca-pick", /"orca-pick"/, webviewFactory],
   // 이 둘은 main 의 ws 표에 있었다. 요소 지목·녹화가 상위 개념으로 분리되면서 소유자도 함께
   // 옮겨갔다. 표를 가진 위치가 그 기능의 입구다.
-  ["분리창 요소 릴레이", /"pick-relay": \(m\) =>/, pickBoot],
+  ["분리창 요소 릴레이", /"pickrec\.deliver": \(m\) =>/, pickBoot],
   ["분리창 선택모드는 서버 방송을 따름", /"pick-mode": \(m\) => applyPickMode\(!!m\.on\)/, pickBoot],
-  ["herdr 역동기화(focused)", /if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*clearTimeout\(herdrSyncTimer\);[\s\S]*setTimeout\(\(\) => applyHerdrFocus\(herdrSyncPane\), 300\);[\s\S]*if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*Date\.now\(\) - lastUserSelect < 1500[\s\S]*const a = agentByPane\(paneId\);[\s\S]*if \(!a\) return/, herdrSync],
+  // 쿨다운 중 포커스 변경을 버리면 머리 이름과 실제 입력 대상이 어긋난다. 동작 검사는 test/herdr-sync.mjs
+  ["herdr 역동기화(focused)", /clearTimeout\(herdrSyncTimer\);[\s\S]*herdrSyncPane = paneId && paneId !== getCurTarget\(\) \? paneId : null;[\s\S]*Math\.max\(300, lastUserSelect \+ 1500 - Date\.now\(\)\)[\s\S]*setTimeout\(\(\) => applyHerdrFocus\(herdrSyncPane\), wait\);[\s\S]*if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*Date\.now\(\) - lastUserSelect < 1500\) \{ scheduleHerdrSync\(paneId\); return; \}[\s\S]*const a = agentByPane\(paneId\);[\s\S]*if \(!a\) return/, herdrSync],
   ["프로필 안정 id 파티션", /persist:acprof:/, webviewFactory],
   ["프로필 id 해석 함수", /function profileIdForStored/, profiles],
   ["프로필 메뉴 닫기(guest pointerdown)", /ac-guest-pointerdown/, webviewFactory],
@@ -140,7 +141,8 @@ check("ipc-trust 신뢰 발신자 검사(보안)", () => {
 check("메모 창 항상 위 IPC는 실제 창 상태를 적용·확인·저장함", () =>
   /ipcMain\.handle\("ac-memo-always-on-top"[\s\S]{0,900}setAlwaysOnTop\(!!enabled\)[\s\S]{0,300}isAlwaysOnTop\(\)[\s\S]{0,300}saveMemoWindowRecord\([^)]*alwaysOnTop/.test(memoWindowManagerSource));
 check("공유 메모 데스크톱 전용 동작 제거", () =>
-  !/ac-memo-all-workspaces|setVisibleOnAllWorkspaces/.test(readAll("native"))
+  !/ac-memo-all-workspaces/.test(readAll("native"))
+  && !/setVisibleOnAllWorkspaces/.test(memoWindowManagerSource)
   && !/mw-all|모든 데스크톱/.test(memoWindow));
 check("메모 보관은 버튼 없이 단축키로만 실행", () =>
   !/id="mw-archive"/.test(web) && /ac-shortcut", "memo-archive"/.test(memoWindowManagerSource));

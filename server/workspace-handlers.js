@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { agentArgv, shellCommand } from "./agent-launch.js";
 import { bindSpaceFolder } from "./browser-state-owner.js";
 import { requestRecompute as recompute } from "./runtime-state.js";
 
@@ -25,10 +26,6 @@ import { requestRecompute as recompute } from "./runtime-state.js";
 //   workspace-runtime.js의 후속 재계산과 bin/smoke.mjs의 스페이스 소유 검사·web의 space/tab 요청 UI.
 
 let herdr;
-
-// 새 터미널 탭에서 시작할 수 있는 항목. 값이 셸에 그대로 전달되므로 라벨로만 선택한다.
-// 사용자가 보낸 문자열을 그대로 실행하면 원격에서 임의 명령을 실행할 수 있게 된다.
-const LAUNCHERS = { claude: "claude", codex: "codex" };
 
 export function initWorkspaceHandlers(deps) {
   herdr = deps.herdr;
@@ -86,24 +83,47 @@ async function waitForShell(paneId, tries = 24, gap = 150) {
   return false;
 }
 
+async function waitForTabPane(workspaceId, tabId) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const pane = (await herdr.paneList(workspaceId)).find((candidate) => candidate.tab_id === tabId);
+    if (pane) return pane;
+    if (attempt < 9) await new Promise((done) => setTimeout(done, 100));
+  }
+  throw new Error("새 탭의 터미널을 찾지 못했습니다");
+}
+
 // 터미널 탭 생성/이름(#6, #8): 생성은 셸 생성이라 원격(폰)에서 금지(AC5). 이름변경은 허용.
 export function handleTab(ws, msg) {
   if (msg.type === "tab.create") {
     if (!ws._local) { ws.send(JSON.stringify({ type: "control-error", message: "원격에서는 터미널 탭 생성 불가(AC5)" })); return; }
+    const cwd = msg.cwd;
+    if (cwd !== undefined && (typeof cwd !== "string" || !path.isAbsolute(cwd) || /[\r\n\0]/.test(cwd))) {
+      ws.send(JSON.stringify({ type: "control-error", message: "터미널 작업 폴더를 절대경로로 지정하세요" })); return;
+    }
+    if (cwd !== undefined) {
+      try {
+        if (!fs.statSync(cwd).isDirectory()) throw new Error("폴더가 아닙니다");
+      } catch {
+        ws.send(JSON.stringify({ type: "control-error", message: `폴더가 없습니다: ${cwd}` })); return;
+      }
+    }
     herdr.tabCreate(msg.workspaceId).then(async (res) => {
       // 생성 직후 이름 부여(#6): tab.create 반환에서 새 tab_id를 찾아 rename.
       const newId = res?.tab_id || res?.tab?.tab_id || res?.result?.tab_id;
       if (msg.name && typeof msg.name === "string" && newId) { try { await herdr.tabRename(newId, msg.name); } catch {} }
       // 새 탭에서 바로 세션을 실행한다. 탭을 만들고 명령을 입력하는 두 단계를 한 번으로 줄인다.
       // 실행 대상은 목록으로 제한한다. 임의 명령이 전달되면 원격 실행 경로가 된다.
-      if (newId && LAUNCHERS[msg.launch]) {
+      if (!newId && (msg.launch || cwd)) throw new Error("새 탭의 식별자를 받지 못했습니다");
+      const argv = newId ? agentArgv(msg.launch) : null;
+      if (newId && (argv || cwd)) {
         try {
-          const panes = (await herdr.paneList(msg.workspaceId)).filter((pane) => pane.tab_id === newId);
-          if (panes[0]) {
-            await waitForShell(panes[0].pane_id);
-            // 제출은 raw "\r" 로 한다. 이름있는 키로 보내면 글자만 입력되고 실행되지 않는다(확인 결과).
-            await herdr.paneSendText(panes[0].pane_id, LAUNCHERS[msg.launch] + "\r");
-          }
+          const pane = await waitForTabPane(msg.workspaceId, newId);
+          if (!await waitForShell(pane.pane_id)) throw new Error("터미널 준비 시간을 초과했습니다");
+          // 제출은 raw "\r" 로 한다. 이름있는 키로 보내면 글자만 입력되고 실행되지 않는다(확인 결과).
+          const commands = [];
+          if (cwd) commands.push(shellCommand(["cd", "--", cwd]));
+          if (argv) commands.push(shellCommand(argv));
+          await herdr.paneSendText(pane.pane_id, commands.join(" && ") + "\r");
         } catch (e) {
           // 오류를 무시하면 명령만 입력된 탭이 남고 사용자는 이유를 알 수 없다.
           ws.send(JSON.stringify({ type: "control-error", message: `세션 실행 실패: ${e.message || e}` }));

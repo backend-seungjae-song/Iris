@@ -4,8 +4,8 @@
 //   화면의 요소를 사람이 눌러서 고르는 일(요소 지목)과, 그 뒤의 조작을 순서대로 받아 적는
 //   일(녹화). 둘은 한 모듈 집합이다. 지목이 녹화에 줄을 추가하고(pick.js → recPush), 녹화 중에는
 //   지목이 다르게 기록된다. 그래서 표에도 한 줄로 등록된다.
-//   ws 소유자 열하나(pick-mode · pick-relay · app-pick · app-pick-note · rec-relay ·
-//   rec-toggle-relay · tab/group/site-pick-relay · tab-granted · group-granted)를 든다.
+//   ws 소유자 일곱 개(pick-mode · pickrec.deliver · app-pick · app-pick-note · rec-relay ·
+//   rec-toggle-relay · target-pending)를 든다.
 //   화면 이름은 25-pick-record.css 가 정의한다.
 //
 // 제공 API
@@ -39,7 +39,7 @@ import {
 } from "./pick-host.js";
 import { noticeBlock } from "../panel/xterm-wiring.js";
 import {
-  applyPickMode, deliverPick, deliverPickLocal, hasDocxContext, hasSheetContext,
+  applyPickMode, completePendingPick, deliverPick, deliverPickLocal, hasDocxContext, hasSheetContext,
   pickMode, togglePickMode,
 } from "./pick.js";
 import {
@@ -68,6 +68,7 @@ export function initCapability(ctx) {
   provide("pick.orcaSource", (on) => "window.__orcaDesired=" + (on ? "true" : "false") + ";" + ORCA_INJECT);
 
   provide("record.on", () => recording);
+  provide("record.hasTarget", () => !!activeWv());
   provide("record.set", (on) => setRecording(on));
   provide("record.tracked", (tabId) => recTracked(tabId));
   provide("record.push", (ev) => recPush(ev));
@@ -80,41 +81,47 @@ export function initCapability(ctx) {
     wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
     if (getXterm()) setTimeout(() => getXterm().focus(), 0);
   };
-
   return {
     ws: {
       "pick-mode": (m) => applyPickMode(!!m.on),
-      "pick-relay": (m) => { if (!BROWSER_MODE && m.pick) deliverPickLocal(m.pick); },
       "app-pick": (m) => { if (!BROWSER_MODE && m.pick) deliverAppPickLocal(m.pick); },
-      "app-pick-note": (m) => { if (!BROWSER_MODE && m.message) showToast(m.message); },
+      "app-pick-note": (m) => { if (!BROWSER_MODE && m.message) showToast(m.message, { level: "info" }); },
       "rec-relay": (m) => { if (!BROWSER_MODE && m.text) recDeliverLocal(m.text); },
       "rec-toggle-relay": () => { if (BROWSER_MODE && activeWv()) setRecording(!recording); },
-      "tab-pick-relay": (m) => { if (!BROWSER_MODE && m.tab) deliverTabPickLocal(m.tab); },
-      "group-pick-relay": (m) => { if (!BROWSER_MODE && m.group) deliverGroupPickLocal(m.group); },
-      "site-pick-relay": (m) => { if (!BROWSER_MODE && m.site) deliverSitePickLocal(m.site); },
-      "tab-granted": (m) => {
-        // 한 대화 안에서 여러 번 지목하면 그 전부가 대상이다. 그래서 "이 탭에서 실행됩니다"라고
-        // 쓰면 두 번째 알림이 첫 번째와 어긋나므로, 지금 대상 전체를 함께 적는다.
-        const others = (m.all || []).filter((h) => h && h !== m.handle);
-        paste(noticeBlock("브라우저 탭 지목", [
-          `탭: @${m.handle}${m.name ? "  " + m.name : ""}`,
-          // 아직 아무것도 띄우지 않은 탭이면 이 줄은 전체를 뺀다. 빈 줄만 남기지 않기 위해서다.
-          ...(m.title || m.url ? [`${m.title || ""}${m.title && m.url ? " · " : ""}${m.url || ""}`] : []),
-          others.length
-            ? `대상 탭: ${(m.all || []).map((h) => "@" + h).join(" ")} · 기본 @${m.handle}`
-            : `대상 탭: @${m.handle}`,
-        ]));
+      "pickrec.deliver": (m) => {
+        if (BROWSER_MODE || !m.payload) return;
+        if (m.kind === "element") deliverPickLocal(m.payload);
+        else if (m.kind === "tab") deliverTabPickLocal(m.payload);
+        else if (m.kind === "group") deliverGroupPickLocal(m.payload);
+        else if (m.kind === "site") deliverSitePickLocal(m.payload);
       },
-      "group-granted": (m) => {
-        // 서버가 매긴 핸들로 문구를 만든다. 이 이름 그대로 iris-browser에 넣을 수 있어야 한다.
+      "target-pending": (m) => {
+        if (m.kind === "element") {
+          if (!completePendingPick(m) && !m.ok) showToast(m.error || "요소 지목을 준비하지 못했습니다", { level: "err" });
+          return;
+        }
+        if (!m.ok) { showToast(m.error || "지목을 준비하지 못했습니다", { level: "err" }); return; }
+        if (m.kind === "tab") {
+          paste(noticeBlock("브라우저 탭 지목", [
+            `등록 구분자: ${m.delimiter}`,
+            `탭: @${m.handle}${m.name ? "  " + m.name : ""}`,
+            ...(m.title || m.url ? [`${m.title || ""}${m.title && m.url ? " · " : ""}${m.url || ""}`] : []),
+            "이 메시지를 보내면 이 세션의 지정 탭으로 등록됩니다.",
+          ]));
+          bNote.textContent = "채팅 입력에 탭 지목을 추가했습니다. 보내면 이 세션 대상으로 등록됩니다.";
+          return;
+        }
+        if (m.kind !== "group") return;
         const short = (u) => { try { const x = new URL(u); return x.host + (x.pathname !== "/" ? x.pathname.slice(0, 24) : ""); } catch { return String(u || "").slice(0, 40); } };
         const rows = (m.tabs || []).map((t) => `  @${t.handle}${t.name ? "  " + t.name : ""}`
           + (t.url ? `  — ${short(t.url)}` : "") + (t.showing ? "  (보임)" : ""));
         paste(noticeBlock("브라우저 그룹 지목", [
+          `등록 구분자: ${m.delimiter}`,
           `그룹: ${m.label} (${m.handle}) · 스페이스 ${m.space}`,
           rows.length ? "탭:\n" + rows.join("\n") : "탭: (없음)",
-          `대상: 그룹 ${m.handle}`,
+          "이 메시지를 보내면 이 세션의 지정 그룹으로 등록됩니다.",
         ]));
+        bNote.textContent = "채팅 입력에 그룹 지목을 추가했습니다. 보내면 이 세션 대상으로 등록됩니다.";
       },
     },
   };
