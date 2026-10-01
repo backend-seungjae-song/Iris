@@ -89,22 +89,28 @@ function finishCloseDialogChoice(choice, finish) {
 }
 function promptDirtyChoice(title, names) {
   return new Promise((resolve) => {
+    const previous = document.activeElement;
     const wrap = document.createElement("div");
     wrap.className = "askwrap";
     const lines = String(names || "").split("\n").filter(Boolean);
-    wrap.innerHTML = `<div class="askbox">
-      <div class="asktitle">${esc(title)}</div>
-      <div class="asknote">${lines.map((name) => esc(name)).join("<br>")}</div>
-      <div class="askrow"><button data-act="cancel">취소</button><button data-act="discard">저장 안 함</button><button class="primary" data-act="save">저장</button></div>
-    </div>`;
+    wrap.innerHTML = `<div class="dim"></div><div class="modal"><div class="mdl" role="dialog" aria-modal="true">
+      <div class="tt">${esc(title)}</div>
+      <div class="tb">${lines.map((name) => esc(name)).join("<br>")}</div>
+      <div class="mdl-row"><span class="hint"><span class="kc">esc</span>취소</span><button data-act="cancel">취소</button><button data-act="discard">저장 안 함</button><button class="primary" data-act="save">저장</button></div>
+    </div></div>`;
     let done = false;
-    const finish = (choice) => { if (done) return; done = true; wrap.remove(); resolve(choice); };
+    const finish = (choice) => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(choice); };
     wrap.addEventListener("click", (event) => {
-      if (event.target === wrap) { finishCloseDialogChoice("cancel", finish); return; }
+      if (event.target === wrap || event.target.classList?.contains("dim")) { finishCloseDialogChoice("cancel", finish); return; }
       const button = event.target.closest("button[data-act]");
       if (button) finishCloseDialogChoice(button.dataset.act || "cancel", finish);
     });
+    wrap.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); finishCloseDialogChoice("cancel", finish); }
+      event.stopPropagation();
+    });
     document.body.appendChild(wrap);
+    wrap.querySelector('[data-act="save"]')?.focus();
   });
 }
 export async function saveTabForClose(t, space) {
@@ -201,7 +207,7 @@ export function removeTabsNow(targets, browserHistories = null) {
   syncWatchDirs(); scheduleWebviewThrottling();
 }
 export async function closeTabs(targets) {
-  if (hasActiveCloseDialog()) return showToast("이미 저장 확인이 열려 있습니다");
+  if (hasActiveCloseDialog()) return showToast("이미 저장 확인이 열려 있습니다", { level: "info" });
   const snapshots = [];
   for (const target of targets || []) {
     const space = target.space || getCenterSpace();
@@ -388,7 +394,7 @@ export function closeAllTabs() {
   const list = getCurrentTabs().slice();
   if (!list.length) return;
   const dirty = list.filter((tab) => isTabDirty(tab));
-  if (dirty.length) showToast(`저장하지 않은 편집이 ${dirty.length}개 있습니다`);
+  if (dirty.length) showToast(`저장하지 않은 편집이 ${dirty.length}개 있습니다`, { level: "warn" });
   closeTabs(list.map((tabRef) => ({ space: getCenterSpace(), tabId: tabRef.id, tabRef })));
 }
 

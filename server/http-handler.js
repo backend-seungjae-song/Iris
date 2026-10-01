@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,17 +10,17 @@ import {
   openDialogAsk,
   plannedAnswer,
 } from "./browser-runtime.js";
-import { allowedOriginHosts, host, portWithLegacy, remote } from "./env.cjs";
+import { allowedOriginHosts, host, NET_POLICY, portWithLegacy } from "./env.cjs";
 import { resolvePickSource } from "./pick-source.js";
 import { handleFeatureState } from "./feature-state.js";
 
 // HTTP request/Origin/MIME/routes 정책의 단일 소유 모듈.
 //
 // 소유 범위
-//   host/remote/Origin 허용 판정, static MIME/no-cache, dialog/browser/run/health routes.
+//   host/Origin 허용 판정, static MIME/no-cache, dialog/browser/run/health routes.
 //
 // 제공 API
-//   PORT/HOST/REMOTE 상수, IP·connection 판정 함수와 createHttpHandler request handler factory.
+//   PORT/HOST 상수, IP·connection 판정 함수와 createHttpHandler request handler factory.
 //   실제 HTTP listener와 WebSocketServer 인스턴스는 노출하거나 만들지 않는다.
 //
 // 의존 대상
@@ -30,7 +29,7 @@ import { handleFeatureState } from "./feature-state.js";
 //
 // 유지 조건
 //   /pick-source는 로컬 오리진의 소스 위치만 응답하고 파일 내용은 싣지 않는다.
-//   /dialog-ask가 Origin gate보다 먼저인 순서, loopback + Tailscale 100.64/10 허용 범위,
+//   /dialog-ask가 Origin gate보다 먼저인 순서, loopback 전용 허용 범위,
 //   프록시 헤더 요청 거부, 자기 origin 정확 일치, 로컬 판정은 isLoopbackRequest 하나,
 //   AC5 로컬 POST gate, route 응답·CORS·MIME·cache 타이밍을 보존한다.
 //
@@ -50,25 +49,19 @@ const WEB = path.join(__dirname, "..", "web");
 // 그 결과 격리하려고 실행한 서버가 실제 앱과 같은 포트를 잡았다. 같은 원인이 index.js 의
 // 포트 대기 주석에도 적혀 있다(EADDRINUSE 종료 62회).
 export const PORT = portWithLegacy();
-// 원격(AC4~6): REMOTE=1이면 0.0.0.0 바인딩해 Tailscale IP로 폰이 접속.
-// 단 접속 IP를 localhost + Tailscale 대역으로만 허용해 미인증 외부 주체를 차단(AC6).
-// 로컬 전용(기본)은 127.0.0.1.
-export const REMOTE = remote();
+// 수신 주소 루프백 고정(env.cjs host)
+// 외부 접속 경로는 원격 게이트웨이 전용. 이 서버는 원격 연결 없음
 export const HOST = host();
 
-// AC6 강제: 허용 대역 = 루프백 + Tailscale CGNAT(100.64.0.0/10). 그 외 원격 주소는 거부.
-// Tailscale은 tailnet에 가입한 기기에만 100.x 주소를 부여하므로 기기 소속이 인증 역할을 한다.
 export function normalizeIp(ip) {
   if (!ip) return "";
   return ip.startsWith("::ffff:") ? ip.slice(7) : ip; // IPv4-mapped IPv6
 }
-export function isAllowedRemote(rawIp) {
+// 접속 허용 주소: 루프백만
+// 이전의 Tailscale 대역(100.64.0.0/10) 허용 제거. 대역 판정은 tailnet 소속 증명 아님
+export function isLoopbackIp(rawIp) {
   const ip = normalizeIp(rawIp);
-  if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true;
-  // 100.64.0.0/10 = 100.64.0.0 ~ 100.127.255.255 (Tailscale CGNAT)
-  const m = ip.match(/^100\.(\d+)\./);
-  if (m) { const o = Number(m[1]); return o >= 64 && o <= 127; }
-  return false;
+  return ip === "127.0.0.1" || ip === "::1";
 }
 // 로컬 판정의 정본. 터미널·실행·/browser-cmd·기능 설정 쓰기처럼 이 기기 사람만 해야 하는 일은
 // 전부 이 함수로 판정한다. 소켓 주소만 보면 같은 기기의 리버스 프록시가 외부 요청을 루프백으로
@@ -91,47 +84,29 @@ export function isLoopbackRequest(req) {
   const ip = normalizeIp(req.socket?.remoteAddress);
   return (ip === "127.0.0.1" || ip === "::1") && !hasProxyHeaders(req);
 }
-// 이 Mac 이 tailnet 에서 받은 주소. 폰은 이 주소로 들어오므로 그 origin 을 자기 origin 으로 본다.
-// tailscale up/down 으로 바뀌므로 요청마다 읽는다.
-export function selfTailscaleIps() {
-  const out = [];
-  let ifaces;
-  // 조회가 실패하면 tailnet origin 을 자기 것으로 확인할 수 없으므로 거부 쪽(빈 목록)으로 둔다.
-  // 여기서 던지면 요청 처리 밖으로 새어 서버가 멈출 수 있다.
-  try { ifaces = os.networkInterfaces(); } catch (e) { console.warn("[origin] networkInterfaces 실패:", e?.message || e); return out; }
-  for (const list of Object.values(ifaces)) {
-    for (const a of list || []) {
-      if (a.family === "IPv4" && a.address.startsWith("100.") && isAllowedRemote(a.address)) out.push(a.address);
-    }
-  }
-  return out;
-}
 // Origin 검사: cross-site + DNS rebinding 차단. Host 헤더는 공격자가 정할 수 있어서 대조 기준이 되지
 // 못한다(자기 도메인을 루프백으로 rebinding 하면 Origin·Host 가 같아진다). 그래서 이 서버 자신의
 // origin 과 스킴·호스트·포트까지 정확히 같을 때만 받는다. 127/8 전체나 다른 포트를 받으면 같은
 // 기기의 다른 로컬 서버가 띄운 페이지가 이 서버에 명령을 보낼 수 있다.
-// MagicDNS 이름 등으로 접속하는 경우만 IRIS_ALLOWED_ORIGIN_HOSTS 로 호스트 이름을 명시해 허용한다.
-export function originAllowed(req, tailscaleIps = null) {
+// 추가 허용 호스트(IRIS_ALLOWED_ORIGIN_HOSTS)도 http://<이름>:<PORT> 전체 origin 비교
+// 호스트 이름만 비교하면 같은 이름의 다른 포트·https 페이지까지 통과
+export function originAllowed(req) {
   const o = req.headers?.origin;
   if (!o) return true; // 네이티브 클라이언트(curl·CLI·MCP)는 Origin 이 없다
   let url;
   try { url = new URL(o); } catch { return false; }
-  if (allowedOriginHosts().includes(url.hostname)) return true;
-  const hosts = ["127.0.0.1", "localhost", "[::1]"];
-  const self = new Set(hosts.map((h) => new URL(`http://${h}:${PORT}`).origin));
-  if (self.has(url.origin)) return true;
-  // Tailscale 주소는 Origin 이 100.x 일 때만 읽는다.
-  if (!/^100\./.test(url.hostname)) return false;
-  const ts = tailscaleIps || selfTailscaleIps();
-  return ts.some((ip) => new URL(`http://${ip}:${PORT}`).origin === url.origin);
+  const hosts = ["127.0.0.1", "localhost", "[::1]", ...allowedOriginHosts()];
+  const self = new Set();
+  for (const h of hosts) {
+    try { self.add(new URL(`http://${h}:${PORT}`).origin); } catch {}
+  }
+  return self.has(url.origin);
 }
-// IP 필터는 REMOTE 플래그·바인딩과 무관하게 항상 적용한다. HOST=0.0.0.0 으로 잘못 설정해도
-// 미인증 외부 주체를 막는다(AC6). 허용 = 루프백 + Tailscale 대역, 프록시 헤더 없음, Origin 통과.
-// 프록시를 거쳐 들어오는 정당한 클라이언트는 없다. 앱 창은 127.0.0.1 로, CLI·MCP 는 직접 POST 로,
-// 폰은 tailnet 주소로 직접 들어온다.
+// 연결 허용 조건: 루프백 소켓, 프록시 헤더 없음, Origin 통과
+// 앱 창·CLI·MCP 모두 루프백 직접 접속. 프록시 경유 정당 클라이언트 없음
 export function connectionAllowed(req) {
   if (hasProxyHeaders(req)) return false;
-  if (!isAllowedRemote(req.socket?.remoteAddress)) return false;
+  if (!isLoopbackIp(req.socket?.remoteAddress)) return false;
   return originAllowed(req);
 }
 
@@ -242,7 +217,7 @@ export function createHttpHandler({ irisHome, capabilityHost }) {
   // 상태 폴더까지 실어야 개발 인스턴스와 설치본을 헷갈리지 않는다(포트만으론 구별이 안 된다).
   if (req.method === "GET" && pathname === "/healthz") {
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({ ok: true, pid: process.pid, port: PORT, stateDir: irisHome }));
+    res.end(JSON.stringify({ ok: true, pid: process.pid, port: PORT, stateDir: irisHome, netPolicy: NET_POLICY }));
     return;
   }
   let rel = pathname === "/" ? "/index.html" : pathname;

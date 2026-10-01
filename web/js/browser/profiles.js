@@ -337,9 +337,12 @@ export function openProfileMenu() {
   (async () => {
     let profs = [];
     try { profs = (window.acHost && acHost.listChromeProfiles) ? await acHost.listChromeProfiles() : []; } catch {}
+    let blocked = "";
+    if (!profs.length) { try { blocked = (window.acHost && acHost.chromeDataBlocked) ? await acHost.chromeDataBlocked() : ""; } catch {} }
     const box = menu.querySelector(".pm-chrome"); if (!box) return;
     box.innerHTML = profs.length
       ? profs.map((p) => `<div class="pm-item pm-import" data-cid="${esc(p.id)}" data-clabel="${esc(p.label)}">${esc(p.label)}</div>`).join("")
+      : blocked ? `<div class="pm-empty pm-blocked">${esc(blocked)}</div>`
       : `<div class="pm-empty">설치된 Chrome 프로필 없음(macOS만 지원)</div>`;
   })();
   menu.addEventListener("click", async (e) => {

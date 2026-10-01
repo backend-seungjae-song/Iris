@@ -162,7 +162,7 @@ async function renderDocxContent(t) {
     chromeCleanups.push(editor.on("error", (error) => {
       if (docxCheckParseError()) return;
       if (t !== getRenderedFileOwner() || t.docxEditor !== editor) return;
-      showToast(error.message || "DOCX 편집기 오류");
+    showToast("DOCX 편집기 오류", { level: "err", detail: String(error?.message || "원인 불명") });
     }));
     if (docxCheckParseError()) return;
     t.docxChromeCleanups = chromeCleanups;

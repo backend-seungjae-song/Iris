@@ -111,6 +111,11 @@ function createChromeHandoffIpc({
     try { if (!isTrustedSender(e)) return []; return cookieImport.listChromeProfiles().map((entry) => ({ id: chromeProfileCid(entry), label: entry.label })); }
     catch { return []; }
   });
+  // 목록이 비었을 때 화면이 부른다. macOS 가 브라우저 폴더 읽기를 막았으면 안내 문구, 아니면 빈 문자열.
+  ipcMain.handle("ac-chrome-data-blocked", (e) => {
+    try { return isTrustedSender(e) ? cookieImport.chromiumDataBlockedMessage() : ""; }
+    catch { return ""; }
+  });
   // 지정 Chrome 프로필의 쿠키를 지정 탭 파티션으로 가져온다(그 로그인 세션 그대로). 파티션은 하드닝도 보장.
   // 쿠키에 더해 저장된 로그인(아이디/비번)도 임포트해 자체 자동완성에 쓴다(credStore).
   ipcMain.handle("ac-import-chrome-profile", async (e, arg) => {

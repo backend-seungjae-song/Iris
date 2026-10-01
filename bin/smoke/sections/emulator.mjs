@@ -3,7 +3,7 @@ import { check, cannotMeasure, filesUnder, read, WEB_SHUTTLE_EXCLUDES } from "..
 // 에뮬레이터 분리 창의 검사.
 //
 // 소유 범위
-//   web/emulator-window 세 파일에 대한 판정. 셔틀 제외와의 일치, 화면 모듈을 그대로 쓰는가,
+//   web/emulator-window 세 파일에 대한 판정. 셔틀 제외와의 일치, 화면·지목 통과 규칙 모듈을 그대로 쓰는가,
 //   창을 닫을 때 세션을 끄지 않는가.
 //
 // 설계 이유
@@ -24,12 +24,13 @@ export default async function run() {
     return true;
   });
 
-  // 창이 자기 화면을 따로 만들면 탭과 창의 동작이 갈린다. 탭이 쓰는 모듈 하나만 가져온다.
-  check("분리 창은 탭과 같은 화면 모듈만 가져온다", () => {
+  // 창이 자기 화면이나 지목 통과 규칙을 따로 만들면 탭과 창의 동작이 갈린다. 탭이 쓰는 두 모듈만 가져온다.
+  check("분리 창은 탭과 같은 화면·지목 통과 규칙 모듈만 가져온다", () => {
     const imports = pageFiles.filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...read(f).matchAll(/\bimport\s*(?:[^"'()]*?from\s*)?\(?\s*["']([^"']+)["']/g)].map((m) => m[1]));
     if (!imports.length) throw new Error("분리 창이 아무 모듈도 가져오지 않는다");
-    const other = imports.filter((p) => p !== "/js/emulator/pane.js");
+    const allowed = new Set(["/js/emulator/pane.js", "/js/emulator/controls.js"]);
+    const other = imports.filter((p) => !allowed.has(p));
     if (other.length) throw new Error(`화면 모듈 밖을 가져온다: ${other.join(", ")}`);
     return true;
   });
@@ -91,42 +92,106 @@ export default async function run() {
     return true;
   });
 
+  check("세로 열 분리와 원래 자리 복귀는 열 상태를 정리한다", () => {
+    const boot = read("web/js/emulator/boot.js");
+    const detach = bootBody("detach");
+    const valid = (source) => /detachable: true/.test(source)
+      && /entry\.inStage = false; entry\.inColumn = false;/.test(detach)
+      && /renderGroups\(\)/.test(detach)
+      && /entry\.detachHome = home/.test(detach)
+      && /returnPlace\(entry\.detachHome, layoutOn\(\)\)/.test(bootBody("reattach"));
+    if (!valid(boot)) throw new Error("세로 열 분리 또는 원래 자리 복귀 경로가 빠졌다");
+    if (valid(boot.replace("detachable: true", "detachable: false"))) throw new Error("분리 제한 위반을 검출하지 못한다");
+    return true;
+  });
+
+  check("Iris 제어와 플랫폼별 폰 조작은 서로 다른 줄에 있다", () => {
+    const pane = read("web/js/emulator/pane.js");
+    const valid = (source) => /root\.append\(toolbar, errorBar, frameWrap, phoneBar\)/.test(source)
+      && /phoneButtons\.set\(name, button\);\s*phoneBar\.append\(button\)/.test(source)
+      && /phoneControls\(platform\)/.test(source)
+      && /button\.setAttribute\("aria-pressed"/.test(source);
+    if (!valid(pane)) throw new Error("두 줄 구성·플랫폼 판정·상태 표시가 빠졌다");
+    if (valid(pane.replace("phoneBar.append(button)", "toolbar.append(button)"))) throw new Error("폰 조작 위치 위반을 검출하지 못한다");
+    return true;
+  });
+
+  check("에뮬레이터 지목은 UI 전용 대기 구분자를 채팅 입력에 넣는다", () => {
+    const native = read("native/electron/emulator/emulator-host.cjs");
+    const preload = read("native/electron/preload.cjs");
+    const boot = read("web/js/emulator/boot.js");
+    const server = read("server/emulator-targets.js");
+    const valid = (serverSource) => /ws\._local \|\| !ws\._ui/.test(serverSource)
+      && /issuePromptTarget\(\{ pane, kind: "device"/.test(serverSource)
+      && /ref: `@device:\$\{udid\}`/.test(serverSource)
+      && /type: "emulator\.target-pending-result"/.test(serverSource)
+      && /type: "emulator\.target-pending"/.test(boot)
+      && /등록 구분자: \$\{message\.delimiter\}/.test(boot)
+      && /"emulator\.target-pending-result": finishDeviceDesignation/.test(boot)
+      && !/ac-emulator-target-pin|app-targets\.json/.test(native)
+      && !/pinTarget/.test(preload);
+    if (!valid(server)) throw new Error("기기 대기 지정·채팅 블록 또는 native 쓰기 제거가 빠졌다");
+    if (valid(server.replace("!ws._local || !ws._ui", "false"))) throw new Error("UI 전용 경계 위반을 검출하지 못한다");
+    return true;
+  });
+
+  check("요소 선택과 기록은 기능 훅과 분리 창 IPC로 이어진다", () => {
+    const boot = read("web/js/emulator/boot.js");
+    const pick = read("web/js/browser/pick-host.js");
+    const window = read(`${PAGE}/window.js`);
+    const server = read("server/browser-message-handlers.js");
+    const valid = (source) => /hasHook\("pick\.toggle"\)/.test(source)
+      && /hasHook\("record\.set"\)/.test(source)
+      && /provide\("emulator\.pickTarget", pickTarget\)/.test(source)
+      && /provide\("emulator\.designate"/.test(source);
+    if (!valid(boot) || !/callHook\("emulator\.pickTarget", target\)/.test(pick)
+      || !/callHook\("emulator\.designate", emulator\)/.test(pick)
+      || !/host\.requestControl\(\{ action: "target"/.test(window)
+      || !/action: "device", tab: params\.get\("tab"\), device/.test(window)
+      || !/entry\.tab\.deviceId = m\.device \|\| null/.test(boot)
+      || !/host\.closeWindow\(\{ tab: params\.get\("tab"\) \}\)/.test(window)
+      || !/!msg\.hasEmulatorContext/.test(server)) throw new Error("요소 선택·기록·분리 창 경로가 끊겼다");
+    if (valid(boot.replace('provide("emulator.pickTarget", pickTarget)', 'provide("emulator.pickTargetX", pickTarget)'))) {
+      throw new Error("훅 이름 위반을 검출하지 못한다");
+    }
+    return true;
+  });
+
   // 세로 열로 보낸 탭도 탭 저장소에 없다. sweep 이 그것을 닫힌 탭으로 보면 기기와 헬퍼를 끈다.
   check("세로 열로 보낸 에뮬레이터 탭은 탭 띠에서 빠지고, 열은 배치 영역으로 등록된다", () => {
     if (!/takeOutOfStrip\(entry\)/.test(bootBody("toColumn"))) throw new Error("toColumn 이 탭을 탭 띠에서 빼지 않는다");
     if (!/putBackInStrip\(entry\)/.test(bootBody("toTab"))) throw new Error("toTab 이 탭을 되돌려 넣지 않는다");
     if (!/if \(entry\.inColumn\) \{[^\n]*continue; \}/.test(bootBody("sweep"))) throw new Error("sweep 이 세로 열의 탭을 닫힌 탭으로 보고 끈다");
-    if (!/registerLayoutRegion\(\{ id: "emulator"[^\n]*visible: \(\) => !!columnEntry/.test(bootBody("mountColumn"))) throw new Error("세로 열이 배치 영역으로 등록되지 않는다");
+    if (!/registerLayoutRegion\(\{ id,/.test(bootBody("ensureGroup")) || !/ensureGroup\("emulator"\)/.test(bootBody("mountColumn"))) throw new Error("세로 열이 배치 영역으로 등록되지 않는다");
     return true;
   });
 
-  // 세로 열의 화면은 탭 띠에 없어 탭의 닫기(×)로 닫을 수 없다. 열의 도구 막대에 닫기 단추를 두고,
-  // 탭을 닫았을 때(sweep → closeEntry)와 같은 경로로 닫아 열이 사라지게 한다.
-  check("세로 열의 에뮬레이터 화면은 열에서 닫을 수 있고, 탭 닫기와 같은 경로로 닫힌다", () => {
-    if (!/entry\.inColumn\s*\?[\s\S]*?label: "세로 열 닫기"[^\n]*onClick: \(\) => closeColumn\(entry\)/.test(bootBody("paneActions"))) throw new Error("세로 열의 도구 막대에 [세로 열 닫기] 단추가 없다");
-    if (!/closeEntry\(entry\.tab\.id\)/.test(bootBody("closeColumn"))) throw new Error("closeColumn 이 탭 닫기와 같은 closeEntry 로 닫지 않는다");
-    if (!/if \(entry === columnEntry\) \{ columnEntry = null; notifyLayout\(\); \}/.test(bootBody("closeEntry"))) throw new Error("closeEntry 가 세로 열을 비우고 배치 엔진에 알리지 않는다");
-    if (!/\bclose: TB_SVG\(/.test(read("web/js/emulator/pane.js"))) throw new Error("닫기 아이콘이 없어 글자를 뺀 도구 막대에서 단추가 비어 보인다");
+  check("각 기기 화면을 닫으면 그 pane만 종료하고 열 목록을 다시 그린다", () => {
+    if (!/closeEntry\(entry\.tab\.id\)/.test(bootBody("paneActions"))) throw new Error("기기 닫기 조작이 없다");
+    if (!/entry\.pane\.close\(\)/.test(bootBody("closeEntry")) || !/renderGroups\(\)/.test(bootBody("closeEntry"))) throw new Error("종료 또는 열 갱신이 빠졌다");
+    if (!/\bclose: TB_SVG\(/.test(read("web/js/emulator/pane.js"))) throw new Error("닫기 아이콘이 없다");
     return true;
   });
 
-  // rail 기기 화면의 무대에 옮긴 탭도 탭 저장소에 없다. sweep 이 그것을 닫힌 탭으로 보면 기기와 헬퍼를 끈다.
-  // 같은 기기를 두 곳에 붙일 수 없으므로 그 화면에 있는 동안 세로 열은 자리를 차지하지 않고, 나오면 되돌린다.
-  check("무대로 옮긴 에뮬레이터 탭은 닫힌 탭이 아니고, 그동안 세로 열은 비어 있다", () => {
-    if (!/takeOutOfStrip\(entry\)/.test(bootBody("toStage"))) throw new Error("toStage 가 탭을 탭 띠에서 빼지 않는다");
-    if (!/putBackInStrip\(entry\)/.test(bootBody("fromStage"))) throw new Error("fromStage 가 탭을 되돌려 넣지 않는다");
-    if (!/if \(entry\.inStage\) \{[^\n]*continue; \}/.test(bootBody("sweep"))) throw new Error("sweep 이 무대의 탭을 닫힌 탭으로 보고 끈다");
-    if (!/visible: \(\) => !!columnEntry && !inRail/.test(bootBody("mountColumn"))) throw new Error("rail 기기 화면에서도 세로 열이 자리를 차지한다");
-    if (!/fromStage\(stageEntry\)/.test(bootBody("leaveRail"))) throw new Error("rail 기기 화면을 떠나도 무대의 화면이 제자리로 돌아가지 않는다");
-    if (!/screen: \{ enter: enterRail, leave: leaveRail \}/.test(read("web/js/emulator/boot.js"))) throw new Error("rail 에 leave 를 등록하지 않았다");
+  check("내부 배치 변경은 pane을 유지하고 모든 무대 기기를 복귀시킨다", () => {
+    const moving = ["toColumn", "toTab", "toStage", "fromStage"].map(bootBody).join("\n");
+    const valid = source => !/\.dispose\(|\.close\(|emulator\.shutdown/.test(source);
+    if (!valid(moving)) throw new Error("내부 이동이 pane을 종료한다");
+    if (valid(moving + "entry.pane.dispose();")) throw new Error("이동 중 dispose 위반을 검출하지 못한다");
+    if (!/if \(entry\.inStage\) \{[^\n]*continue; \}/.test(bootBody("sweep"))) throw new Error("무대 탭을 닫힌 탭으로 취급한다");
+    if (!/visible: \(\) => !inRail/.test(bootBody("ensureGroup"))) throw new Error("무대에서도 열이 자리를 차지한다");
+    if (!/for \(const entry of mounted.values\(\)\) if \(entry.inStage\) fromStage\(entry\)/.test(bootBody("leaveRail"))) throw new Error("모든 기기가 복귀하지 않는다");
     return true;
   });
 
   // 에이전트 경로(openForAgent)는 사용자 화면을 옮기지 않는다. 그래서 rail 기기 화면의 빈 무대가 같은 스페이스에
   // 붙은 화면을 알리고, 사람이 [여기서 보기]를 눌러야 무대로 옮긴다. 알리지 않으면 무대가 빈 채로 남는다.
   check("에이전트가 연 기기는 빈 무대가 알리고, 사람이 누를 때만 무대로 옮긴다", () => {
-    const agent = bootBody("openForAgent");
-    if (/toStage\(|setCenterSpace\(|setActiveTab\(/.test(agent)) throw new Error("openForAgent 가 사용자 화면(무대·스페이스·활성 탭)을 바꾼다");
+    const agent = bootBody("openForAgentRequest");
+    for (const name of ["openForAgent", "openForAgentRequest", "openAllocatedForAgent", "openOwnedForAgent", "waitAgentDevice"]) {
+      if (/toStage\(|setCenterSpace\(|setActiveTab\(/.test(bootBody(name))) throw new Error(`${name} 가 사용자 화면(무대·스페이스·활성 탭)을 바꾼다`);
+    }
+    if (!/renderStage\(\)/.test(bootBody("openOwnedForAgent"))) throw new Error("세션 소유 탭을 연 뒤 빈 무대 안내를 갱신하지 않는다");
     if (!/renderStage\(\)/.test(agent)) throw new Error("openForAgent 가 화면을 붙인 뒤 빈 무대 안내를 갱신하지 않는다");
     const stageBody = bootBody("renderStage");
     if (!/const waiting = !stageEntry && inRail && sp \? entryOfSpace\(sp\) : null;/.test(stageBody)) throw new Error("renderStage 가 같은 스페이스에 붙은 화면을 보지 않는다");
@@ -137,20 +202,12 @@ export default async function run() {
     return true;
   });
 
-  // 배치 엔진이 꺼져 열에서 탭으로 밀려난 화면만 엔진이 다시 켜질 때 열로 돌아간다. home 만 보면 사람이 탭으로
-  // 옮긴 화면이나 다른 기기에 열을 내준 화면까지 되돌린다.
-  check("창이 넓어지면 폭 때문에 탭으로 밀려난 에뮬레이터만 세로 열로 돌아간다", () => {
+  check("창 폭에 밀려난 모든 기기가 넓어지면 각 열로 돌아간다", () => {
     const col = bootBody("mountColumn");
-    if (!/if \(!on\) \{[\s\S]{0,400}?if \(columnEntry\) \{[^\n]*toTab\(entry, true\); entry\.narrowed = !byMode;/.test(col)) throw new Error("엔진이 꺼질 때 밀려난 화면을 표시하지 않는다");
-    // 분리 브라우저·메모 창 모드로 꺼진 것은 폭이 돌아와도 켜지지 않는다. 그때 표시하면 되돌릴 일이 없는 표시가 남는다.
-    if (!/const byMode = document\.body\.classList\.contains\("browser-mode"\) \|\| document\.body\.classList\.contains\("memo-mode"\);/.test(col)) throw new Error("모드 전환으로 꺼진 것도 폭 때문으로 표시한다");
-    if (!/if \(entry\.narrowed && !entry\.inColumn && !entry\.inStage && !entry\.detached\) \{[^\n]*toColumn\(entry\)/.test(col)) throw new Error("엔진이 켜질 때 표시한 화면만 열로 되돌리지 않는다");
-    if (/entry\.home === "column"/.test(col)) throw new Error("열 복귀를 home 으로 판정한다");
-    const actions = bootBody("paneActions");
-    if ((actions.match(/entry\.narrowed = false;/g) || []).length !== 2) throw new Error("[탭으로]·[세로 열로] 수동 이동이 표시를 지우지 않는다");
-    if (!/other\.narrowed = false/.test(bootBody("toColumn"))) throw new Error("다른 화면이 열을 차지해도 밀려난 화면의 표시가 남는다");
-    if (!/entry\.narrowed = false/.test(bootBody("detach"))) throw new Error("분리해도 표시가 남는다");
-    if (!/entry\.narrowed = false/.test(bootBody("closeEntry"))) throw new Error("닫아도 표시가 남는다");
+    if (!/!on && entry\.inColumn/.test(col) || !/entry\.narrowed = !byMode/.test(col)) throw new Error("좁아진 열의 기록이 없다");
+    if (!/on && entry\.narrowed && !entry\.detached && !entry\.inStage/.test(col)) throw new Error("복귀 대상이 잘못됐다");
+    if (!/browser-mode/.test(col) || !/memo-mode/.test(col)) throw new Error("모드 전환을 창 폭 변화와 구분하지 않는다");
+    if (!/entry\.narrowed = false/.test(bootBody("detach"))) throw new Error("분리한 화면의 복귀 기록이 남는다");
     return true;
   });
 

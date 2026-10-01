@@ -109,9 +109,9 @@ export async function offerSaveLogin(cap, tabId, partition) {
           origin: cap.origin, url: cap.url || cap.origin,
           username: cap.username, password: cap.password,
         });
-        if (r && r.ok) showToast(verdict === "update" ? "비밀번호를 바꿨습니다." : "금고에 저장했습니다.");
-        else showToast("저장하지 못했습니다.");
-      } catch { showToast("저장하지 못했습니다."); }
+        if (r && r.ok) showToast(verdict === "update" ? "비밀번호를 바꿨습니다." : "금고에 저장했습니다.", { level: "ok" });
+        else showToast("저장하지 못했습니다.", { level: "err" });
+      } catch { showToast("저장하지 못했습니다.", { level: "err" }); }
     },
     () => { dismissed.add(saveKey(cap.origin, cap.username)); },
   );

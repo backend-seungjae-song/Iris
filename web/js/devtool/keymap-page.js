@@ -21,28 +21,30 @@
 //   settings-view 의 순수 마크업, web/css/20-keymap.css 의 이름.
 //   현재 목록 확인: node bin/importers.mjs web/js/devtool/keymap-page.js
 
-import { applyPreset, featureEnableNote, featureNeedsRestart, featureOptIn, featureRestartNote } from "../core/features.js";
+import { featureEnableNote, featureNeedsRestart, featureOptIn, featureRestartNote, presetMembers } from "../core/features.js";
 import {
   bindingFromEvent, findConflicts, formatBinding, resolvedKeymap, sameBinding,
 } from "../core/keymap.js";
 import { artifactsClick, artifactsModel, enterArtifacts, initArtifacts } from "./artifacts-page.js";
 import { optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
 import { CAPABILITIES } from "../core/capabilities.js";
+import { callHook } from "../core/hooks.js";
 import { motionOn, setMotion } from "../core/motion.js";
 
-let $ = null, wsSend = null, showToast = null, getSecurityToggles = null, setSecurityToggle = null;
+let $ = null, wsSend = null, showToast = null, getSecurityToggles = null, setSecurityToggle = null, clearSiteRecords = null;
 let getRailScreens = null, setRailScreen = null, enableCapability = null, refreshRail = null;
 let getSwitcher = null, pickWindow = null, unpickWindow = null, moveWindow = null;
-let refreshWindows = null, reloadWindows = null, openPermissions = null;
+let refreshWindows = null, reloadWindows = null, openPermissions = null, setGlobalPriority = null;
 let recording = null;   // 지금 새 조합을 기다리는 항목 id
 let query = "";
 let section = SETTINGS_SECTIONS[0].id;   // 왼쪽에서 고른 분류
+let presetView = "full";                 // 편의 기능 목록 보기(전부·최소·개발자). 설정은 안 바꿈
 let seenListRevision = null;
 
 export function initKeymapPage(deps) {
   ({
-    $, wsSend, showToast, getSecurityToggles, setSecurityToggle, getRailScreens, setRailScreen,
-    getSwitcher, pickWindow, unpickWindow, moveWindow, refreshWindows, reloadWindows, openPermissions,
+    $, wsSend, showToast, getSecurityToggles, setSecurityToggle, clearSiteRecords, getRailScreens, setRailScreen,
+    getSwitcher, pickWindow, unpickWindow, moveWindow, refreshWindows, reloadWindows, openPermissions, setGlobalPriority,
     enableCapability, refreshRail,
   } = deps);
   const root = $("#km-panel");
@@ -65,7 +67,7 @@ export function initKeymapPage(deps) {
     if (reset) { wsSend({ type: "keymap-reset", id: reset.dataset.kmReset }); return; }
     if (e.target.closest("#km-reset-all")) {
       wsSend({ type: "keymap-reset" });
-      showToast && showToast("단축키를 전부 기본값으로 되돌렸습니다");
+      showToast && showToast("단축키를 전부 기본값으로 되돌렸습니다", { level: "info" });
       return;
     }
     const sec = e.target.closest("[data-km-sec]");
@@ -111,6 +113,12 @@ export function initKeymapPage(deps) {
       Promise.resolve(action).then(() => renderKeymapPage());
       return;
     }
+    const globalSw = e.target.closest("[data-sw-global]");
+    if (globalSw) {
+      const status = ((getSwitcher && getSwitcher()) || {}).status || {};
+      Promise.resolve(setGlobalPriority && setGlobalPriority(!status.globalPriority)).then(() => renderKeymapPage());
+      return;
+    }
     if (e.target.closest("#sw-refresh")) {
       void requestFreshWindowList();
       return;
@@ -130,40 +138,26 @@ export function initKeymapPage(deps) {
       const optIn = wasOn ? null : featureOptIn(id);
       if (optIn && !await confirmOptIn(optIn)) return;
       try { if (!setRailScreen || !await setRailScreen(id, { confirmed: !!optIn })) return; }
-      catch (error) { showToast && showToast(error.message); return; }
+      catch (error) { showToast && showToast("기능 설정을 바꾸지 못했습니다", { level: "err", detail: String(error.message) }); return; }
       renderKeymapPage();
       if (CAPABILITIES.some((c) => (c.rail || c.id) === id)) {
         // 켜는 쪽은 아직 로드되지 않은 모듈을 지금 로드할 수 있다. 끄는 쪽은 한 번 로드한 ESM 을 내릴 수 없다.
-        if (wasOn) { showToast && showToast(featureRestartNote(id)); return; }
+        if (wasOn) { showToast && showToast(featureRestartNote(id), { level: "info" }); return; }
         // 서버·네이티브 짝이 있는 것을 렌더러만 먼저 로드하면 절반만 적용되므로 재시작까지 미룬다.
-        if (featureNeedsRestart(id)) { showToast && showToast(featureEnableNote(id)); return; }
+        if (featureNeedsRestart(id)) { showToast && showToast(featureEnableNote(id), { level: "info" }); return; }
         const loadedNow = enableCapability ? await enableCapability(id) : false;
-        showToast && showToast(loadedNow ? featureEnableNote(id) : "⌘⇧R 로 다시 읽으면 켜집니다");
+        showToast && showToast(loadedNow ? featureEnableNote(id) : "⌘⇧R 로 다시 읽으면 켜집니다", { level: "info" });
       }
       return;
     }
     const pre = e.target.closest("[data-set-preset]");
     if (pre) {
-      // 저장된 구성과 실행 중인 서버 구성은 재시작 전까지 다를 수 있다.
-      let plan;
-      try { plan = await applyPreset(pre.dataset.setPreset); }
-      catch (error) { showToast && showToast(error.message); return; }
-      // 상태만 바꾸면 rail 과 패널은 그대로다. 켜짐을 화면에 반영하는 것은 rail 이 담당한다.
-      refreshRail && refreshRail();
+      presetView = pre.dataset.setPreset;
       renderKeymapPage();
-      if (!plan) return;
-      const now = plan.turningOn.filter((id) => !featureNeedsRestart(id));
-      let failed = now;
-      if (enableCapability) {
-        const results = await Promise.allSettled(now.map((id) => enableCapability(id)));
-        failed = now.filter((id, i) => results[i].status !== "fulfilled" || !results[i].value);
-      }
-      const parts = [!plan.turningOn.length && !plan.turningOff.length ? "이미 그 구성입니다"
-        : "구성을 저장했습니다. 서버·네이티브에도 반영하려면 앱을 다시 시작해 주세요"];
-      if (failed.length) parts.push(`지금 불러오지 못한 기능: ${failed.join(", ")}. ⌘⇧R 로 다시 읽어 주세요`);
-      showToast && showToast(parts.join(" · "));
       return;
     }
+    const clr = e.target.closest("[data-set-clear]");
+    if (clr) { clearSiteRecords && clearSiteRecords(clr.dataset.setClear); return; }
     const sw = e.target.closest("[data-set-toggle]");
     if (sw) {
       // 켜는 것은 사람이 정한다. 끄는 쪽으로는 묻지 않는다. 끄는 것이 안전한 방향이다.
@@ -193,13 +187,14 @@ export function initKeymapPage(deps) {
 // 확인하면 true. 바깥을 누르거나 Esc 를 누르면 취소다.
 function confirmOptIn(optIn) {
   return new Promise((resolve) => {
+    const previous = document.activeElement;
     const wrap = document.createElement("div");
     wrap.className = "askwrap";
-    wrap.innerHTML = optInConfirmMarkup(optIn);
+    wrap.innerHTML = `<div class="dim"></div><div class="modal">${optInConfirmMarkup(optIn)}</div>`;
     let done = false;
-    const finish = (value) => { if (done) return; done = true; wrap.remove(); resolve(value); };
+    const finish = (value) => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(value); };
     wrap.addEventListener("click", (e) => {
-      if (e.target === wrap) return finish(false);
+      if (e.target === wrap || e.target.classList?.contains("dim")) return finish(false);
       const b = e.target.closest("button");
       if (b) finish(b.dataset.a === "ok");
     });
@@ -256,6 +251,9 @@ export function renderKeymapPage() {
     id: x.id, label: x.label, where: x.where, lock: x.lock, changed: x.changed,
     keys: formatBinding(x.binding), defKeys: formatBinding(x.def),
   }));
+  // 기능이 가진 고정 단축키(창 레이아웃의 전역 단축키). 기능이 꺼져 있으면 훅이 없어 빈 목록
+  const featureRows = callHook("desklayout.keymapRows");
+  if (Array.isArray(featureRows)) items.push(...featureRows);
   // 화면은 settings-view 가 그린다. 앱을 켜지 않는 사본과 검사가 같은 함수를 부를 수 있어야
   // 배치를 두 벌로 적지 않는다.
   body.innerHTML = settingsMarkup({
@@ -264,6 +262,7 @@ export function renderKeymapPage() {
     conflicts: findConflicts(all).filter((c) => c.overlaps),
     toggles: (getSecurityToggles && getSecurityToggles()) || [],
     screens: (getRailScreens && getRailScreens()) || [],
+    presetView, presetMembers: presetMembers(presetView),
     motion: motionOn(),
     switcher,
     artifacts: artifactsModel(),

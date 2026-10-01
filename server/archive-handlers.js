@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { agentArgv, shellCommand } from "./agent-launch.js";
 import * as archive from "./archive.js";
 import { bindSpaceFolder } from "./browser-state-owner.js";
 import { resolveCodexSession } from "./codex-session.js";
@@ -104,12 +105,25 @@ export function handleArchive(ws, msg) {
       const keys = await Promise.all(mine.map((x) => (archive.canResume(x.agent) ? sessionKey(x) : null)));
       const keep = mine.map((x, i) => (keys[i] ? { ...x, sessionUuid: keys[i].uuid, sessionFile: keys[i].file } : null)).filter(Boolean);
       const lost = mine.length - keep.length;
+      const savedTabs = snapshot().tabs[w.id] || [];
+      const keptTabIds = new Set(keep.map((agent) => agent.tabId));
+      let panes = [];
+      if (savedTabs.some((tab) => !keptTabIds.has(tab.tabId))) {
+        try { panes = await herdr.paneList(w.id); }
+        catch (error) { fail(error); return; }
+        if (!Array.isArray(panes)) { fail("터미널의 작업 폴더를 확인하지 못해 접지 않았습니다."); return; }
+        for (const tab of savedTabs) if (!keptTabIds.has(tab.tabId)) {
+          try { validateTerminalCwd(panes.find((pane) => pane.tab_id === tab.tabId)?.cwd); }
+          catch (error) { fail(error); return; }
+        }
+      }
       const tails = await Promise.all(keep.map((x) => readTail(x.paneId, x.agent, x.sessionUuid, x.sessionFile)));
       const entries = keep.map((x, i) => archive.agentEntry(x, w.label, folder, tails[i]));
       archive.addMany(entries);
       // 탭 구성도 함께 남긴다. 세션이 붙지 않은 터미널 탭도 그 스페이스의 일부다.
       const entryByTab = new Map(keep.map((x, i) => [x.tabId, entries[i].id]));
-      const tabs = (snapshot().tabs[w.id] || []).map((t) => ({ label: t.label || "", entry: entryByTab.get(t.tabId) || null }));
+      const tabs = savedTabs.map((t) => ({ label: t.label || "", entry: entryByTab.get(t.tabId) || null,
+        ...(!keptTabIds.has(t.tabId) ? { cwd: panes.find((pane) => pane.tab_id === t.tabId).cwd } : {}) }));
       archive.add(archive.spaceEntry(w.label, folder, entries.map((e) => e.id), tabs));
       broadcastArchives();
       if (lost) ws.send(JSON.stringify({ type: "archive-note", message: `세션 id가 없는 에이전트 ${lost}개는 기록하지 못했습니다.` }));
@@ -156,13 +170,14 @@ const liveSpaceOf = (cwd) => (cwd ? snapshot().workspaces.find((w) => sameDir(w.
 // 스페이스 확보. 이미 실행 중이면 그것을 쓰고, 보관 중이면 복원하면서 그 항목을 보관함에서 뺀다.
 // 새로 만들면 herdr가 기본 탭 하나를 함께 만들므로 그 탭을 첫 세션이 쓰도록 반환한다.
 // 그러지 않으면 복원할 때마다 빈 탭이 하나 남는다.
+// keepArchive가 켜져 있으면 남은 탭 기록을 호출자가 복원 결과에 맞춰 갱신한다.
 // 생성·복원 응답 직후에는 recompute 전이라도 요청한 폴더 객체에 임시로 바인딩한다. 이후 herdr의
 // 검증된 identity가 다른 폴더 객체로 이동하면 workspace runtime이 그 객체로 바꾼다.
-async function ensureSpace(cwd, label) {
+async function ensureSpace(cwd, label, keepArchive = false) {
   if (!cwd) throw new Error("이 항목에는 폴더가 없어 되살릴 수 없습니다.");
   const archived = archive.list().find((x) => x.kind === "space" && sameDir(x.cwd, cwd));
   const live = liveSpaceOf(cwd);
-  if (live) { bindSpaceFolder(live.id, cwd); if (archived) archive.remove(archived.id); return { wsId: live.id, spare: null, archived }; }
+  if (live) { bindSpaceFolder(live.id, cwd); if (archived && !keepArchive) archive.remove(archived.id); return { wsId: live.id, spare: null, archived }; }
   // 복원할 때도 이름은 herdr에 맡긴다. 보관 전 이름이 폴더 이름과 같았다면 넘기지 않아야
   // 복원 후에도 폴더 이름을 따라간다. 넘기면 herdr가 custom_name으로 고정해 되돌릴 수 없다.
   // 폴더 이름과 달랐다면 사용자가 herdr에서 직접 지은 이름이므로 그대로 복원한다.
@@ -174,7 +189,7 @@ async function ensureSpace(cwd, label) {
   // 만든 즉시 폴더에 바인딩한다. 다음 recompute를 기다리면 그 사이의 조작이 임시 키(새 id)로
   // 저장돼 복원한 스페이스의 설정이 두 곳으로 갈라진다.
   bindSpaceFolder(wsId, cwd);
-  if (archived) archive.remove(archived.id);
+  if (archived && !keepArchive) archive.remove(archived.id);
   const spare = res?.root_pane?.pane_id
     ? { tabId: res?.tab?.tab_id || res?.root_pane?.tab_id || null, paneId: res.root_pane.pane_id, cwd: res.root_pane.cwd }
     : null;
@@ -194,13 +209,30 @@ async function takeTab(wsId, spareRef, label) {
   return slot;
 }
 
+function validateTerminalCwd(cwd) {
+  if (typeof cwd !== "string" || !path.isAbsolute(cwd) || /[\r\n\0]/.test(cwd)) {
+    throw new Error("터미널을 되살릴 폴더를 확인하지 못했습니다.");
+  }
+  try { if (fs.statSync(cwd).isDirectory()) return; } catch {}
+  throw new Error(`터미널을 되살릴 폴더가 없습니다: ${cwd}`);
+}
+
+async function reviveTerminal(wsId, spareRef, tab) {
+  const slot = await takeTab(wsId, spareRef, tab.label);
+  // 이전 보관 기록에는 cwd가 없다. 새 기록만 원래 작업 폴더로 이동한다.
+  if (tab.cwd != null && !sameDir(tab.cwd, slot.cwd)) {
+    await herdr.paneSendText(slot.paneId, shellCommand(["cd", "--", tab.cwd]) + "\r");
+  }
+}
+
 // 세션 하나를 복원한다. 탭을 확보해 이름을 붙이고 그 pane에 resume 명령을 입력한다.
 // agent.start에 tab_id를 주면 그 탭에 pane이 하나 더 생겨 빈 셸이 남으므로 직접 입력한다.
 async function reviveAgent(wsId, spareRef, e) {
-  const argv = archive.resumeArgv(e.agent, e.session);
+  const argv = agentArgv(e.agent, { resumeSession: e.session });
   if (!argv) throw new Error(`${e.agent} 세션을 잇는 방법을 모릅니다.`);
   const slot = await takeTab(wsId, spareRef, e.name);
   // 탭은 스페이스 폴더에서 시작한다. 세션이 그 아래 다른 폴더에 있었으면 먼저 옮긴다.
+  // 실행 파일까지 인용(셸 별칭 미적용, 기존 복원 동작 유지)
   const cmd = (sameDir(e.cwd, slot.cwd) || !e.cwd ? "" : `cd ${shq(e.cwd)} && `) + argv.map(shq).join(" ");
   await herdr.paneSendText(slot.paneId, cmd + "\r");
   archive.remove(e.id);
@@ -218,16 +250,19 @@ async function restoreSpaceGroup(ws, cwd) {
   const head = all.find((x) => x.kind === "space" && sameDir(x.cwd, cwd));
   const kids = all.filter((x) => x.kind === "agent" && sameDir(x.spaceCwd, cwd));
   if (!head && !kids.length) throw new Error("되살릴 항목이 없습니다.");
-  const space = await ensureSpace(cwd, head?.label || kids[0]?.spaceLabel);
-  const wsId = space.wsId;
   // 저장해둔 탭 구성이 있으면 그 순서대로 복원하고, 세션이 붙지 않은 터미널 탭도 함께 만든다.
   // 구성이 없으면(세션만 따로 보관한 그룹) 세션만 순서대로 복원한다.
   const byId = new Map(kids.map((k) => [k.id, k]));
   const plan = (head?.tabs || []).length
-    ? head.tabs.map((t) => ({ label: t.label, entry: t.entry && byId.get(t.entry) ? byId.get(t.entry) : null }))
+    ? head.tabs.map((t) => ({ label: t.label, cwd: t.cwd, savedTab: t, entry: t.entry && byId.get(t.entry) ? byId.get(t.entry) : null }))
     : kids.map((k) => ({ label: k.name, entry: k }));
   const planned = new Set(plan.map((p) => p.entry?.id).filter(Boolean));
   for (const k of kids) if (!planned.has(k.id)) plan.push({ label: k.name, entry: k });   // 구성에 없던 세션도 빠뜨리지 않는다
+  // 폴더가 사라졌을 때 보관 기록을 먼저 지우거나 빈 스페이스를 만들지 않는다.
+  for (const tab of plan) if (!tab.entry && tab.cwd != null) validateTerminalCwd(tab.cwd);
+  const space = await ensureSpace(cwd, head?.label || kids[0]?.spaceLabel, true);
+  const wsId = space.wsId;
+  let remainingTabs = [...(head?.tabs || [])];
 
   let ok = 0, plainTabs = 0; const failed = [];
   // 하나씩 간격을 두고 실행한다. 순차로 호출해도 claude 기동은 비동기라 간격이 없으면 8개가
@@ -235,13 +270,20 @@ async function restoreSpaceGroup(ws, cwd) {
   for (let i = 0; i < plan.length; i++) {
     const p = plan[i];
     ws.send(JSON.stringify({ type: "archive-progress", spaceCwd: cwd, done: i, total: plan.length, name: p.entry ? (p.entry.name || p.entry.agent) : (p.label || "터미널 탭") }));
+    let restored = false;
     try {
       if (p.entry) { await reviveAgent(wsId, space, p.entry); ok++; }
-      else { await takeTab(wsId, space, p.label); plainTabs++; }   // 세션 없는 탭은 이름만 복원
+      else { await reviveTerminal(wsId, space, p); plainTabs++; }
+      restored = true;
     } catch (err) { failed.push(`${p.entry?.name || p.label || "탭"}: ${err.message || err}`); }
+    if (restored && head) {
+      remainingTabs = remainingTabs.filter((tab) => tab !== p.savedTab);
+      archive.update(head.id, { tabs: remainingTabs, agents: kids.filter((entry) => archive.get(entry.id)).map((entry) => entry.id) });
+    }
     broadcastArchives();                                  // 복원된 항목부터 목록에서 빠진다
     if (i < plan.length - 1 && p.entry) await new Promise((r) => setTimeout(r, REVIVE_GAP_MS));
   }
+  if (head && !remainingTabs.length) archive.remove(head.id);
   if (failed.length) ws.send(JSON.stringify({ type: "archive-error", message: `세션 ${failed.length}개를 못 살렸습니다 — ${failed.join(" / ")}` }));
   broadcastArchives(); recompute();
   ws.send(JSON.stringify({ type: "archive-restored", workspaceId: wsId,
@@ -254,8 +296,14 @@ async function restoreArchive(ws, e) {
   // 스페이스 항목이면 그 그룹 전체가 대상이다.
   if (e.kind === "space") { await restoreSpaceGroup(ws, e.cwd); return; }
   // 세션 하나: 그 스페이스가 보관 중이면 함께 복원하고(ensureSpace가 처리), 세션은 이 항목만.
-  const space = await ensureSpace(e.spaceCwd || e.cwd, e.spaceLabel);
+  const space = await ensureSpace(e.spaceCwd || e.cwd, e.spaceLabel, true);
   const tabId = await reviveAgent(space.wsId, space, e);
+  if (space.archived) {
+    const tabs = (space.archived.tabs || []).filter((tab) => tab.entry !== e.id);
+    const agents = (space.archived.agents || []).filter((id) => id !== e.id && archive.get(id));
+    archive.update(space.archived.id, { tabs, agents });
+    if (!tabs.length && !agents.length) archive.remove(space.archived.id);
+  }
   broadcastArchives(); recompute();
   ws.send(JSON.stringify({ type: "archive-restored", id: e.id, workspaceId: space.wsId, tabId }));
 }

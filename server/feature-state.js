@@ -4,6 +4,14 @@ import { randomUUID } from "node:crypto";
 import { stateHome } from "./state-home.cjs";
 import { readFeatureState, FEATURE_ID } from "./feature-state-read.cjs";
 
+const savedListeners = new Set();
+
+export function onFeatureStateSaved(fn) {
+  if (typeof fn !== "function") throw new TypeError("feature-state subscriber must be a function");
+  savedListeners.add(fn);
+  return () => savedListeners.delete(fn);
+}
+
 // 비교와 rename 사이에 await를 두지 않는다. 상태 폴더 잠금을 가진 서버만 쓴다.
 export function handleFeatureState(req, res, local) {
   const reply = (code, value) => res.writeHead(code, {
@@ -36,10 +44,15 @@ export function handleFeatureState(req, res, local) {
       fs.mkdirSync(home, { recursive: true });
       fs.writeFileSync(temp, JSON.stringify(value) + "\n", { mode: 0o600, flag: "wx" });
       fs.renameSync(temp, path.join(home, "features.json"));
-      reply(200, { exists: true, revision: value.revision, hidden: value.hidden, shown: value.shown, local });
     } catch {
       try { fs.unlinkSync(temp); } catch {}
       reply(500, { error: "feature state write failed" });
+      return;
     }
+    const saved = { revision: value.revision, hidden: [...value.hidden], shown: [...value.shown] };
+    for (const listener of [...savedListeners]) {
+      try { listener(structuredClone(saved)); } catch {}
+    }
+    reply(200, { exists: true, revision: value.revision, hidden: value.hidden, shown: value.shown, local });
   });
 }

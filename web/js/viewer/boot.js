@@ -181,7 +181,7 @@ function handleDocxMessage(m, responseIoEntry, { showToast, renderDocxPanelBody 
   if (m.error) {
     target.docxError = m.error;
     target.docxData = null;
-    showToast(m.error);
+    showToast("파일을 열지 못했습니다", { level: "err", detail: String(m.error) });
   } else if (m.reason === "watch" && (isTabDirty(target) || target._saveInFlight)) {
     target.docxDiskData = m.data;
     target.docxDiskRevision = m.revision;
@@ -224,7 +224,7 @@ function handleSheetMessage(m, responseIoEntry, { showToast, browserMode, filevi
       t.sheetError = null;
       // 저장하지 않은 편집이 있으면 덮지 않는다. 변경이 없으면 보던 시트는 유지하되 즉시 새 snapshot 으로 바꾼다.
       if (!svApplyResponseData(t, m.data)) {
-        showToast("이 파일이 밖에서 바뀌었습니다. 내 고침이 남아 있어 그대로 두었습니다");
+        showToast("이 파일이 밖에서 바뀌었습니다. 내 고침이 남아 있어 그대로 두었습니다", { level: "info" });
         continue;
       }
     }
@@ -292,5 +292,5 @@ function handleSheetSavedMessage(m, responseIoEntry, { $, showToast }) {
     }
     renderTabs();
   }
-  if (m.error && !m.requestId) showToast("저장 실패: " + m.error);
+  if (m.error && !m.requestId) showToast("저장 실패", { level: "err", detail: String(m.error) });
 }

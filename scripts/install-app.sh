@@ -39,7 +39,8 @@ running() { pgrep -f "$APP/Contents/MacOS/Iris" >/dev/null; }
 # 앱에 종료를 요청하고 프로세스가 사라질 때까지 기다린다. 사라졌으면 0 을 돌려준다.
 quit_app() {
   osascript -e 'tell application "Iris" to quit' 2>/dev/null || true
-  for _ in $(seq 1 10); do running || return 0; sleep 1; done
+  # 에뮬레이터 종료 정리는 최대 20초를 기다린다. 그 뒤 앱 종료까지 여유를 둔다.
+  for _ in $(seq 1 30); do running || return 0; sleep 1; done
   ! running
 }
 
@@ -84,6 +85,7 @@ running || rollback "새 앱이 서버 준비 중에 종료됨"
 echo "6/6  에이전트 컨텍스트 안내 설치"
 # 앱은 이미 바뀌어 돌고 있다. 스킬 파일 하나 때문에 여기서 실패하면 옛 앱 사본이 남고 설치가
 # 실패로 끝난다. 안내만 남기고 마친다. ./setup --check 가 이 상태를 다시 보여 준다.
-node scripts/install-agent-context.mjs --app "$APP" || echo "에이전트 스킬 파일을 놓지 못했습니다 — 위 이유를 해결한 뒤 ./setup 을 다시 돌리면 됩니다."
+# 지목 등록 훅은 이미 넣어 둔 Iris 항목만 갱신한다. 새로 넣는 것은 묻고 나서 하는 ./setup 몫이다.
+node scripts/install-agent-context.mjs --app "$APP" || echo "에이전트 스킬 파일·지목 등록 훅을 갱신하지 못했습니다 — 위 이유를 해결한 뒤 ./setup 을 다시 돌리면 됩니다."
 [ -n "$OLD" ] && rm -rf "$OLD"
 echo "교체 완료 — 설치된 앱이 현재 소스로 돕니다."

@@ -26,8 +26,9 @@ if (!app.requestSingleInstanceLock()) { app.quit(); return; }
 
 if (pinnedUserData) console.log(`[iris] 개발 갈래 쿠키 폴더: ${pinnedUserData}`);
 
-const { BrowserWindow, Menu, shell, ipcMain, clipboard, session, dialog, webContents, screen, safeStorage, globalShortcut, systemPreferences, desktopCapturer, nativeImage } = require("electron");
+const { BrowserWindow, Menu, Notification, shell, ipcMain, clipboard, session, dialog, webContents, screen, safeStorage, globalShortcut, systemPreferences, desktopCapturer, nativeImage } = require("electron");
 const { execFile } = require("node:child_process");
+const nativeAx = require("./cdp-native-ax.cjs");
 const { applyHardening, isAudioInputPermission, setNativeUserAgent, WEBAUTHN_SCRIPT, BOTCHECK_SCRIPT, OPENER_SCRIPT, dialogScript } = require("./browser-hardening.cjs");
 const chromeAuth = require("./chrome-auth.cjs");
 const { runChromeAuth } = chromeAuth;
@@ -63,7 +64,7 @@ const switcherCore = require("./switcher-core.cjs");
 const { createWindowCatalog } = require("./window-catalog.cjs");
 const { createWindowIcons } = require("./window-icons.cjs");
 const { createWindowMedia } = require("./window-media.cjs");
-const { createSwitcherHost } = require("./switcher-host.cjs");
+const { createSwitcherHost, irisKeyAction } = require("./switcher-host.cjs");
 const { createChromeHandoffIpc } = require("./chrome-handoff-ipc.cjs");
 const { createAiLoginPolicy } = require("./ai-login-policy.cjs");
 const { localLoginFor } = require("../../server/local-login.cjs");
@@ -117,11 +118,64 @@ const { installDownloadHook, noteExplicitSave } = createDownloadHook({
   },
 });
 
+// 위치·화면 공유·마이크·파일 쓰기. 기능을 켠 뒤 사이트마다 사람이 허용해야 한다. 저장은 ui-state.json 의 sitePermissions.
+const sitePermissions = require("./site-permissions.cjs").createSitePermissions({
+  read: () => readUiState().sitePermissions,
+  write: (patch) => writeUiState(patch),
+  // 창이 떠 있는 동안 에이전트의 OS 창 조작은 막는다. 기본 버튼은 [차단], 창을 닫으면 기억하지 않는다.
+  confirm: async ({ site, name, asks }) => {
+    nativeAx.holdNativeInput("사이트 권한");
+    try {
+      const result = await dialog.showMessageBox({
+        type: "question", title: `${name} 권한`, message: `${site} 에서 ${asks}`,
+        detail: "허용하거나 차단하면 이 사이트에 기억합니다. 설정의 보안에서 지울 수 있습니다.",
+        buttons: ["허용", "차단", "지금은 안 함"], defaultId: 1, cancelId: 2, noLink: true,
+      });
+      return result.response === 0 ? true : result.response === 1 ? false : null;
+    } finally { nativeAx.holdNativeInput(null); }
+  },
+});
 const profileSessionPolicy = createProfileSessionPolicy({
+  sitePermissions,
+  frameWebContents: (frame) => { try { return webContents.fromFrame(frame); } catch { return null; } },
+  // 공유할 화면을 매번 사람이 고른다(화면이 하나여도). 창 단위 공유는 지원하지 않는다.
+  pickDisplaySource: async ({ site }) => {
+    const sources = await desktopCapturer.getSources({ types: ["screen"] });
+    if (!sources.length) return null;
+    nativeAx.holdNativeInput("화면 공유");
+    try {
+      const result = await dialog.showMessageBox({
+        type: "question", title: "화면 공유", message: `${site} 에 공유할 화면을 고르세요`,
+        buttons: [...sources.map((src) => src.name), "취소"], defaultId: sources.length, cancelId: sources.length, noLink: true,
+      });
+      return sources[result.response] || null;
+    } finally { nativeAx.holdNativeInput(null); }
+  },
   basePartition: IRIS_PARTITION,
   fromPartition: (partition) => session.fromPartition(partition),
   hardenBrowserSession: applyHardening,
   userAgentForPartition: (partition) => cookieImport.userAgentForPartition(partition),
+  // 처리할 앱이 없으면 묻지 않는다. 기본 버튼은 [취소]다(크롬과 같음). 사이트가 사람이 Enter 를 치는 순간에
+  // 창을 띄워 [열기]를 누르게 만들 수 있기 때문이다. 창이 떠 있는 동안 에이전트의 OS 창 조작은 막는다.
+  confirmExternalOpen: async ({ url, site, unsure }) => {
+    let appName = "";
+    try { appName = app.getApplicationNameForProtocol(url) || ""; } catch {}
+    if (!appName) return false;
+    nativeAx.holdNativeInput("앱 열기");
+    try {
+      const result = await dialog.showMessageBox({
+        type: "question",
+        title: "앱 열기",
+        message: `${appName} 앱을 열까요?`,
+        detail: unsure ? `${site} 페이지 또는 그 안에 들어 있는 다른 사이트에서 요청했습니다.` : `${site} 에서 요청했습니다.`,
+        buttons: ["열기", "취소"],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      });
+      return result.response === 0;
+    } finally { nativeAx.holdNativeInput(null); }
+  },
   chooseWebauthnAccount: async (details) => {
     const accounts = details.accounts;
     const result = await dialog.showMessageBox({
@@ -225,6 +279,19 @@ if (AUDIO_DIAG_ENABLED) {
 }
 // 파일 트리가 파일 시스템을 다루는 세 동작은 fs-ipc.cjs 가 소유한다.
 createFsIpc({ ipcMain, shell, fs, path, os, isTrustedSender });
+// 새 스페이스의 작업 폴더 선택 — macOS 폴더 창. 신뢰 렌더러만(webview 게스트가 파일 시스템 탐색 창을
+// 띄우지 못하게). 고른 경로만 반환하고 이 IPC 자체는 아무것도 읽거나 쓰지 않는다.
+ipcMain.handle("ac-pick-folder", async (e, arg) => {
+  try {
+    if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
+    const owner = BrowserWindow.fromWebContents(e.sender);
+    const defaultPath = typeof arg?.defaultPath === "string" && path.isAbsolute(arg.defaultPath) ? arg.defaultPath : undefined;
+    const opts = { properties: ["openDirectory", "createDirectory"], title: "스페이스로 열 폴더", buttonLabel: "열기", ...(defaultPath ? { defaultPath } : {}) };
+    const r = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, opts) : await dialog.showOpenDialog(opts);
+    if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
+    return { ok: true, path: r.filePaths[0] };
+  } catch (e2) { return { ok: false, error: String(e2 && e2.message || e2) }; }
+});
 // 탭 화면 크기 지정(반응형 확인). DevTools의 기기 툴바는 <webview> 대상에서는 버튼 자체가 뜨지
 // 않아서 같은 동작을 앱이 CDP로 수행한다. 실제 적용은 cdp-control의 applyViewportTo가
 // 한 곳에서 맡는다. 주소줄에서 호출하든 AI가 iris-browser로 호출하든 같은 결과여야 하기 때문이다.
@@ -401,6 +468,13 @@ ipcMain.handle("ac-login-convenience", (e, arg) => {
   if (arg && arg.warned === true) writeUiState({ loginWarningSeen: true });
   return { on: loginConvenienceOn(), warned: loginWarningSeen() };
 });
+// 설정 보안 분류가 쓴다. 인자 없으면 조회, {kind,on} 이면 사용 여부 변경, {clear:kind} 이면 그 기능의 사이트 기록 삭제.
+ipcMain.handle("ac-site-permissions", (e, arg) => {
+  if (!isTrustedSender(e)) return [];
+  if (arg && typeof arg.kind === "string" && typeof arg.on === "boolean") sitePermissions.setFeature(arg.kind, arg.on);
+  if (arg && typeof arg.clear === "string") sitePermissions.clearSites(arg.clear);
+  return sitePermissions.summary();
+});
 const { setCreds } = createCredentialIpc({
   ipcMain, credentialService, isTrustedSender, isProfilePartition,
   purgePartition, basePartition: IRIS_PARTITION, loginConvenienceOn,
@@ -542,6 +616,41 @@ createWebviewLifecycle({
     noteExplicitSave,
   }).attach,
   appDrawsLink,
+  // https 문서는 앱 주소로 referrer 를 보내지 않아 대개 빈 값이다. 그때는 탭 주소로 대신하고,
+  // 탭 안에 다른 출처 프레임이 있으면 그 프레임의 요청일 수 있다고 표시한다.
+  openAppUrl: (wc, url, referrerUrl) => {
+    let from = /^https?:/i.test(String(referrerUrl || "")) ? referrerUrl : "";
+    let unsure = false;
+    if (!from) {
+      try {
+        from = wc.getURL();
+        const top = new URL(from).origin;
+        unsure = wc.mainFrame.framesInSubtree.some((f) => { try { return new URL(f.url).origin !== top; } catch { return true; } });
+      } catch {}
+    }
+    profileSessionPolicy.requestExternalOpen(wc, url, from, { unsure })
+      .then((ok) => { if (ok) return shell.openExternal(url); })
+      .catch(() => {});
+  },
+  // Electron 은 이 이벤트 안에서 동기로 정해야 해서 동기 확인 창을 쓴다. 자동화 중이면 묻지 않고 머문다.
+  confirmLeave: (wc, win) => {
+    if (aiDriving(wc.id)) return false;
+    let parent = win;
+    try { if (!parent && wc.hostWebContents) parent = BrowserWindow.fromWebContents(wc.hostWebContents); } catch {}
+    let site = "";
+    try { site = new URL(wc.getURL()).origin; } catch {}
+    const opts = {
+      type: "question",
+      message: "사이트에서 나가시겠습니까?",
+      detail: `${site && site !== "null" ? site + "\n" : ""}변경사항이 저장되지 않을 수 있습니다.`,
+      buttons: ["나가기", "취소"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    };
+    const response = parent && !parent.isDestroyed() ? dialog.showMessageBoxSync(parent, opts) : dialog.showMessageBoxSync(opts);
+    return response === 0;
+  },
 });
 
 // 개발 인스턴스와 설치된 앱이 같은 포트를 쓰면 포트 점유를 두고 충돌한다. 포트를 갈라
@@ -674,6 +783,14 @@ const windowMedia = createWindowMedia({
   nativeImage,
   log: (...args) => console.warn(...args),
 });
+// ⌥Tab 토글을 받는 창: 콘솔 창과 브라우저 모드 창(분리 탭 창 포함). 메모 창·에뮬레이터 분리 창은 제외
+function takesSwitcherToggle(w) {
+  if (!w || w.isDestroyed()) return false;
+  if (w === getMainWindow()) return true;
+  try { return new URL(w.webContents.getURL()).searchParams.get("mode") === "browser"; } catch { return false; }
+}
+let lastSwitchWindow = null;
+app.on("browser-window-focus", (_e, w) => { if (takesSwitcherToggle(w)) lastSwitchWindow = w; });
 switcherHost = createSwitcherHost({
   core: switcherCore,
   catalog: windowCatalog,
@@ -720,6 +837,19 @@ switcherHost = createSwitcherHost({
       return true;
     } catch { return false; }
   },
+  // 고른 창 없이 전역 우선 사용으로 받은 ⌥Tab. 콘솔·브라우저 창이 앞이면 그 창에 토글,
+  // 그 밖(메모·에뮬레이터 분리 창·다른 앱)이면 마지막으로 쓴 콘솔·브라우저 창을 앞으로(irisKeyAction)
+  irisKey: () => {
+    const { action, win } = irisKeyAction(
+      { focused: BrowserWindow.getFocusedWindow(), lastSwitch: lastSwitchWindow, main: getMainWindow() }, takesSwitcherToggle);
+    if (action === "toggle") { win.webContents.send("ac-switcher-toggle"); return; }
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    // 창 focus 만으로는 앱이 활성이 되지 않아 다른 데스크톱의 창이 오지 않는다(raiseOwnWindow 주석).
+    app.focus({ steal: true });
+    win.focus();
+  },
   isTrustedSender: matchesTrustedSender,
   isTrustedMediaSender: (event) => {
     const window = getMainWindow();
@@ -760,6 +890,29 @@ ipcMain.on("ac-app-reload", () => {
   for (const b of browserWindowManager.allBrowserWindows()) { try { b.webContents.reloadIgnoringCache(); } catch {} }
   for (const b of memoWindowManager.allMemoWindows()) { try { b.webContents.reloadIgnoringCache(); } catch {} }
 });
+const osNoticeIds = new Map();
+const osNoticeHandles = new Map();
+ipcMain.on("ac-notify", (event, message) => {
+  if (!isTrustedSender(event) || BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return;
+  const id = String(message && message.id || "").slice(0, 100);
+  if (!id || osNoticeIds.has(id)) return;
+  const now = Date.now();
+  for (const [key, at] of osNoticeIds) if (now - at > 600000) osNoticeIds.delete(key);
+  osNoticeIds.set(id, now);
+  const target = BrowserWindow.fromWebContents(event.sender) || getMainWindow();
+  const notice = new Notification({ title: String(message.title || "Iris").slice(0, 60),
+    body: String(message.body || "").slice(0, 300) });
+  osNoticeHandles.set(id, notice);
+  notice.on("close", () => osNoticeHandles.delete(id));
+  notice.on("click", () => {
+    if (!target || target.isDestroyed()) return;
+    if (target.isMinimized()) target.restore();
+    target.show(); target.focus();
+    app.focus({ steal: true });
+    target.webContents.send("ac-notice-activate", { id });
+  });
+  notice.show();
+});
 ipcMain.on("ac-open-browser", (_e, opts) => { try { browserWindowManager.createBrowserModeWindow(false, opts); } catch {} });
 ipcMain.on("ac-open-shared-browser", () => { try { browserWindowManager.createBrowserModeWindow(true); } catch {} });
 ipcMain.on("ac-dock-browser", () => { browserWindowManager.dockBrowserModeWindows(); });
@@ -779,6 +932,7 @@ bootNativeCapabilities({
     runCdp,
     windowLayout,
     guardWebviewPartition,
+    isProfilePartition: matchesProfilePartition,
     pinHiddenViewportById,
     webContents,
     screen,
@@ -830,7 +984,21 @@ audioDiagnostics.applyTestSwitches(app.commandLine);
 // 서버는 앱의 자식 프로세스다(native/electron/server-host.cjs). 창을 만들기 전에 먼저 실행한다.
 // 창이 먼저 뜨면 첫 loadURL이 반드시 실패하고, 사용자는 빈 화면을 본 뒤 재시도로 채워지는 것을 본다.
 // 이미 떠 있는 서버가 있으면 띄우지 않고 붙는다(전환기의 launchd 서버, 또는 개발 인스턴스).
-const serverHost = new ServerHost({ app, port: APP_PORT, stateDir: IRIS_HOME });
+// 네트워크 정책이 다른 서버 안내 후 종료. 기동 시·기동 이후 공통
+function quitForServerPolicy(pid) {
+  dialog.showMessageBoxSync({
+    type: "error",
+    buttons: ["종료"],
+    message: `${APP_PORT}번에 이전 버전 Iris 서버가 있습니다`,
+    detail: `그 서버${pid ? `(pid ${pid})` : ""}는 외부 접속을 받을 수 있는 이전 네트워크 정책으로 실행 중입니다.\n`
+      + `그 서버를 종료한 뒤 앱을 다시 실행해 주세요.`,
+  });
+  app.quit();
+}
+const serverHost = new ServerHost({
+  app, port: APP_PORT, stateDir: IRIS_HOME,
+  onPolicyMismatch: (health) => quitForServerPolicy(health?.pid),
+});
 // 앱이 종료될 때 자식 프로세스도 함께 종료한다. 여기서 종료하지 않으면 서버만 남아, 다음에 실행한
 // 앱이 이전 서버에 붙어 수정이 반영되지 않는다.
 app.on("will-quit", () => { try { serverHost.stop(); } catch {} });
@@ -842,6 +1010,11 @@ app.whenReady().then(async () => {
   pickMode.registerGlobalShortcut();
   switcherHost.start(); // ready 기준 +3초·+8초 재결합 창을 여기서 연다.
   const started = await serverHost.start();
+  // 네트워크 정책이 다른 이전 서버는 연결 선택지 없이 종료. 외부 수신 가능 서버 연결 방지
+  if (started && started.policyMismatch) {
+    quitForServerPolicy(started.conflict?.pid);
+    return;
+  }
   // 그 포트에 다른 상태 폴더를 쓰는 서버가 있으면 창을 바로 열면 안 된다. 열면 사용자는 자기
   // 탭·북마크가 사라진 화면을 보고 다른 인스턴스의 상태를 수정하게 된다. 개발 인스턴스가 4271에
   // 떠 있을 때 실제로 발생한다. 무엇이 그 포트에 있는지 알리고 사용자가 결정하게 한다.

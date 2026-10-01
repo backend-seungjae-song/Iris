@@ -20,14 +20,14 @@ export function centerFileDragHotNext(kind, overCenter) {
 }
 
 export function openDroppedEntries(entries, openFile, showToast) {
-  if (!Array.isArray(entries) || !entries.length) { showToast("드롭한 파일 종류를 확인하지 못했습니다"); return; }
+  if (!Array.isArray(entries) || !entries.length) { showToast("드롭한 파일 종류를 확인하지 못했습니다", { level: "err" }); return; }
   for (const entry of entries) {
-    if (entry?.error === "directory") { showToast("폴더는 열 수 없습니다. 파일을 놓아 주세요"); continue; }
-    if (entry?.error === "entry") { showToast("드롭한 파일 종류를 확인하지 못했습니다"); continue; }
+    if (entry?.error === "directory") { showToast("폴더는 열 수 없습니다. 파일을 놓아 주세요", { level: "warn" }); continue; }
+    if (entry?.error === "entry") { showToast("드롭한 파일 종류를 확인하지 못했습니다", { level: "err" }); continue; }
     if (typeof entry?.path !== "string" || !entry.path.startsWith("/") || entry.path.includes("\0")) {
-      showToast("드롭한 파일 경로를 읽지 못했습니다"); continue;
+      showToast("드롭한 파일 경로를 읽지 못했습니다", { level: "err" }); continue;
     }
-    try { openFile(entry.path); } catch { showToast("드롭한 파일을 열지 못했습니다"); }
+    try { openFile(entry.path); } catch { showToast("드롭한 파일을 열지 못했습니다", { level: "err" }); }
   }
 }
 
@@ -61,7 +61,7 @@ export function initCenterFileDrop({ tabstrip, centerBody, browserview, browserW
     event.stopPropagation();
     callHook("chatcopy.dragHint", "drop", false);
     const items = Array.from(event.dataTransfer.items || []).filter((item) => item.kind === "file");
-    if (!items.length) { showToast("드롭한 파일 종류를 확인하지 못했습니다"); return; }
+    if (!items.length) { showToast("드롭한 파일 종류를 확인하지 못했습니다", { level: "err" }); return; }
     const entries = items.map((item) => {
       try {
         const entry = item.webkitGetAsEntry?.() || item.getAsEntry?.();

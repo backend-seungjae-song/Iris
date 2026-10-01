@@ -1,6 +1,6 @@
 // herdr socket 클라이언트.
 // 확인한 herdr 연결 모델:
-//  - 일반 요청(agent.list, agent.send): 응답 후 herdr가 소켓을 닫는다 → 매 호출 새 연결.
+//  - 일반 요청(agent.list, agent.prompt): 응답 후 herdr가 소켓을 닫는다 → 매 호출 새 연결.
 //  - events.subscribe: 소켓 유지, push 스트림 → 전용 구독 소켓 1개.
 //  - agent_status_changed(working↔idle)는 pane_id별 구독이라, 현재 pane 전체를 구독하고
 //    pane 집합이 바뀌면 재구독한다. 전역 이벤트(pane.created 등)는 type만으로 구독.
@@ -15,7 +15,9 @@ const SOCK = herdrSession().socket;
 // type만으로 구독 가능한 전역 이벤트 (pane_id 불필요).
 const GLOBAL_SUBS = [
   "pane.created", "pane.closed", "pane.exited", "pane.agent_detected", "pane.focused",
-  "workspace.created", "workspace.closed", "workspace.renamed", "tab.created", "tab.closed",
+  "pane.moved", "workspace.created", "workspace.closed", "workspace.renamed",
+  "workspace.focused", "workspace.moved", "workspace.reordered",
+  "tab.created", "tab.closed", "tab.focused", "tab.renamed", "tab.moved",
 ].map((type) => ({ type }));
 
 export class HerdrClient extends EventEmitter {
@@ -35,9 +37,11 @@ export class HerdrClient extends EventEmitter {
       });
       let buf = "";
       let done = false;
+      let timer;
       const finish = (fn, arg) => {
         if (done) return;
         done = true;
+        clearTimeout(timer);
         c.destroy();
         fn(arg);
       };
@@ -55,7 +59,8 @@ export class HerdrClient extends EventEmitter {
         else finish(resolve, msg.result ?? msg);
       });
       c.on("error", (e) => finish(reject, e));
-      setTimeout(() => finish(reject, new Error(`herdr timeout: ${method}`)), 5000);
+      c.on("end", () => finish(reject, new Error(`herdr closed: ${method}`)));
+      timer = setTimeout(() => finish(reject, new Error(`herdr timeout: ${method}`)), 5000);
     });
   }
 
@@ -131,9 +136,9 @@ export class HerdrClient extends EventEmitter {
   }
 
   // 조종 블록: 채팅 send. 대상 세션(부모 pane)의 에이전트에 메시지를 전달한다.
-  // target은 pane_id 문자열. agent.send는 herdr가 에이전트 입력으로 제출한다.
+  // target은 pane_id 문자열. agent.prompt는 herdr가 에이전트 입력으로 제출한다.
   agentSend(target, text) {
-    return this.call("agent.send", { target, text });
+    return this.call("agent.prompt", { target, text });
   }
 
   // 조종 블록: 응답 읽기. pane의 터미널 내용이다. source: "recent"(스크롤백 포함) | "visible"(현재 화면).

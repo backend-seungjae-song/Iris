@@ -62,7 +62,7 @@ export function initCapability(ctx) {
       copiedTimer = null;
       const ok = await written;
       if (gen !== copiedGen) return;
-      showToast(ok ? `${String(text).split("\n").length}줄 복사됨` : "복사하지 못했습니다");
+      showToast(ok ? `${String(text).split("\n").length}줄 복사됨` : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" });
     }, COPY_TOAST_DELAY_MS);
   };
 
@@ -83,17 +83,17 @@ export function initCapability(ctx) {
     catch (e2) {
       // 여기까지 오면 서버 기록과 로컬 누적분을 모두 쓰지 못한 것으로, 결과가 비는 유일한 경우다.
       blog("edge finish", e2.message);
-      showToast("범위 복사를 만들지 못했습니다 — " + (e2.message || "원인 불명"));
+      showToast("범위 복사를 만들지 못했습니다", { level: "err", detail: String(e2.message || "원인 불명") });
     }
     if (!got || !got.text) return;
     const text = got.text;
-    if (!(await writeClipboard(text))) { showToast("범위 복사를 만들었지만 클립보드에 쓰지 못했습니다"); return; }
+    if (!(await writeClipboard(text))) { showToast("범위 복사를 만들었지만 클립보드에 쓰지 못했습니다", { level: "err", near: "action" }); return; }
     const lines = text.split("\n").length;
     // 잘렸을 수 있다는 사실을 감추면 모르고 붙여넣게 된다. 완전본과 다른 문구를 쓰고, 어느 대조가
     // 일치하지 않았는지 함께 남긴다. 이 정보가 없으면 원인을 찾을 수 없다.
-    showToast(got.degraded
-      ? `${lines}줄 복사됨 — 화면에서 본 만큼만 (기록 대조 실패: ${got.degraded})`
-      : `${lines}줄 복사됨(화면 밖 포함)`);
+    showToast(got.degraded ? `${lines}줄만 복사했습니다` : `${lines}줄 복사됨(화면 밖 포함)`,
+      { level: got.degraded ? "err" : "ok", body: got.degraded ? "화면에서 본 범위만 복사했습니다." : undefined,
+        detail: got.degraded ? String(got.degraded) : undefined, near: "action" });
   }
 
   return {};

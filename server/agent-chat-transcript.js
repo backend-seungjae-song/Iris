@@ -109,7 +109,28 @@ function parse(line) {
 // ── Claude Code ─────────────────────────────────────────────────────────────
 // 한 줄 = assistant 블록 하나 또는 user 턴 하나. thinking 은 흐린 줄로 따로 떼고, tool_result 만
 // 담긴 user 줄은 도구 결과 메시지(role tool)가 된다.
+// 에이전트 작업 중 사람이 보낸 입력. user 줄 대신 queued_command 첨부로만 기록됨(다른 세션·작업 알림은 제외)
+function decodeQueuedPrompt(rec, fallbackId) {
+  const a = rec.attachment;
+  if (!a || a.type !== "queued_command" || a.commandMode !== "prompt" || a.origin?.kind !== "human") return [];
+  const blocks = typeof a.prompt === "string" ? (a.prompt ? [{ type: "text", text: clip(a.prompt, LIMITS.text) }] : [])
+    : Array.isArray(a.prompt) ? a.prompt.flatMap((c) => c?.type === "text" && typeof c.text === "string" && c.text
+      ? [{ type: "text", text: clip(c.text, LIMITS.text) }] : c?.type === "image" ? [{ type: "image" }] : []) : [];
+  if (!blocks.length) return [];
+  const id = typeof rec.uuid === "string" ? rec.uuid : fallbackId;
+  return [{ id, role: "user", blocks, ts: ts(a.timestamp || rec.timestamp) }];
+}
+
+// 작업 중 사람에게 보인 중간 답. 기록 파일에는 text 가 아니라 서명에 narration 표시가 있는 thinking 으로만 남음.
+// 표시가 없거나 서명 형식이 바뀌면 기존처럼 생각으로 분류
+const NARRATION_MARK = Buffer.from("narration");
+function isNarration(signature) {
+  if (typeof signature !== "string" || !signature) return false;
+  try { return Buffer.from(signature.slice(0, 96), "base64").subarray(0, 64).includes(NARRATION_MARK); } catch { return false; }
+}
+
 function decodeClaude(rec, fallbackId) {
+  if (rec.type === "attachment") return decodeQueuedPrompt(rec, fallbackId);
   if (rec.type !== "user" && rec.type !== "assistant") return [];
   const id = typeof rec.uuid === "string" ? rec.uuid : fallbackId;
   const time = ts(rec.timestamp);
@@ -126,7 +147,9 @@ function decodeClaude(rec, fallbackId) {
   for (const c of content) {
     if (!c || typeof c !== "object") continue;
     if (c.type === "text" && typeof c.text === "string" && c.text) { if (!machine) main.push({ type: "text", text: clip(c.text, LIMITS.text) }); }
-    else if (c.type === "thinking" && typeof c.thinking === "string" && c.thinking.trim()) {
+    else if (c.type === "thinking" && typeof c.thinking === "string" && c.thinking.trim() && isNarration(c.signature)) {
+      if (!machine) main.push({ type: "text", text: clip(c.thinking, LIMITS.text) });
+    } else if (c.type === "thinking" && typeof c.thinking === "string" && c.thinking.trim()) {
       out.push({ id: `${id}:r${out.length}`, role: "reasoning", blocks: [{ type: "text", text: clip(c.thinking, LIMITS.text) }], ts: time });
     } else if (c.type === "tool_use") {
       main.push({ type: "tool-call", id: typeof c.id === "string" ? c.id : null, name: String(c.name || "tool"), input: boundInput(c.input) });

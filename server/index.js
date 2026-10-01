@@ -29,6 +29,7 @@ import { handleArtifacts, initArtifactsHandlers } from "./artifacts-handlers.js"
 import { humanPathDeny } from "./human-path.js";
 import { bulkPolicy } from "./bulk-fill.js";
 import * as spaceKey from "./space-key.js";
+import { createSpaceOrderStore, handleSpaceOrderMessage } from "./space-order.js";
 import { handleSheetRead, handleSheetWrite } from "./sheet-handlers.js";
 import { handleDocxRead, handleDocxWrite } from "./docx-handlers.js";
 import {
@@ -40,7 +41,7 @@ import {
   handleFsWatch,
   handleFsWrite,
 } from "./fs-handlers.js";
-import { port as acPort } from "./env.cjs";
+import { ignoredRemoteEnv, NET_POLICY, port as acPort } from "./env.cjs";
 import {
   initRuntimeState,
   snapshot,
@@ -164,12 +165,10 @@ import {
 import {
   HOST,
   PORT,
-  REMOTE,
   connectionAllowed,
   createHttpHandler,
   hardenHeaderParsing,
   isLoopbackRequest,
-  selfTailscaleIps,
 } from "./http-handler.js";
 import { initKeymapStore, keymapWire, resetKeymap, setKeymapOverride } from "./keymap-store.js";
 import { handleSpace, handleTab, initWorkspaceHandlers } from "./workspace-handlers.js";
@@ -181,6 +180,7 @@ import {
   handleTabClose,
   handlePaneClose,
   handleTabFocus,
+  handleWorkspaceFocus,
   initHerdrHandlers,
   relayToOneConsole,
 } from "./herdr-handlers.js";
@@ -317,6 +317,8 @@ if (lockHolder) {
 // 잠금을 얻은 뒤에 읽는다. 순서가 바뀌면 대기 중인 서버가 T0 스냅샷을 유지한 채 기다리다가
 // 자리를 이어받은 뒤 그 사이의 변경을 덮는다. 두 모듈 다 import 시점에는 아무것도 읽지 않는다.
 spaceKey.load();     // 스페이스↔폴더 결속 키. 다른 상태가 이 키를 주소로 쓰므로 먼저 로드한다.
+const spaceOrderStore = createSpaceOrderStore();
+spaceOrderStore.initialize();
 initBrowserStateOwner({
   broadcast: (message) => broadcast(message),
   getRecoveryEvidence: (workspaces) => buildSpaceRecoveryEvidence(workspaces),
@@ -326,6 +328,7 @@ const shutdownCapabilities = [], exitCapabilities = [];
 const capabilityContext = {
   broadcast: (message) => broadcast(message),
   broadcastLocal: (message) => broadcastLocal(message),
+  spaceOrder: spaceOrderStore,
   visitClients: (visitor) => { for (const client of wss.clients) visitor(client); },
   onShutdown: (callback) => shutdownCapabilities.push(callback),
   onExit: (callback) => exitCapabilities.push(callback),
@@ -426,7 +429,8 @@ attachWs({
     // 홈 경로도 함께 보낸다. 터미널에 출력되는 산출물 경로는 `~/Downloads/…` 형태가 흔한데, 창은 홈이
     // 어디인지 몰라 그 경로를 해석하지 못해 열기·Finder 보기가 모두 실패한다.
     // 홈 경로는 같은 기기의 서버가 알고 있으므로 창이 추정하지 않게 한다.
-    ws.send(JSON.stringify({ type: "caps", local: ws._local, home: os.homedir() }));
+    // netPolicy: 창이 연결 완료 처리 전 확인하는 서버 네트워크 정책(첫 메시지)
+    ws.send(JSON.stringify({ type: "caps", local: ws._local, home: os.homedir(), netPolicy: NET_POLICY }));
     // 창이 자기 저장분(파일 탭·기본 프로필·순서)을 같은 키로 옮기는 데 쓴다. 창은 첫 state에서
     // 파일 탭을 복원하므로 그보다 먼저 보낸다. 이관이 끝난 뒤 붙은 창도 이 표만 있으면 스스로 옮긴다.
     ws.send(JSON.stringify(spaceKeysWire()));
@@ -448,11 +452,13 @@ attachWs({
     if (msg.type === "read" || msg.type === "send") handleControl(ws, msg);
     else if (msg.type === "focus") handleFocus(ws, msg);
     else if (msg.type === "tab-focus") handleTabFocus(ws, msg);
+    else if (msg.type === "workspace-focus") handleWorkspaceFocus(ws, msg);
     else if (msg.type === "tab-close") handleTabClose(ws, msg);
     else if (msg.type === "pane-close") handlePaneClose(ws, msg);
     else if (msg.type === "tab-reopen") handleTabReopen(ws, msg);
     else if (msg.type === "keymap-set") { if (ws._local && setKeymapOverride(msg.id, msg.binding)) broadcast(keymapWire()); }
     else if (msg.type === "keymap-reset") { if (ws._local && resetKeymap(msg.id || null)) broadcast(keymapWire()); }
+    else if (msg.type === "space-order.set") handleSpaceOrderMessage(ws, msg, spaceOrderStore);
     else if (msg.type.startsWith("pty.")) handlePty(ws, msg);
     else if (msg.type === "browser-sync") handleBrowserSync(ws, msg);
     else if (msg.type === "pick-relay") { if (ws._local) relayToOneConsole({ type: "pick-relay", pick: msg.pick }); } // 분리창 요소 pick → 콘솔 터미널 하나로(로컬만)
@@ -587,10 +593,7 @@ server.on("error", (e) => {
 });
 server.listen(PORT, HOST, () => {
   console.log(`Iris → http://127.0.0.1:${PORT}`);
-  if (REMOTE) {
-    const ts = selfTailscaleIps()[0];
-    if (ts) console.log(`  폰 접속(tailnet): http://${ts}:${PORT}`);
-    else console.log(`  원격 모드 ON — Tailscale 미탐지. 'sudo tailscale up' 후 tailnet IP로 접속됩니다.`);
-    console.log(`  접속 허용: localhost + Tailscale(100.64/10)만. 그 외 원격 IP는 403(AC6).`);
-  }
+  // 기존 원격 설정 지정 시 경고만. 바인딩은 루프백 유지
+  const ignored = ignoredRemoteEnv();
+  if (ignored.length) console.warn(`  ${ignored.join("·")} 설정 무시: 이 서버는 127.0.0.1 에서만 접속을 받습니다. 휴대폰 접속은 원격 게이트웨이를 사용합니다.`);
 });

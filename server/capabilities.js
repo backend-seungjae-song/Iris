@@ -10,6 +10,16 @@ import { handleLocaldev } from "./localdev-bridge.js";
 import { agentChatOnConnect, handleAgentChat, initAgentChat } from "./agent-chat.js";
 import { isPathAllowed as fsPathAllowed } from "./runtime-state.js";
 import { isLoopbackRequest } from "./http-handler.js";
+import { createAgentDraftWriter } from "./agent-draft.js";
+import { initDiffReviewHandler, handleDiffReview } from "./diff-review-handler.js";
+import { initGithubPrHandler, handleGithubPr } from "./github-pr-handler.js";
+import { initWorktrees, handleWorktrees } from "./worktree-handlers.js";
+import { handleEmulatorTargets } from "./emulator-targets.js";
+import { handlePickrecRelay } from "./pickrec-relay.js";
+import { onFeatureStateSaved } from "./feature-state.js";
+import { createRemoteLifecycle } from "./remote/index.js";
+
+let remoteLifecycle;
 
 function runHttp(req, res, ctx) {
     const runMgr = ctx.runManager;
@@ -29,6 +39,18 @@ function runHttp(req, res, ctx) {
 }
 
 export const capabilities = [
+  {
+    id: "diffreview", wsPrefixes: ["diffreview."],
+    init(ctx) { initDiffReviewHandler({ draftWriter: createAgentDraftWriter({ herdr: ctx.herdr }) }); },
+    handle(ws, msg) { if (!msg.type.startsWith("diffreview.")) return false; handleDiffReview(ws, msg); return true; },
+  },
+  {
+    id: "githubpr", wsPrefixes: ["githubpr."],
+    init(ctx) { initGithubPrHandler({ draftWriter: createAgentDraftWriter({ herdr: ctx.herdr }) }); },
+    handle(ws, msg) { if (!msg.type.startsWith("githubpr.")) return false; handleGithubPr(ws, msg); return true; },
+  },
+  { id: "worktrees", wsPrefixes: ["worktrees."],
+    init(ctx) { initWorktrees({ herdr: ctx.herdr }); }, handle: handleWorktrees },
   {
     id: "usage", wsPrefixes: ["usage."],
     init(ctx) {
@@ -72,6 +94,19 @@ export const capabilities = [
     init(ctx) { initAgentChat(ctx); },
     onConnect: agentChatOnConnect,
     handle: handleAgentChat,
+  },
+  {
+    id: "pickrec", wsPrefixes: ["pickrec."],
+    handle: handlePickrecRelay,
+  },
+  {
+    id: "emulator", wsPrefixes: ["emulator."],
+    handle: handleEmulatorTargets,
+  },
+  {
+    id: "remote", wsPrefixes: ["remote."],
+    init(ctx) { remoteLifecycle = createRemoteLifecycle({ ctx, onFeatureStateSaved }); },
+    handle(ws, msg) { return remoteLifecycle.handle(ws, msg); },
   },
   {
     id: "memolab", wsPrefixes: [],

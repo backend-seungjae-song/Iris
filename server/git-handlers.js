@@ -38,8 +38,9 @@ function git(root, args, timeout = 20000) {
 }
 // 폴더 아래에서 .git 이 있는 위치를 모은다. pane 을 띄운 적 없는 저장소는 후보가 될 방법이
 // 없어서, 스페이스 안에 저장소가 여럿이면 그중 하나만 보인다.
-// 깊이와 개수를 제한한다. 큰 트리에서 이 탐색이 몇 초씩 걸리면 그동안 화면이 비어 있다.
-const REPO_SCAN_DEPTH = 4;
+// 스페이스 폴더 바로 아래까지만 찾는다. 더 깊이 찾으면 작업 폴더에 받아 둔 저장소까지 목록에 나온다.
+// 개수도 제한한다. 큰 트리에서 이 탐색이 몇 초씩 걸리면 그동안 화면이 비어 있다.
+const REPO_SCAN_DEPTH = 1;
 const REPO_SCAN_MAX = 40;
 const REPO_SKIP = new Set(["node_modules", ".git", "dist", "build", "out", "coverage",
   ".next", ".turbo", ".cache", "vendor", "Pods", "target", ".venv", "venv", "__pycache__"]);
@@ -57,12 +58,26 @@ export function nestedRepos(dir, { depth = REPO_SCAN_DEPTH, max = REPO_SCAN_MAX,
       if (REPO_SKIP.has(name)) continue;
       const abs = path.join(d, name);
       if (hasGit(abs)) out.push(abs);
-      // 저장소 안에 다른 저장소가 있을 수 있으므로(서브모듈·모노레포 내 독립 저장소) 계속 탐색한다.
       if (left > 1) walk(abs, left - 1);
     }
   };
   walk(dir, depth);
   return out;
+}
+// 개행이 든 경로도 -z 출력으로 구분한다. 브랜치가 없는 항목은 detached HEAD다.
+function worktreeEntries(root) {
+  const result = git(root, ["worktree", "list", "--porcelain", "-z"], 1500);
+  if (!result.ok) return [];
+  const entries = [];
+  for (const field of result.out.split("\0")) {
+    if (field.startsWith("worktree ")) entries.push({ root: field.slice(9), branch: "" });
+    else if (field.startsWith("branch refs/heads/") && entries.length) entries.at(-1).branch = field.slice(18);
+  }
+  return entries.filter((entry) => fs.existsSync(entry.root));
+}
+export function linkedWorktrees(dir) {
+  const root = gitRoot(dir);
+  return root ? worktreeEntries(root).map((entry) => entry.root) : [];
 }
 function gitCodeOf(c) { return ({ M: "M", A: "A", D: "D", R: "R", C: "C", U: "U", "?": "U" })[c] || c; }
 // reqPath = 화면이 요청한 폴더. 응답에 포함해야 화면이 그 폴더가 어느 저장소로 해석됐는지
@@ -91,7 +106,9 @@ export function gitStatusRich(root, reqPath) {
   }
   // branches = 전환할 수 있는 로컬 브랜치. 커밋·전환 뒤에 오는 status 에 함께 실어 목록이 따로 낡지 않게 한다.
   return { type: "git-status", root, path: reqPath || root, isRepo: true, branch, ahead, behind, staged, changes,
-    branches: gitBranchRefs(root, ["refs/heads"]) };
+    base: defaultBase(root, gitBranchRefs(root)), // 화면이 레포마다 어느 브랜치에서 갈라졌는지 표시
+    branches: gitBranchRefs(root, ["refs/heads"]),
+    worktrees: worktreeEntries(root).map((entry) => ({ branch: entry.branch, root: fsPathAllowed(entry.root) ? entry.root : null })) };
 }
 // Base 브랜치 후보는 로컬·원격 브랜치 목록이다. 화면이 보낸 base 는 이 목록에 있을 때만 git 에
 // 넘긴다. 목록 밖 문자열을 그대로 넘기면 "--output=..." 같은 값이 옵션으로 해석된다.
@@ -107,16 +124,24 @@ export function gitBranchRefs(root, scopes = ["refs/heads", "refs/remotes"]) {
   }
   return out;
 }
-// 기본 Base: origin/HEAD 가 가리키는 브랜치, 없으면 흔한 이름 순으로 처음 있는 것.
-// 원격 쪽을 먼저 본다. PR 이 비교하는 대상은 원격의 기본 브랜치다.
+// 기본 Base: 지금 브랜치가 갈라져 나온 브랜치. 후보(origin/HEAD 가 가리키는 브랜치, 흔한 이름 순·원격 먼저) 중
+// 갈라진 뒤 커밋이 가장 적은 것, 같으면 앞 후보. develop 에서 딴 브랜치를 main 과 비교하면 팀이 develop 에 올린
+// 커밋까지 섞여 내 변경이 묻힘. 지금 브랜치 자신과 그 원격은 다른 후보가 없을 때만 씀
 export function defaultBase(root, refs) {
+  const cands = [];
+  const add = (b) => { if (b && refs.includes(b) && !cands.includes(b)) cands.push(b); };
   const head = git(root, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]).out.trim();
-  if (head.startsWith("refs/remotes/")) { const b = head.slice(13); if (refs.includes(b)) return b; }
-  for (const n of ["main", "master", "develop"]) {
-    if (refs.includes("origin/" + n)) return "origin/" + n;
-    if (refs.includes(n)) return n;
+  if (head.startsWith("refs/remotes/")) add(head.slice(13));
+  for (const n of ["main", "master", "develop", "dev"]) { add("origin/" + n); add(n); }
+  const cur = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]).out.trim();
+  let best = "", bestCount = Infinity;
+  for (const b of cands) {
+    if (cur && (b === cur || b === "origin/" + cur)) continue;
+    const r = git(root, ["rev-list", "--count", b + "..HEAD"]); // b 는 refs 목록 안의 이름만
+    const n = r.ok ? Number(r.out.trim()) : NaN;
+    if (Number.isFinite(n) && n < bestCount) { best = b; bestCount = n; }
   }
-  return "";
+  return best || cands.find((b) => b !== cur) || ""; // 다른 후보가 없으면(main 위) 자기 원격과 비교
 }
 // base·mode 로 비교 기준을 정한다. committed = base...HEAD(분기점부터 HEAD 까지 커밋된 것),
 // worktree = 분기점부터 지금 디스크 상태까지(커밋 전 변경 포함).
@@ -168,7 +193,11 @@ export function handleGit(ws, msg) {
   if (!dir || !fsPathAllowed(dir)) { ws.send(JSON.stringify({ type: "git-error", op, path: dir || "", error: "허용되지 않은 경로" })); return; }
   // 하위 저장소 찾기. 이 op 는 그 폴더가 저장소가 아니어도 응답해야 하므로 아래 gitRoot 판정보다 앞에
   // 둔다. 스페이스 폴더 자체는 저장소가 아니고 그 안에 저장소가 여럿인 경우가 흔하다.
-  if (op === "repos") { ws.send(JSON.stringify({ type: "git-repos", path: dir, repos: nestedRepos(dir) })); return; }
+  if (op === "repos") {
+    const repos = nestedRepos(dir);
+    const worktrees = [...new Set([dir, ...repos].flatMap(linkedWorktrees))].filter(fsPathAllowed);
+    ws.send(JSON.stringify({ type: "git-repos", path: dir, repos, worktrees })); return;
+  }
   if (GIT_MUTATIONS.has(op) && !ws._local) { ws.send(JSON.stringify({ type: "git-error", op, path: dir, error: "원격에서는 git 조작 불가(AC5)" })); return; }
   const root = gitRoot(dir);
   if (!root) { ws.send(JSON.stringify({ type: "git-status", root: dir, path: dir, isRepo: false })); return; }

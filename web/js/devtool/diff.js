@@ -24,6 +24,7 @@
 //   현재 목록 확인: node bin/importers.mjs web/js/devtool/diff.js
 
 import { repoNameOf } from "../core/repo-name.js";
+import { callHook } from "../core/hooks.js";
 import {
   addTab, ensureTabSpace, getActiveTabId, getCenterSpace, getTabs, getTabSpaces,
   setActiveTab, setCenterSpace,
@@ -73,6 +74,22 @@ export function openDiff(file, opts) {
     ? { type: "git.diff", path: root || file, file, mode, base, untracked: !!opts.untracked, oldRel: opts.oldRel || "" }
     : { type: "git.diff", path: root || file, file, staged: !!opts.staged, untracked: !!opts.untracked });
 }
+// PR 서버에서 받은 patch를 그대로 표시해 로컬 작업 트리의 변경과 섞이지 않게 한다.
+export function openPatchDiff({ root, file, patch = null, number, base, spaceId, requestId, error = "", activate = true }) {
+  const sp = spaceId || getCenterSpace() || getSelectedSpaceId();
+  if (!sp || (patch !== null && typeof patch !== "string")) return false;
+  const id = `diff:pr:${root}:${number}:${file}`;
+  let tab = getTabs(sp).find((item) => item.id === id);
+  // 닫힌 탭을 응답이 다시 열거나 이전 요청이 새 클릭의 결과를 덮지 않게 한다.
+  if (!activate && (!tab || tab.patchRequest !== requestId)) return false;
+  if (!tab) tab = addTab(sp, { id, kind: "diff", label: `${file.split("/").pop()} · PR #${number}`,
+    path: `${root}/${file}`, root, rel: file, mode: "pullrequest", prNumber: number });
+  Object.assign(tab, { patch, base, error, patchRequest: requestId });
+  if (activate) {
+    setCenterSpace(sp); setActiveTab(sp, id); renderTabs(); showActiveTab();
+  } else if (getCenterSpace() === sp && getActiveTabId(sp) === id) renderDiffView(tab);
+  return true;
+}
 // diff 한 장을 줄로 푼다. 번호는 hunk 머리(@@ -a,b +c,d @@)에서만 알 수 있고, 그 값을 놓치면
 // 그 뒤 줄이 전부 잘못된 번호를 갖는다. 잘못된 번호는 번호가 없는 것보다 해롭다.
 // 지운 줄은 옛 파일에만, 더한 줄은 새 파일에만 번호가 있다. 양쪽에 다 적으면 없는 줄을 가리킨다.
@@ -112,7 +129,7 @@ export function colorizeDiff(patch) {
 }
 export function renderDiffView(t) {
   const dv = dom("#diffview");
-  const tag = t.mode ? `${t.base || "Base"} 대비${t.mode === "worktree" ? " · 커밋 전 포함" : ""}`
+  const tag = t.mode === "pullrequest" ? `PR #${t.prNumber} · ${t.base} 대비` : t.mode ? `${t.base || "Base"} 대비${t.mode === "worktree" ? " · 커밋 전 포함" : ""}`
     : (t.untracked ? "새 파일" : (t.staged ? "스테이지됨" : "변경"));
   // 어느 레포의 어느 경로인지를 머리글에 적는다. 레포가 여럿이면 파일 이름만으로는 구분되지 않는다.
   const rel = t.rel || "", slash = rel.lastIndexOf("/");
@@ -127,6 +144,7 @@ export function renderDiffView(t) {
     : "";
   const bar = `<div class="dv-bar"><span class="dv-tag">${escapeHtml(tag)}</span>`
     + `<span class="dv-crumb" title="${escapeHtml(t.root ? t.root + "/" + rel : t.label)}">${crumb}</span>` + meta + `</div>`;
+  if (t.error) { dv.innerHTML = bar + `<div class="dv-empty" role="alert">${escapeHtml(t.error)}</div>`; return; }
   if (t.patch == null) { dv.innerHTML = bar + `<div class="dv-empty">불러오는 중…</div>`; return; }
   const fold = hasHunk && !t.showMeta ? " fold-meta" : "";
   dv.innerHTML = bar + (t.patch.trim() ? `<pre class="dv-body${fold}">${colorizeDiff(t.patch)}</pre>` : `<div class="dv-empty">표시할 diff가 없습니다.</div>`);
@@ -138,6 +156,8 @@ export function renderDiffView(t) {
     btn.title = t.showMeta ? "파일 머리 줄 접기" : "파일 머리 줄 보기";
   };
   if (t.patch.trim()) highlightDiff(dv.querySelector(".dv-body"), t);
+  callHook("diffreview.render", { view: dv, toolbar: dv.querySelector(".dv-bar"),
+    lines: [...dv.querySelectorAll(".dv-body > .dl")], tab: t, rows: diffRows(t.patch), spaceId: getCenterSpace() });
 }
 
 // ── 문법 강조 ──

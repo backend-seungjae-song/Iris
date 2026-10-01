@@ -198,9 +198,10 @@ export default async function run() {
         enableExtensionLoader: async () => aggregate,
         waitForExtension: async (partition) => { waited.push(partition); return aggregate.results[0]; },
       },
-      showToast: (message) => toasts.push(message),
+      showToast: (message, options) => toasts.push({ message, detail: options?.detail || "" }),
     });
-    if (!toasts.some((message) => message.includes("persist:acprof:work(load)"))) throw new Error(toasts.join(" / "));
+    // 실패한 partition 은 오류 원문(detail)에 남는다. 제목은 짧은 결과 문구
+    if (!toasts.some((toast) => toast.detail.includes("persist:acprof:work(load)"))) throw new Error(JSON.stringify(toasts));
     await callHook("extensionloader.before-devtools", { partition: partitions[0] });
     if (waited.join() !== partitions[0]) throw new Error("before-devtools가 현재 partition을 기다리지 않았다");
     clearHooks();

@@ -343,7 +343,7 @@ export function initXterm() {
               if (sp.kind !== "path") { openTerminalTarget(sp.text, ev); return; }
               if (wantsReveal(ev)) { revealTerminalPath(sp.text); return; }   // ⌘⇧ = Finder에서 보기
               openTerminalPath(sp.text);
-            } catch (err) { showToast("여는 중 오류: " + (err && err.message || err)); }
+            } catch (err) { showToast("여는 중 오류", { level: "err", detail: String(err && err.message || err) }); }
           },
         }));
         cb(links.length ? links : undefined);
@@ -457,10 +457,6 @@ export function initXterm() {
   // 입력: xterm이 키·IME·붙여넣기를 원시 바이트(onData)로 주므로 그대로 PTY(herdr)에 전달.
   xterm.onData((d) => {
     wsSend({ type: "pty.input", data: d });
-    // 사용자가 프롬프트를 제출한 순간이 한 대화의 끝이다. 지목이 여기까지만 쌓이도록 서버에 알린다.
-    // 붙여넣기로 넣는 알림 블록은 이 경로를 타지 않는다(wsSend로 직접 보낸다). 사용자가 입력한 것만 온다.
-    const curTarget = getCurTarget();
-    if (d.indexOf("\r") >= 0 && curTarget) wsSend({ type: "chat-submitted", pane: curTarget });
   });
   xterm.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;

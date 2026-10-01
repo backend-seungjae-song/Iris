@@ -10,6 +10,8 @@ pnpm agent:context launch --id review-api --runtime codex --model MODEL --effort
 
 `--runtime` accepts `codex` or `claude`. Reasons are `independent-work`, `independent-review`, `separate-evidence`, and `isolated-trial`. Choose model and effort from the installed runtime's supported catalog. `--dry-run` verifies identity without launching. The launcher adds no permission bypass flags; the child uses its runtime settings and the brief's authority boundary.
 
+Codex terminals launched here use `--no-daemon`. Hooks and tools inherit the terminal environment, so new and resumed conversations can register the correct pane. Closing the terminal also ends its local runtime; shared-daemon background continuation is unavailable for these terminals. Phone messages use the live terminal and verify its conversation ID before sending. Registered IDs locate transcript files even when a shared daemon has closed them; an explicit `resume ID` can be identified before the first input hook.
+
 The caller must belong to the current pane's live runtime process. `HERDR_SOCKET_PATH` must agree with the socket derived from the Iris state directory/session. Native Codex workers sharing the parent's pane cannot use that pane's identity to launch a terminal. For development, pass the matching `IRIS_STATE_DIR` and `IRIS_HERDR_SESSION` settings.
 
 Each job ID is scoped to the parent terminal. Repeating a completed launch with identical inputs returns the original receipt without creating another terminal. Different inputs under the same ID are rejected. Creation intent and result are stored under `stateHome()/agent-context/<socket-hash>/`. If the result is uncertain or lineage registration fails, inspect the saved receipt and live pane before recovery; retrying the same ID does not create an additional terminal. Preserve the result artifact before closing only the child pane recorded in the receipt.
@@ -24,7 +26,9 @@ Source files: [launcher](../bin/agent-context.mjs), [lineage join](../server/age
 
 Agent previous/next shortcuts cycle only top-level sessions. From a child they use its top-level parent's position. Cmd+W closes the selected pane only, checks its terminal identity, and ignores held-key repeats. Legacy whole-tab close requests are refused for split tabs.
 
-`pnpm install:app` also installs the managed `iris-agent-context` skill for Codex and Claude Code. New sessions discover it in each runtime's `skills/` directory; existing personal guidance/settings remain untouched. Custom homes follow `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. The skill points to the launcher bundled inside `/Applications/Iris.app`, so it continues to work if the source checkout moves. Reinstalling refreshes only the Iris-managed skill; a conflicting user-owned skill is preserved and reported.
+`pnpm install:app` also installs the managed `iris-agent-context` skill for Codex and Claude Code. New sessions discover it in each runtime's `skills/` directory; existing personal guidance remains untouched.
+
+The Iris hook has managed entries for `SessionStart` and `UserPromptSubmit` in `~/.claude/settings.json` and `~/.codex/hooks.json`. Its command contains `IRIS_AGENT_CONTEXT_PROMPT_TARGETS=1`. Both entries report the hook's session ID and transcript path for the current Iris pane; `UserPromptSubmit` also registers designated app targets. Iris accepts only real `.jsonl` files under the configured Claude `projects` or Codex `sessions` directory and rejects files inside its state directory. `./setup` asks before adding the entries (`install-agent-context.mjs --hooks`). It creates a missing settings file only when that runtime's home folder exists and copies an existing file to `.iris-agent-context.bak` once before the first change. `pnpm install:app` only refreshes an existing Iris entry to the new app path. Other entries, keys and order are preserved; symlinked or unparsable files are reported and left unchanged. Codex runs a new hook only after it is trusted in `/hooks`, and asks again when the hook command changes (for example, a different app location). `./setup --check` reports a missing or outdated hook. Custom homes follow `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. The skill points to the launcher bundled inside `/Applications/Iris.app`, so it continues to work if the source checkout moves. Reinstalling refreshes only the Iris-managed skill; a conflicting user-owned skill is preserved and reported.
 
 ## Non-interactive subsessions
 
@@ -41,3 +45,11 @@ Use the wrapper for every non-interactive `codex`/`claude` command that should a
 Working files are stored under `stateHome()/agent-run/<socket-hash>/<job>/` and are kept only when the command fails or `--keep` is given.
 
 Verification: `pnpm test` covers the shell quoting, the env keys withheld from the child, the stream separation and exit-code publication order in the pane script, and the configuration that includes the wrapper in the installed app.
+
+## Session registration
+
+The `SessionStart` and `UserPromptSubmit` hooks register Codex and Claude session IDs independently of transcript-file creation. Once a valid transcript exists, the hook also reports its path. The hook verifies the live process before using an inherited pane ID. If environment filtering removes that ID, it checks process ancestry. Shared-daemon clients can recover an existing exact registration or an unregistered explicit `resume ID` matching the hook ID. Iris starts new and restored Codex terminals with `--no-daemon`; existing shared-daemon terminals must resume through that option.
+
+The installer removes the older Herdr SessionStart registration command and Claude SessionEnd registrar when Iris registration is enabled. Other hooks remain in place. Both registration and prompt targets use the verified pane. Registration requests time out after one second; later prompt hooks attempt registration again.
+
+`SessionStart` only registers the session. `UserPromptSubmit` applies the markers in the submitted prompt and discards omitted pending markers. Pending markers are stored under `stateHome()` so an Iris restart preserves them until submission or their 24-hour expiry. Consumption is saved before grants are applied; saving failures leave grants unchanged.

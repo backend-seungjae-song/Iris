@@ -16,7 +16,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
-const { childEnv } = require("../../server/env.cjs");
+const { childEnv, NET_POLICY } = require("../../server/env.cjs");
 const { createDevSourceWatch } = require("./dev-source-watch.cjs");
 
 const PROBE_TIMEOUT_MS = 700;
@@ -82,9 +82,16 @@ function samePath(a, b) {
 
 // /healthz 응답이 그 포트·상태 폴더의 Iris 서버인지. 앱이 붙을 서버를 고를 때와 설치 스크립트가
 // 새 앱의 서버가 떴는지 볼 때 같은 기준을 쓴다.
+// Iris 서버 응답이지만 네트워크 정책이 다른 경우. 이전 버전(0.0.0.0 수신 가능) 서버
+function policyMismatch(health) {
+  return !!health && health.ok === true && health.netPolicy !== NET_POLICY;
+}
+
+// 네트워크 정책 불일치 서버(이전 버전, 0.0.0.0 수신 가능)는 재사용 제외
 function healthMatches(health, { port, stateDir }) {
   if (!health || health.ok !== true) return false;
   if (Number(health.port) !== Number(port)) return false;
+  if (health.netPolicy !== NET_POLICY) return false;
   return samePath(health.stateDir, stateDir);
 }
 
@@ -115,11 +122,16 @@ async function waitUntilUp(port, deadline) {
 }
 
 class ServerHost {
-  constructor({ app, port, stateDir, onLog }) {
+  constructor({ app, port, stateDir, onLog, onPolicyMismatch }) {
     this.app = app;
     this.port = port;
     this.stateDir = stateDir;
     this.onLog = onLog || (() => {});
+    // 기동 이후 정책 불일치 통지. 앱 종료 처리 담당
+    this.onPolicyMismatch = onPolicyMismatch || (() => {});
+    this.policyFailed = false;
+    // 기동 후 준비 확인 실패. 이후 자동 기동(감시·backoff) 중단
+    this.halted = false;
     this.child = null;
     this.owned = false;      // 이 앱이 실행한 서버인지. 아니면 붙기만 한 서버다
     this.stopping = false;
@@ -169,9 +181,12 @@ class ServerHost {
       // 실행하지 않는다. 여기서 자식을 실행하면 그 자식은 상태 폴더 잠금만 점유한 채 포트를
       // 얻지 못하고 재시도를 반복한다. 요청을 처리하지 못하면서 정상 서버의 기동까지 막는다.
       this.conflict = existing;
+      if (existing.ok === true && existing.netPolicy !== NET_POLICY) {
+        this.log(`${this.port}번에 네트워크 정책이 다른 이전 Iris 서버가 떠 있습니다 — pid ${existing.pid}. 그 서버를 종료한 뒤 앱을 다시 실행해 주세요.`);
+      }
       this.log(`${this.port}번을 다른 서버가 쓰고 있습니다 — pid ${existing.pid}, 상태 ${existing.stateDir || "?"}.`);
       this.log(`  우리 상태 폴더는 ${this.stateDir} 입니다. 그쪽을 내리거나 IRIS_PORT로 포트를 갈라 주세요.`);
-      return { attached: false, health: null, conflict: existing };
+      return { attached: false, health: null, conflict: existing, policyMismatch: policyMismatch(existing) };
     }
     this.spawnOnce();
     const health = await waitUntilUp(this.port, Date.now() + READY_TIMEOUT_MS);
@@ -180,8 +195,12 @@ class ServerHost {
       this.log(`서버가 ${READY_TIMEOUT_MS / 1000}초 안에 응답하지 않았습니다 — 그 자식을 내리고 ${path.join(this.stateDir, "server.log")}를 남깁니다.`);
       const dead = this.child;
       this.child = null;
+      // 소유 해제 후 종료. 종료 처리의 자동 재기동 차단(검증 안 된 서버 재실행 방지)
+      // 준비 대기 중 예약된 backoff 재기동도 중단
+      this.halted = true;
+      this.owned = false;
       try { dead && dead.kill("SIGTERM"); } catch {}
-      return { attached: false, health: null };
+      return { attached: false, health: null, policyMismatch: policyMismatch(health) };
     }
     this.log(`서버를 띄웠습니다 — pid ${health.pid}, ${health.stateDir}`);
     this.watch();
@@ -205,10 +224,12 @@ class ServerHost {
       // await 뒤에는 상태가 달라져 있을 수 있다. backoff 재시작이 그 사이에 자식을 실행했거나
       // 앱이 종료 중일 수 있으므로 다시 확인한다.
       if (this.stopping || this.child) return;
+      // 그 포트 서버가 정책 불일치(이전 버전으로 교체 등)면 통신 중단
+      if (policyMismatch(health)) { this.failPolicy(health); return; }
       if (health) return;   // 누구의 것이든 그 포트에 서버가 있으면 종료하지 않는다
       if (this.restarts.length >= RESTART_BACKOFF_MS.length) return;  // 재시도 예산을 넘기지 않는다
       this.log("붙어 있던 서버가 사라졌습니다 — 이제 앱이 띄웁니다.");
-      this.spawnOnce();
+      this.spawnVerified();
     }, watchIntervalMs());
     if (this.watchTimer.unref) this.watchTimer.unref();
   }
@@ -241,7 +262,7 @@ class ServerHost {
     await this.awaitLockRelease();
     this.reloading = false;
     if (this.stopping) return false;
-    this.spawnOnce();
+    this.spawnVerified();
     if (this.sourceWatch) this.sourceWatch.noteReloaded();
     return true;
   }
@@ -274,6 +295,9 @@ class ServerHost {
     const env = { ...process.env, ...childEnv({ port: this.port, stateDir: this.stateDir }) };
     // 서버가 자신을 설정하는 변수다. 앱이 물려받은 옛 값이 새 계약을 덮지 않게 지운다.
     delete env.PORT;
+    // 이전 원격 설정 제거. 이전 버전 소스(IRIS_SERVER_ROOT)도 루프백 수신
+    delete env.REMOTE;
+    delete env.HOST;
     if (runtime.asNode) env.ELECTRON_RUN_AS_NODE = "1";
     else delete env.ELECTRON_RUN_AS_NODE;
 
@@ -314,7 +338,44 @@ class ServerHost {
     this.log(`서버가 내려갔습니다(code ${code}, signal ${signal || "-"}) — ${delay / 1000}초 뒤 다시 띄웁니다.`);
     // unref 로 이 대기가 프로세스를 유지하지 않게 한다. 앱은 자체 수명으로 살아 있고,
     // 앱이 없는 환경(테스트)에서는 이 타이머만 남아 종료되지 않는 일이 없어야 한다.
-    setTimeout(() => { if (!this.stopping) this.spawnOnce(); }, delay).unref?.();
+    setTimeout(() => { if (!this.stopping) this.spawnVerified(); }, delay).unref?.();
+  }
+
+  // 첫 기동 외 자식 기동 경로(인계·재시작·재기동) 공통 진입
+  // 기동 후 응답의 정책 확인. 불일치 시 통신 중단
+  spawnVerified() {
+    if (this.policyFailed || this.halted) return;
+    this.spawnOnce();
+    const child = this.child;
+    if (!child) return;
+    void (async () => {
+      const health = await waitUntilUp(this.port, Date.now() + READY_TIMEOUT_MS);
+      if (this.stopping || this.child !== child) return;
+      if (policyMismatch(health)) { this.failPolicy(health); return; }
+      if (health && this.matches(health)) return;
+      // 응답 없음·잘못된 응답 = 첫 기동과 같은 실패 처리. 소유 해제·감시 중단 후 자식 종료, 재기동 없음
+      this.log(`서버가 ${READY_TIMEOUT_MS / 1000}초 안에 올바르게 응답하지 않았습니다 — 그 자식을 내리고 다시 띄우지 않습니다.`);
+      this.halted = true;
+      if (this.watchTimer) { clearInterval(this.watchTimer); this.watchTimer = null; }
+      this.owned = false;
+      this.child = null;
+      try { child.kill("SIGTERM"); } catch {}
+    })();
+  }
+
+  // 정책 불일치 처리. 1회만
+  // 소유 해제(재기동 차단), 감시 중단, 이 앱 자식 종료, 앱에 통지
+  failPolicy(health) {
+    if (this.policyFailed) return;
+    this.policyFailed = true;
+    this.log(`${this.port}번 서버의 네트워크 정책이 다릅니다(pid ${health?.pid ?? "?"}) — 연결을 끊고 앱을 종료합니다.`);
+    this.owned = false;
+    if (this.watchTimer) { clearInterval(this.watchTimer); this.watchTimer = null; }
+    if (this.sourceWatch) { this.sourceWatch.stop(); this.sourceWatch = null; }
+    const child = this.child;
+    this.child = null;
+    try { child && child.kill("SIGTERM"); } catch {}
+    try { this.onPolicyMismatch(health); } catch (e) { this.log(`정책 불일치 통지 실패: ${e && e.message}`); }
   }
 
   // 앱 종료 시. 이 앱이 실행한 서버만 종료한다. 붙기만 한 서버는 다른 소유자의 것이다.

@@ -20,6 +20,7 @@
 //   grep -rl 'browser/record.js"' web/js
 
 import { getWebview } from "./webview-store.js";
+import { callHook } from "../core/hooks.js";
 import {
   activeBrowserId, bindWebviewRecording, scheduleWebviewThrottling,
 } from "./webview.js";
@@ -228,6 +229,7 @@ export function recAdoptTab(tabId) {
 export function setRecording(on) {
   if (on === recording) return;
   recording = on;
+  callHook("emulator.recordMode", recording);
   document.body.classList.toggle("recording", on);
   if (on) {
     recEvents = []; recT0 = Date.now(); recTabs = new Set();

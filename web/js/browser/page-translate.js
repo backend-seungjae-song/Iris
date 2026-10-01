@@ -1,7 +1,7 @@
-// 현재 webview page를 사용자가 요청한 순간 한국어로 번역한다.
+// webview 페이지의 수동 번역과 사이트별 자동 번역 설정을 소유한다.
 //
 // 소유 범위
-//   pagetranslate.page hook, 우클릭 action 등록, Google widget 주입 코드와 결과/toast mapping.
+//   번역·자동 번역 설정 hook, 우클릭 action 등록, webview 수명 관찰과 Google widget 주입.
 //
 // 제공 API
 //   initCapability(ctx). 검사가 쓰는 buildPageTranslateScript와 findGuestWebview도 내준다.
@@ -10,9 +10,9 @@
 //   ctx.acHost의 범용 context-action bridge, ctx.getWebviewEntries(), ctx.showToast().
 //
 // 유지 조건
-//   사용자가 메뉴를 누르기 전에는 page code나 외부 resource를 로드하지 않는다. http(s) top page만
+//   수동 요청 또는 같은 프로필·origin의 저장된 자동 번역 설정이 있을 때만 외부 resource를 로드한다. http(s) top page만
 //   대상으로 하고 CSP를 완화하거나 webRequest를 바꾸지 않는다. 실패는 구조화된 code로 끝나며
-//   성공 toast는 ok=true일 때만 보인다. reload 복원을 위해 googtrans 지속 상태를 남기지 않는다.
+//   성공 toast는 ok=true일 때만 보인다. Google의 googtrans 상태는 지우고 Iris 설정으로만 자동 번역한다.
 //   위젯이 부분 번역한 뒤 실패해도 text/DOM은 원복하지 않고, 원문 복원은 reload로만 한다.
 //
 // 영향 범위
@@ -25,6 +25,9 @@ export const TARGET_LANGUAGE = "ko";
 export const GOOGLE_TRANSLATE_LOADER = "https://translate.google.com/translate_a/element.js?cb=";
 const ACTION_NAME = "pagetranslate.page";
 const PROVIDER_NAME = "pagetranslate.page";
+const AUTO_ON_ACTION = "pagetranslate.autoOn";
+const AUTO_OFF_ACTION = "pagetranslate.autoOff";
+const AUTO_STORAGE_PREFIX = "iris.pageTranslate.auto.v1:";
 
 const FAILURE_MESSAGES = {
   csp: "페이지 보안 정책 때문에 번역 서비스를 불러올 수 없습니다.",
@@ -32,9 +35,39 @@ const FAILURE_MESSAGES = {
   timeout: "페이지 번역 시간이 초과되었습니다.",
   unsupported: "이 페이지는 번역할 수 없습니다.",
   "already-running": "페이지 번역이 이미 진행 중입니다.",
+  storage: "자동 번역 설정을 저장하지 못했습니다.",
 };
 
 const translating = new WeakMap();
+
+function pageUrl(webview) {
+  try { return String(webview.getURL() || ""); } catch { return ""; }
+}
+
+// 프로필과 origin을 함께 저장하므로 다른 계정·프로토콜·포트에는 설정이 적용되지 않는다.
+export function autoTranslatePreferenceKey(webview) {
+  try {
+    const url = new URL(pageUrl(webview));
+    if (!/^https?:$/.test(url.protocol)) return "";
+    const partition = webview.getAttribute("partition") || "";
+    return AUTO_STORAGE_PREFIX + JSON.stringify([partition, url.origin]);
+  } catch { return ""; }
+}
+
+function preferenceEnabled(key) {
+  try { return !!key && window.localStorage.getItem(key) === "ko"; } catch { return false; }
+}
+
+function savePreference(key, enabled) {
+  if (!key) return { ok: false, code: "unsupported", detail: "page or profile is unavailable" };
+  try {
+    if (enabled) window.localStorage.setItem(key, TARGET_LANGUAGE);
+    else window.localStorage.removeItem(key);
+    return { ok: true, code: enabled ? "auto-enabled" : "auto-disabled" };
+  } catch (error) {
+    return { ok: false, code: "storage", detail: String(error?.message || error) };
+  }
+}
 
 export function findGuestWebview(entries, guestWebContentsId) {
   const wanted = Number(guestWebContentsId);
@@ -317,19 +350,127 @@ async function translateGuest(ctx, message) {
 export function initCapability(ctx) {
   const host = ctx.acHost || null;
   const showToast = typeof ctx.showToast === "function" ? ctx.showToast : () => {};
+  const observed = new WeakMap();
+
+  function reportFailure(result) {
+    showToast(FAILURE_MESSAGES[result.code] || FAILURE_MESSAGES.unsupported, { level: "err" });
+    try { console.warn("[pagetranslate]", result.code, result.detail || ""); } catch {}
+  }
+
+  async function automaticallyTranslate(webview, state) {
+    if (webview.isConnected === false) return;
+    const key = autoTranslatePreferenceKey(webview);
+    const href = pageUrl(webview);
+    if (!preferenceEnabled(key) || state.attemptedHref === href) return;
+    state.attemptedHref = href;
+    const generation = state.generation;
+    const active = translating.get(webview);
+    if (active && active.href !== href) await active.promise;
+    if (generation !== state.generation || pageUrl(webview) !== href || !preferenceEnabled(key)) return;
+    let guestWebContentsId;
+    try { guestWebContentsId = webview.getWebContentsId(); } catch { return; }
+    const result = await translateGuest(ctx, { guestWebContentsId });
+    if (generation !== state.generation || pageUrl(webview) !== href || !preferenceEnabled(key)) return;
+    if (!result.ok) reportFailure(result);
+  }
+
+  function scheduleTranslation(webview, state, delay = 0) {
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => { void automaticallyTranslate(webview, state); }, delay);
+  }
+
+  function observeWebviews() {
+    for (const [, record] of typeof ctx.getWebviewEntries === "function" ? ctx.getWebviewEntries() : []) {
+      const webview = record?.el;
+      if (!webview?.addEventListener || observed.has(webview)) continue;
+      const state = { generation: 0, attemptedHref: "", timer: null };
+      observed.set(webview, state);
+      const reset = (newDocument = false) => {
+        state.generation++;
+        state.attemptedHref = "";
+        clearTimeout(state.timer);
+        if (newDocument) translating.delete(webview);
+      };
+      webview.addEventListener("did-start-navigation", (event) => {
+        if (event.isMainFrame) reset();
+      });
+      webview.addEventListener("dom-ready", () => {
+        reset(true);
+        scheduleTranslation(webview, state);
+      });
+      webview.addEventListener("did-navigate-in-page", (event) => {
+        if (!event.isMainFrame) return;
+        // SPA가 탐색 이벤트 뒤에 새 문구를 렌더링할 시간을 준다.
+        scheduleTranslation(webview, state, 150);
+      });
+      if (record.ready) scheduleTranslation(webview, state);
+    }
+  }
+
+  observeWebviews();
+  const stack = typeof ctx.$ === "function" ? ctx.$("#wv-stack") : null;
+  if (stack && typeof MutationObserver !== "undefined") {
+    const observer = new MutationObserver(observeWebviews);
+    observer.observe(stack, { childList: true });
+  }
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("storage", (event) => {
+      if (!event.key?.startsWith(AUTO_STORAGE_PREFIX)) return;
+      for (const [, record] of typeof ctx.getWebviewEntries === "function" ? ctx.getWebviewEntries() : []) {
+        const state = observed.get(record?.el);
+        if (!state || autoTranslatePreferenceKey(record.el) !== event.key) continue;
+        if (event.newValue === TARGET_LANGUAGE) {
+          state.attemptedHref = "";
+          if (record.ready) scheduleTranslation(record.el, state);
+        }
+      }
+    });
+  }
 
   provide(PROVIDER_NAME, async (message) => {
     const result = await translateGuest(ctx, message);
-    if (result.ok) showToast("페이지를 한국어로 번역했습니다.");
+    if (result.ok) showToast("페이지를 한국어로 번역했습니다.", { level: "ok" });
     else {
-      showToast(FAILURE_MESSAGES[result.code] || FAILURE_MESSAGES.unsupported);
-      try { console.warn("[pagetranslate]", result.code, result.detail || ""); } catch {}
+      reportFailure(result);
     }
     return result;
   });
 
+  provide(AUTO_ON_ACTION, async (message) => {
+    const webview = findGuestWebview(ctx.getWebviewEntries, message?.guestWebContentsId);
+    const saved = savePreference(autoTranslatePreferenceKey(webview), true);
+    if (!saved.ok) { reportFailure(saved); return saved; }
+    showToast("이 사이트의 자동 번역을 켰습니다.", { level: "ok" });
+    observeWebviews();
+    const state = observed.get(webview);
+    if (state) {
+      clearTimeout(state.timer);
+      state.attemptedHref = pageUrl(webview);
+    }
+    const href = pageUrl(webview);
+    const result = await translateGuest(ctx, message);
+    if (!result.ok && preferenceEnabled(autoTranslatePreferenceKey(webview)) && pageUrl(webview) === href) reportFailure(result);
+    return { ...saved, translation: result };
+  });
+
+  provide(AUTO_OFF_ACTION, (message) => {
+    const webview = findGuestWebview(ctx.getWebviewEntries, message?.guestWebContentsId);
+    const key = autoTranslatePreferenceKey(webview);
+    const saved = savePreference(key, false);
+    if (!saved.ok) { reportFailure(saved); return saved; }
+    const state = observed.get(webview);
+    if (state) {
+      state.generation++;
+      clearTimeout(state.timer);
+    }
+    showToast("이 사이트의 자동 번역을 껐습니다. 새로고침하면 원문을 볼 수 있습니다.", { level: "ok" });
+    return saved;
+  });
+
   if (host && host.registerContextAction) {
     host.registerContextAction({ name: ACTION_NAME, label: "이 페이지 번역" });
+    host.registerContextAction({ name: AUTO_ON_ACTION, label: "이 사이트 항상 한국어로 번역" });
+    host.registerContextAction({ name: AUTO_OFF_ACTION, label: "이 사이트 자동 번역 끄기" });
   }
   return {};
 }

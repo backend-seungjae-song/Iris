@@ -49,6 +49,7 @@
     },
     "files": [
       "bin/agent-context.mjs",
+      "bin/iris-session.mjs",
       "bin/agent-run.mjs",
       "native/**/*",
       "server/**/*",
@@ -58,6 +59,7 @@
     ],
     "asarUnpack": [
       "bin/agent-context.mjs",
+      "bin/iris-session.mjs",
       "bin/agent-run.mjs",
       "package.json",
       "server/**",
@@ -90,6 +92,8 @@
       "hardenedRuntime": false,
       "extendInfo": {
         "NSAppleEventsUsageDescription": "브라우저 탭과 창을 실제 클릭·입력으로 조작하기 위해 시스템 이벤트를 씁니다.",
+        "NSLocationUsageDescription": "사이트가 위치 정보를 요청하고 사용자가 허용한 경우에만 현재 위치를 알려 줍니다.",
+        "NSAudioCaptureUsageDescription": "에뮬레이터 탭의 기기 소리 크기를 기기마다 따로 조절하기 위해 그 기기의 소리를 받아 다시 재생합니다.",
         "LSUIElement": false
       }
     }
@@ -104,12 +108,13 @@
     "node-pty": "^1.1.0",
     "puppeteer-core": "25.10.0",
     "tldts": "7.4.11",
+    "uqr": "0.1.3",
     "ws": "^8.21.1",
     "zod": "4.5.4"
   },
   "devDependencies": {
     "docx": "^9.7.1",
-    "electron": "^43.2.0",
+    "electron": "^43.7.0",
     "electron-builder": "^26.15.3",
     "esbuild": "0.28.2",
     "serve-sim": "0.1.40"

@@ -147,13 +147,19 @@ test("팝업은 연 세션만 목록·지정으로 제어하고 종료하면 권
   for (const mutation of [
     { op: "group.create", space: "X", id: "ai:A", name: "A" },
     { op: "group.create", space: "X", id: "ai:B", name: "B" },
+    { op: "group.create", space: "X", id: "picked-one", name: "첫 그룹" },
+    { op: "group.create", space: "X", id: "picked-two", name: "둘째 그룹" },
     { op: "tab.open", space: "X", id: "opener-a", url: "https://a.test", group: "ai:A" },
     { op: "tab.open", space: "X", id: "opener-b", url: "https://b.test", group: "ai:B" },
     { op: "tab.open", space: "X", id: "opener-human", url: "https://human.test" },
+    { op: "tab.open", space: "X", id: "picked-tab-one", url: "https://one.test", group: "picked-one" },
+    { op: "tab.open", space: "X", id: "picked-tab-two", url: "https://two.test", group: "picked-two" },
   ]) sendWs({ type: "browser-sync", mutation });
 
   sendWs({ type: "browser-tab-wc", wc: 101, tabId: "opener-a", space: "X", url: "https://a.test", win: "console" });
   sendWs({ type: "browser-tab-wc", wc: 102, tabId: "opener-human", space: "X", url: "https://human.test", win: "console" });
+  sendWs({ type: "browser-tab-wc", wc: 103, tabId: "picked-tab-one", space: "X", url: "https://one.test", win: "console" });
+  sendWs({ type: "browser-tab-wc", wc: 104, tabId: "picked-tab-two", space: "X", url: "https://two.test", win: "console" });
   sendWs({ type: "browser-tab-wc", wc: 201, tabId: "popup-a", openerWc: 101,
     url: "https://popup.test", title: "팝업", win: "popup" });
 
@@ -210,11 +216,59 @@ test("팝업은 연 세션만 목록·지정으로 제어하고 종료하면 권
   });
 
   await t.test("8. 팝업 종료는 pin·grant·last의 persisted 유령을 남기지 않는다", async () => {
+    await browserCmd("untarget", "A");
     const token = fs.readFileSync(path.join(stateDir, "ui-token"), "utf8").trim();
     const auth = await sendWsAndFind({ type: "ui-auth", token }, (m) => m.type === "ui-auth");
     assert.equal(auth.ok, true);
-    await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "popup-a" },
-      (m) => m.type === "tab-granted" && m.pane === "A");
+
+    const firstGroup = await sendWsAndFind({ type: "browser-group-grant", pane: "A", space: "X", group: "picked-one" },
+      (m) => m.type === "target-pending" && m.kind === "group");
+    await browserCmd("prompt-targets", "A", { markers: [firstGroup.delimiter] });
+    let grouped = await browserCmd("tabs", "A");
+    assert.ok(grouped.data.tabs.some((tab) => tab.tabId === "picked-tab-one"));
+    const secondGroup = await sendWsAndFind({ type: "browser-group-grant", pane: "A", space: "X", group: "picked-two" },
+      (m) => m.type === "target-pending" && m.kind === "group");
+    await browserCmd("prompt-targets", "A", { markers: [secondGroup.delimiter] });
+    grouped = await browserCmd("tabs", "A");
+    assert.ok(grouped.data.tabs.some((tab) => tab.tabId === "picked-tab-two"));
+    assert.ok(!grouped.data.tabs.some((tab) => tab.tabId === "picked-tab-one"), "이전 지정 그룹이 교체되지 않았다");
+
+    const pending = await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "popup-a" },
+      (m) => m.type === "target-pending" && m.pane === "A");
+    assert.match(pending.delimiter, /^@.+-tab-[a-z][0-9a-f]{5}~[A-Za-z0-9_-]{8,128}$/i);
+    const notYet = await browserCmd("tabs", "A");
+    assert.deepEqual([notYet.data.pinnedAll, notYet.data.granted], [[], []], "UI 지목만으로 권한이 생겼다");
+    const wrongPane = await browserCmd("prompt-targets", "B", { markers: [pending.delimiter] });
+    assert.equal(wrongPane.data.activated.length, 0);
+    assert.match(wrongPane.data.rejected[0].reason, /다른 세션/);
+    const activated = await browserCmd("prompt-targets", "A", { markers: [pending.delimiter] });
+    assert.equal(activated.data.activated.length, 1);
+    const replay = await browserCmd("prompt-targets", "A", { markers: [pending.delimiter] });
+    assert.equal(replay.data.activated.length, 0);
+    assert.match(replay.data.rejected[0].reason, /이미 사용됨/);
+
+    const elementPending = await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "popup-a", via: "pick" },
+      (m) => m.type === "target-pending" && m.kind === "element");
+    await browserCmd("prompt-targets", "A", { markers: [elementPending.delimiter] });
+    const secondElement = await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "popup-human", via: "pick" },
+      (m) => m.type === "target-pending" && m.kind === "element");
+    await browserCmd("prompt-targets", "A", { markers: [secondElement.delimiter] });
+    const humanPending = await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "opener-human" },
+      (m) => m.type === "target-pending" && m.kind === "tab");
+    await browserCmd("prompt-targets", "A", { markers: [humanPending.delimiter] });
+    const bPending = await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "opener-b" },
+      (m) => m.type === "target-pending" && m.kind === "tab");
+    await browserCmd("prompt-targets", "A", { markers: [bPending.delimiter] });
+    const replaced = await browserCmd("tabs", "A");
+    assert.ok(replaced.data.granted.some((handle) => handle === pending.handle), "요소 grant가 탭 교체 뒤 사라졌다");
+    assert.ok(replaced.data.tabs.some((tab) => tab.tabId === "popup-human"), "먼저 누적한 요소 grant가 사라졌다");
+    assert.ok(replaced.data.tabs.some((tab) => tab.tabId === "opener-b"), "새 지정 탭이 권한 목록에 없다");
+    assert.ok(!replaced.data.tabs.some((tab) => tab.tabId === "opener-human"), "이전 지정 탭이 교체되지 않았다");
+    const popupAgain = await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "popup-a" },
+      (m) => m.type === "target-pending" && m.kind === "tab");
+    await browserCmd("prompt-targets", "A", { markers: [popupAgain.delimiter] });
+    sendWs({ type: "browser-tab-gone", tabId: "popup-human", wc: 202 });
+
     const before = await browserCmd("tabs", "A");
     assert.ok(before.data.pinnedAll.length && before.data.granted.length, "종료 전 pin/grant 준비가 안 됐다");
 
@@ -226,5 +280,22 @@ test("팝업은 연 세션만 목록·지정으로 제어하고 종료하면 권
       const file = path.join(stateDir, "grants.json");
       return fs.existsSync(file) && !fs.readFileSync(file, "utf8").includes("popup-a");
     });
+  });
+
+  await t.test("9. 잠든 탭(webview 없음)도 지목하고 보내면 그 세션에 등록된다", async () => {
+    sendWs({ type: "browser-sync", mutation: { op: "tab.open", space: "X", id: "sleeping-x", url: "https://sleep.test" } });
+    const before = await browserCmd("tabs", "A");
+    assert.ok(!before.data.tabs.some((tab) => tab.tabId === "sleeping-x"), "지목 전인데 그룹 밖 잠든 탭이 보였다");
+
+    const pending = await sendWsAndFind({ type: "browser-target-set", pane: "A", tabId: "sleeping-x" },
+      (m) => m.type === "target-pending" && m.kind === "tab" && m.url === "https://sleep.test");
+    assert.match(pending.delimiter, /^@.+-tab-[a-z][0-9a-f]{5}~/i);
+    const activated = await browserCmd("prompt-targets", "A", { markers: [pending.delimiter] });
+    assert.equal(activated.data.activated.length, 1);
+    const after = await browserCmd("tabs", "A");
+    const tab = after.data.tabs.find((item) => item.tabId === "sleeping-x");
+    assert.equal(tab?.sleeping, true, "지목한 잠든 탭이 목록에 없다");
+    assert.ok(after.data.granted.includes(pending.handle), "잠든 탭 지목이 권한으로 등록되지 않았다");
+    assert.ok(after.data.pinnedAll.includes(pending.handle), "잠든 탭 지목이 고정되지 않았다");
   });
 });

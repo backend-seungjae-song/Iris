@@ -39,13 +39,13 @@ export async function switchSheetMode(t, targetMode) {
   if (sourceDirty) {
     // 잠금은 앱 셸이 소유한다. 이미 열려 있으면 null 이 오고, 여기서 두 번째 대화상자를 띄우지 않는다.
     const choice = await chooseDirtyAction("변경 내용을 저장하고 전환할까요?", t.label || t.path);
-    if (choice === null) { showToast("이미 저장 확인이 열려 있습니다"); return; }
+    if (choice === null) { showToast("이미 저장 확인이 열려 있습니다", { level: "warn" }); return; }
     if (choice === "cancel" || !isLiveSource()) return;
     sourceDirty = sourceMode ? svTabDirty(t) : isTextTabDirty(t);
     targetDirty = sourceMode ? isTextTabDirty(t) : svTabDirty(t);
     if (choice === "save") {
       if (sourceDirty && targetDirty) {
-        showToast("원문과 표 양쪽에 편집이 남아 있습니다. 수정 사항 모두 취소하거나 전환을 취소하세요");
+        showToast("원문과 표 양쪽에 편집이 남아 있습니다. 수정 사항 모두 취소하거나 전환을 취소하세요", { level: "warn" });
         return;
       }
       try { await saveTabForClose(t, space); }

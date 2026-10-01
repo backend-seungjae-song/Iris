@@ -30,7 +30,7 @@ import { provide } from "../core/hooks.js";
 // 이 기능의 마크업 위치. index.html 에 두면 기능을 꺼도 바깥 요소가 파싱되므로 여기서 만든다.
 // 바깥 요소(aside 의 id·class)는 rail 표가 정본이고 여기는 안쪽만 담는다.
 export const panelHtml = `
-  <div class="af-head"><h1>AI 자동완성 로그인</h1><span class="af-sum" id="af-sum"></span><span class="af-sp"></span><button class="af-ib" id="af-refresh" title="새로고침"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button></div>
+  <div class="af-head"><h1>AI 자동완성 로그인</h1><span class="af-sum" id="af-sum"></span><span class="af-sp"></span><button class="af-ib" id="af-refresh" title="새로고침"><svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 0-2.3 5.7"/><path d="M20 5v7h-7"/></svg></button></div>
   <div class="af-body" id="af-body"></div>
 `;
 

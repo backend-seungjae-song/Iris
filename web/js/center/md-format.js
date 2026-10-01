@@ -26,10 +26,10 @@ const FORMATS = [
     icon: svg('<path d="M6 4h8M6 8h8M6 12h8"/><circle cx="2.75" cy="4" r=".9"/>'
       + '<circle cx="2.75" cy="8" r=".9"/><circle cx="2.75" cy="12" r=".9"/>') },
   { name: "check", label: "체크 목록", prefix: "- [ ] ", key: "md-check",
-    icon: svg('<path d="M7.5 4h7M7.5 12h7"/><path d="m1.5 4.2 1.4 1.4 2.4-2.6"/>'
-      + '<rect x="1.5" y="10.5" width="3.5" height="3.5" rx=".8"/>') },
+    icon: svg('<path d="M7.5 3.5h7M7.5 11.5h7"/><path d="m1.5 3.7 1.4 1.4 2.4-2.6"/>'
+      + '<rect x="1.5" y="10" width="3.5" height="3.5" rx=".8"/>') },
   { name: "quote", label: "인용", prefix: "> ", key: "md-quote",
-    icon: svg('<path d="M3 3.5v9"/><path d="M6.5 5.5h7.5M6.5 8h7.5M6.5 10.5h5"/>') },
+    icon: svg('<path d="M2.5 3.5v9"/><path d="M6 5.5h7.5M6 8h7.5M6 10.5h5"/>') },
   { name: "link", label: "링크", key: "md-link",
     icon: svg('<path d="M6.8 9.2a2.8 2.8 0 0 0 4 0l2.2-2.2a2.8 2.8 0 0 0-4-4L8 4"/>'
       + '<path d="M9.2 6.8a2.8 2.8 0 0 0-4 0L3 9a2.8 2.8 0 0 0 4 4L8 12"/>') },

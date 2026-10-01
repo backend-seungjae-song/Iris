@@ -143,7 +143,7 @@ export function updateMemoText(space, text, { immediate = false, baseVersion } =
   const draft = { text: String(text ?? ""),
     baseVersion: String(baseVersion || previous?.baseVersion || memoProjectedGet(memoVersionStore, space, "")), updatedAt: Date.now() };
   memoProjectedSet(memoStore, space, draft.text);
-  if (!setMemoDraft(space, draft)) showToast("메모 초안을 이 창에 보존하지 못했습니다. 연결을 확인하세요.");
+  if (!setMemoDraft(space, draft)) showToast("메모 초안을 이 창에 보존하지 못했습니다. 연결을 확인하세요.", { level: "err" });
   if (memoDraftKey(space) === memoDraftKey(memoShownSpace)) markDirty(true);
   scheduleMemoDraft(space, immediate);
 }
@@ -153,7 +153,7 @@ export function applyMemoServerDocument(space, serverDoc, { resend = true } = {}
   memoProjectedSet(memoVersionStore, space, doc.version);
   const recovered = snapshotState.recoverDraft(doc, memoDraftFor(space));
   if (recovered.draft) {
-    if (!setMemoDraft(space, recovered.draft)) showToast("메모 초안을 이 창에 보존하지 못했습니다.");
+    if (!setMemoDraft(space, recovered.draft)) showToast("메모 초안을 이 창에 보존하지 못했습니다.", { level: "err" });
     memoProjectedSet(memoStore, space, recovered.text);
     if (resend) sendMemoDraft(space, recovered.draft);
   } else {
@@ -175,7 +175,7 @@ export function applyMemoSnapshot(message) {
     }
     if (memoShownSpace && memoDraftFor(memoShownSpace)) setMemoValue(memoDraftFor(memoShownSpace).text);
     markDirty(!!memoDraftFor(memoShownSpace));
-    if (message.error) showToast(message.error);
+    if (message.error) showToast("메모를 저장하지 못했습니다", { level: "err", detail: String(message.error) });
     return;
   }
   const serverTexts = (message.memos && typeof message.memos === "object") ? message.memos : {};
@@ -195,7 +195,7 @@ export function applyMemoSnapshot(message) {
   if (memoShownSpace && memoDraftFor(memoShownSpace)) memoProjectedSet(memoStore, memoShownSpace, memoDraftFor(memoShownSpace).text);
   markDirty(!!memoDraftFor(memoShownSpace));
   for (const item of retry) sendMemoDraft(item.space, item.draft);
-  if (retry.some((item) => item.merged)) showToast("다른 창의 메모와 이 창의 초안을 모두 보존했습니다.");
+  if (retry.some((item) => item.merged)) showToast("다른 창의 메모와 이 창의 초안을 모두 보존했습니다.", { level: "ok" });
 }
 export function applyMemoConflict(message) {
   const pending = memoPending.get(message.requestId); memoPending.delete(message.requestId);
@@ -237,7 +237,7 @@ export function applyMemoSaved(message) {
 }
 export function applyMemoDocumentMessage(message) {
   const recovered = applyMemoServerDocument(message.space, { text: message.text, version: message.version });
-  if (recovered.action === "merge") showToast("다른 창의 메모와 이 창의 초안을 모두 보존했습니다.");
+  if (recovered.action === "merge") showToast("다른 창의 메모와 이 창의 초안을 모두 보존했습니다.", { level: "ok" });
   // 초안이 없을 때만 다른 창의 최신본으로 화면을 갈아 끼운다. 초안은 위에서 합쳐 즉시 저장한다.
   if (spk(message.space) === spk(memoShownSpace) && !memoDraftFor(memoShownSpace) && !memoHasFocus()) { memoShownSpace = null; renderMemo(); }
 }

@@ -186,7 +186,7 @@ function knownPath(p) {
 // done(moved) 이 알림 문구를 만든다. 부르는 쪽마다 옮겨진 것이 파일인지 폴더인지 다르다.
 async function sendToTrash(paths, done) {
   const host = trash();
-  if (!host) { showToast && showToast("이 창에서는 휴지통으로 보낼 수 없습니다"); return; }
+  if (!host) { showToast && showToast("이 창에서는 휴지통으로 보낼 수 없습니다", { level: "warn" }); return; }
   if (busy) return;
   busy = true;
   rerender();
@@ -215,7 +215,6 @@ async function sendToTrash(paths, done) {
   // 못 보낸 수는 사유 수가 아니라 실제로 옮겨지지 않은 수다. 한 번에 보내다 통째로 실패하면
   // 사유는 하나여도 남아 있는 것은 전부다.
   const shortfall = paths.length - moved;
-  showToast && showToast(shortfall
-    ? `${moved}개를 보내고 ${shortfall}개를 못 보냈습니다. ${failed[0] || "이유 없음"}`
-    : done(moved));
+  showToast && showToast(shortfall ? `${moved}개를 보내고 ${shortfall}개를 못 보냈습니다.` : done(moved),
+    { level: shortfall ? "err" : "ok", detail: shortfall ? String(failed[0] || "이유 없음") : undefined });
 }

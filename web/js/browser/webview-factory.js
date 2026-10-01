@@ -301,7 +301,7 @@ export function createWebview(tabId, profileOverride, initialUrl) {
         await acHost.aiLoginSet(req.origin, c.username, !!req.allow);
         el.send("ac-ai-allow-response", { origin: req.origin, frameId: req.frameId, i: req.i, allow: !!req.allow });
         if (document.body.classList.contains("af-active")) callHook("autofill.refresh");
-        showToast(`${c.username}: AI 로그인 ${req.allow ? "허용" : "잠금"}`);
+        showToast(`${c.username}: AI 로그인 ${req.allow ? "허용" : "잠금"}`, { level: "info" });
       } catch {}
     }
     // 이 브라우저에서 새로 로그인한 것을 수집했다. 여기서 바로 저장하지 않고, 저장 여부는 사용자가
@@ -352,14 +352,14 @@ function refreshChromeSession(tabId, url) {
     if (result.staged > 0) {
       if (activeBrowserId() === tabId && !stagedChromeRecoveryNotices.has(partition)) {
         stagedChromeRecoveryNotices.add(partition);
-        showToast("Chrome 로그인 복구를 준비했습니다. Iris를 다시 시작하면 적용됩니다.");
+        showToast("Chrome 로그인 복구를 준비했습니다. Iris를 다시 시작하면 적용됩니다.", { level: "ok" });
       }
       return;
     }
     if (!result.changed || !result.refreshed) return;
     stagedChromeRecoveryNotices.delete(partition);
     if (result.reason === "login-recovery") navigateOn(rec, url);
-    else if (activeBrowserId() === tabId) showToast("Chrome 로그인을 갱신했습니다. 새로고침하면 적용됩니다.");
+    else if (activeBrowserId() === tabId) showToast("Chrome 로그인을 갱신했습니다. 새로고침하면 적용됩니다.", { level: "info" });
   }).catch(() => {}).finally(() => {
     rec.chromeRecoveryPending = false;
     if (getWebview(tabId) === rec && rec.url !== url) refreshChromeSession(tabId, rec.url);

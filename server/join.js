@@ -11,21 +11,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import { claudeHome } from "./agent-homes.js";
-
-const PROJECTS = claudeHome("projects");
+import { agentSessionPathFor, sessionIdsFromTranscriptTail,
+  validateAgentSessionPath } from "./agent-session-path.js";
 
 // 세션 UUID → { sessionFile, sessionDir } 역인덱스. slug를 모르는 채로 찾는다.
-export function indexProjects() {
+export function indexProjects(projectsRoot = claudeHome("projects")) {
   const idx = new Map();
+  const aliases = new Map();
   let projDirs;
   try {
-    projDirs = fs.readdirSync(PROJECTS, { withFileTypes: true });
+    projDirs = fs.readdirSync(projectsRoot, { withFileTypes: true });
   } catch {
     return idx;
   }
   for (const p of projDirs) {
     if (!p.isDirectory()) continue;
-    const projPath = path.join(PROJECTS, p.name);
+    const projPath = path.join(projectsRoot, p.name);
     let entries;
     try {
       entries = fs.readdirSync(projPath, { withFileTypes: true });
@@ -39,12 +40,21 @@ export function indexProjects() {
         rec.dir = full;
         idx.set(e.name, rec);
       } else if (e.name.endsWith(".jsonl")) {
+        const verified = validateAgentSessionPath("claude", full, { claudeRoot: projectsRoot });
+        if (!verified) continue;
         const uuid = e.name.slice(0, -6);
         const rec = idx.get(uuid) || {};
-        rec.file = full;
+        rec.file = verified;
         idx.set(uuid, rec);
+        for (const alias of sessionIdsFromTranscriptTail(verified)) {
+          if (!aliases.has(alias)) aliases.set(alias, new Set());
+          aliases.get(alias).add(rec);
+        }
       }
     }
+  }
+  for (const [alias, records] of aliases) {
+    if (!idx.has(alias) && records.size === 1) idx.set(alias, records.values().next().value);
   }
   return idx;
 }
@@ -87,8 +97,8 @@ function scanTranscript(file) {
 }
 
 // 한 세션 UUID에 대한 실행 중 서브에이전트 트리.
-export function subagentTree(sessionUuid, idx) {
-  const rec = idx.get(sessionUuid);
+export function subagentTree(sessionUuid, idx, sessionRec = null) {
+  const rec = sessionRec || idx.get(sessionUuid);
   if (!rec) return [];
   const sessionDir = rec.dir || (rec.file ? rec.file.replace(/\.jsonl$/, "") : null);
   if (!sessionDir) return [];
@@ -222,10 +232,19 @@ function treeHasCodex(nodes) {
 export function buildMonitorState(agents) {
   const idx = indexProjects();
   return agents.map((a) => {
-    const uuid = a.agent_session?.value || null;
+    const isClaude = String(a.agent || "").toLowerCase() === "claude";
+    const reported = isClaude ? agentSessionPathFor(a.pane_id, "claude") : null;
+    const nativePath = isClaude && a.agent_session?.kind === "path"
+      ? validateAgentSessionPath("claude", a.agent_session.value) : null;
+    const nativeIds = nativePath ? sessionIdsFromTranscriptTail(nativePath) : new Set();
+    const uuid = reported?.sessionId || (nativePath
+      ? (nativeIds.size === 1 ? nativeIds.values().next().value : null) : a.agent_session?.value || null);
+    const rec = reported ? { file: reported.file, dir: reported.file.replace(/\.jsonl$/, "") }
+      : nativePath ? { file: nativePath, dir: nativePath.replace(/\.jsonl$/, "") }
+        : isClaude && uuid ? idx.get(uuid) : null;
     // status 게이트를 두지 않는다. subagentTree 내부 mtime precheck가 idle 세션을 저렴하게 건너뛰고,
     // 백그라운드 서브(부모 idle이어도 실행 중)를 정확히 포함한다.
-    const tree = uuid ? subagentTree(uuid, idx) : [];
+    const tree = isClaude && uuid ? subagentTree(uuid, idx, rec) : [];
     // Cross: 서브트리의 agentType(설명줄 아님)에 codex 계열이 있으면 Claude×Codex 교차.
     // 세션(owner)이 codex 검증자(verifier)를 실행한 구조다. description 오탐을 피해 agentType만 본다.
     const hasCodex = treeHasCodex(tree);
@@ -238,7 +257,7 @@ export function buildMonitorState(agents) {
       terminalId: a.terminal_id || null,
       focused: !!a.focused, // herdr에서 현재 포커스된 pane → UI 선택을 역방향 동기화(loop-safe)
       sessionUuid: uuid,
-      transcriptFile: (uuid && idx.get(uuid)?.file) || null, // 질문 판정(agent-question.js)이 끝을 읽는다
+      transcriptFile: rec?.file || null, // 질문 판정용 원본 기록
       cross: hasCodex ? { owner: "claude", verifier: "codex" } : null,
       subagents: tree,
     };

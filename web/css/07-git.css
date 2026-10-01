@@ -10,11 +10,12 @@
   transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
 
 /* 아이콘 단추: 머리(받기·보내기·새로고침), 무리 머리, 파일 줄*/
-.sc-ico, .sc-gact, .sc-act { width:24px; height:24px; display:grid; place-items:center; border-radius:var(--r-s); color:var(--muted); flex:none;
-  font:inherit; background:none; border:0; cursor:pointer; }
+.sc-ico, .sc-gact, .sc-act { width:25px; height:25px; display:grid; place-items:center; border-radius:var(--r-s); color:var(--muted); flex:none;
+  padding:0; font:inherit; background:none; border:0; cursor:pointer; }
 .sc-ico:hover:not(:disabled), .sc-gact:hover, .sc-act:hover { background:var(--hover); color:var(--fg); }
 .sc-ico:active:not(:disabled), .sc-gact:active, .sc-act:active, .sc-btn:active, .sc-view:active { transform:scale(.96); }
 .sc-ico svg, .sc-gact svg, .sc-act svg { width:13px; height:13px; }
+/* 13px 아이콘이 정수 좌표에 놓이도록 단추 폭을 홀수로 맞춘다. 짝수 폭이면 반 픽셀 위치가 되어 오른쪽 아래로 밀린다. */
 /* 레포가 없으면 받기·보내기가 적용될 곳이 없다.*/
 .sc-ico:disabled { opacity:.4; cursor:default; }
 
@@ -31,6 +32,8 @@
 .sc-branch-repo { flex:none; max-width:40%; font-size:var(--fs-s); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sc-branch-dd { flex:1; min-width:0; }
 .sc-sync { flex:none; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.sc-branch-base { flex:0 1 auto; min-width:0; max-width:40%; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sc-branch-base[hidden] { display:none; }
 .sc-sync:empty { display:none; }
 
 /* 브랜치·Base 선택기의 트리거. 동작과 펼친 목록은 공용 드롭다운(01c-components.css)이 갖는다.*/
@@ -42,9 +45,9 @@
 .sc-sel .cc-dd-item { font-family:var(--mono); font-size:var(--fs-s); }
 
 /* 보기 전환: 커밋 전 / Base 대비 / Base+커밋 전*/
-.sc-views { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; padding:2px; margin:0 var(--pad) 10px; border-radius:var(--r);
+.sc-views { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.5fr); gap:1px; padding:2px; margin:0 var(--pad) 10px; border-radius:var(--r);
   border:1px solid var(--line); background:var(--surface); }
-.sc-view { height:22px; border-radius:var(--r-s); font:inherit; font-size:var(--fs-s); color:var(--muted); white-space:nowrap; min-width:0;
+.sc-view { min-height:22px; padding:3px 4px; border-radius:var(--r-s); font:inherit; font-size:var(--fs-s); color:var(--muted); white-space:normal; overflow-wrap:anywhere; min-width:0;
   background:none; border:0; cursor:pointer; }
 .sc-view:hover { color:var(--fg); background:var(--hover); }
 .sc-view.on { background:var(--select); color:var(--select-fg); font-weight:600; }
@@ -78,9 +81,11 @@
 .sc-repo-head .sc-fold { width:10px; height:10px; color:var(--faint); flex:none; transform:rotate(90deg); }
 .sc-repo.folded .sc-repo-head .sc-fold { transform:none; }
 .sc-repo-name { font-weight:650; color:var(--fg); flex:none; }
-.sc-repo-where { flex:0 1 auto; min-width:0; font-size:var(--fs-xs); color:var(--faint); overflow:hidden; text-overflow:ellipsis; }
 .sc-repo-bi { width:12px; height:12px; color:var(--muted); flex:none; }
-.sc-repo-branch { font:500 var(--fs-xs)/1 var(--mono); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; }
+.sc-repo-branch { font:500 var(--fs-xs)/1 var(--mono); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:0 1 auto; }
+/* 브랜치가 갈라져 나온 Base. 브랜치 바로 뒤에 붙고 뒤의 수를 오른쪽으로 민다. 폭이 모자라면 브랜치가 먼저 줄어듦 */
+.sc-repo-base { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); white-space:nowrap; flex:none; margin-right:auto; }
+.sc-repo-head:not(:has(.sc-repo-base)) .sc-repo-branch { flex:1; }
 .sc-repo-ahead { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); flex:none; }
 .sc-repo-n { font:600 var(--fs-xs)/1 var(--mono); color:var(--fg-2); padding:2px 5px; border-radius:var(--r-s); background:rgb(var(--pal-babyblue-rgb)/.1); flex:none; }
 .sc-repo-n.zero { background:none; color:var(--faint); }
@@ -110,11 +115,14 @@
 .sc-group-head { height:26px; display:flex; align-items:center; gap:6px; padding:0 6px 0 var(--pad); color:var(--fg-2); font-weight:600; font-size:var(--fs-s); }
 .sc-count { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
 .sc-gact { margin-left:auto; opacity:0; }
-.sc-group-head:hover .sc-gact, .sc-gact:focus-visible { opacity:1; }
+.sc-group-head:hover .sc-gact, .sc-gact:focus-visible, .sc-gact[data-gact="stageall"] { opacity:1; }
+.sc-gfold { margin-left:auto; display:flex; gap:2px; }
+.sc-gfold .sc-ico { width:23px; height:23px; }
+.sc-gfold + .sc-gact { margin-left:0; }
 
-/* 폴더 묶음과 파일 줄. 폴더 이름은 머리가 들고 있으므로 줄에는 파일 이름만 둔다.*/
+/* 폴더 트리. 폴더 경로는 위의 폴더 줄에 있어서 파일 줄에는 파일 이름만 표시한다.*/
 .sc-files { padding:0 6px; }
-.sc-dir-head { height:24px; display:flex; align-items:center; gap:6px; padding:0 6px 0 8px; border-radius:var(--r-s); color:var(--muted);
+.sc-dir-head { height:24px; display:flex; align-items:center; gap:6px; padding:0 6px 0 calc(8px + var(--d, 0) * 12px); border-radius:var(--r-s); color:var(--muted);
   font-size:var(--fs-s); white-space:nowrap; }
 .sc-dir-head:hover { background:var(--hover); color:var(--fg); }
 .sc-dir-head svg { width:10px; height:10px; color:var(--faint); flex:none; }
@@ -122,7 +130,7 @@
 .sc-dir-name { font-family:var(--mono); font-size:var(--fs-xs); overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .sc-dir-n { margin-left:auto; font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
 .sc-dir-body.collapsed { display:none; }
-.sc-file { height:var(--row); display:flex; align-items:center; gap:7px; padding:0 4px 0 24px; border-radius:var(--r-s); color:var(--fg-2);
+.sc-file { height:var(--row); display:flex; align-items:center; gap:7px; padding:0 4px 0 calc(12px + var(--d, 0) * 12px); border-radius:var(--r-s); color:var(--fg-2);
   position:relative; white-space:nowrap; }
 .sc-file:hover { background:var(--hover); color:var(--fg); }
 /* 가운데에서 diff 를 보고 있는 파일*/
@@ -134,9 +142,33 @@
 .sc-file.D .sc-name { text-decoration:line-through; text-decoration-color:var(--faint); }
 .sc-actions { display:none; margin-left:auto; gap:1px; flex:none; }
 .sc-file:hover .sc-actions, .sc-file:focus-within .sc-actions { display:flex; }
-.sc-act { width:22px; height:22px; }
+.sc-act { width:23px; height:23px; }
 
 /* Base 대비 보기의 비교 기준 줄*/
 .sc-base-row { display:flex; align-items:center; gap:8px; padding:6px var(--pad) 10px; }
 .sc-base-lbl { font-size:var(--fs-s); color:var(--muted); }
 .sc-base-slot { flex:1; min-width:0; }
+
+/* 워크트리 선택도 기존 브랜치 선택기와 같은 크기를 쓴다. */
+.sc-branch-row[hidden], #sc-individual[hidden] { display:none; }
+.sc-worktree-slot { padding:3px 6px 0; }
+.sc-worktree-slot .sc-sel { width:100%; }
+.sc-worktree-slot .cc-dd-trigger { width:100%; }
+.sc-worktree-slot .cc-dd-trigger .cc-dd-sub { display:none; }
+.sc-repo-name { min-width:0; max-width:48%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sc-repo-branch { flex:1; }
+.sc-repo-base { flex:0 1 auto; min-width:0; max-width:22%; overflow:hidden; text-overflow:ellipsis; }
+#sc-individual { flex:none; padding:0 6px; font-size:var(--fs-xs); }
+/* 좁은 패널에서도 트리거와 화살표가 한 줄 안에 머문다. */
+.sc-branch-dd > .cc-dd { width:100%; min-width:0; }
+.sc-branch-dd .cc-dd-trigger { height:28px; min-height:28px; display:flex; padding:0 8px; gap:6px; }
+.sc-branch-dd .cc-dd-value { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sc-branch-dd .cc-dd-trigger .cc-dd-sub { display:none; }
+.sc-branch-dd .cc-dd-trigger svg { margin-left:0; flex:none; }
+.sc-worktree-mode { display:flex; justify-content:flex-end; padding:5px var(--pad); }
+.sc-commit-row { flex-wrap:wrap; }
+.sc-commit-row .sc-hint { margin-left:auto; }
+
+/* 메뉴의 부모도 올려야 다음 저장소의 sticky 헤더에 가려지지 않는다. */
+.sc-repo-top:has(.cc-dd.open) { z-index:3; }
+.sc-branch-row:has(.cc-dd.open) { position:relative; z-index:4; }

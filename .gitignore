@@ -26,3 +26,4 @@ routing/
 design/
 # 공개 위생 검사의 아는 낱말 목록. 찾는 낱말을 그대로 담고 있어 git 밖에 둔다.
 scripts/private-traces.local.mjs
+.design-source-install/

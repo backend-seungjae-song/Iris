@@ -135,7 +135,7 @@ export function isSizeDragging() { return !!sizeDrag; }
 
 export function openSizeMenu() {
   const id = activeBrowserId();
-  if (!id) { showToast("브라우저 탭에서만 크기를 지정할 수 있습니다."); return; }
+  if (!id) { showToast("브라우저 탭에서만 크기를 지정할 수 있습니다.", { level: "info" }); return; }
   const cur = viewportByTab[id];
   const items = VIEWPORT_PRESETS.map((p) => ({
     label: (cur && cur.w === p.w && cur.h === p.h ? "● " : "　") + p.label,
@@ -146,7 +146,7 @@ export function openSizeMenu() {
     const v = await askText("화면 크기", cur ? `${cur.w}x${cur.h}` : "390x844", "가로x세로 (예: 768x1024)");
     if (v == null) return;
     const m = String(v).match(/(\d+)\s*[x×*,\s]\s*(\d+)/);
-    if (!m) { showToast("가로x세로 형식으로 입력하세요."); return; }
+    if (!m) { showToast("가로x세로 형식으로 입력하세요.", { level: "warn" }); return; }
     applyViewport(id, { w: +m[1], h: +m[2] });
   } });
   items.push({ label: "해제(원래 크기)", disabled: !cur, act: () => { if (cur) applyViewport(id, null); } });
@@ -159,14 +159,14 @@ export function openSizeMenu() {
 // 위장 주입용으로 붙여둔 디버거와는 공존한다(같이 붙어 있어도 양쪽 명령이 정상, 측정).
 export async function toggleDevTools() {
   const r = activeWv();
-  if (!r || !r.el) { showToast("개발자 도구는 브라우저 탭에서 열립니다."); return; }
+  if (!r || !r.el) { showToast("개발자 도구는 브라우저 탭에서 열립니다.", { level: "info" }); return; }
   try {
     if (r.el.isDevToolsOpened()) r.el.closeDevTools();
     else {
       await callHook("extensionloader.before-devtools", { partition: r.el.partition });
       r.el.openDevTools();
     }
-  } catch (e) { showToast("개발자 도구를 열지 못했습니다: " + (e.message || e)); }
+  } catch (e) { showToast("개발자 도구를 열지 못했습니다", { level: "err", detail: String(e.message || e) }); }
 }
 
 // 요소 선택 모드 = 항상 화면 고정과 함께(별도 토글 없음). on/off 모두 __orcaSet 한 함수로 결정.
