@@ -58,17 +58,17 @@ export function updateSizeBtn() {
 
 export async function applyViewport(tabId, vp, quiet) {
   const rec = tabId ? getWebview(tabId) : null;
-  if (!rec || !rec.el) { showToast("브라우저 탭에서만 크기를 지정할 수 있습니다."); return; }
+  if (!rec || !rec.el) { showToast("브라우저 탭에서만 크기를 지정할 수 있습니다.", { level: "info" }); return; }
   let wcId = 0;
   try { wcId = rec.el.getWebContentsId(); } catch {}
-  if (!wcId) { showToast("탭이 아직 준비되지 않았습니다."); return; }
+  if (!wcId) { showToast("탭이 아직 준비되지 않았습니다.", { level: "warn" }); return; }
   if (vp) viewportByTab[tabId] = vp; else delete viewportByTab[tabId];
   if (!vp) setTouchDrag(tabId, false);    // 해제하면 터치 변환도 같이 내린다
   updateSizeBtn(); viewportLayout();      // 화면은 먼저 바꾼다. 드래그 중에 포인터를 따라와야 한다
   // live = 손잡이를 드래그하는 중. 이때는 기기가 바뀌어도 새로고침하지 않는다(놓았을 때 한 번만).
   const r = await acHost?.setViewport(vp ? { wcId, width: vp.w, height: vp.h, live: !!quiet } : { wcId, clear: true });
-  if (!r || !r.ok) { showToast("크기를 바꾸지 못했습니다: " + ((r && r.error) || "알 수 없음")); return; }
-  if (!quiet) showToast(vp ? `화면 크기 ${vp.w}×${vp.h} · ${deviceClassOf(vp.w)}` : "화면 크기 해제");
+  if (!r || !r.ok) { showToast("크기를 바꾸지 못했습니다", { level: "err", detail: String((r && r.error) || "알 수 없음") }); return; }
+  if (!quiet) showToast(vp ? `화면 크기 ${vp.w}×${vp.h} · ${deviceClassOf(vp.w)}` : "화면 크기 해제", { level: "info" });
 }
 
 // 지정한 크기 그대로 화면을 만들어 가운데 둔다. 배율은 걸지 않는다. 배율을 걸면 크기 조절이

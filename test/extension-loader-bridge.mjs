@@ -11,7 +11,7 @@ async function boot(acHost) {
   clearHooks();
   const errors = [], toasts = [];
   const loaded = await bootCapabilities({
-    items: [item], ctx: { acHost, showToast: (m) => toasts.push(m) },
+    items: [item], ctx: { acHost, showToast: (message, options) => toasts.push({ message, options }) },
     onError: (id, e) => errors.push(`${id}: ${e.message}`),
   });
   return { loaded, errors, toasts };
@@ -38,13 +38,16 @@ test("로드에 성공하면 성공 알림과 DevTools 전 대기 훅을 둔다"
   const ok = { ok: true, partition: "persist:acbrowser" };
   const r = await boot({ enableExtensionLoader: async () => ({ ok: true, results: [ok] }), waitForExtension: async () => ok });
   assert.deepEqual(r.errors, []);
-  assert.match(r.toasts[0], /1개 세션에 로드/);
+  assert.match(r.toasts[0].message, /1개 세션에 불러왔습니다/);
+  assert.equal(r.toasts[0].options.level, "ok");
   assert.deepEqual(await callHook("extensionloader.before-devtools", { partition: "persist:acbrowser" }), ok);
 });
 
 test("실제 로드가 실패하면 실패 알림을 내고 DevTools 전 대기도 실패한다", async () => {
   const bad = { ok: false, partition: "persist:acbrowser", stage: "load" };
   const r = await boot({ enableExtensionLoader: async () => ({ ok: false, results: [bad] }), waitForExtension: async () => bad });
-  assert.match(r.toasts[0], /로드 실패: persist:acbrowser\(load\)/);
+  assert.equal(r.toasts[0].message, "React 개발자 도구를 불러오지 못했습니다");
+  assert.equal(r.toasts[0].options.level, "err");
+  assert.match(r.toasts[0].options.detail, /persist:acbrowser\(load\)/);
   await assert.rejects(() => callHook("extensionloader.before-devtools", { partition: "persist:acbrowser" }), /확장 준비 실패/);
 });

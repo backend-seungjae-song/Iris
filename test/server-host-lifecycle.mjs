@@ -11,6 +11,8 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { freePort } from "./lib/net.mjs";
+import envMod from "../server/env.cjs";
+const { NET_POLICY } = envMod;
 
 const require = createRequire(import.meta.url);
 const { ServerHost, probe } = require("../native/electron/server-host.cjs");
@@ -40,12 +42,243 @@ test("아무도 없으면 probe는 null이다", async () => {
 });
 
 // 같은 상태 폴더를 보는 서버라고 답하는 가짜. 붙어야 하는 쪽이다.
-function fakeServer(port, stateDir, pid = 99999) {
+function fakeServer(port, stateDir, pid = 99999, netPolicy = NET_POLICY) {
   return http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, pid, port, stateDir }));
+    res.end(JSON.stringify({ ok: true, pid, port, stateDir, ...(netPolicy ? { netPolicy } : {}) }));
   });
 }
+
+test("네트워크 정책 없는 이전 서버: 같은 상태 폴더여도 붙지 않고 정책 불일치 표시", async () => {
+  const port = await freePort();
+  const stateDir = "/tmp/ac-test-old-policy";
+  const old = fakeServer(port, stateDir, 4242, null);
+  await listen(old, port);
+  try {
+    const host = new ServerHost({ app: fakeApp, port, stateDir, onLog: () => {} });
+    const r = await host.start();
+    assert.equal(r.attached, false);
+    assert.equal(r.policyMismatch, true, "앱이 연결 선택지 없이 종료하도록 표시");
+    assert.equal(host.child, null);
+  } finally { await close(old); }
+});
+
+// 이전 버전 흉내 서버 소스(netPolicy 없는 healthz, 기동 기록)
+function oldRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ac-old-root-"));
+  fs.mkdirSync(path.join(root, "server"));
+  fs.writeFileSync(path.join(root, "server", "index.js"), `
+    const fs = require("fs"), http = require("http"), path = require("path");
+    const dir = process.env.IRIS_STATE_DIR, port = Number(process.env.IRIS_PORT);
+    fs.appendFileSync(path.join(dir, "spawns.log"), "x\\n");
+    http.createServer((q, s) => { s.end(JSON.stringify({ ok: true, pid: process.pid, port, stateDir: dir })); }).listen(port, "127.0.0.1");
+    process.on("SIGTERM", () => process.exit(0));
+  `);
+  return root;
+}
+
+test("기동 이후 경로(재시작·인계·재기동 공통 spawnVerified): 정책 불일치면 통지·소유 해제·자식 종료", async () => {
+  const root = oldRoot();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ac-verify-"));
+  const prev = process.env.IRIS_SERVER_ROOT;
+  process.env.IRIS_SERVER_ROOT = root;
+  const port = await freePort();
+  const seen = [];
+  const host = new ServerHost({ app: fakeApp, port, stateDir, onLog: () => {}, onPolicyMismatch: (h) => seen.push(h) });
+  try {
+    host.owned = true;
+    host.spawnVerified();
+    for (let i = 0; i < 40 && !seen.length; i++) await new Promise((r) => setTimeout(r, 250));
+    assert.equal(seen.length, 1, "정책 불일치 통지");
+    assert.equal(host.owned, false);
+    assert.equal(host.child, null);
+    host.spawnVerified();
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(fs.readFileSync(path.join(stateDir, "spawns.log"), "utf8").trim().split("\n").length, 1, "실패 후 재기동 없음");
+    const gone = await (async () => { for (let i = 0; i < 20; i++) { if (!(await probe(port))) return true; await new Promise((r) => setTimeout(r, 150)); } return false; })();
+    assert.ok(gone, "불일치 자식 종료");
+  } finally {
+    host.stop();
+    if (prev === undefined) delete process.env.IRIS_SERVER_ROOT; else process.env.IRIS_SERVER_ROOT = prev;
+    await new Promise((r) => setTimeout(r, 300));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("spawnVerified: 잘못된 응답(ok:false)도 실패 처리 — 소유 해제·자식 종료, 정책 통지 없음", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ac-bad-root-"));
+  fs.mkdirSync(path.join(root, "server"));
+  fs.writeFileSync(path.join(root, "server", "index.js"), `
+    const http = require("http"), port = Number(process.env.IRIS_PORT);
+    http.createServer((q, s) => { s.end(JSON.stringify({ ok: false })); }).listen(port, "127.0.0.1");
+    process.on("SIGTERM", () => process.exit(0));
+  `);
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ac-bad-state-"));
+  const prev = process.env.IRIS_SERVER_ROOT;
+  process.env.IRIS_SERVER_ROOT = root;
+  const port = await freePort();
+  const seen = [];
+  const host = new ServerHost({ app: fakeApp, port, stateDir, onLog: () => {}, onPolicyMismatch: (h) => seen.push(h) });
+  try {
+    host.owned = true;
+    host.spawnVerified();
+    const child = host.child;
+    assert.ok(child);
+    for (let i = 0; i < 40 && host.child; i++) await new Promise((r) => setTimeout(r, 250));
+    assert.equal(host.child, null, "잘못된 응답 자식 정리");
+    assert.equal(host.owned, false, "재기동 차단");
+    assert.deepEqual(seen, [], "정책 불일치와 구분");
+  } finally {
+    host.stop();
+    if (prev === undefined) delete process.env.IRIS_SERVER_ROOT; else process.env.IRIS_SERVER_ROOT = prev;
+    await new Promise((r) => setTimeout(r, 300));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("첫 기동 준비 실패 뒤에는 대기 중 예약된 backoff 도 다시 띄우지 않는다", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ac-first-root-"));
+  const count = path.join(root, "starts.log");
+  fs.mkdirSync(path.join(root, "server"));
+  fs.writeFileSync(path.join(root, "server", "index.js"), `
+    require("fs").appendFileSync(${JSON.stringify(count)}, "start\\n");
+    process.exit(1);
+  `);
+  const port = await freePort();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ac-first-state-"));
+  const prev = process.env.IRIS_SERVER_ROOT;
+  process.env.IRIS_SERVER_ROOT = root;
+  const host = new ServerHost({ app: fakeApp, port, stateDir, onLog: () => {} });
+  const starts = () => fs.readFileSync(count, "utf8").trim().split("\n").length;
+  try {
+    const r = await host.start();
+    assert.equal(r.health, null, "준비 실패");
+    assert.equal(host.halted, true);
+    const after = starts();
+    // backoff 마지막 예약(15초 뒤)까지 포함하는 대기
+    await new Promise((res) => setTimeout(res, 16000));
+    assert.equal(starts(), after, "실패 반환 뒤 기동 없음");
+    assert.equal(host.child, null);
+    assert.equal(host.owned, false);
+  } finally {
+    host.stop();
+    if (prev === undefined) delete process.env.IRIS_SERVER_ROOT; else process.env.IRIS_SERVER_ROOT = prev;
+    await new Promise((res) => setTimeout(res, 300));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("감시가 띄운 서버가 준비 확인에 실패하면 이후 감시·backoff 도 다시 띄우지 않는다", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ac-halt-root-"));
+  const count = path.join(root, "starts.log");
+  fs.mkdirSync(path.join(root, "server"));
+  fs.writeFileSync(path.join(root, "server", "index.js"), `
+    const fs = require("fs"), http = require("http"), port = Number(process.env.IRIS_PORT);
+    fs.appendFileSync(${JSON.stringify(count)}, "start\\n");
+    http.createServer((q, s) => { s.end(JSON.stringify({ ok: false })); }).listen(port, "127.0.0.1");
+    process.on("SIGTERM", () => process.exit(0));
+  `);
+  const port = await freePort();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ac-halt-state-"));
+  const good = fakeServer(port, stateDir, 3333);
+  await listen(good, port);
+  const prev = process.env.IRIS_SERVER_ROOT;
+  process.env.IRIS_SERVER_ROOT = root;
+  process.env.IRIS_SERVER_WATCH_MS = "500";
+  const seen = [];
+  const host = new ServerHost({ app: fakeApp, port, stateDir, onLog: () => {}, onPolicyMismatch: (h) => seen.push(h) });
+  try {
+    assert.equal((await host.start()).attached, true);
+    await close(good);
+    for (let i = 0; i < 40 && !fs.existsSync(count); i++) await new Promise((r) => setTimeout(r, 250));
+    assert.ok(fs.existsSync(count), "감시가 서버를 띄움");
+    for (let i = 0; i < 60 && !host.halted; i++) await new Promise((r) => setTimeout(r, 250));
+    assert.equal(host.halted, true, "준비 확인 실패");
+    // 감시 주기 여러 번 + backoff 첫 지연보다 긴 대기
+    await new Promise((r) => setTimeout(r, 3000));
+    assert.equal(fs.readFileSync(count, "utf8").trim().split("\n").length, 1, "다시 띄우지 않음");
+    assert.equal(host.child, null);
+    assert.equal(host.watchTimer, null, "감시 중단");
+    assert.deepEqual(seen, [], "정책 불일치와 구분");
+  } finally {
+    delete process.env.IRIS_SERVER_WATCH_MS;
+    host.stop();
+    if (prev === undefined) delete process.env.IRIS_SERVER_ROOT; else process.env.IRIS_SERVER_ROOT = prev;
+    await new Promise((r) => setTimeout(r, 300));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("붙어 있던 서버가 이전 정책 서버로 바뀌면 감시가 통지", async () => {
+  const port = await freePort();
+  const stateDir = "/tmp/ac-test-swap";
+  const good = fakeServer(port, stateDir, 1111);
+  await listen(good, port);
+  process.env.IRIS_SERVER_WATCH_MS = "500";
+  const seen = [];
+  const host = new ServerHost({ app: fakeApp, port, stateDir, onLog: () => {}, onPolicyMismatch: (h) => seen.push(h) });
+  let old;
+  try {
+    assert.equal((await host.start()).attached, true);
+    await close(good);
+    old = fakeServer(port, stateDir, 2222, null);
+    await listen(old, port);
+    for (let i = 0; i < 20 && !seen.length; i++) await new Promise((r) => setTimeout(r, 250));
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].pid, 2222);
+  } finally {
+    delete process.env.IRIS_SERVER_WATCH_MS;
+    host.stop();
+    if (old) await close(old);
+  }
+});
+
+test("자식 기동 호출 위치: 첫 기동과 spawnVerified 뿐", () => {
+  const src = fs.readFileSync(new URL("../native/electron/server-host.cjs", import.meta.url), "utf8");
+  const calls = [...src.matchAll(/this\.spawnOnce\(\)/g)].length;
+  assert.equal(calls, 2, "검증 없는 기동 경로 추가 방지");
+});
+
+test("이전 버전 소스 자식: REMOTE·HOST 미전달, 정책 불일치 후 재기동 없음", async () => {
+  // IRIS_SERVER_ROOT 가 가리키는 흉내 서버. 받은 환경과 기동 횟수를 기록, netPolicy 없는 healthz
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ac-old-root-"));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ac-old-state-"));
+  fs.mkdirSync(path.join(root, "server"));
+  fs.writeFileSync(path.join(root, "server", "index.js"), `
+    const fs = require("fs"), http = require("http"), path = require("path");
+    const dir = process.env.IRIS_STATE_DIR, port = Number(process.env.IRIS_PORT);
+    fs.appendFileSync(path.join(dir, "spawns.log"), JSON.stringify({ REMOTE: process.env.REMOTE ?? null, HOST: process.env.HOST ?? null }) + "\\n");
+    http.createServer((q, s) => { s.end(JSON.stringify({ ok: true, pid: process.pid, port, stateDir: dir })); }).listen(port, "127.0.0.1");
+    process.on("SIGTERM", () => process.exit(0));
+  `);
+  fs.writeFileSync(path.join(root, "package.json"), "{}");
+  const prev = { ROOT: process.env.IRIS_SERVER_ROOT, REMOTE: process.env.REMOTE, HOST: process.env.HOST };
+  process.env.IRIS_SERVER_ROOT = root; process.env.REMOTE = "1"; process.env.HOST = "0.0.0.0";
+  const port = await freePort();
+  const host = new ServerHost({ app: fakeApp, port, stateDir, onLog: () => {} });
+  try {
+    const r = await host.start();
+    assert.equal(r.health, null);
+    assert.equal(r.policyMismatch, true);
+    assert.equal(host.owned, false, "소유 해제. 종료 처리의 자동 재기동 차단");
+    await new Promise((res) => setTimeout(res, 2500));
+    const spawns = fs.readFileSync(path.join(stateDir, "spawns.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.equal(spawns.length, 1, "거부된 서버 재기동 없음");
+    assert.deepEqual(spawns[0], { REMOTE: null, HOST: null }, "이전 원격 설정 미전달");
+  } finally {
+    host.stop();
+    for (const [k, v] of Object.entries({ IRIS_SERVER_ROOT: prev.ROOT, REMOTE: prev.REMOTE, HOST: prev.HOST })) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    await new Promise((res) => setTimeout(res, 300));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
 
 test("같은 상태 폴더의 서버가 이미 있으면 붙기만 한다 — 띄우지도, 나갈 때 죽이지도 않는다", async () => {
   const port = await freePort();
@@ -86,10 +319,14 @@ test("다른 상태 폴더를 쓰는 서버에는 붙지 않고, 그 자리에 �
 
 test("포트만 같고 우리 것이 아닌 응답은 통과시키지 않는다", () => {
   const host = new ServerHost({ app: fakeApp, port: 4271, stateDir: "/tmp/ac-state", onLog: () => {} });
-  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/ac-state" }), true);
-  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/ac-state/" }), true, "경로 표기 차이는 같은 것으로 본다");
-  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/other" }), false);
-  assert.equal(host.matches({ ok: true, port: 4291, stateDir: "/tmp/ac-state" }), false);
+  const p = { netPolicy: NET_POLICY };
+  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/ac-state", ...p }), true);
+  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/ac-state/", ...p }), true, "경로 표기 차이는 같은 것으로 본다");
+  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/other", ...p }), false);
+  assert.equal(host.matches({ ok: true, port: 4291, stateDir: "/tmp/ac-state", ...p }), false);
+  // 네트워크 정책 없음·불일치 = 이전 버전 서버(0.0.0.0 수신 가능). 재사용 제외
+  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/ac-state" }), false, "정책 필드 없는 이전 서버");
+  assert.equal(host.matches({ ok: true, port: 4271, stateDir: "/tmp/ac-state", netPolicy: "old" }), false, "정책 불일치");
   assert.equal(host.matches({ hello: "world" }), false, "우연히 JSON 200을 주는 남의 프로그램");
   assert.equal(host.matches(null), false);
 });
@@ -101,7 +338,7 @@ test("같은 폴더를 다른 이름으로 부르는 것을 다르다고 하지 
   try {
     const viaTmp = dir.startsWith("/private/") ? dir.slice("/private".length) : dir;
     const host = new ServerHost({ app: fakeApp, port: 4271, stateDir: viaTmp, onLog: () => {} });
-    assert.equal(host.matches({ ok: true, port: 4271, stateDir: dir }), true,
+    assert.equal(host.matches({ ok: true, port: 4271, stateDir: dir, netPolicy: NET_POLICY }), true,
       `${viaTmp} 와 ${dir} 는 같은 폴더다`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

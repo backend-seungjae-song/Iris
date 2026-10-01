@@ -47,6 +47,7 @@ export default async function run() {
     const calls = {
       "agentchat.sync": ["web/js/main.js", "web/js/herdr/sync.js"],
       "agentchat.openSubagent": ["web/js/herdr/agents.js"],
+      "agentchat.closeSubagent": ["web/js/herdr/agents.js"], // 부모 줄을 누르면 서브에이전트 보기를 닫는다
       "agentchat.toggle": ["web/js/browser/dock.js"],   // 웹뷰에 포커스가 있을 때 main 이 중계한 ⌘⇧J
     };
     if (!/"agent-chat": \{ mod: true, shift: true, key: "j" \}/.test(read("native/electron/main-window.cjs"))) throw new Error("main 중계표에 agent-chat 이 없다 — 웹뷰 포커스에서 ⌘⇧J 가 안 된다");
@@ -80,7 +81,7 @@ export default async function run() {
     return true;
   });
 
-  await checkAsync("스페이스 줄과 하위 있는 에이전트 줄은 누를 때마다 접힘이 바뀐다", async () => {
+  await checkAsync("스페이스 줄과 하위 있는 에이전트 줄은 이동할 때는 이동만, 고른 뒤 누르면 접힘이 바뀐다", async () => {
     const saved = { document: globalThis.document, window: globalThis.window };
     globalThis.document = { addEventListener() {} };
     globalThis.window = { addEventListener() {} };
@@ -102,6 +103,7 @@ export default async function run() {
       });
       const collapsed = { groups: new Set(), dirs: new Set() };
       let cur = "w1:p2";
+      let sel = "w1";
       const esc = (s) => String(s ?? "");
       const spaces = () => [{ id: "w1", label: "one", folder: "/w" }];
       tree.initTree({ $, esc, wsSend() {}, statusClass: () => "", orderedSpaces: spaces, getIsLocal: () => true,
@@ -110,11 +112,11 @@ export default async function run() {
       // 앱의 focusSpace 처럼 그 스페이스의 에이전트를 고르며 드러낸다(접힌 그룹을 편다).
       const selectSession = (pane) => { cur = pane; agents.revealAgentRow(pane); };
       cm.initContextMenu({ $, esc, wsSend() {}, showToast() {}, copyText: async () => true, isFileLikeKind: () => true,
-        getIsLocal: () => true, getSelectedSpaceId: () => "w1", orderedSpaces: spaces, saveOrder() {},
-        focusSpace: () => selectSession("w1:p1") });
+        getIsLocal: () => true, getSelectedSpaceId: () => sel, orderedSpaces: spaces, saveOrder() {},
+        focusSpace: (id) => { sel = id; selectSession("w1:p1"); } });
       agents.initAgents({ $, esc, cssEsc: esc, statusClass: () => "", wsSend() {}, getIsLocal: () => true,
         getCurTarget: () => cur, orderedSpaces: spaces, spk: (id) => id, saveCollapsed() {}, selectSession,
-        copyText: async () => true, showToast() {}, getSelectedSpaceId: () => "w1", collapsed, renderSpaces: tree.renderSpaces });
+        copyText: async () => true, showToast() {}, getSelectedSpaceId: () => sel, collapsed, renderSpaces: tree.renderSpaces });
       const list = $("#space-list");
       const fire = (match) => { for (const fn of list.listeners.click || []) fn(clickEvent(match)); };
 
@@ -125,6 +127,14 @@ export default async function run() {
         spaceSeen.push(collapsed.groups.has("w1") ? "접힘" : "펴짐");
       }
       if (spaceSeen.join(",") !== "접힘,펴짐,접힘,펴짐") throw new Error(`스페이스 줄 4번: ${spaceSeen.join(",")}`);
+      // 다른 스페이스에서 펼쳐진 스페이스를 누르면 이동만 하고, 이동한 뒤에 누르면 접는다.
+      sel = "w2";
+      fire((sel2) => (sel2 === ".space-row" ? spaceRow : null));
+      if (sel !== "w1") throw new Error("다른 스페이스에서 누른 스페이스로 이동하지 않았다");
+      if (collapsed.groups.has("w1")) throw new Error("다른 스페이스에서 펼쳐진 스페이스를 누르자 접혔다");
+      fire((sel2) => (sel2 === ".space-row" ? spaceRow : null));
+      if (!collapsed.groups.has("w1")) throw new Error("이동한 뒤 스페이스 줄을 눌렀는데 접히지 않았다");
+      collapsed.groups.delete("w1");
 
       const agentRow = { dataset: { target: "w1:p1" } };
       cur = "w1:p2";
@@ -135,13 +145,36 @@ export default async function run() {
         branchSeen.push(/data-sub-agent="sub1"/.test(list.innerHTML) ? "펴짐" : "접힘");
       }
       if (cur !== "w1:p1") throw new Error("고르지 않은 줄을 눌렀는데 선택이 옮겨지지 않았다");
-      if (branchSeen.join(",") !== "접힘,펴짐,접힘,펴짐") throw new Error(`에이전트 줄 4번: ${branchSeen.join(",")}`);
+      // 첫 클릭은 이동만. 펼쳐진 하위 목록을 접지 않는다
+      if (branchSeen.join(",") !== "펴짐,접힘,펴짐,접힘") throw new Error(`에이전트 줄 4번: ${branchSeen.join(",")}`);
+      // 접힌 채로 다른 줄에서 돌아와도 이동만 하고 펴지 않는다
+      cur = "w1:p2";
+      fire((sel) => (sel === ".srow" ? agentRow : null));
+      tree.renderSpaces();
+      if (cur !== "w1:p1" || /data-sub-agent="sub1"/.test(list.innerHTML)) throw new Error("접힌 에이전트 줄로 이동하면서 하위 목록을 폈다");
+      fire((sel) => (sel === ".srow" ? agentRow : null));
+      tree.renderSpaces();
 
       let opened = null;
       hooks.provide("agentchat.openSubagent", (info) => { opened = info; });
       const info = { dataset: { subPane: "w1:p1", subAgent: "sub1", subDesc: "리뷰", subType: "general" } };
       fire((sel) => (sel === ".agent-info-row[data-sub-agent]" ? info : null));
       if (!opened || opened.paneId !== "w1:p1" || opened.agentId !== "sub1") throw new Error(`서브에이전트 줄이 연 것: ${JSON.stringify(opened)}`);
+
+      // 서브에이전트 보기가 열린 채 부모 줄을 누르면 보기만 닫고 하위 목록의 접힘 상태는 바꾸지 않는다.
+      let subOpen = true;
+      const closedFor = [];
+      hooks.provide("agentchat.closeSubagent", (pane) => { closedFor.push(pane); if (!subOpen) return false; subOpen = false; return true; });
+      tree.renderSpaces();
+      const before = /data-sub-agent="sub1"/.test(list.innerHTML);
+      fire((sel) => (sel === ".srow" ? agentRow : null));
+      tree.renderSpaces();
+      if (closedFor.join(",") !== "w1:p1") throw new Error(`부모 줄이 서브에이전트 보기 닫기를 부른 pane: ${closedFor.join(",") || "없음"}`);
+      if (/data-sub-agent="sub1"/.test(list.innerHTML) !== before) throw new Error("서브에이전트 보기에서 나오면서 하위 목록도 접었다");
+      // 보기를 닫은 뒤에 누르면 하위 목록을 접거나 편다.
+      fire((sel) => (sel === ".srow" ? agentRow : null));
+      tree.renderSpaces();
+      if (/data-sub-agent="sub1"/.test(list.innerHTML) === before) throw new Error("서브에이전트 보기가 없을 때 부모 줄이 접기·펴기를 바꾸지 않았다");
       return true;
     } finally {
       globalThis.document = saved.document;

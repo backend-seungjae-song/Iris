@@ -11,7 +11,7 @@
 //   main 소유 선택 scalar는 접근자·setter로, 마지막 에이전트 객체와 DOM은 init에서 참조로 받는다.
 //
 // 유지 조건
-//   동일 pane 무시 → 300ms debounce → 1.5s 사용자 쿨다운 → pane 존재 확인 순서와,
+//   동일 pane 이면 대기 취소 → 300ms debounce → 1.5s 사용자 쿨다운(버리지 않고 끝난 뒤 반영) → pane 존재 확인 순서와,
 //   역동기화 경로에서 herdr focus를 되보내지 않는 loop-safe 경계를 그대로 보존한다.
 //
 // 영향 범위
@@ -40,16 +40,19 @@ export function markHerdrUserSelect() {
   lastUserSelect = Date.now();
 }
 
+// 매 방송의 포커스가 최신값. 선택과 같아지면 대기 취소, 다르면 쿨다운 뒤 반영(버리면 헤더와 실제 입력 대상이 어긋남)
 export function scheduleHerdrSync(paneId) {
-  if (!paneId || paneId === getCurTarget()) return;
-  herdrSyncPane = paneId;
   clearTimeout(herdrSyncTimer);
-  herdrSyncTimer = setTimeout(() => applyHerdrFocus(herdrSyncPane), 300);
+  herdrSyncTimer = null;
+  herdrSyncPane = paneId && paneId !== getCurTarget() ? paneId : null;
+  if (!herdrSyncPane) return;
+  const wait = Math.max(300, lastUserSelect + 1500 - Date.now());
+  herdrSyncTimer = setTimeout(() => applyHerdrFocus(herdrSyncPane), wait);
 }
 
 function applyHerdrFocus(paneId) {
   if (!paneId || paneId === getCurTarget()) return;
-  if (Date.now() - lastUserSelect < 1500) return; // 사용자 선택 우선(쿨다운)
+  if (Date.now() - lastUserSelect < 1500) { scheduleHerdrSync(paneId); return; } // 사용자 선택 우선(쿨다운), 끝나면 다시 판정
   const a = agentByPane(paneId);
   if (!a) return; // 아직 목록에 없는 pane이면 스킵
   setCurTarget(paneId);

@@ -42,10 +42,26 @@ test("스크롤 이벤트는 관제 재계산을 부르지 않는다", async () 
 
 test("pane 집합이 바뀌는 이벤트는 재계산과 구독 갱신을 부른다", async () => {
   const { calls, fire } = harness();
-  fire({ type: "pane.created", data: { pane_id: "w1:p2" } });
+  fire({ event: "pane_created", data: { type: "pane_created", pane: { pane_id: "w1:p2" } } });
   await sleep(500);
   assert.ok(calls.recompute >= 1, "새 pane 은 재계산을 불러야 한다");
   assert.ok(calls.refresh >= 1, "새 pane 은 구독 갱신을 불러야 한다");
+});
+
+test("다른 workspace로 pane을 옮기면 새 pane id의 구독을 갱신한다", async () => {
+  const { calls, fire } = harness();
+  fire({ event: "pane_moved", data: { type: "pane_moved", previous_pane_id: "w1:p2", pane: { pane_id: "w2:p3" } } });
+  await sleep(500);
+  assert.ok(calls.recompute >= 1);
+  assert.ok(calls.refresh >= 1);
+});
+
+test("기존 일반 pane에서 에이전트를 감지하면 상태 구독을 시작한다", async () => {
+  const { calls, fire } = harness();
+  fire({ event: "pane_agent_detected", data: { type: "pane_agent_detected", pane_id: "w1:p2" } });
+  await sleep(500);
+  assert.ok(calls.recompute >= 1);
+  assert.ok(calls.refresh >= 1);
 });
 
 test("그 밖의 이벤트도 재계산까지는 간다", async () => {

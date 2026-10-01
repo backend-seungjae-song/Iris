@@ -77,12 +77,18 @@ check("놓친 창도 레거시 경로→폴더 객체 이력을 재접속 때 �
     && /applySpaceKeys\(m\.map \|\| \{\}, m\.remaps \|\| \{\}\)/.test(web)
     && /remapWindowStores\(remaps\)/.test(web);
 });
-// herdr는 경로를 직접 입력받고 스페이스 이름은 폴더 이름으로 붙인다(.../my-app → "my-app").
-check("폴더는 경로 입력으로 받는다", () => /askText\("새 스페이스 폴더"/.test(contextMenu) && !/pickFolder/.test(allWebJs));
+// 앱에서는 Finder 폴더 창으로 고르고, 폴더 창이 없는 일반 브라우저에서만 경로를 입력받는다.
+// 스페이스 이름은 herdr가 폴더 이름으로 붙인다(.../my-app → "my-app").
+check("폴더는 Finder 폴더 창으로 고른다", () =>
+  /acHost\?\.pickFolder\)/.test(contextMenu) && /pickFolder\(spaceRoot\(\)/.test(contextMenu)
+  && /askText\("새 스페이스 폴더"/.test(contextMenu)
+  && /pickFolder: \(defaultPath\) => ipcRenderer\.invoke\("ac-pick-folder"/.test(read("native/electron/preload.cjs"))
+  && /ipcMain\.handle\("ac-pick-folder"[\s\S]{0,120}isTrustedSender\(e\)[\s\S]{0,400}"openDirectory"/.test(main));
 check("~ 경로를 푼다", () => /os\.homedir\(\)/.test(workspaceHandlers) && /startsWith\("~\/"\)/.test(workspaceHandlers));
 check("스페이스 추가 버튼(로컬 전용)", () =>
   /id="space-add"/.test(web) && /addBtn\.hidden = !getIsLocal\(\)/.test(tree));
-check("스페이스 닫기는 확인을 거친다", () => /space\.close/.test(contextMenu) && /confirm\(/.test(contextMenu));
+check("스페이스 닫기는 확인을 거친다", () =>
+  /if \(!await askConfirm\(`스페이스 "\$\{name\}"을\(를\) 닫을까요\?`[^\n]*\) return;\s*wsSend\(\{ type: "space\.close"/.test(contextMenu));
 // window.prompt는 이 런타임에 없어서 호출하면 예외가 나고 그 기능 전체가 동작하지 않는다.
 check("web에 window.prompt 호출이 없다", () => !/[=(,]\s*prompt\(/.test(web));
 check("이름 입력은 askText로", () => /function askText\(/.test(contextMenu));
@@ -248,6 +254,22 @@ check("MCP 등록 판정은 파일 유무·등록 뒤 재조회·묻기 전 명�
       .filter(([, i]) => lines.slice(i + 1, i + 4).some((l) => /^\s*elif \[ "\$CHECK" = "1" \]; then$/.test(l))).length === 2
     && shownBeforeAsk(/info "\\\$ claude mcp add --scope user iris-mcp -- node \$IRIS_MCP"/, /if ask "Claude Code 에 iris-mcp/)
     && shownBeforeAsk(/info "\\\$ codex mcp add iris-mcp -- node \$IRIS_MCP"/, /if ask "Codex 에 iris-mcp/);
+});
+// 설정 변경 범위: Claude Code·Codex의 세션 기록·지목 등록 훅
+// 새 설치 조건: setup 확인 뒤 --hooks
+// 자동 갱신 범위: install-app.sh의 기존 Iris 항목
+check("세션 기록·지목 등록 훅은 묻고 나서만 새로 넣는다", () => {
+  const lines = setupSh.split("\n").filter((l) => !/^\s*(?:#|:)/.test(l));
+  const sets = lines.map((l, i) => [l, i]).filter(([l]) => /--hooks\b/.test(l) && !/^\s*info /.test(l));
+  const installer = read("scripts/install-agent-context.mjs");
+  return sets.length === 1 && /^\s*HOOKS="--hooks"$/.test(sets[0][0])
+    && /if ask "/.test(lines[sets[0][1] - 1])
+    && /install-agent-context\.mjs --app \/Applications\/Iris\.app \$HOOKS/.test(setupSh)
+    && /\/hooks 를 열어 Iris 훅을 신뢰/.test(setupSh)
+    && /\["SessionStart", "UserPromptSubmit"\]/.test(installer)
+    && /IRIS_AGENT_CONTEXT_RUNTIME=\$\{runtime\}/.test(installer)
+    && /server\/agent-session-path\.js/.test(installer)
+    && !/--hooks\b/.test(read("scripts/install-app.sh"));
 });
 check("CLI가 없는 에이전트는 실패가 아니라 건너뜀이다", () =>
   /if ! command -v claude[^\n]*\n\s*info /.test(setupSh) && /if ! command -v codex[^\n]*\n\s*info /.test(setupSh));
@@ -616,13 +638,18 @@ if (LIVE) {
     // AC6가 사라지면 AC5가 대신 막으면서 본문이 "local only (AC5)"로 바뀐다 → 이 검사는 실패한다.
     return body === "forbidden";
   });
-  check("Tailscale 대역도 /browser-cmd는 거부(AC5 실동작)", () => {
+  check("Tailscale 주소로는 서버에 닿지 않는다(루프백 전용 바인딩)", () => {
     let ts = "";
     try { ts = execFileSync("/opt/homebrew/bin/tailscale", ["ip", "-4"], { encoding: "utf8" }).trim().split("\n")[0].trim(); } catch {}
     if (!/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ts)) { console.log("       (Tailscale 주소 없음 — 건너뜀)"); return true; }
-    // 전역 필터는 100.64/10을 허용하므로 여기서 거부하는 것은 AC5뿐이다. AC5를 지우면 명령이 실행돼 통과한다.
-    const body = post(ts, ts).trim();
-    return /local only \(AC5\)/.test(body);
+    // TCP 연결 결과 직접 관측. 거부 = 통과, 연결 성공 = 위반, 그 밖의 오류·시간 초과 = 못 잰 것
+    const probe = `import socket,errno,sys\ns=socket.socket();s.settimeout(3)\ntry:\n s.connect((sys.argv[1],4271));print("open")\nexcept ConnectionRefusedError:print("refused")\nexcept Exception as e:print("other:"+type(e).__name__)`;
+    let seen = "";
+    try { seen = execFileSync("/usr/bin/python3", ["-c", probe, ts], { encoding: "utf8" }).trim(); }
+    catch (e) { cannotMeasure(`연결 관측 실행 실패: ${e.message}`); }
+    if (seen === "refused") return true;
+    if (seen === "open") return false;
+    cannotMeasure(`연결 결과 판정 불가: ${seen || "출력 없음"}`);
   });
   check("서버가 현재 index.html 서빙", () => {
     const base = new URL("http://127.0.0.1:4271/");
@@ -667,8 +694,8 @@ console.log("[9] 보관함 — 접기·되살리기");
 const arc = read("server/archive.js");
 // 복원 키가 없는 세션을 보관하면 그대로 사라지므로, 그 경계가 이 기능의 안전장치다.
 check("열쇠 없는 세션은 접지 않는다", () => /sessionUuid/.test(archiveHandlers) && /되살릴 수 없습니다/.test(archiveHandlers));
-check("모르는 종류는 접지 않는다", () => /canResume/.test(arc) && /canResume/.test(archiveHandlers));
-check("claude·codex 재개 명령을 안다", () => /"claude", "--resume"/.test(arc) && /"codex", "resume"/.test(arc));
+check("모르는 종류는 접지 않는다", () => /agentArgv\(agentKind\)/.test(arc) && /canResume/.test(archiveHandlers) && /BASE_ARGV\.get/.test(read("server/agent-launch.js")));
+check("claude·codex 재개 명령을 안다", () => /"claude", "--resume"/.test(read("server/agent-launch.js")) && /"codex", "--no-daemon", "resume"/.test(read("server/agent-launch.js")));
 check("보관은 로컬만(AC5)", () => {
   const handler = fnBody(archiveHandlers, "handleArchive");
   return /!ws\._local/.test(handler);
@@ -809,11 +836,11 @@ console.log("[10b] 탭 화면 크기");
 check("되살리기는 탭의 pane에 직접 친다", () => /paneSendText\(slot\.paneId, cmd \+ "\\r"\)/.test(archiveHandlers) && !/agentStart/.test(archiveHandlers));
 // 이름 있는 키로 제출하면 글자만 입력되고 실행되지 않는다.
 check("탭에서 세션을 띄울 때도 \\r 로 제출한다", () =>
-  /LAUNCHERS\[msg\.launch\] \+ "\\r"/.test(workspaceHandlers) && !/paneSendKeys/.test(workspaceHandlers));
+  /paneSendText\([^;]+\+ "\\r"\)/.test(workspaceHandlers) && !/paneSendKeys/.test(workspaceHandlers));
 // 스페이스를 새로 만들면 herdr가 기본 탭을 함께 만든다. 첫 세션이 그 탭을 써야 빈 탭이 남지 않는다.
 check("저장해둔 이름으로 탭 이름을 붙인다", () => /tabRename\(slot\.tabId, label\)/.test(archiveHandlers));
 check("기본 탭을 재사용해 빈 탭을 남기지 않는다", () => /spareRef\.spare/.test(archiveHandlers) && /spare: null/.test(archiveHandlers));
-check("세션 없는 탭도 저장·복구한다", () => /tabs: Array\.isArray\(tabs\)/.test(arc) && /takeTab\(wsId, space, p\.label\)/.test(archiveHandlers));
+check("세션 없는 탭도 저장·복구한다", () => /tabs: Array\.isArray\(tabs\)/.test(arc) && /reviveTerminal\(wsId, space, p\)/.test(archiveHandlers));
 // herdr는 실경로(/private/tmp/…)를, 사용자·저장값은 심링크 경로(/tmp/…)를 준다. 같은 폴더를 놓치면
 // 살아 있는 스페이스를 못 알아보고 중복으로 만든다.
 check("폴더 비교는 심링크를 푼다", () => /fs\.realpathSync\(path\.resolve\(p\)\)/.test(archiveHandlers));

@@ -260,8 +260,8 @@ console.log("\n[10h] 스크린샷은 증거가 된다");
       && /async function settleAnimations/.test(c)
       && /a\.playState !== "running"/.test(c)                                    // 도는 것이 없으면 곧바로 논다
       && /t\.iterations === Infinity/.test(c)                                    // 스피너를 세면 매번 상한을 태운다
-      && /const wantsFrames = observation\.animates\(cmd\)/.test(wiring)          // 실제로 부른다
-      && /if \(held && wantsFrames\) await observation\.settleAnimations\(send\)/.test(wiring)
+      && /const wantsFrames = cmd === "mouse" \|\| observation\.animates\(cmd\)/.test(wiring)
+      && /if \(held && wantsFrames && !\(cmd === "mouse" && \["move", "drag"\]\.includes\(args\?\.action\)\)\) \{\s*await observation\.settleAnimations\(send\)/.test(wiring)
       && /!wantsKeys && !wantsFrames/.test(wiring)                               // 키 붙잡기와 하나로 묶어 두 번 잡지 않는다
       && !/pulseFrames/.test(readAll("native"));                                // 안 되는 길은 native 어디에도 두지 않는다
   });
@@ -279,22 +279,24 @@ console.log("\n[10h] 스크린샷은 증거가 된다");
     const srv = read("server/browser-commands.js"), ui = readAll("web");
     return /choices: \{ type: "array"/.test(mcp)
       && /choices: Array\.isArray\(a\.choices\)/.test(mcp)
-      && /done: answer === "다 했음" \|\| !!\(choices && choices\.length && answer === choices\[0\]\)/.test(srv)
-      && /choices: choices && choices\.length \? choices : undefined/.test(srv)
-      && /data-ans="\$\{esc\(c\)\}"/.test(ui)
+      && /data\.done = record\.choices \? answer === record\.choices\[0\] : answer === "다 했음"/.test(srv)
+      && /Array\.isArray\(args\?\.choices\) \? args\.choices\.map\(\(value\) => String\(value\)\.trim\(\)\)/.test(srv)
+      && /item\.choices\?\.length \? item\.choices : \["다 했어요", "못 하겠어요"\]/.test(ui)
+      && /item\.onAnswer\?\.\(choice\)/.test(ui)
       && /choices: m\.choices/.test(ui);
   });
   check("부를 자리가 앱이면 앱으로 데려간다", () => {
     const commands = read("server/browser-commands.js"), messages = read("server/browser-message-handlers.js"), ui = readAll("web");
-    return /const askDevice = args && args\.device != null/.test(commands)
-      && /where: askDevice \? "app" : "tab"/.test(commands)
+    return /const requestedDevice = args\?\.device != null \? String\(args\.device\)\.trim\(\) : ""/.test(commands)
+      && /where: item\.device \? "app" : "tab"/.test(commands)
       && /msg\.type === "focus-app"/.test(messages)
       && /execFileSync\("open", \["-a", "Simulator"\]/.test(messages)
       && /label: "그 앱으로"/.test(ui)
       && /device: \{ type: "string"/.test(mcp);
   });
   check("대량 기입 승인은 승인·취소로 묻는다", () =>
-    /choices: \["승인", "취소"\]/.test(mcp));
+    /C\("approve", \{ tab, title: "대량 기입 승인"[\s\S]{0,400}approve_label: "승인", deny_label: "취소" \}\)/.test(mcp)
+    && /approved = !!\(ask && ask\.data && ask\.data\.approved\)/.test(mcp));
   check("고른 답을 문장에 넣을 때 조사를 맞춘다", () => {
     // "승인를"이 나오면 그 문장을 쓴 쪽을 사람이 덜 믿는다.
     const srv = readAll("server");
@@ -421,19 +423,40 @@ console.log("\n[10h] 스크린샷은 증거가 된다");
     && /NO_TAB\.has\(t\.name\) \? t\.schema : \{ \.\.\.t\.schema, \.\.\.TAB_PARAM \}/.test(mcp)
     && /inputSchema: \{ type: "object", properties: schemaOf\(t\)/.test(mcp)   // 목록이 그 표를 쓴다
     && /const s = schemaOf\(t\), names = Object\.keys\(s\);/.test(mcp));     // 검사도 같은 표를 쓴다
-  // 기기가 여럿이면 고정한 기기로만 간다. 고정한 기기의 탭이 닫히면 조용히 다른 기기로 갈아타지 않는다.
-  check("에뮬레이터도 고정할 수 있다", () => {
-    const mcp = read("bin/iris-mcp.mjs");
-    return /name: "app_target"/.test(mcpApp)
-      && /function pinnedDevice\(session\)/.test(mcpApp)
-      && /function setPinnedDevice\(session, udid\)/.test(mcpApp)
-      && /app-targets\.json/.test(mcpApp)                     // 프로세스가 다시 떠도 유지
-      && /if \(list\.some\(\(t\) => t\.udid === pin\)\) return pin;/.test(mcpApp)
-      && /\/\/ 고정한 기기의 탭이 닫혔다\. 조용히 다른 기기로 갈아타지 않는다/.test(mcpApp)
-      && /async function simTargetError\(want\)/.test(mcpApp);     // 왜 없는지 구분해 말한다
+  // 등록 기기가 한 대면 그 기기로만 간다. 탭이 닫히면 다른 기기로 갈아타지 않고,
+  // 여러 대면 호출자가 device를 적어야 한다. 상태 파일은 서버 한 곳만 쓴다.
+  await checkAsync("에뮬레이터 등록 목록은 서버가 저장하고 MCP가 해석한다", async () => {
+    const store = read("server/app-targets.js");
+    if (!(/name: "app_target"/.test(mcpApp)
+      && /async function registeredDeviceState\(session\)/.test(mcpApp)
+      && /serverCall\("app-targets-get"/.test(mcpApp)
+      && /serverCall\("app-targets-set"/.test(mcpApp)
+      && !/app-targets\.json/.test(mcpApp)
+      && /path\.join\(stateDir, "app-targets\.json"\)/.test(store)
+      && /fs\.renameSync\(temp, file\)/.test(store)
+      && /async function simTargetError\(want\)/.test(mcpApp))) return false;
+    const { createAppSurface } = await import(new URL("../../../bin/mcp/app.mjs", import.meta.url).href);
+    const first = "11111111-1111-4111-8111-111111111111", second = "22222222-2222-4222-8222-222222222222";
+    let registered = [first], tabs = [{ udid: first }, { udid: second, mine: true, owner: "smoke" }];
+    const writes = [];
+    const surface = createAppSurface({ currentSession: async () => "smoke", journal: async () => null,
+      addReceipt: () => ({}), call: async (cmd, args) => {
+        if (cmd === "app-targets-get") return { ok: true, data: { devices: registered } };
+        if (cmd === "app-devices") return { ok: true, data: { tabs } };
+        if (cmd === "app-targets-set") { writes.push(args.devices); registered = args.devices; return { ok: true }; }
+        throw new Error(`기기 선택에서 예상하지 않은 서버 호출: ${cmd}`);
+      } });
+    if (await surface.simTarget() !== first) throw new Error("등록한 한 대를 선택하지 않는다");
+    tabs = tabs.filter((tab) => tab.udid !== first);
+    if (await surface.simTarget() !== null) throw new Error("등록한 탭이 닫히면 다른 기기를 선택한다");
+    tabs.push({ udid: first }); registered = [first, second];
+    if (await surface.simTarget() !== null) throw new Error("여러 대를 등록했는데 지정 없이 기기를 선택한다");
+    const cleared = await surface.tools.find((tool) => tool.name === "app_target").run({ clear: true });
+    if (!cleared.ok || writes.length !== 1 || writes[0].length !== 0) throw new Error("등록 해제를 서버에 보내지 않는다");
+    return true;
   });
   check("기기도 최대 4대까지 동시에", () =>
-    /const MAX_DEVICES = 4;/.test(mcpApp)
+    /const MAX_DEVICES = MAX_APP_TARGETS;/.test(mcpApp)
     && /async function runOnDevices/.test(mcp)
     && /ok: okCount === per\.length,/.test(mcp)          // 절반만 된 것을 성공이라 부르지 않는다
     && /const appRefsByDevice = new Map\(\)/.test(mcpApp)   // 참조표는 기기마다 따로

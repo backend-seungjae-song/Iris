@@ -302,7 +302,7 @@ function wireMemo() {
   const create = $("#memo-new-window"), shared = $("#memo-shared-window");
   if (create) create.addEventListener("click", (event) => {
     event.preventDefault(); event.stopPropagation();
-    const space = memoSpace(); if (!space) { showToast("스페이스를 먼저 선택하세요."); return; }
+    const space = memoSpace(); if (!space) { showToast("스페이스를 먼저 선택하세요.", { level: "warn" }); return; }
     const requestId = memoReqId("memo-create");
     const current = orderedSpaces().find((item) => item.id === space);
     rememberMemoCreate(requestId, { space, label: current?.label || space });
@@ -312,8 +312,8 @@ function wireMemo() {
     event.preventDefault(); event.stopPropagation();
     try {
       const result = await acHost?.openSharedMemo?.();
-      if (!result?.ok) showToast(result?.error || "공유 메모 창을 열지 못했습니다.");
-    } catch { showToast("공유 메모 창을 열지 못했습니다."); }
+      if (!result?.ok) showToast("공유 메모 창을 열지 못했습니다.", { level: "err", detail: String(result?.error || "원인 불명") });
+    } catch { showToast("공유 메모 창을 열지 못했습니다.", { level: "err" }); }
   });
 }
 

@@ -148,6 +148,9 @@ export default async function run() {
     const table = [
       [{ pickedMode: false, registered: {}, dir: 1 }, "legacy"],
       [{ pickedMode: false, registered: {}, dir: -1 }, "none"],
+      // 전역 우선 사용: 고른 창이 없어도 다음 창 키가 전역이면 렌더러는 손대지 않는다(메인이 토글을 보낸다).
+      [{ pickedMode: false, registered: { next: true }, dir: 1 }, "global"],
+      [{ pickedMode: false, registered: { next: true }, dir: -1 }, "none"],
       [{ pickedMode: true, registered: { next: true }, dir: 1 }, "global"],
       [{ pickedMode: true, registered: { prev: true }, dir: -1 }, "global"],
       [{ pickedMode: true, registered: { next: false }, dir: 1 }, "step"],

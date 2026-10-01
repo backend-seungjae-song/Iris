@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // A separate terminal context has an explicit parent and a single launch receipt.
+// The worktree subcommand creates a git worktree and records the calling pane as its creator for the Iris sidebar.
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import http from "node:http";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { parseArgs } from "node:util";
@@ -13,8 +15,14 @@ import { herdrSession } from "../server/herdr-session.cjs";
 import { HerdrClient } from "../server/herdr.js";
 import { resolveCodexSession } from "../server/codex-session.js";
 import { writeAgentLineage } from "../server/agent-lineage.js";
+import { createWorktreeFromCommand } from "../server/worktree-handlers.js";
+import { port as irisPort } from "../server/env.cjs";
+import { MAX_PROMPT_TARGET_MARKERS } from "../server/prompt-targets.js";
+import { validateAgentSessionPath } from "../server/agent-session-path.js";
+import { chooseCodexResumePane, chooseHerdrPane, processAncestry } from "./iris-session.mjs";
 
 const run = promisify(execFile);
+const MAX_HOOK_INPUT_BYTES = 64 * 1024 * 1024;
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const REASONS = new Set(["independent-work", "independent-review", "separate-evidence", "isolated-trial"]);
 const EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
@@ -101,7 +109,7 @@ export async function launchContext(options, deps = {}) {
   }
   const childSessionId = options.runtime === "claude" ? crypto.randomUUID() : undefined;
   const command = options.runtime === "codex"
-    ? [runtimeBin, "--model", options.model, "--config", `model_reasoning_effort=${JSON.stringify(options.effort)}`, brief]
+    ? [runtimeBin, "--no-daemon", "--model", options.model, "--config", `model_reasoning_effort=${JSON.stringify(options.effort)}`, brief]
     : [runtimeBin, "--model", options.model, "--effort", options.effort, "--session-id", childSessionId, brief];
   const args = ["agent", "start", name, "--workspace", parent.workspace_id, "--cwd", cwd, "--no-focus", "--", ...command];
   const record = { version: 1, id: options.id, signature, status: "launching", createdAt: new Date().toISOString(), socketPath,
@@ -148,20 +156,235 @@ export async function launchContext(options, deps = {}) {
   }
 }
 
+// The creating session is recorded only when this process provably runs inside the caller's herdr pane
+// of this Iris state; otherwise the worktree is still created and the sidebar shows the creator as unknown.
+async function callerSession(env, deps) {
+  if (!env.HERDR_PANE_ID) return { session: null, note: "Not inside a herdr pane; the creating session was not recorded." };
+  const socketPath = deps.socketPath || herdrSession().socket;
+  if (!env.HERDR_SOCKET_PATH || path.resolve(env.HERDR_SOCKET_PATH) !== path.resolve(socketPath)) {
+    return { session: null, note: "The caller's herdr socket is not this Iris state's session; the creating session was not recorded." };
+  }
+  const client = deps.client || new HerdrClient();
+  try {
+    const pane = await client.paneGet(env.HERDR_PANE_ID);
+    const info = await client.call("pane.process_info", { pane_id: pane?.pane_id });
+    const ancestors = deps.ancestors || ancestorPids();
+    if (!pane?.terminal_id || !pane.workspace_id || !ancestors.has(info?.process_info?.shell_pid)) {
+      return { session: null, note: "This process does not belong to the pane named by HERDR_PANE_ID; the creating session was not recorded." };
+    }
+    let label = null;
+    try { label = (await client.tabList(pane.workspace_id)).find((tab) => tab.tab_id === pane.tab_id)?.label || null; } catch {}
+    return { session: { paneId: pane.pane_id, terminalId: pane.terminal_id, workspaceId: pane.workspace_id,
+      agent: pane.agent || null, sessionId: pane.agent_session?.value || null, label } };
+  } catch {
+    return { session: null, note: "herdr pane information is unavailable; the creating session was not recorded." };
+  }
+}
+
+export async function createWorktree(options, deps = {}) {
+  const env = deps.env || process.env;
+  const repo = path.resolve(options.repo || process.cwd());
+  const name = String(options.name || "").trim();
+  if (!name) throw new Error("--name is required (letters or digits first, then letters, digits, . _ -)");
+  const branch = String(options.branch || `feat/${name}`).trim();
+  let base = String(options.base || "").trim();
+  if (!base) {
+    base = execFileSync("git", ["-C", repo, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
+    if (!base || base === "HEAD") throw new Error("The current checkout has no branch; pass --base BRANCH");
+  }
+  const { session, note } = await callerSession(env, deps);
+  const made = await (deps.create || createWorktreeFromCommand)({ repo, name, branch, base, session });
+  if (!made.recorded) throw new Error(`Worktree created at ${made.path} but its creator record could not be saved`);
+  return { path: made.path, branch: made.branch, base: made.base, primary: made.primary,
+    creator: session ? { paneId: session.paneId, workspaceId: session.workspaceId, agent: session.agent } : null, ...(note ? { note } : {}) };
+}
+
+export function extractPromptTargetMarkers(prompt) {
+  const text = String(prompt || "");
+  const matches = [];
+  const pattern = /@device:[A-Za-z0-9][A-Za-z0-9._:-]*~[A-Za-z0-9_-]{8,128}|@[A-Za-z0-9._-]+-(?:tab|group)-[A-Za-z][0-9A-Fa-f]{5}~[A-Za-z0-9_-]{8,128}/g;
+  for (const match of text.matchAll(pattern)) {
+    if (!matches.includes(match[0])) matches.push(match[0]);
+    // 상한을 넘긴 사실까지 서버에 보내야 요청 전체가 거절된다. 앞부분만 적용하면 뒤 nonce가 재사용된다.
+    if (matches.length > MAX_PROMPT_TARGET_MARKERS) break;
+  }
+  return matches;
+}
+
+function readHookInput(input = process.stdin) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    let bytes = 0;
+    input.setEncoding("utf8");
+    input.on("data", (chunk) => {
+      bytes += Buffer.byteLength(chunk, "utf8");
+      body += chunk;
+      if (bytes > MAX_HOOK_INPUT_BYTES) reject(new Error("훅 입력이 너무 큽니다"));
+    });
+    input.on("end", () => {
+      try { resolve(JSON.parse(body || "{}")); }
+      catch { reject(new Error("훅 입력 JSON을 읽지 못했습니다")); }
+    });
+    input.on("error", reject);
+  });
+}
+
+async function promptPane(hook, deps = {}) {
+  const env = deps.env || process.env;
+  const envPane = env.IRIS_SESSION || env.HERDR_PANE_ID;
+  if (envPane && await processInPane(envPane, deps)) return envPane;
+  const sessionId = String(hook?.session_id || "");
+  if (!sessionId) return null;
+  const client = deps.client || new HerdrClient();
+  try {
+    const agents = await Promise.race([
+      client.agentList(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("session lookup timeout")), 250)),
+    ]);
+    const runtime = deps.runtime || env.IRIS_AGENT_CONTEXT_RUNTIME;
+    const hits = agents.filter((agent) => (!runtime || agent.agent === runtime)
+      && [agent?.agent_session?.value, agent?.session_id].includes(sessionId));
+    if (hits.length) return hits.length === 1 ? String(hits[0].pane_id || "") || null : null;
+    if (runtime !== "codex") return null;
+    const infos = await Promise.race([
+      Promise.all(agents.map((agent) => client.call("pane.process_info", { pane_id: agent.pane_id }).catch(() => null))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("process lookup timeout")), 750)),
+    ]);
+    const resumed = chooseCodexResumePane(agents, infos, sessionId);
+    if (resumed) return resumed;
+    const lineage = await (deps.ancestry || processAncestry)();
+    return chooseHerdrPane(agents.filter((agent) => agent.agent === runtime),
+      infos.filter((_, i) => agents[i].agent === runtime), lineage);
+  } catch { return null; }
+}
+
+// 환경 변수 pane 확인. 공용 Codex 데몬의 hook 은 데몬을 처음 띄운 pane 의 HERDR_PANE_ID 를 물려받음
+async function processInPane(pane, deps = {}) {
+  if (deps.ownsPane) return deps.ownsPane(pane);
+  const client = deps.client || new HerdrClient();
+  try {
+    const info = await Promise.race([
+      client.call("pane.process_info", { pane_id: pane }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("pane lookup timeout")), 250)),
+    ]);
+    return ancestorPids().has(info?.process_info?.shell_pid);
+  } catch { return false; }
+}
+
+function callPromptTargets(markers, session, agentSession, deps = {}, registerOnly = false) {
+  if (deps.call) return deps.call(markers, session, agentSession, { registerOnly });
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ cmd: "prompt-targets", args: { markers, registerOnly, ...(agentSession ? { agentSession } : {}) }, session });
+    const req = http.request({ host: "127.0.0.1", port: irisPort(), path: "/browser-cmd", method: "POST",
+      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        try { resolve(JSON.parse(body)); }
+        catch { reject(new Error("서버 응답을 읽지 못했습니다")); }
+      });
+    });
+    req.setTimeout(1100, () => req.destroy(new Error("서버 응답 시간 초과")));
+    req.on("error", reject);
+    req.end(payload);
+  });
+}
+
+async function reportHerdrSession(agentSession, hook, deps = {}) {
+  if (!agentSession || !hook?.session_id) return;
+  if (deps.reportHerdr) return deps.reportHerdr(agentSession, hook);
+  const env = deps.env || process.env;
+  const command = env.HERDR_BIN_PATH || executable("herdr", env);
+  const args = ["pane", "report-agent-session", agentSession.paneId,
+    "--source", `herdr:${agentSession.agent}`, "--agent", agentSession.agent,
+    "--agent-session-id", agentSession.sessionId];
+  if (agentSession.transcriptPath) args.push("--agent-session-path", agentSession.transcriptPath);
+  if (typeof hook.source === "string" && hook.source) args.push("--session-start-source", hook.source);
+  await run(command, args, { env, timeout: 1000, maxBuffer: 256 << 10 });
+}
+
+function hookAgentSession(hook, pane, runtime, deps = {}) {
+  if (!pane || !["claude", "codex"].includes(runtime) || hook?.agent_id || hook?.is_subagent) return null;
+  const sessionId = String(hook?.session_id || "");
+  if (!sessionId || sessionId.length > 512 || /[\x00-\x1f\x7f]/.test(sessionId)) return null;
+  const transcriptPath = validateAgentSessionPath(runtime, hook?.transcript_path, deps.pathOptions);
+  if (String(hook?.transcript_path || "").split(path.sep).includes("subagents")) return null;
+  // SessionStart는 기록 파일을 만들기 전에 올 수 있다. ID 등록은 파일 생성과 분리한다.
+  return { paneId: pane, agent: runtime, sessionId, ...(transcriptPath ? { transcriptPath } : {}) };
+}
+
+function promptTargetSummary(data) {
+  const activated = Array.isArray(data?.activated) ? data.activated : [];
+  const rejected = Array.isArray(data?.rejected) ? data.rejected : [];
+  const parts = activated.map((record) => {
+    if (record.kind === "device") return `기기 ${record.label || record.target?.udid}(${record.target?.udid})`;
+    const label = record.kind === "element" ? "요소" : record.kind === "group" ? "그룹" : "탭";
+    return `${label} ${record.ref}`;
+  });
+  const lines = [];
+  if (parts.length) lines.push(`지목 등록: ${parts.join(" · ")}`);
+  const devices = [...new Set(activated.filter((record) => record.kind === "device").map((record) => record.target?.udid).filter(Boolean))];
+  if (devices.length > 1) lines.push(`등록 기기가 ${devices.length}대라 app_* 도구에는 device를 적으세요.`);
+  if (rejected.length) {
+    const counts = new Map();
+    for (const item of rejected) counts.set(item.reason || "알 수 없는 이유", (counts.get(item.reason || "알 수 없는 이유") || 0) + 1);
+    lines.push(`지목 구분자 ${rejected.length}개 거절: ${[...counts].map(([reason, count]) => `${reason} ${count}`).join(" · ")}`);
+  }
+  return lines.join("\n");
+}
+
+export async function submitPromptTargets(hook, deps = {}) {
+  const markers = extractPromptTargetMarkers(hook?.prompt);
+  const runtime = String(deps.runtime || deps.env?.IRIS_AGENT_CONTEXT_RUNTIME || process.env.IRIS_AGENT_CONTEXT_RUNTIME || "").toLowerCase();
+  try {
+    if (hook?.agent_id || hook?.is_subagent) return "";
+    const pane = await promptPane(hook, { ...deps, runtime });
+    if (!pane) return markers.length ? "지목 등록 실패: 이 프롬프트의 Iris pane을 확인하지 못했습니다." : "";
+    const agentSession = hookAgentSession(hook, pane, runtime, deps);
+    try { await reportHerdrSession(agentSession, hook, deps); } catch {}
+    const registerOnly = hook?.hook_event_name === "SessionStart" || !Object.hasOwn(hook || {}, "prompt");
+    const result = await callPromptTargets(markers, pane, agentSession?.transcriptPath ? agentSession : null, deps, registerOnly);
+    if (!result?.ok) return `지목 등록 실패: ${result?.error || "Iris 서버가 요청을 거절했습니다."}`;
+    return markers.length ? promptTargetSummary(result.data) : "";
+  } catch (error) {
+    return markers.length ? `지목 등록 실패: ${String(error?.message || error)}` : "";
+  }
+}
+
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     id: { type: "string" }, runtime: { type: "string" }, model: { type: "string" }, effort: { type: "string" },
     reason: { type: "string" }, brief: { type: "string" }, cwd: { type: "string" }, name: { type: "string" },
+    repo: { type: "string" }, base: { type: "string" }, branch: { type: "string" },
     "dry-run": { type: "boolean" }, help: { type: "boolean" },
   } });
   if (values.help) {
     console.log("pnpm agent:context launch --id JOB --runtime codex|claude --model MODEL --effort LEVEL --reason independent-work|independent-review|separate-evidence|isolated-trial --brief FILE [--cwd DIR] [--name NAME] [--dry-run]");
+    console.log("pnpm agent:context worktree --name NAME [--repo DIR] [--base BRANCH] [--branch BRANCH]");
     return;
   }
-  if (positionals.length !== 1 || positionals[0] !== "launch") throw new Error("Expected launch; use --help for the contract");
+  if (positionals.length === 1 && positionals[0] === "prompt-targets") {
+    const output = await submitPromptTargets(await readHookInput(), { runtime: values.runtime });
+    if (output) process.stdout.write(output + "\n", () => process.exit(0));
+    else process.exit(0);
+    return;
+  }
+  if (positionals.length === 1 && positionals[0] === "worktree") {
+    const result = JSON.stringify(await createWorktree(values), null, 2) + "\n";
+    // HerdrClient keeps a 5 s timeout timer per call; exit once the answer is flushed instead of waiting for it.
+    process.stdout.write(result, () => process.exit(0));
+    return;
+  }
+  if (positionals.length !== 1 || positionals[0] !== "launch") throw new Error("Expected launch, worktree or prompt-targets; use --help for the contract");
   console.log(JSON.stringify(await launchContext({ ...values, dryRun: values["dry-run"] }), null, 2));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+  main().catch((error) => {
+    if (process.argv.includes("prompt-targets")) {
+      process.stdout.write(`지목 등록 실패: ${error.message}\n`, () => process.exit(0));
+      return;
+    }
+    console.error(error.message); process.exitCode = 1;
+  });
 }

@@ -451,7 +451,7 @@ function failStart(state, message) {
   }
   restoreWebview(state, state.url);
   if (state.transport === "live" && host?.liveChromeOpenSettings) showConsentNotice(state, message);
-  else try { showToast("Chrome 미러를 시작하지 못했습니다: " + message); } catch {}
+  else try { showToast("Chrome 미러를 시작하지 못했습니다", { level: "err", detail: String(message) }); } catch {}
 }
 
 function ensureBackend(state) {
@@ -541,7 +541,7 @@ function enterMirror(rec, url, committed, options = {}) {
       state = makeSurface(rec);
       mirrorsByTab.set(rec.tabId, state);
     } catch (error) {
-      try { showToast(error && error.message ? error.message : "Chrome 미러 표면을 만들지 못했습니다."); } catch {}
+      try { showToast("Chrome 미러 표면을 만들지 못했습니다.", { level: "err", detail: String(error?.message || "원인 불명") }); } catch {}
       return;
     }
   }

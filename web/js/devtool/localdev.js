@@ -27,7 +27,7 @@ const ACTION_WAIT = 20000;
 const STATUS_WAIT = 6000;   // 서버 쪽 제한 시간(4초)보다 길게 둔다
 
 const ICON = {
-  reload: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  reload: '<path d="M20 12a8 8 0 1 0-2.3 5.7"/><path d="M20 5v7h-7"/>',
   open: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   check: '<path d="m5 12 5 5 9-10"/>',

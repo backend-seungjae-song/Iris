@@ -42,7 +42,7 @@ export const panelHtml = `
 `;
 
 const MM_ICON = {
-  refresh: '<svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+  refresh: '<svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 0-2.3 5.7"/><path d="M20 5v7h-7"/></svg>',
   caret: '<svg class="i mm-cv" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
   back: '<svg class="i" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg>',
 };
@@ -178,7 +178,7 @@ export function mmRefresh() {
 provide("memo.archive", () => archiveMemo());
 
 export function archiveMemo() {
-  const sp = memoSpace(); if (!sp) { showToast("스페이스를 먼저 선택하세요."); return; }
+  const sp = memoSpace(); if (!sp) { showToast("스페이스를 먼저 선택하세요.", { level: "warn" }); return; }
   wsSend({ type: "memo.archive", space: sp, text: memoTextOf(sp) });
 }
 
@@ -196,17 +196,17 @@ function wireMemoAdmin() {
       case "archive": wsSend({ type: "memo.archive", space: sp, text: memoTextOf(sp) }); break; // 보고 있는 스페이스 것을 담는다
       case "open": mmOpen = mmOpen === d ? null : d; mmRefresh(); break;
       case "del": if (confirm(`${d} 보관본을 통째로 삭제할까요?`)) wsSend({ type: "memo.archive.delete", space: sp, date: d }); break;
-      case "copy": if (a) copyText(a.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다")); break;
+      case "copy": if (a) copyText(a.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); break;
       // 하루치 안의 한 기록만 지운다. 잘못 담은 하나 때문에 하루를 버리지 않는다.
       case "bdel": { const bk = a && (a.blocks || []).find((x) => x.id === b.dataset.id); if (!bk) break;
         if (confirm(`${d} ${bk.clock || "이전 기록"}에 보관한 것만 삭제할까요?`)) wsSend({ type: "memo.archive.block.delete", space: sp, date: d, id: bk.id }); } break;
-      case "bcopy": { const bk = a && (a.blocks || []).find((x) => x.id === b.dataset.id); if (bk) copyText(bk.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다")); } break;
+      case "bcopy": { const bk = a && (a.blocks || []).find((x) => x.id === b.dataset.id); if (bk) copyText(bk.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } break;
       case "restore": if (a) { // 덮지 않고 이어 붙인다. 작성 중인 내용을 잃지 않기 위한 것이다
         const cur = memoTextOf(sp);
         const next = (cur ? cur.replace(/\s+$/, "") + "\n\n" : "") + a.text;
         advanceMemoRevision();
         updateMemoText(sp, next, { immediate: true });
-        setMemoShownSpace(null); renderMemo(); mmRefresh(); showToast(`${d} 보관본을 이어 붙였습니다.`);
+        setMemoShownSpace(null); renderMemo(); mmRefresh(); showToast(`${d} 보관본을 이어 붙였습니다.`, { level: "info" });
       } break;
       case "clear": if (confirm("지금 메모 본문을 비웁니다. 보관본은 그대로 남습니다. 계속할까요?")) {
         advanceMemoRevision();
@@ -216,7 +216,7 @@ function wireMemoAdmin() {
       case "note-open": {
         const noteId = b.dataset.note, label = mmSpaceLabel(sp);
         if (noteId) Promise.resolve(window.acHost?.openLocalMemo?.({ spaceKey: spk(sp), noteId, spaceLabel: label }))
-          .then((result) => { if (!result?.ok) showToast(result?.error || "메모 창을 열지 못했습니다."); });
+          .then((result) => { if (!result?.ok) showToast("메모 창을 열지 못했습니다.", { level: "err", detail: String(result?.error || "원인 불명") }); });
       } break;
       case "note-restore": if (b.dataset.note) wsSend({ type: "memo.note.restore", requestId: memoReqId("memo-restore"), space: sp, noteId: b.dataset.note }); break;
       // 조회만 한다. 작업 스페이스는 그대로 두고 이 화면의 보기만 옮긴다.

@@ -104,6 +104,13 @@ export const RAIL_ITEMS = [
     canDisable: true, disabledReason: "",
   },
   {
+    id: "remote", label: "원격",
+    title: "휴대폰 원격 제어",
+    icon: "<path d=\"M12 3 19 6v5c0 4.4-2.8 8.2-7 10-4.2-1.8-7-5.6-7-10V6z\"/><path d=\"M9 12h6\"/>",
+    body: "remote-active", panel: "remote-panel", layout: "panel", width: 320,
+    canDisable: true, disabledReason: "",
+  },
+  {
     id: "keymap", label: "설정",
     title: "설정: 단축키, 보안",
     icon: "<path d=\"M9 9h6v6H9z\"/><path d=\"M9 9V6a3 3 0 1 0-3 3h3z\"/><path d=\"M15 9h3a3 3 0 1 0-3-3v3z\"/><path d=\"M15 15v3a3 3 0 1 0 3-3h-3z\"/><path d=\"M9 15H6a3 3 0 1 0 3 3v-3z\"/>",

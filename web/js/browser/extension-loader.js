@@ -45,9 +45,12 @@ export async function initCapability(ctx = {}) {
   const aggregate = await host.enableExtensionLoader();
   const results = Array.isArray(aggregate && aggregate.results) ? aggregate.results : [];
   if (!aggregate || !aggregate.ok) {
-    ctx.showToast?.(`React 개발자 도구 로드 실패: ${failureSummary(results) || "native 응답 없음"}`);
+    ctx.showToast?.("React 개발자 도구를 불러오지 못했습니다", {
+      level: "err",
+      detail: failureSummary(results) || "native 응답 없음",
+    });
   } else {
-    ctx.showToast?.(`React 개발자 도구를 ${results.length}개 세션에 로드했습니다. 열린 페이지는 새로고침하세요.`);
+    ctx.showToast?.(`React 개발자 도구를 ${results.length}개 세션에 불러왔습니다. 열린 페이지는 새로고침하세요.`, { level: "ok" });
   }
   return {};
 }

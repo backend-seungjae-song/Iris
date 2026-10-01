@@ -3,19 +3,16 @@
 // iris-browser CLI와 같은 표면·같은 경로(POST /browser-cmd)를 쓴다. 서버가 루프백 전용(AC5)이므로
 // 이 프로세스도 같은 머신에서만 동작한다. 새 권한을 열지 않고 CLI로 할 수 있는 것만 할 수 있다.
 //
-// 세션 식별: HERDR_PANE_ID(또는 IRIS_SESSION)를 먼저 쓴다. Codex가 MCP를 띄울 때 그 환경을 넘기지
-// 않는 경우에는 MCP의 프로세스 조상과 herdr pane의 실제 프로세스를 대조한다. 세션별로 탭을
-// 고정할 수 있어 여러 AI 세션이 서로 다른 탭을 동시에 조종해도 섞이지 않는다.
+// 공유 서버의 HERDR_PANE_ID는 다른 대화의 값일 수 있다. 현재 대화 ID와 프로세스 소유 관계는
+// CLI와 같은 resolver에서 확인하며, 명시적 IRIS_SESSION은 현재 존재하는 pane만 허용한다.
 //
 // 등록: claude mcp add --scope user iris-mcp -- node <이 파일 경로>
 // stdout은 JSON-RPC 전용이다. 로그는 반드시 stderr로.
 import http from "node:http";
-import net from "node:net";
+import { createSessionResolver, chooseHerdrPane } from "./iris-session.mjs";
 import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
-import childProcess from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { stateHome } from "../server/state-home.cjs";
 import { artifactDir } from "../server/artifacts-home.cjs";
@@ -43,101 +40,12 @@ import { bulkPolicy } from "../server/bulk-fill.js";
 const IRIS_HOME = stateHome();
 
 const PORT = acPort();
-const EXPLICIT_SESSION = process.env.IRIS_SESSION || process.env.HERDR_PANE_ID || null;
-const HERDR_SOCK = process.env.HERDR_SOCKET_PATH || path.join(os.homedir(), ".config", "herdr", "herdr.sock");
 const log = (...a) => process.stderr.write("[iris-mcp] " + a.join(" ") + "\n");
-
-function herdrCall(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const socket = net.connect(HERDR_SOCK, () => {
-      socket.write(JSON.stringify({ id: "iris-mcp", method, params }) + "\n");
-    });
-    let buf = "", done = false;
-    const finish = (fn, value) => {
-      if (done) return;
-      done = true;
-      socket.destroy();
-      fn(value);
-    };
-    socket.on("data", (chunk) => {
-      buf += chunk.toString();
-      const nl = buf.indexOf("\n");
-      if (nl < 0) return;
-      let msg;
-      try { msg = JSON.parse(buf.slice(0, nl)); }
-      catch { finish(reject, new Error("herdr bad response")); return; }
-      if (msg.error) finish(reject, new Error(msg.error.message || "herdr error"));
-      else finish(resolve, msg.result ?? msg);
-    });
-    socket.on("error", (e) => finish(reject, e));
-    setTimeout(() => finish(reject, new Error(`herdr timeout: ${method}`)), 2000);
-  });
-}
-
-function processAncestry() {
-  return new Promise((resolve) => {
-    childProcess.execFile("/bin/ps", ["-axo", "pid=,ppid="], { timeout: 2000, maxBuffer: 4 << 20 }, (err, stdout) => {
-      if (err && !stdout) { resolve([]); return; }
-      const parents = new Map();
-      for (const line of String(stdout || "").split("\n")) {
-        const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-        if (m) parents.set(Number(m[1]), Number(m[2]));
-      }
-      const out = [], seen = new Set();
-      let pid = process.pid;
-      while (pid > 1 && !seen.has(pid) && out.length < 32) {
-        out.push(pid); seen.add(pid); pid = parents.get(pid) || 0;
-      }
-      resolve(out);
-    });
-  });
-}
-
-// 가장 가까운 조상 프로세스가 속한 pane 하나만 고른다. 같은 거리에서 둘 이상 맞으면 잘못된 탭을
-// 여는 것보다 세션 없음으로 막는 편이 안전하다.
-function chooseHerdrPane(agents, processInfos, ancestry) {
-  const rank = new Map((ancestry || []).map((pid, i) => [Number(pid), i]));
-  const hits = [];
-  for (let i = 0; i < (agents || []).length; i++) {
-    const pane = agents[i]?.pane_id;
-    if (!pane) continue;
-    const raw = processInfos[i];
-    const info = raw?.process_info || raw || {};
-    const pids = [info.shell_pid, ...(Array.isArray(info.foreground_processes)
-      ? info.foreground_processes.map((p) => p.pid) : [])].map(Number).filter(Number.isFinite);
-    const scores = pids.map((pid) => rank.get(pid)).filter((v) => v != null);
-    if (scores.length) hits.push({ pane: String(pane), score: Math.min(...scores) });
-  }
-  if (!hits.length) return null;
-  const best = Math.min(...hits.map((h) => h.score));
-  const panes = [...new Set(hits.filter((h) => h.score === best).map((h) => h.pane))];
-  return panes.length === 1 ? panes[0] : null;
-}
-
-let discoveredSession = null, sessionLookup = null, lastSessionMiss = 0;
+const resolveSession = createSessionResolver();
+let discoveredSession = null;
 async function currentSession() {
-  if (EXPLICIT_SESSION) return EXPLICIT_SESSION;
-  if (discoveredSession) return discoveredSession;
-  if (sessionLookup) return sessionLookup;
-  if (Date.now() - lastSessionMiss < 1000) return null;
-  sessionLookup = (async () => {
-    try {
-      const [listed, ancestry] = await Promise.all([herdrCall("agent.list"), processAncestry()]);
-      const agents = listed?.agents || [];
-      const infos = await Promise.all(agents.map((a) =>
-        herdrCall("pane.process_info", { pane_id: a.pane_id }).catch(() => null)));
-      const pane = chooseHerdrPane(agents, infos, ancestry);
-      if (pane) {
-        discoveredSession = pane;
-        log("세션 자동 해석 —", pane);
-        return pane;
-      }
-    } catch {}
-    lastSessionMiss = Date.now();
-    return null;
-  })();
-  try { return await sessionLookup; }
-  finally { sessionLookup = null; }
+  discoveredSession = await resolveSession();
+  return discoveredSession;
 }
 
 // 확인 보고서와 판정 영수증은 bin/mcp/report.mjs 가 소유한다. 여기서는 도구 연결만 한다.
@@ -224,7 +132,9 @@ async function absorbMoments(r) {
     else { book[key] = { first: Date.now(), last: Date.now(), seen: 1, text: m.text }; }
     dirty = true;
     let shot = m.shot;
-    if (shot) {
+    // 앱 도구는 알림을 찾으면 그 자리에서 QA 기록 파일에 남긴다(bin/mcp/app.mjs). 여기서 다시 남기면
+    // 같은 알림이 두 번 들어간다.
+    if (shot && !m.journaled) {
       // 사라진 알림은 다시 찍을 수 없고 이번 한 번뿐이다. 그래서 문구만이 아니라
       // 얼마나 떠 있었는지·몇 번째로 본 것인지까지 같이 남긴다.
       const j = await journal({ kind: "artifact", source: "moment", shot,
@@ -269,8 +179,16 @@ async function call(cmd, args = {}) {
         headers: { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
       (res) => {
         let body = "";
+        let ended = false;
+        const interrupted = (error) => resolve({ ok: false,
+          error: "Iris 응답이 끝나기 전에 연결이 끊겼습니다. 명령이 처리됐을 수 있으니 상태를 확인하세요."
+            + (error?.message ? ` ${error.message}` : "") });
+        res.on("aborted", interrupted);
+        res.on("error", interrupted);
+        res.on("close", () => { if (!ended) interrupted(); });
         res.on("data", (c) => (body += c));
         res.on("end", () => {
+          ended = true;
           try { resolve(JSON.parse(body)); }
           catch { resolve({ ok: false, error: "응답 파싱 실패: " + body.slice(0, 200) }); }
         });
@@ -294,6 +212,32 @@ const TARGET = {
 const pickTarget = (a) => (a.ref ? { ref: String(a.ref) } : { sel: String(a.selector || "") });
 
 const TOOLS = [
+  { name: "notify",
+    desc: "기다리지 않고 결과를 알린다. 같은 key는 기존 알림을 갱신하고, 짧은 시간에 많이 보내면 한 알림으로 합쳐진다.",
+    schema: {
+      level: { type: "string", enum: ["ok", "info", "warn", "err"], description: "알림 수준" },
+      title: { type: "string", maxLength: 60, description: "알림 제목(최대 60자)" },
+      body: { type: "string", maxLength: 300, description: "알림 본문(최대 300자)" },
+      detail: { type: "string", maxLength: 2000, description: "오류 원문 등 자세한 내용(최대 2000자)" },
+      tab: { type: "string", description: "관련 탭" },
+      device: { type: "string", description: "관련 기기" },
+      key: { type: "string", maxLength: 100, description: "같은 알림을 갱신할 키" },
+    }, req: ["level", "title"],
+    run: async (a, C) => C("notify", { level: a.level, title: String(a.title), body: a.body, detail: a.detail, tab: a.tab,
+      device: a.device ? (await appSurface.simTarget(a.device)) || a.device : a.device, key: a.key }) },
+  { name: "progress",
+    desc: "오래 걸리는 작업을 하나의 알림으로 시작·갱신·완료한다. 끝 신호가 없으면 ttl 뒤 응답 없음 경고로 남는다.",
+    schema: {
+      op: { type: "string", enum: ["start", "update", "end"], description: "작업 단계" },
+      title: { type: "string", description: "start/update의 제목" },
+      p: { type: "number", minimum: 0, maximum: 1, description: "진행률 0~1" },
+      id: { type: "string", description: "start가 반환한 진행 알림 id" },
+      result: { type: "string", enum: ["ok", "err"], description: "end 결과" },
+      detail: { type: "string", description: "end의 자세한 내용" },
+      tab: { type: "string", description: "관련 탭" },
+      ttl: { type: "number", minimum: 1, description: "start 뒤 응답 없음으로 바꿀 초(기본 120)" },
+    }, req: ["op"],
+    run: (a, C) => C("progress", { op: a.op, title: a.title, p: a.p, id: a.id, result: a.result, detail: a.detail, tab: a.tab, ttl: a.ttl }) },
   { name: "browser_snapshot",
     desc: "현재 페이지의 접근성 스냅샷(요소 참조 @e1… 포함). 무엇이 있는지 모를 때 가장 먼저 쓴다. "
       + "큰 화면은 바이트 예산에서 끊기고 이어 볼 커서를 함께 준다 — 전체를 다시 받지 말고 커서로 잇거나 "
@@ -369,14 +313,14 @@ const TOOLS = [
 
       let approved = false;
       if (pol.mode === "confirm") {
-        const ask = await C("ask", { tab, title: "대량 기입 승인",
-          message: `${(() => { try { return new URL(url).host; } catch { return url; } })()} 에 ${values.length}칸을 연달아 넣습니다`
-            + ` (처음: ${head.join(" / ")}${values.length > 3 ? " …" : ""}). 커서 자리와 값을 보고 골라 주세요.`,
-          choices: ["승인", "취소"], wait: 240, ready: true });
-        approved = !!(ask && ask.data && ask.data.done);
+        const ask = await C("approve", { tab, title: "대량 기입 승인",
+          summary: `${(() => { try { return new URL(url).host; } catch { return url; } })()} 에 ${values.length}칸을 연달아 넣습니다`,
+          items: head, total: values.length, irreversible: true, wait: 240,
+          approve_label: "승인", deny_label: "취소" });
+        approved = !!(ask && ask.data && ask.data.approved);
         if (!approved) {
           return { ok: false, error: "사람이 승인하지 않았습니다 — 아무것도 넣지 않았습니다."
-            + (ask && ask.data ? ` (응답: ${ask.data.answer})` : "") };
+            + (ask && ask.data && !ask.data.answered ? " (응답 시간 초과)" : "") };
         }
       }
 
@@ -721,19 +665,38 @@ const TOOLS = [
       parallel: { type: "boolean", description: "true면 쓰던 탭을 두고 하나 더 만든다. 두 화면이 동시에 살아 있어야 할 때만 — 예: 같은 사이트의 프론트와 어드민을 함께 보며 비교." },
       profile: { type: "string", description: "로그인 칸(프로필) 이름. 같은 사이트에 다른 계정으로 로그인해야 할 때 필수 — 칸을 안 가르면 쿠키가 하나라 한쪽이 로그아웃된다. 쓸 수 있는 이름은 browser_tabs의 profiles에 있다. 없는 계정용 칸은 사람이 앱에서 만들어 로그인해야 한다." } },
     run: (a, C) => C("newtab", { url: a.url, title: a.title, parallel: a.parallel, profile: a.profile }) },
-  { name: "browser_ask_user", desc: "사람을 부른다. 결제·본인확인·캡차·약관 동의처럼 AI가 대신하면 안 되거나 대신할 수 없는 자리, 그리고 되돌리기 어려운 일에 승인을 받아야 하는 자리에서 쓴다. 사용자 화면을 빼앗지 않고 우측 상단 알림으로 부르며, 알림의 [그 탭으로](앱이면 [그 앱으로]) 버튼이 그 자리까지 데려간다. 무엇을 고를지는 choices로 네가 정한다. 사람이 끝냈다고 답할 때까지 붙잡고 기다린다(그 탭으로 간 것만으로는 돌려주지 않는다). 부르고 나서 턴을 끝내지 마라 — 이 도구의 답을 받고 화면을 확인해 이어서 진행한다. 시간 안에 답이 없으면 같은 인자로 다시 불러 이어 기다린다(알림은 다시 뜨지 않고 그 부름을 이어받는다).",
-    schema: { message: { type: "string", description: "무엇을 해달라는지 한 줄. 예: 결제 수단을 선택하고 결제해 주세요." },
-      title: { type: "string", description: "알림 제목(생략 가능)." },
+  { name: "browser_ask_user", desc: "사람에게 선택을 묻거나 결제·본인확인·캡차처럼 사람이 직접 해야 할 일을 맡긴다. 되돌리기 어려운 작업의 승인은 approve를 쓴다. 알림의 [그 탭으로](앱이면 [그 앱으로]) 버튼으로 이동해도 호출은 끝나지 않는다. 사람이 답할 때까지 기다리고, 30~240초 안에 답이 없으면 id를 반환한다. 이어 기다릴 때 ask_id에 그 id를 넣으면 같은 알림의 다음 회차로 이어지고 호출 사이의 답도 받는다. 부르고 나서 턴을 끝내지 말고 이 도구의 결과를 받아 화면을 확인한다.",
+    schema: { message: { type: "string", maxLength: 300, description: "무엇을 해달라는지 한 줄. 예: 결제 수단을 선택하고 결제해 주세요." },
+      title: { type: "string", maxLength: 60, description: "알림 제목(생략 가능)." },
       tab: { type: "string", description: "그 자리가 있는 탭. 생략하면 이 세션이 쓰는 탭." },
       device: { type: "string", description: "브라우저가 아니라 기기 앱(iOS 시뮬레이터·Android)에서 해야 하는 자리면 그 기기(app_targets의 udid·시리얼·이름). 주면 알림이 [그 앱으로]로 바뀌고, 눌렀을 때 그 기기가 열린 Iris 에뮬레이터 탭으로 데려간다. tab과 함께 주지 않는다." },
-      choices: { type: "array", items: { type: "string" }, maxItems: 4,
-        description: "사람이 고를 답을 직접 정한다(최대 4개). 예: [\"네\",\"아니오\"] · [\"승인\",\"취소\",\"나중에\"]. 첫 번째가 진행을 뜻하는 답이고 그것을 고르면 done:true로 온다. 생략하면 예전대로 [확인] 하나이며 다 했음/못 했음만 받는다. 답은 고른 글자 그대로 answer에 온다." },
-      wait: { type: "number", description: "사람의 응답을 기다릴 초(기본 180, 0이면 안 기다림, 한 호출 최대 240 — 넘으면 다시 불러 이어 기다린다)." },
+      choices: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4,
+        description: "사람이 고를 답(2~4개). 첫 번째가 진행 답이다. 생략하면 tab/device가 있을 때 [다 했어요],[못 하겠어요]가 생긴다." },
+      wait: { type: "number", minimum: 30, maximum: 240, description: "사람의 응답을 기다릴 초(기본 180, 30~240). 0은 허용하지 않는다." },
+      ask_id: { type: "string", description: "시간 초과 뒤 같은 요청을 이어받을 id" },
       ready: { type: "boolean", description: "네가 채울 수 있는 칸을 다 채웠다는 확인. 화면에 아직 채울 수 있는 필수 칸이 남아 있으면 이 도구는 부르지 않고 그 목록을 돌려준다 — 값을 모르면 탭을 넘기지 말고 사용자에게 값만 물어 네가 채워라. 사람만 할 수 있는 부분(카드·비밀번호·인증번호·본인확인)만 남았을 때 true." } },
+    req: ["message"],
     // 기기 이름은 udid·시리얼로 바꿔 보낸다. 서버는 그 값의 모양으로 iOS 와 Android 를 가른다.
     run: async (a, C) => C("ask", { message: a.message, title: a.title, tab: a.tab,
       device: a.device ? (await appSurface.simTarget(a.device)) || a.device : a.device,
-      choices: Array.isArray(a.choices) ? a.choices : undefined, wait: a.wait, ready: a.ready }) },
+      choices: Array.isArray(a.choices) ? a.choices : undefined, wait: a.wait, ready: a.ready, ask_id: a.ask_id }) },
+  { name: "approve",
+    desc: "되돌리기 어려운 작업을 사람에게 보여 주고 승인 또는 거절을 기다린다. 시간이 끝나거나 창이 다시 열리지 않으면 거절로 처리되고 만료된 알림은 누를 수 없다.",
+    schema: {
+      title: { type: "string", maxLength: 60, description: "승인 요청 제목(최대 60자)" },
+      summary: { type: "string", maxLength: 300, description: "무엇을 어디에 할지 한 줄" },
+      items: { type: "array", items: { type: "string" }, maxItems: 10, description: "미리보기 줄(최대 10개)" },
+      total: { type: "number", minimum: 0, description: "전체 항목 수" },
+      irreversible: { type: "boolean", description: "되돌릴 수 없음 표시" },
+      tab: { type: "string", description: "관련 탭" },
+      device: { type: "string", description: "관련 기기" },
+      wait: { type: "number", minimum: 30, maximum: 240, description: "응답 대기 초(기본 240)" },
+      approve_label: { type: "string", description: "승인 단추 글자" },
+      deny_label: { type: "string", description: "거절 단추 글자" },
+    }, req: ["title", "summary"],
+    run: async (a, C) => C("approve", { title: a.title, summary: a.summary, items: a.items, total: a.total, irreversible: a.irreversible, tab: a.tab,
+      device: a.device ? (await appSurface.simTarget(a.device)) || a.device : a.device,
+      wait: a.wait, approve_label: a.approve_label, deny_label: a.deny_label }) },
   { name: "browser_picks", desc: "사용자가 화면에서 직접 고른 요소들(최근 10개). 고르는 순간 그 탭은 이 세션이 만질 수 있게 열리지만(권한) 대상 탭이 바뀌지는 않는다 — 그 탭을 직접 다뤄야 할 때만 tab에 그 핸들을 넣어라. 터미널에 붙은 글은 사람이 읽는 형식이고, 이 도구는 선택자·대체 선택자·속성·소스 파일 같은 원본 필드를 준다.",
     schema: {}, run: (a, C) => C("picks") },
   // ── 모바일 앱(iOS·Android) ──
@@ -999,7 +962,7 @@ function recordUse(t, a, r, extra) {
   if (!t.name.startsWith("browser_")) return;
   try {
     const d = (r && r.data) || {};
-    const row = { ts: Date.now(), session: EXPLICIT_SESSION || discoveredSession || null, tool: t.name,
+    const row = { ts: Date.now(), session: discoveredSession || null, tool: t.name,
       tab: a.tab == null ? null : String(a.tab), ok: !!(r && (r.multi ? r.okCount > 0 : r.ok && !(d.ok === false))),
       ...(a.ref ? { ref: String(a.ref) } : {}), ...(a.selector ? { selector: String(a.selector).slice(0, 200) } : {}),
       ...(a.then != null ? { then: Object.keys(a.then).sort() } : {}),
@@ -1194,7 +1157,7 @@ rl.on("line", async (line) => {
           + "화면은 사람이 하듯 밟아라 — 스냅샷을 보고 누르고 입력한다. 같은 사이트 안을 주소로 건너뛰거나 eval로 조작하는 것은 서버가 거부한다. "
           + "밟지 않은 경로는 확인된 것이 아니라서, 그렇게 '됐다'고 적은 것이 사람이 해보면 안 되는 경우가 많았다. "
           + "모바일 앱은 Iris 에뮬레이터 탭의 기기에서만 확인한다 — simctl·emulator·open -a Simulator로 기기를 따로 켜지 마라. "
-          + "사용자는 Iris 탭만 본다. app_* 도구가 탭이 없으면 이 스페이스에 열고, 다른 기기가 필요하면 app_target이 그 탭을 바꾼다." });
+          + "사용자는 Iris 탭만 본다. app_* 도구가 이 세션에 할당된 기기가 없으면 다른 세션이 쓰지 않는 기기로 이 세션의 탭을 열고, 다른 기기가 필요하면 app_target이 그 탭을 바꾼다." });
     }
     if (method === "notifications/initialized" || method === "notifications/cancelled") return; // 알림은 응답 없음
     if (method === "ping") return ok(id, {});

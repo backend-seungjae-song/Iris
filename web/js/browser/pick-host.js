@@ -331,8 +331,11 @@ export function pickTabAt(target) {
   const sp = boundSpace();
   const local = getTabs(sp).find((x) => x.id === id);
   if (local && isFileKindId(local.kind)) return { el, rec: null, id, docTab: local };
+  // 잠든 브라우저 탭(webview 내림). 지목은 탭 정체성으로 하고 에이전트 명령 때 서버가 깨움
+  if (local && local.kind === "browser") return { el, rec: null, id };
   return null; // 그 외(파일 탭 등)는 평소대로 null
 }
+function pickEmulatorAt(target) { return callHook("emulator.pickTarget", target) || null; }
 // 북마크도 지목 대상이다. 탭·그룹이 "어디서 일할지"라면 북마크는 "어디로 갈지"다. 주소를 받아
 // 적어 주는 대신 눌러서 넘긴다.
 export function pickBmkAt(target) {
@@ -416,13 +419,20 @@ function wirePickPointer() {
   // capture 등록 순서가 중요하므로 기존 최상위와 같은 시점에 건다.
   for (const type of ["mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu"]) {
     document.addEventListener(type, (e) => {
-      if (!pickMode || (!pickTabAt(e.target) && !pickGroupAt(e.target) && !pickBmkAt(e.target) && !pickAgentAt(e.target) && !pickFileAt(e.target) && !pickCellAt(e.target) && !pickDocxAt(e.target) && !pickSheetAt(e.target))) return;
+      if (!pickMode || (!pickEmulatorAt(e.target) && !pickTabAt(e.target) && !pickGroupAt(e.target) && !pickBmkAt(e.target) && !pickAgentAt(e.target) && !pickFileAt(e.target) && !pickCellAt(e.target) && !pickDocxAt(e.target) && !pickSheetAt(e.target))) return;
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
     }, true);
   }
 
   document.addEventListener("pointerdown", (e) => {
     if (!pickMode) return;
+    const emulator = pickEmulatorAt(e.target);
+    if (emulator) {
+      e.preventDefault(); e.stopPropagation();
+      clearPickHover(emulator.el);
+      callHook("emulator.designate", emulator);
+      return;
+    }
     const g = pickGroupAt(e.target);
     if (g) {
       e.preventDefault(); e.stopPropagation();
@@ -471,7 +481,8 @@ function wirePickPointer() {
     e.preventDefault(); e.stopPropagation();
     const label = (hit.el.querySelector(".cname")?.textContent || "브라우저").trim();
     if (hit.docTab) { deliverDocTabPick(hit.docTab); return; } // webview 없음. 자동화 대상 지정이 아니라 설명 전달
-    deliverTabPick({ wc: hit.rec.wc, tabId: hit.rec.tabId || hit.id || null, label, url: hit.rec.url || "", title: hit.rec.title || "" });
+    const rec = hit.rec || {};
+    deliverTabPick({ wc: rec.wc, tabId: rec.tabId || hit.id || null, label, url: rec.url || "", title: rec.title || "" });
   }, true);
 }
 // 문서 탭 지목. CDP로 잡을 webview가 없어 browser-target-set(자동화 대상 고정)은 쓸 수 없다. 대신
@@ -488,13 +499,17 @@ function deliverDocTabPick(t) {
 }
 // 탭 지목 전달. 분리창엔 터미널이 없으므로 콘솔로 relay하고, 콘솔이 자기 세션(getCurTarget())에 묶는다.
 function deliverTabPick(tab) {
-  if (BROWSER_MODE) { wsSend({ type: "tab-pick-relay", tab }); bNote.textContent = "탭 지목됨 → 콘솔 세션에 고정."; return; }
+  if (BROWSER_MODE) {
+    wsSend({ type: "pickrec.relay", kind: "tab", payload: tab });
+    bNote.textContent = "탭 지목됨 → 콘솔 세션에 고정.";
+    return;
+  }
   deliverTabPickLocal(tab);
 }
 // 북마크 지목. 탭·그룹과 달리 서버가 매길 이름이 없어(주소가 곧 이름) 문구를 여기서 만든다.
 // 분리창엔 터미널이 없으므로 콘솔로 넘긴다.
 function deliverSitePick(bm) {
-  if (BROWSER_MODE) { wsSend({ type: "site-pick-relay", site: bm }); bNote.textContent = `사이트 지목됨 → 콘솔 세션에 전달.`; return; }
+  if (BROWSER_MODE) { wsSend({ type: "pickrec.relay", kind: "site", payload: bm }); bNote.textContent = `사이트 지목됨 → 콘솔 세션에 전달.`; return; }
   deliverSitePickLocal(bm);
 }
 export function deliverSitePickLocal(bm) {
@@ -510,23 +525,27 @@ export function deliverSitePickLocal(bm) {
   bNote.textContent = `사이트 "${bm.title || bm.url}" 지목됨.`;
 }
 function deliverGroupPick(g) {
-  if (BROWSER_MODE) { wsSend({ type: "group-pick-relay", group: g }); bNote.textContent = "그룹 지목됨 → 콘솔 세션에 전달."; return; }
+  if (BROWSER_MODE) {
+    wsSend({ type: "pickrec.relay", kind: "group", payload: g });
+    bNote.textContent = "그룹 지목됨 → 콘솔 세션에 전달.";
+    return;
+  }
   deliverGroupPickLocal(g);
 }
-// 지목만 보내고, 붙여넣을 문구는 서버가 핸들을 매겨 돌려준 뒤에 만든다(group-granted 수신부).
+// 지목만 보내고, 붙여넣을 문구는 서버가 대기 구분자를 돌려준 뒤에 만든다(target-pending 수신부).
 // 창이 이름을 지어내면 터미널에는 실제로 부를 수 없는 이름이 남는다.
 export function deliverGroupPickLocal(g) {
   if (!getCurTarget()) { bNote.textContent = "먼저 왼쪽에서 에이전트(세션)를 선택하세요."; return; }
   if (!g.space) { bNote.textContent = "이 그룹의 스페이스를 알 수 없습니다."; return; }
   wsSend({ type: "browser-group-grant", pane: getCurTarget(), space: g.space, group: g.group });
-  bNote.textContent = `그룹 "${g.label}" 지목됨. 이 세션이 씁니다.`;
+  bNote.textContent = `그룹 "${g.label}" 지목 등록 준비 중…`;
 }
-// 지목만 보내고, 붙여넣을 문구는 서버가 핸들을 매겨 돌려준 뒤에 만든다(tab-granted 수신부).
+// 지목만 보내고, 붙여넣을 문구는 서버가 대기 구분자를 돌려준 뒤에 만든다(target-pending 수신부).
 // 창이 아는 wc 숫자(@4)는 부를 수 있는 이름이 아니고 숫자라 혼동된다.
 export function deliverTabPickLocal(tab) {
   if (!getCurTarget()) { bNote.textContent = "먼저 왼쪽에서 에이전트(세션)를 선택하세요."; return; }
   wsSend({ type: "browser-target-set", pane: getCurTarget(), wc: tab.wc, tabId: tab.id || tab.tabId || null });
-  bNote.textContent = `탭 "${tab.label}" 고정됨: 이 세션의 iris-browser 대상.`;
+  bNote.textContent = `탭 "${tab.label}" 지목 등록 준비 중…`;
 }
 function deliverCellPick(pick) {
   deliverCellPickLocal(pick);

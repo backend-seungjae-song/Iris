@@ -36,26 +36,22 @@ check("--tab 이 죽은 탭이어도 남은 탭 안내", () => /if \(!hasTab\(wa
 // 요소 선택 모드가 창마다 갈려 상태가 어긋나던 문제는, 상태를 서버 한 곳으로 옮겨 막는다.
 // 요소를 고르는 것과 탭을 지목하는 것은 다른 행위다. 같은 경로로 처리하면 요소를 고를 때마다
 // 제어 대상이 그 탭으로 넘어가고 지목 알림이 한 벌 더 붙는다.
-// 지목은 한 대화 안에서만 누적된다. 그렇지 않으면 이전 지목까지 따라와 대상이 늘어나고,
-// 두 번째 알림이 첫 번째와 모순된다("이 탭에서 실행됩니다"가 둘 다 참일 수 없다).
-check("지목은 한 얘기 안에서만 쌓인다", () =>
-  /const chatTabs = new Map\(\)/.test(browserRuntime) && /const designedThisChat = new Set\(\)/.test(browserRuntime)
-  && /function designateTab/.test(browserRuntime)
-  && /userGrantTabs\.set\(key, new Set\(chatTabs\.get\(key\) \|\| \[\]\)\)/.test(browserRuntime)  // 첫 지목에서 지난 것 정리
-  && /msg\.type === "chat-submitted"/.test(browserMessages) && /endChat\(msg\.pane\)/.test(browserMessages)
-  && /wsSend\(\{ type: "chat-submitted", pane: curTarget \}\)/.test(xtermWiring)         // 제출이 경계다
-  && !/groupGrants\.delete/.test(sliceBetween(browserRuntime, "function designateTab", "function endChat", "지목은 한 얘기 안에서만 쌓인다")));  // 그룹 권한은 안 건드린다
-check("그룹 지목도 한 얘기 안에서만 쌓인다", () =>
-  /function designateGroup/.test(browserRuntime)
-  && /groupGrants\.set\(key, new Set\(chatGroups\.get\(key\) \|\| \[\]\)\)/.test(browserRuntime)
-  && /designateGroup\(msg\.pane, msg\.space, msg\.group\)/.test(browserMessages)
-  && /chatGroups\.delete\(key\); designedGroupsThisChat\.delete\(key\)/.test(browserRuntime));  // 제출로 함께 닫힌다
-check("요소 선택은 탭을 넘겨받지 않는다", () =>
+// 제출 훅이 검증한 이번 메시지의 구분자가 직접 지정 집합을 교체한다. 요소 선택 권한은 따로 누적된다.
+check("프롬프트의 탭 구분자가 지정 탭 집합을 교체한다", () =>
+  /function replaceDesignatedTabs\(pane, tabIds\)/.test(browserRuntime)
+  && /designatedTabsByPane\.set\(key, new Set\(tabs\)\)/.test(browserRuntime)
+  && /replaceTabs\(records\)[\s\S]{0,180}replaceDesignatedTabs\(session/.test(browserCommands)
+  && !/wsSend\(\{ type: "chat-submitted"/.test(xtermWiring));
+check("프롬프트의 그룹 구분자가 지정 그룹 집합을 교체한다", () =>
+  /function replaceDesignatedGroups\(pane, groups\)/.test(browserRuntime)
+  && /groupGrants\.set\(key, new Set\(values\)\)/.test(browserRuntime)
+  && /replaceGroups\(records\)[\s\S]{0,180}replaceDesignatedGroups\(session/.test(browserCommands));
+check("요소 선택 권한은 지정 탭 교체와 분리해 누적한다", () =>
   /const byPick = msg && msg\.via === "pick"/.test(browserMessages)
-  && /else \{ designateTab\(msg\.pane, pickedId\); addPin\(msg\.pane, pickedId\)/.test(browserMessages)  // 고정·지목은 직접 지목했을 때만
-  && /if \(byPick\) \{ noteChatTab\(msg\.pane, pickedId\); grantTab/.test(browserMessages)      // 선택은 권한만 더한다
-  && /if \(!byPick\) \{[\s\S]{0,400}?type: "tab-granted"/.test(browserMessages)  // 지목 알림도 그때만
-  && /via: "pick"/.test(pick));                             // 선택 경로가 스스로 그렇게 밝힌다
+  && /kind: byPick \? "element" : "tab"/.test(browserMessages)
+  && /function grantTab\(pane, tabId\)[\s\S]{0,220}elementGrantTabsByPane/.test(browserRuntime)
+  && /addElements\(records\)[\s\S]{0,220}grantTab\(session/.test(browserCommands)
+  && /via: "pick"/.test(pick));
 check("요소 선택 상태의 진실 소스는 서버 하나", () =>
   /let pickModeOn = false/.test(browserRuntime) && /function setPickModeState/.test(browserRuntime)
   && /broadcast\(\{ type: "pick-mode", on: pickModeOn \}\)/.test(browserRuntime));

@@ -22,3 +22,6 @@ body.recording::after { content:""; position:fixed; inset:0; border:2px solid #E
    하이라이트와 같은 --focus 을 쓴다(고정 파랑이 아니라 기존 토큰). */
 .picking-tabs .fileview .pick-hover { outline:2px solid var(--pick-ring); outline-offset:-1px; background:color-mix(in srgb, var(--pick-ring) 14%, transparent); }
 #wv-pick.on { background:var(--ai); color:var(--pal-ink); }
+.picking-tabs .emu-column, .picking-tabs .emu-stage-host, .picking-tabs .emu-tab-host { cursor:crosshair; }
+.picking-tabs .emu-screen-surface { cursor:default; }
+.picking-tabs .emu-column.pick-hover, .picking-tabs .emu-stage-host.pick-hover, .picking-tabs .emu-tab-host.pick-hover { outline:2px solid var(--focus); outline-offset:-2px; }

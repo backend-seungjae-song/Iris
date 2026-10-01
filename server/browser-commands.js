@@ -1,16 +1,22 @@
 import crypto from "node:crypto";
 
+import { reportAgentSessionPath } from "./agent-session-path.js";
+import { MAX_APP_TARGETS, appTargetsFor, readAppTargets, setAppTargets } from "./app-targets.js";
+import { emulatorCapacity } from "./emulator-capacity.js";
 import { bulkPolicy } from "./bulk-fill.js";
+import { activatePromptTargets, MAX_PROMPT_TARGET_MARKERS } from "./prompt-targets.js";
 import {
   MAX_PINS,
   absorbIntoSessionGroup,
   addPin,
   answerDialogAsk,
+  broadcastAiTargets,
   cdpExecutorReady,
   dropPin,
   ensureSessionGroup,
   getLastTab,
   goneReply,
+  grantTab,
   grantTabIdsOf,
   groupExists,
   groupHandleFor,
@@ -25,6 +31,8 @@ import {
   profileNames,
   profileRefToId,
   requestCdp,
+  replaceDesignatedGroups,
+  replaceDesignatedTabs,
   resolveTarget,
   revokeTab,
   sessionGroupId,
@@ -104,6 +112,56 @@ export function noteAppPick(pane, pick) {
 export function runSessionCmd(cmd, args, session, runId) {
   const qa = handleQaSessionCmd(cmd, args, session, runId);
   if (qa) return qa;
+  if (cmd === "app-targets-get") {
+    if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음)." };
+    try {
+      return { ok: true, data: { session, devices: appTargetsFor(session) } };
+    } catch (error) {
+      return { ok: false, error: `기기 등록을 읽지 못했습니다: ${String(error?.message || error)}` };
+    }
+  }
+  if (cmd === "app-targets-set") {
+    if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음)." };
+    try {
+      const devices = setAppTargets(session, Array.isArray(args?.devices) ? args.devices : []);
+      return { ok: true, data: { session, devices } };
+    } catch (error) {
+      return { ok: false, error: `기기 등록을 저장하지 못했습니다: ${String(error?.message || error)}` };
+    }
+  }
+  if (cmd === "prompt-targets") {
+    if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음)." };
+    if (args?.agentSession) reportAgentSessionPath({ paneId: session, ...args.agentSession });
+    if (args?.registerOnly === true) return { ok: true, data: { activated: [], rejected: [] } };
+    const markers = Array.isArray(args?.markers) ? args.markers : [];
+    if (markers.length > MAX_PROMPT_TARGET_MARKERS) {
+      return { ok: false, error: `지목 구분자는 한 메시지에 최대 ${MAX_PROMPT_TARGET_MARKERS}개입니다.` };
+    }
+    try {
+      const result = activatePromptTargets({ pane: session, markers, actions: {
+        maxDevices: MAX_APP_TARGETS,
+        replaceGroups(records) {
+          replaceDesignatedGroups(session, records.map((record) => record.target));
+        },
+        replaceTabs(records) {
+          replaceDesignatedTabs(session, records.map((record) => record.target.tabId).filter((tabId) => hasTab(tabId) || tabExistsInState(tabId)));
+        },
+        addElements(records) {
+          for (const record of records) if (hasTab(record.target.tabId)) grantTab(session, record.target.tabId);
+          broadcastAiTargets();
+        },
+        replaceDevices(records) {
+          const devices = records.map((record) => record.target.udid);
+          setAppTargets(session, devices, { exclusive: true });
+          // 이전 세션이 켠 탭에 떠 있는 기기면 그 탭도 이 세션 것이 된다. 창이 없으면 옮길 탭도 없다.
+          askEmulator("reown", { devices, owner: session }, 3000).catch(() => {});
+        },
+      } });
+      return { ok: true, data: result };
+    } catch (error) {
+      return { ok: false, error: `지목 등록 실패: ${String(error?.message || error)}` };
+    }
+  }
   if (cmd === "picks") {
     const list = (pickLog.get(String(session)) || []).slice().reverse();
     return { ok: true, data: { count: list.length, picks: list.map((x) => ({
@@ -380,23 +438,49 @@ export async function runBrowserCmdResilient(cmd, args, session, runId) {
 // AI가 대신할 수 없는 단계(결제·본인확인·캡차·약관 동의)에서 사용자를 호출한다. 화면을 가져오지 않는다.
 // 호출하고 그 탭으로 가는 경로를 제공한 뒤, 사용자가 이동했는지만 반환한다. 완료 여부는 페이지를 보고 판단한다.
 const pendingAsks = new Map();   // id → { resolve, timer }
-let askSeq = 0;
-const askOwner = new Map();      // id → { session, tabId } 호출의 소유자
-const askGoing = new Map();      // session → id. 사용자가 이동까지 응답했으나 끝나지 않은 호출
+const askOwner = new Map();      // id → 대기 알림과 호출의 소유자
+const askByKey = new Map();
+const startingAsks = new Set(); // 화면 확인 중인 질문도 중복 호출을 막는다.
+const askGoing = new Map();      // session → id. 사용자가 이동한 호출
 const askAnswers = new Map();    // id → answer. 대기 중인 호출이 없는 사이에 사용자가 누른 응답
+const focusedUi = new Set();
+export function setUserInterfaceFocus(ws, focused) {
+  if (focused) focusedUi.add(ws);
+  else focusedUi.delete(ws);
+  if (!ws._noticeFocusCloseBound) {
+    ws._noticeFocusCloseBound = true;
+    ws.on("close", () => focusedUi.delete(ws));
+  }
+}
 // 한 번의 호출이 대기하는 최대 시간. MCP 클라이언트가 먼저 끊으면 AI는 오류만 받으므로
 // 그 전에 반환하고 다시 호출하도록 안내한다. 알림은 화면에 그대로 남는다.
-const ASK_CALL_MAX_MS = 240000;
 
 export function answerUserAsk(id, answer) {
   const aid = String(id), a = String(answer || "갔음");
   const own = askOwner.get(aid);
+  if (!own || own.expired || askAnswers.has(aid)) return;
   // 이동 응답은 그 세션이 사용자를 기다리는 중이라는 표시다. 호출이 잠시 끊긴 사이에 눌려도
   // 다음 호출이 이 호출을 이어받아야 알림이 두 번 뜨지 않는다.
-  if (a === "갔음" && own) askGoing.set(own.session, aid);
+  if (a === "갔음") { own.went = true; askGoing.set(own.session, aid); }
   const p = pendingAsks.get(aid);
   if (p) p.resolve(a);
-  else { askAnswers.set(aid, a); while (askAnswers.size > 20) askAnswers.delete(askAnswers.keys().next().value); }
+  else if (a !== "갔음") {
+    // 호출 사이에 받은 답은 다음 호출에 전달하되 화면에서는 즉시 닫는다.
+    askAnswers.set(aid, a);
+    if (askGoing.get(own.session) === aid) askGoing.delete(own.session);
+    broadcast({ type: "ai-ask-closed", id: aid, kind: own.kind, title: own.title, text: own.text });
+  }
+}
+
+export function pendingUserNotices() {
+  return [...askOwner.values()].filter((item) => !item.expired && !askAnswers.has(item.id)).map((item) => ({
+    type: "ai-ask", id: item.id, kind: item.kind, tabId: item.tabId, space: item.space,
+    session: item.session, where: item.device ? "app" : "tab", device: item.device || undefined,
+    title: item.title, text: item.text, choices: item.choices, round: item.round,
+    wait: item.deadline ? Math.max(0, Math.ceil((item.deadline - Date.now()) / 1000)) : 0,
+    went: item.went, items: item.items, total: item.total, irreversible: item.irreversible,
+    approveLabel: item.approveLabel, denyLabel: item.denyLabel,
+  }));
 }
 // 받침이 있으면 "을", 없으면 "를". 선택한 답을 그대로 문장에 넣으면 "승인를"이 되므로
 // 조사를 맞춘다.
@@ -463,92 +547,142 @@ function unfilledOn(wc) {
 }
 function askUser(args, session) {
   return new Promise((resolve) => {
+    const kind = args && args._kind === "approve" ? "approve" : "ask";
     const skey = String(session || "");
-    const w = args && args.wait != null && args.wait !== "" ? Number(args.wait) : 180;   // 0은 대기하지 않음
-    const waitMs = Math.min(ASK_CALL_MAX_MS, Math.max(0, Math.min(600, Number.isFinite(w) ? w : 180)) * 1000);
-    const deadline = Date.now() + waitMs;   // 이 호출의 대기 종료 시각. 단계가 넘어가도 연장되지 않는다.
-    // 호출한 쪽이 선택지를 정했으면 첫 번째가 긍정이다. "예/아니오"에서 예가 앞에 오는 것과 같다.
-    // 어느 것이 진행인지 서버가 추정하지 않고 호출한 쪽이 순서로 지정한다.
-    const choices = Array.isArray(args && args.choices)
-      ? args.choices.map((c) => String(c).trim()).filter(Boolean).slice(0, 4) : null;
-    // 대상이 앱인지 탭인지는 settle도 읽는다. 이어받기 경로(이동까지 응답한 호출을 다시 기다리는
-    // 위치)는 아래 본문을 건너뛰고 settle로 가므로, 선언이 그 뒤에 있으면 서버가 종료된다
-    // (확인 결과 server.log: ReferenceError: Cannot access 'askDevice' before initialization).
-    const askDevice = args && args.device != null ? String(args.device).trim() : "";
-    const settle = (id, answer, going, tabId) => {
-      pendingAsks.delete(id);
-      if (answer !== null) { askGoing.delete(skey); askOwner.delete(id); }
-      resolve({ ok: true, data: { answered: answer !== null,
-        done: answer === "다 했음" || !!(choices && choices.length && answer === choices[0]),
-        answer: answer || (going ? "간 뒤 응답 없음" : "응답 없음"),
-        tab: tabId ? handleFor(tabId) || tabId : null,
-        ...(askDevice ? { device: askDevice } : {}),
-        note: askNote(answer, going, askDevice ? "app" : "tab") } });
-    };
-    // 사용자가 응답할 때까지 대기한다. 이동 응답은 시작 신호일 뿐이라 여기서 반환하지 않는다.
-    // 반환하면 AI가 사용자가 작업을 마치기 전에 턴을 끝낸다.
-    const waitOn = (id, tabId, going) => {
-      const buffered = askAnswers.get(id);
-      if (buffered !== undefined) {
-        askAnswers.delete(id);
-        if (buffered === "갔음") { waitOn(id, tabId, true); return; }
-        settle(id, buffered, going, tabId); return;
-      }
-      const ms = Math.max(0, deadline - Date.now());
-      if (!ms) { settle(id, null, going, tabId); return; }
-      pendingAsks.set(id, { timer: setTimeout(() => settle(id, null, going, tabId), ms), resolve: (a) => {
-        const p = pendingAsks.get(id); if (p) clearTimeout(p.timer);
-        if (a === "갔음") { waitOn(id, tabId, true); return; }
-        settle(id, a, going, tabId);
-      } });
-    };
-    // 사용자가 이미 이동까지 응답한 호출이 남아 있으면 다시 호출하지 않는다. 알림을 다시 띄우면
-    // 사용자가 같은 작업을 두 번 요청받는다. 그 호출을 이어서 기다린다.
-    const cont = askGoing.get(skey);
-    if (cont && (askOwner.has(cont) || askAnswers.has(cont))) {
-      const own = askOwner.get(cont) || {};
-      waitOn(cont, own.tabId || null, true);
+    const rawWait = args?.wait == null ? (kind === "approve" ? 240 : 180) : Number(args.wait);
+    if (!Number.isFinite(rawWait) || rawWait < 30 || rawWait > 240) {
+      resolve({ ok: false, error: "wait는 30~240초여야 합니다. 기다리지 않는 알림은 notify를 쓰세요." });
       return;
     }
-    const text = String((args && args.message) || "").trim().slice(0, 300);
-    if (!text) { resolve({ ok: false, error: "무엇을 해달라는 것인지 한 줄로 적어 주세요(message)." }); return; }
-    // 대상은 탭만이 아니다. iOS 시뮬레이터 앱도 사용자가 직접 조작해야 하는 대상이다.
-    // device가 오면 탭 폴백을 쓰지 않는다. 폴백을 쓰면 앱을 안내하면서 다른 탭으로 이동시킨다.
-    const ref = args && args.tab != null ? tabIdOfRef(args.tab) : null;
-    const tabId = askDevice && !ref ? null
+    const providedId = kind === "ask" ? String(args?.ask_id || "").trim() : "";
+    const resumed = providedId ? askOwner.get(providedId) : null;
+    if (providedId && !resumed) {
+      resolve({ ok: false, error: "이어받을 부름을 찾을 수 없습니다. 새 요청은 ask_id 없이 보내세요." }); return;
+    }
+    if (resumed && (resumed.session !== skey || resumed.kind !== kind)) {
+      resolve({ ok: false, error: "이 부름을 이어받을 수 없습니다." }); return;
+    }
+    const choices = kind === "approve"
+      ? resumed?.choices || [String(args.approve_label || "승인"), String(args.deny_label || "취소")]
+      : resumed?.choices || (Array.isArray(args?.choices) ? args.choices.map((value) => String(value).trim()) : null);
+    if (kind === "ask" && choices && (choices.length < 2 || choices.length > 4 || choices.some((value) => !value))) {
+      resolve({ ok: false, error: "choices는 비어 있지 않은 답 2~4개여야 합니다." }); return;
+    }
+    if (kind === "approve" && args?.total != null && (!Number.isFinite(Number(args.total)) || Number(args.total) < 0)) {
+      resolve({ ok: false, error: "total은 0 이상의 수여야 합니다." }); return;
+    }
+    const text = resumed?.text || String(kind === "approve" ? args?.summary || "" : args?.message || "").trim().slice(0, 300);
+    if (!text) {
+      resolve({ ok: false, error: kind === "approve" ? "summary를 적어 주세요." : "message를 적어 주세요." }); return;
+    }
+    const requestedTitle = String(args?.title || "").trim();
+    if (kind === "approve" && !resumed && !requestedTitle) {
+      resolve({ ok: false, error: "title을 적어 주세요." }); return;
+    }
+    const requestedDevice = args?.device != null ? String(args.device).trim() : "";
+    const requestedTab = args?.tab != null ? String(args.tab).trim() : "";
+    if (!resumed && requestedDevice && requestedTab) {
+      resolve({ ok: false, error: "tab과 device는 하나만 적어 주세요." }); return;
+    }
+    const device = resumed?.device || requestedDevice;
+    const ref = !resumed && requestedTab ? tabIdOfRef(requestedTab) : null;
+    const tabId = resumed ? resumed.tabId : device && !ref ? null
       : (ref || (session ? (resolveTarget(session).tabId || primaryPin(session)) : null));
-    if (tabId && !tabAllowed(session, tabId).ok) { resolve({ ok: false, error: "이 세션이 쓸 수 있는 탭이 아닙니다." }); return; }
-    const meta = tabId ? tabMeta(tabId) || {} : {};
-    const id = "ask" + (++askSeq);
-    const ready = !!(args && args.ready);
-    const proceed = (unfilled) => {
-      askOwner.set(id, { session: skey, tabId });
-      // 사람에게 넘기는 순간 그 탭의 CDP 를 뗀다. 유휴 창(30초)을 기다리면 사람이 로그인하는
-      // 동안 CDP 가 붙어 있다. 실패해도 호출은 계속한다.
-      if (wc) execOnWc("handoff", {}, wc).catch(() => {});
-      broadcast({ type: "ai-ask", id, tabId, space: meta.space || null, session: session || null,
-        where: askDevice ? "app" : "tab", device: askDevice || undefined,
-        choices: choices && choices.length ? choices : undefined,
-        title: String((args && args.title) || "").slice(0, 60) || undefined,
-        text: text + (unfilled && unfilled.length ? `\n(AI가 못 채운 칸: ${unfilled.join(" · ")})` : "") });
-    if (!waitMs) {
-      resolve({ ok: true, data: { answered: false, done: false, answer: "안 기다림", tab: tabId ? handleFor(tabId) || tabId : null,
-        note: "불렀습니다. 응답은 기다리지 않았습니다 — 사람이 갔는지는 화면으로 확인하세요." } }); return; }
-      waitOn(id, tabId, false);
+    if (!resumed && tabId && !tabAllowed(session, tabId).ok) {
+      resolve({ ok: false, error: "이 세션이 쓸 수 있는 탭이 아닙니다." }); return;
+    }
+    if (kind === "ask" && !tabId && !device && !choices) {
+      resolve({ ok: false, error: "대상 탭이나 기기가 없으면 choices를 2~4개 적어 주세요." }); return;
+    }
+    const key = resumed?.key || skey + ":" + kind + ":" + (providedId || [text, tabId || "", device].join("\u0000"));
+    if (startingAsks.has(key)) {
+      resolve({ ok: false, error: "같은 부름을 이미 준비하는 호출이 있습니다." }); return;
+    }
+    let record = resumed || askOwner.get(askByKey.get(key));
+    if (record && (record.session !== skey || record.kind !== kind)) record = null;
+    const start = Date.now();
+    const waitMs = rawWait * 1000;
+    const done = (answer) => {
+      clearTimeout(pendingAsks.get(record.id)?.timer);
+      pendingAsks.delete(record.id);
+      const answered = answer != null;
+      const approved = kind === "approve" && answer === record.choices[0];
+      const finished = answered || kind === "approve";
+      if (finished) {
+        askOwner.delete(record.id); askByKey.delete(record.key); askAnswers.delete(record.id);
+        if (askGoing.get(skey) === record.id) askGoing.delete(skey);
+        if (kind === "approve" && !answered) record.expired = true;
+        broadcast({ type: "ai-ask-closed", id: record.id, expired: record.expired,
+          kind: record.kind, title: record.title, text: record.text });
+      } else {
+        record.deadline = null;
+        if (askGoing.get(skey) === record.id) askGoing.delete(skey);
+        broadcast({ type: "ai-ask", ...pendingUserNotices().find((item) => item.id === record.id) });
+      }
+      const data = { id: record.id, answered, round: record.round, went: !!record.went,
+        waitedSeconds: Number(((Date.now() - start) / 1000).toFixed(3)), waitLimitSeconds: rawWait };
+      if (kind === "approve") {
+        data.approved = approved;
+      } else {
+        data.done = record.choices ? answer === record.choices[0] : answer === "다 했음";
+        data.answer = answer || "응답 없음";
+        data.tab = tabId ? handleFor(tabId) || tabId : null;
+        if (device) data.device = device;
+        data.note = askNote(answer, record.went, device ? "app" : "tab");
+        if (!answered) data.resume = "같은 ask_id로 다시 부르세요";
+      }
+      resolve({ ok: true, data });
     };
-    // 채울 수 있는 칸이 남았으면 호출하지 않고 반환한다. 값을 모르면 사용자에게 값을 물어보고
-    // AI가 채운다. 탭을 넘기는 것은 사용자만 할 수 있는 작업에만 쓴다.
+    const waitOn = () => {
+      const buffered = askAnswers.get(record.id);
+      if (buffered !== undefined) { askAnswers.delete(record.id); done(buffered); return; }
+      const ms = Math.max(0, record.deadline - Date.now());
+      if (!ms) { done(null); return; }
+      pendingAsks.set(record.id, { timer: setTimeout(() => done(null), ms), resolve: (answer) => {
+        clearTimeout(pendingAsks.get(record.id)?.timer);
+        pendingAsks.delete(record.id);
+        if (answer === "갔음") { waitOn(); return; }
+        done(answer);
+      } });
+    };
+    if (record) {
+      if (pendingAsks.has(record.id)) {
+        resolve({ ok: false, error: "같은 부름을 이미 기다리는 호출이 있습니다.", data: { id: record.id } }); return;
+      }
+      record.round += 1;
+      record.deadline = Date.now() + waitMs;
+      if (askAnswers.has(record.id)) { waitOn(); return; }
+      broadcast({ type: "ai-ask", ...pendingUserNotices().find((item) => item.id === record.id) });
+      waitOn();
+      return;
+    }
+    const meta = tabId ? tabMeta(tabId) || {} : {};
+    const proceed = (unfilled) => {
+      const id = "ask-" + crypto.randomUUID();
+      record = { id, key, kind, session: skey, tabId, space: meta.space || null, device,
+        title: String(requestedTitle || "AI가 사람을 부릅니다").slice(0, 60),
+        text: text + (unfilled?.length ? "\n(AI가 못 채운 칸: " + unfilled.join(" · ") + ")" : ""),
+        choices, round: 1, went: false, deadline: Date.now() + waitMs,
+        items: kind === "approve" && Array.isArray(args?.items) ? args.items.slice(0, 10).map(String) : undefined,
+        total: kind === "approve" ? Number(args?.total || 0) : undefined,
+        irreversible: kind === "approve" && !!args?.irreversible,
+        approveLabel: kind === "approve" ? choices[0] : undefined,
+        denyLabel: kind === "approve" ? choices[1] : undefined };
+      askOwner.set(id, record); askByKey.set(key, id);
+      if (wc) execOnWc("handoff", {}, wc).catch(() => {});
+      broadcast({ type: "ai-ask", ...pendingUserNotices().find((item) => item.id === id) });
+      waitOn();
+    };
     const wc = tabId ? wcOfTabId(tabId) : null;
-    // 빈 칸 계산은 웹 폼을 대상으로 하는 검사다. 앱 대상에는 셀 항목이 없으므로 그대로 호출한다.
-    if (askDevice && !tabId) { proceed([]); return; }
-    unfilledOn(wc).then((u) => {
-      const left = (u && u.required) || [];
-      if (left.length && !ready) {
-        resolve({ ok: false, error: `아직 네가 채울 수 있는 칸이 남았습니다: ${left.join(" · ")}`
-          + `${u.optional && u.optional.length ? ` (선택 칸도 비어 있음: ${u.optional.join(" · ")})` : ""}. `
-          + `사람을 부르기 전에 채우세요. 값을 모르면 탭을 넘기지 말고 사용자에게 그 값을 물어본 뒤 직접 채우면 됩니다. `
-          + `이 화면에서 사람만 할 수 있는 부분(비밀번호·카드·인증번호·본인확인)만 남았다면 ready:true로 다시 부르세요.`,
-          data: { unfilled: left, optional: (u && u.optional) || [] } });
+    if (kind === "approve" || (device && !tabId)) { proceed([]); return; }
+    startingAsks.add(key);
+    unfilledOn(wc).then((unfilled) => {
+      startingAsks.delete(key);
+      const left = unfilled?.required || [];
+      if (left.length && !args?.ready) {
+        resolve({ ok: false, error: "아직 네가 채울 수 있는 칸이 남았습니다: " + left.join(" · ")
+          + ". 사람을 부르기 전에 채우세요. 사람만 할 부분이면 ready:true로 다시 부르세요.",
+          data: { unfilled: left, optional: unfilled?.optional || [] } });
         return;
       }
       proceed(left);
@@ -559,6 +693,94 @@ function askUser(args, session) {
 // 번에 하나만 받으면 그 묶음을 쓸 수가 없다. 대상 목록은 배열로도, 쉼표로도
 // 받는다. 상한을 두는 이유는 동시에 네 화면까지가 결과를 확인할 수 있는 범위이기 때문이다.
 const MAX_TARGETS = 4;
+const notifyRecent = new Map();
+const notifyKeys = new Map();
+const progressItems = new Map();
+function notifyUser(args, session) {
+  const level = String(args?.level || "");
+  const title = String(args?.title || "").trim().slice(0, 60);
+  if (!["ok", "info", "warn", "err"].includes(level) || !title) {
+    return { ok: false, error: "level(ok/info/warn/err)과 title이 필요합니다." };
+  }
+  const skey = String(session || "");
+  const device = args?.device == null ? "" : String(args.device).trim();
+  const requestedTab = args?.tab == null ? "" : String(args.tab).trim();
+  if (device && requestedTab) return { ok: false, error: "tab과 device는 하나만 적어 주세요." };
+  const tabId = requestedTab ? tabIdOfRef(requestedTab) : null;
+  if (requestedTab && !tabId) return { ok: false, error: "관련 탭을 찾을 수 없습니다." };
+  if (tabId && !tabAllowed(session, tabId).ok) return { ok: false, error: "이 세션이 쓸 수 있는 탭이 아닙니다." };
+  const now = Date.now();
+  const recent = (notifyRecent.get(skey) || []).filter((item) => now - item.at < 10000);
+  const key = args?.key ? skey + ":" + String(args.key).slice(0, 100) : "";
+  const existing = key && notifyKeys.get(key);
+  if (existing) {
+    broadcast({ type: "ai-notify", id: existing, level, title, body: String(args.body || "").slice(0, 300),
+      detail: String(args.detail || "").slice(0, 2000), session: skey, tab: tabId, device: device || undefined });
+    return { ok: true, data: { id: existing, shown: "merged" } };
+  }
+  if (recent.length >= 3) {
+    const last = recent[2];
+    last.extra = (last.extra || 0) + 1;
+    notifyRecent.set(skey, recent);
+    broadcast({ type: "ai-notify", id: last.id, level: "info", title: `외 ${last.extra}건`,
+      body: title, session: skey });
+    return { ok: true, data: { id: last.id, shown: "merged" } };
+  }
+  const id = "notify-" + crypto.randomUUID();
+  recent.push({ id, at: now, extra: 0 });
+  notifyRecent.set(skey, recent);
+  if (key) {
+    notifyKeys.set(key, id);
+    while (notifyKeys.size > 200) notifyKeys.delete(notifyKeys.keys().next().value);
+  }
+  broadcast({ type: "ai-notify", id, level, title, body: String(args.body || "").slice(0, 300),
+    detail: String(args.detail || "").slice(0, 2000), session: skey, tab: tabId, device: device || undefined });
+  return { ok: true, data: { id, shown: (level === "warn" || level === "err") && focusedUi.size === 0 ? "both" : "app" } };
+}
+function progressUser(args, session) {
+  const op = String(args?.op || "");
+  if (op === "start") {
+    const title = String(args?.title || "").trim().slice(0, 300);
+    if (!title) return { ok: false, error: "title이 필요합니다." };
+    if (args.p != null && (!Number.isFinite(args.p) || args.p < 0 || args.p > 1)) return { ok: false, error: "p는 0~1입니다." };
+    const ttl = args.ttl == null ? 120 : Number(args.ttl);
+    if (!Number.isFinite(ttl) || ttl < 1) return { ok: false, error: "ttl은 1초 이상입니다." };
+    const requestedTab = args?.tab == null ? "" : String(args.tab).trim();
+    const tabId = requestedTab ? tabIdOfRef(requestedTab) : null;
+    if (requestedTab && !tabId) return { ok: false, error: "관련 탭을 찾을 수 없습니다." };
+    if (tabId && !tabAllowed(session, tabId).ok) return { ok: false, error: "이 세션이 쓸 수 있는 탭이 아닙니다." };
+    const id = "progress-" + crypto.randomUUID();
+    const timer = setTimeout(() => {
+      if (!progressItems.has(id)) return;
+      progressItems.delete(id);
+      broadcast({ type: "ai-progress", op: "end", id, result: "warn", title: "응답 없음", detail: title });
+    }, ttl * 1000);
+    progressItems.set(id, { session: String(session || ""), timer, ttl, tabId });
+    broadcast({ type: "ai-progress", op, id, title, p: args.p, ttl, session, tab: tabId });
+    return { ok: true, data: { id } };
+  }
+  const id = String(args?.id || "");
+  const item = progressItems.get(id);
+  if (!item || item.session !== String(session || "")) return { ok: true, data: { ok: false } };
+  if (op === "update") {
+    if (args.p != null && (!Number.isFinite(args.p) || args.p < 0 || args.p > 1)) return { ok: false, error: "p는 0~1입니다." };
+    clearTimeout(item.timer);
+    item.timer = setTimeout(() => {
+      progressItems.delete(id);
+      broadcast({ type: "ai-progress", op: "end", id, result: "warn", title: "응답 없음" });
+    }, item.ttl * 1000);
+    broadcast({ type: "ai-progress", op, id, title: args.title == null ? undefined : String(args.title).slice(0, 300), p: args.p, ttl: item.ttl, session });
+    return { ok: true, data: { ok: true } };
+  }
+  if (op === "end" && ["ok", "err"].includes(args.result)) {
+    clearTimeout(item.timer); progressItems.delete(id);
+    broadcast({ type: "ai-progress", op, id, result: args.result,
+      title: args.title == null ? undefined : String(args.title).slice(0, 300),
+      detail: args.detail == null ? undefined : String(args.detail).slice(0, 2000), session });
+    return { ok: true, data: { ok: true } };
+  }
+  return { ok: false, error: "op(start/update/end)과 end의 result(ok/err)를 확인하세요." };
+}
 function refList(tab) {
   if (tab == null) return null;
   const arr = (Array.isArray(tab) ? tab : String(tab).split(","))
@@ -567,6 +789,9 @@ function refList(tab) {
 }
 export function runBrowserCmd(cmd, args, session, noAutoTab, runId) {
   return new Promise((resolve) => {
+    if (cmd === "notify") { resolve(notifyUser(args, session)); return; }
+    if (cmd === "progress") { resolve(progressUser(args, session)); return; }
+    if (cmd === "approve") { askUser({ ...args, _kind: "approve" }, session).then(resolve); return; }
     // 대상이 여럿이면 하나씩 처리하는 기존 경로를 반복해서 사용한다. 권한 검사·그룹 편입·오류
     // 문구가 모두 그 경로에 있어, 여기서 나눠 실행하면 대상마다 동일하게 적용된다.
     const targets = args && args.tab != null ? refList(args.tab) : null;
@@ -598,14 +823,31 @@ export function runBrowserCmd(cmd, args, session, noAutoTab, runId) {
       askEmulator("list", {}, 5000).then((r) => {
         if (!r || r.ok === false) { resolve(r || { ok: false, error: "응답 없음" }); return; }
         const mine = sessionSpace(session);
-        resolve({ ok: true, data: { space: mine, tabs: (r.tabs || []).map((t) => ({ ...t, mine: !!mine && spaceKey.sameStorageSpace(t.space, mine) })) } });
+        // 세션 소유 탭은 그 세션만의 것이다. 같은 스페이스의 다른 세션 탭을 mine 으로 보지 않는다.
+        resolve({ ok: true, data: { space: mine, tabs: (r.tabs || []).map((t) => ({ ...t,
+          mine: t.owner ? t.owner === String(session || "") : !!mine && spaceKey.sameStorageSpace(t.space, mine) })) } });
       });
       return;
     }
     if (cmd === "app-open") {
+      if (args?.additional && !session) { resolve({ ok: false, error: "추가 기기는 인증된 세션에서만 열 수 있습니다." }); return; }
+      let reservedDevices;
+      try {
+        reservedDevices = [...new Set(Object.entries(readAppTargets())
+          .filter(([pane]) => args?.additional || pane !== String(session || ""))
+          .flatMap(([, devices]) => devices))];
+      } catch (error) {
+        resolve({ ok: false, error: `등록 기기 목록을 읽지 못했습니다: ${error.message}` }); return;
+      }
       const wait = Math.min(Math.max(Number(args && args.wait) || 120000, 5000), 240000);
-      askEmulator("open", { space: sessionSpace(session), device: (args && args.device) || null, wait }, wait + 5000)
-        .then((r) => resolve(r && r.ok ? { ok: true, data: r } : (r || { ok: false, error: "응답 없음" })));
+      // 세션이 있으면 그 세션 소유 탭에 연다. 새로 켜는 기기는 이 컴퓨터의 한도 안에서만 켠다.
+      const capacity = session ? emulatorCapacity() : null;
+      askEmulator("open", { space: sessionSpace(session), device: (args && args.device) || null, wait,
+        reservedDevices, ...(args?.additional ? { additional: true } : {}),
+        owner: session || null, limit: capacity ? capacity.limit : null, diskOk: capacity ? capacity.diskOk : true }, wait + 5000)
+        // 자동으로 켠 기기는 등록하지 않는다. 할당은 사람의 지목과 app_target 뿐이고, 소유 탭이 닫히면 다음 호출이 새로 켠다.
+        .then((r) => resolve(r && r.ok ? { ok: true, data: r }
+          : r && r.code === "capacity" ? { ...r, data: { capacity } } : (r || { ok: false, error: "응답 없음" })));
       return;
     }
     const local = runSessionCmd(cmd, args, session, runId);

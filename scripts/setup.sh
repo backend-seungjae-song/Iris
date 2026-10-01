@@ -291,19 +291,42 @@ else
   fi
 fi
 
-# 에이전트가 Iris 안에서 자식 세션을 띄우는 방법을 담은 스킬 파일. 설치된 앱의 실행기 경로를
-# 담으므로 앱이 있어야 하고, 5단계의 install-app.sh 가 이미 깔았으므로 여기서는 확인이 주다.
+# 설치 대상: 자식 세션 안내 skill과 세션 기록·지목 등록 훅
+# 필요 조건: 설치된 앱의 실행기 경로
+# 자동 갱신: 5단계 install-app.sh의 skill과 기존 Iris 훅
+# 새 훅 조건: Claude Code·Codex 사용자 설정 변경 확인
+# 훅 부재 영향: 대화 기록 경로와 탭·그룹·요소·에뮬레이터 지목 미등록
 if [ -d /Applications/Iris.app ]; then
   if [ "$CHECK" = "1" ]; then
-    node scripts/install-agent-context.mjs --app /Applications/Iris.app --check >/dev/null \
-      && ok "에이전트 스킬 파일(iris-agent-context)이 최신입니다" \
-      || { warn "에이전트 스킬 파일이 없거나 낡았습니다 — ./setup 을 옵션 없이 돌리면 맞춰 줍니다"; note_fail; }
+    if CTX_CHECK="$(node scripts/install-agent-context.mjs --app /Applications/Iris.app --check 2>&1)"; then
+      ok "에이전트 스킬 파일(iris-agent-context)과 세션 기록·지목 등록 훅이 최신입니다"
+    else
+      warn "에이전트 스킬 파일이나 세션 기록·지목 등록 훅이 없거나 낡았습니다 — ./setup 을 옵션 없이 돌리면 맞춰 줍니다"
+      echo "$CTX_CHECK" | sed 's/^/     /'
+      # 심볼릭 링크·깨진 JSON 설정은 setup 도 건드리지 않는다. 사람이 고쳐야 하는 항목임을 따로 알린다
+      echo "$CTX_CHECK" | grep -q "hook skipped" \
+        && info "hook skipped 로 표시된 파일은 ./setup 이 고치지 않습니다 — 그 파일의 SessionStart·UserPromptSubmit 을 직접 고치거나 파일을 고친 뒤 다시 돌리세요."
+      note_fail
+    fi
   else
-    run node scripts/install-agent-context.mjs --app /Applications/Iris.app \
-      && ok "에이전트 스킬 파일 준비됨" || { bad "에이전트 스킬 파일을 놓지 못했습니다"; note_fail; }
+    HOOKS=""
+    if [ "$(node scripts/install-agent-context.mjs --app /Applications/Iris.app --hook-status 2>/dev/null)" = "missing" ]; then
+      info "세션 기록·지목 등록 훅: 실제 대화 파일 경로와 앱에서 지목한 대상을 해당 Iris 세션에 등록합니다."
+      info "~/.claude/settings.json·~/.codex/hooks.json 의 SessionStart·UserPromptSubmit 에 Iris 항목을 하나씩 넣습니다(기존 파일은 .iris-agent-context.bak 으로 먼저 복사)."
+      info "\$ node scripts/install-agent-context.mjs --app /Applications/Iris.app --hooks"
+      if ask "Claude Code·Codex 에 Iris 세션 기록·지목 등록 훅을 넣을까요?"; then
+        HOOKS="--hooks"
+      else
+        echo "     건너뜁니다. 대화 기록 경로와 지목한 대상이 세션에 등록되지 않습니다. 나중에 './setup' 을 다시 돌리면 됩니다."
+      fi
+    fi
+    run node scripts/install-agent-context.mjs --app /Applications/Iris.app $HOOKS \
+      && ok "에이전트 스킬 파일·세션 기록·지목 등록 훅 준비됨" || { bad "에이전트 스킬 파일이나 훅을 놓지 못했습니다"; note_fail; }
+    [ -n "$HOOKS" ] && command -v codex >/dev/null 2>&1 \
+      && info "Codex 는 새 훅을 신뢰해야 실행합니다 — Codex 에서 /hooks 를 열어 Iris 훅을 신뢰하세요."
   fi
 else
-  info "앱이 아직 없어 에이전트 스킬 파일은 앱을 넣은 뒤에 봅니다."
+  info "앱이 아직 없어 에이전트 스킬 파일·세션 기록·지목 등록 훅은 앱을 넣은 뒤에 봅니다."
 fi
 
 echo

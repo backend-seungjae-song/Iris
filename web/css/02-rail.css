@@ -15,5 +15,7 @@
 .rail-ico.active::before { content:""; position:absolute; left:-6px; top:8px; bottom:8px; width:2px; border-radius:2px; background:var(--ai); }
 .rail-ico.active .rl { color:var(--ai); font-weight:600; }
 .rail-ico.rail-toggle { margin-top:auto; margin-bottom:6px; }
+/* 글자가 없는 버튼은 위아래 padding 을 같게 해 아이콘을 세로 가운데에 놓는다. */
+.rail-ico.rail-toggle, .rail-ico.rail-layout { padding:6px 0; }
 body.sidebar-collapsed .rail-ico.rail-toggle { transform:scaleX(-1); }
 body.browser-mode .actrail { display:none !important; }

@@ -146,6 +146,36 @@ Chrome/Brave/Edge 프로필 선택, 쿠키 가져오기, 선택적 비밀번호 
 읽어 적용한다. Chrome 원본 DB에는 쓰지 않는다. URL·쿠키·패스키·비밀번호를 진단 로그에 남기지 않는다.
 개발 userData와 단일 인스턴스 잠금을 쿠키 staging 모듈보다 먼저 고정한다.
 
+## Iris 안에서 쓰는 확장·번역·검색어 추천
+
+주소창의 **확장**을 누르면 현재 프로필의 확장을 관리할 수 있다. **Chrome에서 가져오기**에서
+프로필과 확장을 선택하거나 **압축 해제된 확장 폴더 선택…**으로 `manifest.json`이 있는 폴더를 고른다.
+선택한 확장 파일은 Iris 상태 폴더에 복사되며 Chrome 원본은 변경하지 않는다. 설치한 뒤 페이지를
+새로고침한다. 같은 메뉴에서 확장 팝업·설정을 열거나 사용을 끄고 제거할 수 있다.
+
+Electron 43.7 이상의 확장 API를 사용한다. MV3 서비스 워커에서 빠진 `webNavigation.onCommitted`와
+`tabs.create`는 Iris의 탐색 이벤트와 탭 생성에 연결한다. 네트워크 요청 이벤트는 Electron의 원래
+`chrome.webRequest`를 사용한다. Chrome 확장 원본 스크립트를 수정하지 않는다.
+
+확장이 만드는 새 탭은 같은 프로필·스페이스·그룹에 열린다. `tabs.create`는 HTTP(S) 주소와 빈 탭,
+`active`·`openerTabId`·`windowId`를 지원한다. 한 탭만 표시하는 분리창 등 새 탭을 표시할 수 없는
+창에서는 오류를 반환한다. 워커의 탐색 이벤트는 확장에 허용된 사이트로 제한하며 확장을 끄거나
+제거하면 이벤트 전달도 중단한다.
+
+Chrome Web Store의 전체 확장 호환이나 자동 업데이트는 제공하지 않는다. 지원하지 않는 API를
+사용하는 확장은 일부 기능이 작동하지 않을 수 있다. React 개발자 도구는 기존 편의 기능에서 별도로 관리한다.
+
+페이지 우클릭 메뉴의 **이 사이트 항상 한국어로 번역**을 선택하면 현재 페이지와 이후 같은 사이트의
+페이지를 Google 번역으로 번역한다. 설정은 Iris 프로필과 사이트의 프로토콜·호스트·포트별로 구분된다.
+**이 사이트 자동 번역 끄기**를 누르면 이후 자동 번역을 멈춘다. 이미 번역한 페이지의 원문은
+직접 새로고침해 확인한다. 사이트 보안 정책이나 네트워크 문제로 번역하지 못하면 오류를 표시한다.
+
+주소창에 검색어를 입력하면 방문 기록·북마크와 Google 추천 검색어를 함께 볼 수 있다. 방향키로
+선택한 뒤 Enter를 누르거나 후보를 클릭한다. Esc를 누르면 원래 입력으로 돌아간다.
+Google 추천을 위해 입력한 검색어를 전송하며 쿠키와 방문 기록은 보내지 않는다. 주소·이메일·경로로
+판정한 입력은 전송하지 않는다. 연결이 안 되면 방문 기록·북마크 후보를 계속 사용할 수 있다.
+**설정 → 편의 기능 → Google 검색어 추천**에서 이 기능을 끌 수 있다.
+
 ## 관련 코드
 
 | 경계 | 소유 파일 |
@@ -160,3 +190,7 @@ Chrome/Brave/Edge 프로필 선택, 쿠키 가져오기, 선택적 비밀번호 
 | 자동 복구 판단 | `native/electron/cookie-sync-policy.cjs` |
 | 닫힌 탭 탐색 이력 | `native/electron/browser-navigation-history.cjs`, `server/browser-runtime.js` |
 | 이동 중 목적지 표시 | `web/js/browser/navigation-feedback.js`, `web/js/browser/webview-factory.js` |
+| 확장 관리 | `native/electron/browser-extensions.cjs`, `native/electron/browser-extension-catalog.cjs`, `web/js/browser/extensions.js` |
+| 확장 API 연결 | `native/electron/browser-extension-compatibility.cjs`, `native/electron/browser-extension-worker-preload.cjs`, `native/electron/browser-extension-tabs.cjs` |
+| 페이지 자동 번역 | `web/js/browser/page-translate.js` |
+| 검색어 추천 | `native/electron/search-suggest.cjs`, `web/js/browser/search-suggest.js`, `web/js/browser/bookmarks.js` |

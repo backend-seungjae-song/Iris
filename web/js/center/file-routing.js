@@ -55,7 +55,7 @@ export function openFile(path) {
   if (fileKindOf(path)) { openDocInSpaceBrowser(path); return; }
   if (BINARY_RE.test(path)) {
     try { acHost && acHost.revealInFinder && acHost.revealInFinder(path); } catch (e) {}
-    showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다");
+    showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다", { level: "warn" });
     return;
   }
   openFileLocal(path);
@@ -63,7 +63,7 @@ export function openFile(path) {
 
 export function openFileLocal(path) {
   const sp = getCenterSpace() || getSelectedSpaceId();
-  if (!sp) { showToast("파일을 열 스페이스가 없습니다. 왼쪽에서 스페이스를 고르세요"); return; }
+  if (!sp) { showToast("파일을 열 스페이스가 없습니다. 왼쪽에서 스페이스를 고르세요", { level: "warn" }); return; }
   ensureTabSpace(sp);
   const id = "file:" + path;
   if (!getTabs(sp).find((t) => t.id === id)) {
@@ -81,7 +81,7 @@ export function openDocInSpaceBrowser(path) {
   // 스페이스만 그리므로 아무도 그리지 않는 탭이 된다. 두 값은 실제로 갈릴 수 있다.
   // 새 브라우저 탭도 같은 규칙으로 스페이스를 고른다(main.js 의 newBrowserTab).
   const sp = (BROWSER_MODE && boundSpace()) || consoleSpace();
-  if (!sp) { showToast("문서를 열 스페이스가 없습니다. 왼쪽에서 스페이스를 고르세요"); return; }
+  if (!sp) { showToast("문서를 열 스페이스가 없습니다. 왼쪽에서 스페이스를 고르세요", { level: "warn" }); return; }
   bsMutate({ op: "space.active", space: sp });
   if (!BROWSER_MODE && !state.docked) { try { acHost && acHost.openBrowser && acHost.openBrowser(); } catch (e) {} }
   const id = "file:" + path;
@@ -120,21 +120,21 @@ export function revealTerminalPath(raw) {
 export function openTerminalPath(raw) {
   const p = resolveTerminalPath(raw);
   const hostHome = getHostHome();
-  if (!p) { showToast(hostHome ? "경로를 해석할 수 없습니다: " + raw : "서버에서 홈 경로를 아직 못 받았습니다"); return; }
+  if (!p) { showToast(hostHome ? "경로를 해석할 수 없습니다: " + raw : "서버에서 홈 경로를 아직 못 받았습니다", { level: "warn" }); return; }
   if (WEB_DOC_RE.test(p)) { openInSpaceBrowser(fileUrlOf(p)); return; }
   if (fileKindOf(p)) { openFile(p); return; }
-  if (BINARY_RE.test(p)) { revealTerminalPath(raw); showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다"); return; }
+  if (BINARY_RE.test(p)) { revealTerminalPath(raw); showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다", { level: "warn" }); return; }
   const rooted = /^[/~]/.test(String(raw || "").trim());
   if (!rooted) {
     // 조용히 반환하지 않는다. 눌렀는데 아무 일도 일어나지 않으면 기능이 고장 난 것으로 보이고,
     // 무엇이 막았는지 알아야 다음 동작을 고를 수 있다.
     if (!/\.[A-Za-z0-9]{1,10}$/.test(p)) {
-      showToast("파일 이름으로 안 보여 열지 않았습니다. 전체 경로면 엽니다: " + raw);
+      showToast("파일 이름으로 안 보여 열지 않았습니다. 전체 경로면 엽니다: " + raw, { level: "warn" });
       return;
     }
     const roots = [...new Set(getLastAgents().map((a) => a.cwd).filter(Boolean).map((c) => c.replace(/\/$/, "")))];
     if (!roots.some((r) => p === r || p.startsWith(r + "/"))) {
-      showToast("작업 폴더 밖이라 열지 않았습니다. 전체 경로면 엽니다");
+      showToast("작업 폴더 밖이라 열지 않았습니다. 전체 경로면 엽니다", { level: "warn" });
       return;
     }
   }

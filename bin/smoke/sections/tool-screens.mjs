@@ -109,6 +109,25 @@ await checkAsync("스페이스 폴더 밖 pane 은 하위가 아니다", async (
   return true;
 });
 
+// 파일 없이 하위 폴더 하나만 있는 폴더는 한 줄(a/b/c)로 합쳐 표시하고, 폴더를 파일보다 먼저 표시한다.
+// 폴더별 한 단계 묶음으로 돌아가면 web/js/a 와 web/js/b 가 web/js 아래에 들어가지 않아 이 검사가 실패한다.
+await checkAsync("소스 제어 변경 목록은 폴더 트리로 묶이고 폴더 하나만 든 폴더는 합쳐진다", async () => {
+  const mod = await import(new URL("../../../web/js/devtool/source-control.js", import.meta.url).href);
+  const files = ["web/js/a/x.js", "web/js/b/y.js", "web/css/z.css", "bin/smoke/sections/s.mjs", "README.md", "web/index.html"]
+    .map((rel) => ({ rel }));
+  const show = (node, pad = "") => node.dirs.map((d) => `${pad}${d.label}/(${d.n})\n` + show(d, pad + "  ")).join("")
+    + node.files.map((f) => `${pad}${f.rel.split("/").pop()}\n`).join("");
+  const got = show(mod.scFileTree(files));
+  const want = "bin/smoke/sections/(1)\n  s.mjs\nweb/(4)\n  css/(1)\n    z.css\n  js/(2)\n    a/(1)\n      x.js\n    b/(1)\n      y.js\n  index.html\nREADME.md\n";
+  if (got !== want) throw new Error("\n" + got);
+  const sc = read("web/js/devtool/source-control.js");
+  // 모두 펼치기·모두 접기는 목록 제목 줄마다 있고, 그 레포의 그 목록 폴더에만 적용된다.
+  for (const k of ["staged", "changes", "branch"]) if (!new RegExp(`foldBtns\\("${k}"`).test(sc)) throw new Error(`${k} 목록 제목 줄에 모두 펼치기·접기 버튼이 없다`);
+  if (!/scFoldAll\(root, gfold\.dataset\.kind, gfold\.dataset\.gfold === "shut"\)/.test(sc)) throw new Error("목록 제목 줄 버튼이 그 목록의 scFoldAll 에 연결되지 않았다");
+  if (!/startsWith\(kind \+ "\|"\)/.test(sc)) throw new Error("scFoldAll 이 다른 목록의 폴더까지 접는다");
+  return true;
+});
+
 // 계정 화면의 마크업은 accounts-view.js 가, 이벤트 연결은 accounts-screen.js 가 갖는다.
 // 이름 하나가 빠지면 화면은 정상으로 보이고 버튼만 반응하지 않는다. 그래서 연결 쪽 소스에서
 // 참조하는 이름을 뽑아 마크업에 있는지 확인한다. 손으로 적은 목록은 연결이 바뀌어도 그대로다.
@@ -222,9 +241,8 @@ await checkAsync("하위 레포를 찾아내고, 훑는 범위가 묶여 있다"
   if (!found.includes("/w/app") || !found.includes("/w/server")) throw new Error("바로 아래 레포를 놓쳤다: " + found.join(", "));
   // node_modules 를 검색하면 의존 패키지에 포함된 .git 이 목록을 채운다.
   if (found.some((x) => x.includes("node_modules"))) throw new Error("node_modules 를 훑었다");
-  // 깊이 제한이 필요하다. 큰 트리에서 검색이 몇 초씩 걸리면 그동안 화면이 비어 있다.
-  if (found.includes("/w/deep/a/b/c/d")) throw new Error("깊이 제한이 없다");
-  if (!found.includes("/w/deep/a/b/c")) throw new Error("제한 안쪽인데 못 찾았다");
+  // 스페이스 폴더 바로 아래까지만 찾는다. 더 깊은 저장소는 작업 폴더에 받아 둔 것이라 목록에 넣지 않는다.
+  if (found.some((x) => x.startsWith("/w/deep/"))) throw new Error("한 단계보다 깊이 찾았다: " + found.join(", "));
   // 개수 상한도 실제로 먹어야 한다.
   const many = {}; const names = [];
   for (let i = 0; i < 60; i++) { names.push("r" + i); many["/m/r" + i] = []; }
@@ -532,7 +550,8 @@ await checkAsync("설정 배선이 붙잡는 이름이 그림에 다 있다", as
   if (hooks.length < 4) throw new Error(`배선에서 이름을 ${hooks.length}개밖에 못 뽑았다`);
   const model = {
     items: [{ id: "find", label: "찾기", where: "편집기", lock: "", changed: true, keys: "⌘F", defKeys: "⌘F" }],
-    toggles: [{ id: "login-convenience", name: "로그인 편의 기능", desc: "설명", on: false, warn: "" }],
+    toggles: [{ id: "login-convenience", name: "로그인 편의 기능", desc: "설명", on: false, warn: "" },
+      { id: "site:geolocation", name: "위치 사용", desc: "설명", on: true, clear: { id: "geolocation", label: "기록 지우기" } }],
     screens: [{ id: "memo", label: "메모", on: true, lock: "" }],
     switcher: {
       windows: [{ id: 1, cgId: 1, displayApp: "메모", displayTitle: "한 장", picked: true }],
@@ -1861,13 +1880,26 @@ await checkAsync("기능 지면의 이름을 그 기능만 쓴다", async () => 
   // 에서 정의하는 것은 memo-window 이고 memo-mode 는 앱 셸이 붙이는 class 에 의존한 것이다.
   // .memo-window .panel-head 도 정의가 아니라 앱 셸의 바깥 요소를 자기 안에서 조정한 것이다.
   // 그래서 소유자는 조상 선택자 없이 단독으로 정의한 규칙(.wvc-row { … })으로만 정한다.
-  const bareNames = (rel) => {
-    const sheet = read(rel).replace(/\/\*[\s\S]*?\*\//g, "");
+  const bareNamesOf = (source) => {
+    const sheet = source.replace(/\/\*[\s\S]*?\*\//g, "");
     const out = new Set();
     for (const m of sheet.matchAll(/([^{}]+)\{/g)) {
       const sel = m[1].trim();
       if (sel.startsWith("@")) continue;
-      for (const oneSel of sel.split(",")) {
+      // :has()·:not() 안의 class는 선택 조건이며 이 규칙이 정의하는 요소가 아니다.
+      let subject = "", depth = 0;
+      for (let i = 0; i < sel.length; i++) {
+        const ch = sel[i];
+        if (depth) {
+          if (ch === "(") depth++;
+          else if (ch === ")") depth--;
+          continue;
+        }
+        const condition = /^:(?:has|not)\(/.exec(sel.slice(i));
+        if (condition) { depth = 1; i += condition[0].length - 1; continue; }
+        subject += ch;
+      }
+      for (const oneSel of subject.split(",")) {
         const t = oneSel.trim();
         if (!t || /[\s>+~]/.test(t)) continue;
         for (const c of t.matchAll(/\.([A-Za-z][A-Za-z0-9_-]{3,})/g)) out.add(c[1]);
@@ -1875,6 +1907,11 @@ await checkAsync("기능 지면의 이름을 그 기능만 쓴다", async () => 
     }
     return out;
   };
+  const bareNames = (rel) => bareNamesOf(read(rel));
+  const sample = bareNamesOf(".sc-repo-top:has(:is(.cc-dd.open, .cc-menu)) { z-index:3; } :is(.wvc-row) { display:flex; }");
+  if (!sample.has("sc-repo-top") || !sample.has("wvc-row") || sample.has("cc-dd") || sample.has("cc-menu")) {
+    throw new Error("직접 정의한 class와 :has() 조건을 구분하지 못한다");
+  }
   const allCssFiles = sourceFiles("web").filter((f) => f.startsWith("web/css/") && f.endsWith(".css"));
   const capOf = new Map();
   for (const cap of CAPABILITIES) for (const n of cap.css || []) capOf.set("web/css/" + n, cap.id);
@@ -2188,7 +2225,19 @@ await checkAsync("가운데 지면을 틀이 세지 않는다", async () => {
   // 선언에 없는 필드는 그 기능의 파일에서 파생한다. 받는 쪽 이름을 탭으로 한정한다. 그러지
   // 않으면 다른 객체의 흔한 이름(root·rel)까지 딸려 와 소유자가 반대로 잡힌다.
   const RECV = "(?:t|tab|target|current|activeTab|tabRef)";
-  const WRITE = new RegExp(`\\b${RECV}\\.([A-Za-z_$][\\w$]*)\\s*=(?!=)`, "g");
+  const WRITE = new RegExp(`\\b(${RECV})\\.([A-Za-z_$][\\w$]*)\\s*=(?!=)`, "g");
+  const tabFieldWrites = (src) => [...src.matchAll(WRITE)].filter((m) => {
+    const declarations = new RegExp(`\\b(?:const|let|var)\\s+${m[1]}\\s*=\\s*([^;\\n]+)`, "g");
+    const declaration = [...src.slice(0, m.index).matchAll(declarations)].at(-1);
+    // 닫힌 블록의 DOM 변수로 뒤에 나오는 다른 함수의 탭 필드까지 제외하지 않는다.
+    return !declaration || !/^document\.createElement\(/.test(declaration[1])
+      || /\}/.test(src.slice(declaration.index + declaration[0].length, m.index));
+  });
+  if (tabFieldWrites('const tab = document.createElement("button"); tab.title = "이름";').length
+    || tabFieldWrites('const tab = getTab(); tab.title = "이름";').length !== 1
+    || tabFieldWrites('function button() { const tab = document.createElement("button"); } function update(tab) { tab.title = "이름"; }').length !== 1) {
+    throw new Error("DOM 요소의 속성과 데이터 탭의 필드를 구분하지 못한다");
+  }
   const nude = (rel) => read(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
   // 앱 셸의 필드. 생성 시점에 만드는 것(makeFileTab)과, 앱 셸이 규약으로 정해 두고 누구나 같은
   // 뜻으로 쓰는 것이다. 기능이 그 위에 값을 넣어도 소유자가 아니다. _saveInFlight 는 앱 셸의
@@ -2197,9 +2246,9 @@ await checkAsync("가운데 지면을 틀이 세지 않는다", async () => {
   const writers = new Map();
   for (const cap of CAPS) {
     for (const f of cap.files || []) {
-      for (const m of nude("web/js/" + f).matchAll(WRITE)) {
-        if (!writers.has(m[1])) writers.set(m[1], new Set());
-        writers.get(m[1]).add(cap.id);
+      for (const m of tabFieldWrites(nude("web/js/" + f))) {
+        if (!writers.has(m[2])) writers.set(m[2], new Set());
+        writers.get(m[2]).add(cap.id);
       }
     }
   }

@@ -14,7 +14,7 @@
 
 /* ---- 부품: 아이콘 단추 · 단추 · 입력칸 · 세그먼트 · 스위치 · 점 ---- */
 .af-ib, .af-btn, .af-seg button, .af-sw { font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
-.af-ib { width:24px; height:24px; display:grid; place-items:center; border-radius:var(--r-s); color:var(--muted); flex:none; }
+.af-ib { width:24px; height:24px; padding:0; display:grid; place-items:center; border-radius:var(--r-s); color:var(--muted); flex:none; }
 .af-ib:hover { background:var(--hover); color:var(--fg); }
 .af-ib:active { transform:scale(.94); }
 

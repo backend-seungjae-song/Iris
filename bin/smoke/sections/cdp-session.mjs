@@ -297,7 +297,7 @@ export default async function run() {
       const guide = sliceBetween(cdpF, "    // 무엇이 있는지 함께 알려 준다", "\n  }\n}\n\n// 탭 화면", "CDP default 안내 목록");
       const guideText = [...guide.matchAll(/"([^"]*)"/g)].map((match) => match[1]).join("");
       const listedText = guideText.split("쓸 수 있는 것: ")[1];
-      const expected = "snapshot text url screenshot shotsizes observe tabs goto back forward reload viewport wait click dblclick hover fill type bulkfill key select focus clear check scroll scrollto eval expect diff a11y locate pdf login upload download dialog dialogs nativewin nativeclick nativekey newtab target untarget";
+      const expected = "snapshot text url screenshot shotsizes observe tabs goto back forward reload viewport wait click dblclick hover fill type phonetype bulkfill key phonekey phonefocus select focus clear check scroll scrollto eval expect diff a11y locate pdf login upload download dialog dialoginfo dialogs nativewin nativeclick nativekey newtab target untarget";
       if (listedText !== expected) throw new Error("default 안내 목록의 기존 이름·순서가 달라졌다");
       const listed = new Set(listedText.split(/\s+/).filter(Boolean));
       const handlerNames = Object.keys(handlers);

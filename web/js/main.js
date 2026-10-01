@@ -24,6 +24,8 @@ import { initMarkdown, markdownWebLink, mdToHtml } from "./core/markdown.js";
 import { cycleAgent, initKeynav } from "./core/keynav.js";
 import { initScreenSwitch } from "./core/screen-switch.js";
 import { initMotion } from "./core/motion.js";
+import { pushNotice, updateNotice, expireNotice, removeNotice, hasNotice, focusNotice, anchorNotices } from "./core/notice-center.js";
+import { showActionNotice } from "./core/action-notice.js";
 
 import { getWs, getWsGeneration, initWs, wsSend as transportWsSend } from "./core/ws.js";
 import { initDock, reconcileBrowserMode, reconcileDocTabs, toggleDock } from "./browser/dock.js";
@@ -162,8 +164,8 @@ function wsSend(o) {
     pending.catch(() => {});
     return pending;
   }
-  if (o && o.type === "pick-mode" && o.op === "toggle") o = { ...o, hasSheetContext: !!callHook("pick.sheetContext"), hasDocxContext: !!callHook("pick.docxContext") };
-  transportWsSend(o);
+  if (o && o.type === "pick-mode" && o.op === "toggle") o = { ...o, hasSheetContext: !!callHook("pick.sheetContext"), hasDocxContext: !!callHook("pick.docxContext"), hasEmulatorContext: !!callHook("emulator.hasPickContext") };
+  return transportWsSend(o);
 }
 
 // ── 스페이스 열쇠 ──
@@ -231,7 +233,8 @@ function orderedSpaces() {
   for (const s of spaces) if (byId.has(s.id)) out.push(s);
   return out;
 }
-function saveOrder(list) { spaceOrder = list.map((s) => spk(s.id)); localStorage.setItem("ac.spaceOrder", JSON.stringify(spaceOrder)); }
+function sendSpaceOrder() { if (!AUX_MODE) wsSend({ type: "space-order.set", order: spaceOrder }); }
+function saveOrder(list) { spaceOrder = list.map((s) => spk(s.id)); localStorage.setItem("ac.spaceOrder", JSON.stringify(spaceOrder)); sendSpaceOrder(); }
 
 // ── 접힘 상태 ──
 // 접힘 상태는 기기에 남는다. 창을 다시 열 때마다 초기화되면 매번 다시 접어야 한다
@@ -268,12 +271,17 @@ initTree({
   saveCollapsed, syncWatchDirs, collapsed, dirCache,
 });
 
-// ── 공용 토스트 ──
-let toastTimer = null;
-
-function showToast(msg) { const t = $("#copied-toast"); if (!t) return; t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1600); }
+// ── 공용 알림 ──
+function showToast(msg, options = {}) {
+  const title = String(msg ?? "");
+  // near: 복사 결과는 누른 자리 옆(core/action-notice.js). 원인(body·detail)이 붙거나 자리를 못 구하면 알림 목록
+  if (options.near && !options.body && !options.detail && showActionNotice(options.near, { kind: options.level || "info", title })) return null;
+  return pushNotice({ kind: options.level || "info", title, body: options.body, detail: options.detail,
+    id: options.id, source: options.source, key: options.key, ttl: options.ttl });
+}
 // main 이 조용히 취소한 일을 사람에게 한 줄로 알린다. 그게 없으면 버튼이 안 먹는 것으로만 보인다.
-try { window.acHost?.onNativeNotice?.((m) => { if (m && m.text) showToast(String(m.text)); }); } catch {}
+try { window.acHost?.onNativeNotice?.((m) => { if (m && m.text) showToast(String(m.text), { level: m.level || "info" }); }); } catch {}
+try { window.acHost?.onNoticeActivated?.((m) => { if (m && m.id) focusNotice(m.id); }); } catch {}
 // 복사했는지를 돌려준다. 호출자는 true 일 때만 복사했다고 알린다. 앱에서는 메인 프로세스가 쓰고
 // 결과를 알려 주고, 브라우저로 연 화면은 웹 API 를 쓴다(권한이 없으면 거절된다).
 async function copyText(text) {
@@ -297,64 +305,30 @@ function filePathBarHtml(path) {
 }
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-copy-path]"); if (!btn) return;
-  copyText(btn.dataset.copyPath).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다"));
+  copyText(btn.dataset.copyPath).then((ok) => showToast(ok ? "경로를 복사했습니다" : "경로를 복사하지 못했습니다", { level: ok ? "ok" : "err", near: btn }));
 });
-// 유지되는 알림. 사라지는 토스트와 달리 사용자가 확인을 누를 때까지 남고, 해당 위치로 이동시킨다.
-let noticeSeq = 0;
+// 유지되는 알림.
 // 앱임을 증명하는 토큰. 여러 곳에서 쓰므로 한 번만 읽어 둔다(동기 IPC).
 let _uiToken = null;
 function uiToken() {
   if (_uiToken === null) { try { _uiToken = (window.acHost && acHost.uiToken && acHost.uiToken()) || ""; } catch (e) { _uiToken = ""; } }
   return _uiToken;
 }
-// choices: 부르는 쪽이 정한 답 목록. 없으면 [확인](=나중에) 하나다.
-// 선택지를 서버가 정해 두면 "다 했어요/못 하겠어요"밖에 못 고르는데, 사람이 답할 것은
-// 그 둘만 있는 것이 아니라, 예/아니오처럼 상황마다 다른 답이 필요하다.
-function noticeChoices(cs, withGo) {
-  if (!cs || !cs.length) return "";
-  // data-pick 은 메뉴 시스템이 이미 쓰는 이름이라, 알림 답은 다른 이름을 쓴다.
-  return cs.map((c, i) => `<button class="${i === 0 && !withGo ? "hot" : ""}" data-ans="${esc(c)}">${esc(c)}</button>`).join("");
+function reportNoticeFocus() {
+  const token = uiToken();
+  if (token) wsSend({ type: "ui-auth", token, focused: document.hasFocus() });
 }
-function showNotice({ title, body, warn, action, answer, hot, choices }) {
-  // 방송은 모든 창이 받는다. 모든 창이 알림을 띄우면 같은 알림이 분리 브라우저 창마다
-  // 겹쳐 뜬다. 알림은 콘솔 본 창 하나에서만 보인다.
-  if (BROWSER_MODE) return;
-  const stack = $("#noticestack"); if (!stack) return;
-  const id = "nt" + (++noticeSeq);
-  const el = document.createElement("div");
-  el.className = "notice" + (warn ? " warn" : "") + (hot ? " call" : "");
-  el.innerHTML = `<div class="nt">${esc(title)}</div><div class="nb">${esc(body || "")}</div>`
-    + `<div class="na">${action ? `<button class="hot" data-go="1">${esc(action.label)}</button>` : ""}${
-        choices && choices.length ? noticeChoices(choices, !!action) : `<button data-close="1">확인</button>`}</div>`;
-  if (answer) el.dataset.wait = "1";   // 답을 기다리는 알림은 새 알림에 밀려 사라지면 안 된다
-  el.addEventListener("click", (e) => {
-    if (e.target.closest("[data-go]") && action) {
-      try { action.run(); } catch {}
-      try { answer && answer("갔음"); } catch {}
-      if (!answer) { el.remove(); return; }
-      // 그 탭으로 간 것은 출발이지 완료가 아니다. 여기서 알림을 닫아 버리면 AI는 사람이 일을 마쳤는지
-      // 답을 받지 못한 채 종료되므로, 종료를 알릴 경로를 남긴다.
-      const picks = choices && choices.length ? noticeChoices(choices, false) : "";
-      el.querySelector(".nb").textContent = (body || "")
-        + (picks ? ". 보고 나서 아래에서 골라 주세요. AI가 기다리고 있습니다."
-                 : ". 끝나면 [다 했어요]를 눌러 주세요. AI가 기다리고 있습니다.");
-      el.querySelector(".na").innerHTML = picks
-        || `<button class="hot" data-done="1">다 했어요</button><button data-fail="1">못 하겠어요</button>`;
-      return;
-    }
-    const pick = e.target.closest("[data-ans]");
-    if (pick) { try { answer && answer(pick.dataset.ans); } catch {} el.remove(); return; }
-    if (e.target.closest("[data-done]")) { try { answer && answer("다 했음"); } catch {} el.remove(); return; }
-    if (e.target.closest("[data-fail]")) { try { answer && answer("못 했음"); } catch {} el.remove(); return; }
-    if (e.target.closest("[data-close]")) { try { answer && answer("나중에"); } catch {} el.remove(); }
-  });
-  stack.appendChild(el);
-  while (stack.children.length > 4) {
-    const victim = [...stack.children].find((c) => !c.dataset.wait);
-    if (!victim) break;
-    victim.remove();
-  }
-  return id;
+window.addEventListener("focus", reportNoticeFocus);
+window.addEventListener("blur", reportNoticeFocus);
+function showNotice({ id, title, body, warn, action, answer, hot, choices, wait, round, source,
+  approve, items, total: itemTotal, irreversible, approveLabel, denyLabel, expired, dismissOnAnswer }) {
+  const kind = approve ? "approve" : hot ? "ask" : warn ? "warn" : "info";
+  return pushNotice({ id, kind, title, body, go: action, choices, round, source, items, total: itemTotal,
+    irreversible, approveLabel, denyLabel, expired, dismissOnAnswer,
+    deadline: wait ? Date.now() + wait * 1000 : null,
+    onGo: answer ? () => answer("갔음") : null,
+    onAnswer: answer ? (choice) => answer(approve || choices?.length ? choice
+      : choice === "다 했어요" ? "다 했음" : choice === "못 하겠어요" ? "못 했음" : choice) : null });
 }
 // 해당 탭으로 이동시킨다. 알림만 주고 찾아가게 하면 알림의 역할을 하지 못한다.
 // 알림의 "그 탭으로" 동작. 순서가 중요하다. 그 탭이 있는 스페이스로 먼저 옮기고, 그 스페이스의
@@ -446,6 +420,7 @@ const escHtml = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;
 initTerminal({ $, wsSend });
 initHerdrTabs({ $, wsSend, showToast, getIsLocal: () => isLocal, getSelectedSpaceId: () => selectedSpaceId,
   onLayoutChange: () => sendPtyResize() });
+anchorNotices([{ element: $("#wv-stack"), edge: "top" }, $("#htabs"), $("#right .right-head")]);
 // xterm 입출력 연결은 이 위치에서 초기화한다. 복붙 기능(화면 밖 드래그·복사
 // 정리·자동 복사·파일 드롭)는 chatcopy 기능이 소유하고, 여기서는 훅만 부른다.
 function terminalWs() { return getWs(); }
@@ -468,7 +443,8 @@ function switchToSpaceOf(a) {
   // 스페이스만 바뀌고 에이전트 섹션이 그대로면 현재 위치를 알 수 없다.
   renderAgents(); revealAgentRow(a.paneId || curTarget);
 }
-function selectSession(target, fromSpace) {
+// via: 서버 로그에 남길 조작 출처(입력이 엉뚱한 세션에 들어갔을 때 경위 추적용)
+function selectSession(target, fromSpace, via) {
   markHerdrUserSelect(); // 사용자 클릭 직후 잠깐은 herdr 역동기화가 선택을 뒤집지 못하게.
   curTarget = target;
   const a = agentByPane(target);
@@ -478,7 +454,7 @@ function selectSession(target, fromSpace) {
   paintStateDot(tDot, a);
   initXterm();
   // 임베드된 herdr(같은 세션)를 이 에이전트 pane으로 이동 → 터미널 화면이 그 에이전트로 전환.
-  wsSend({ type: "focus", target });
+  wsSend({ type: "focus", target, origin: via || "unknown" });
   if (window.innerWidth > 820) setTimeout(() => { fitTerminal(); getXterm().focus(); }, 0);
   // herdr식 연동: 에이전트를 고르면 그 에이전트의 Space도 함께 포커싱(하이라이트+스크롤).
   // fromSpace=true면 Space 쪽에서 이미 온 호출이라 되돌아가는 렌더를 생략(루프 방지).
@@ -504,21 +480,23 @@ function focusSpace(id) {
   getSpaceList().querySelector(`.space-row[data-space="${cssEsc(id)}"]`)?.scrollIntoView({ block: "nearest" });
   switchCenterSpace(id); // 센터 탭을 이 스페이스 작업공간으로 전환
   const ags = agentsOfSpace(id);
-  // 1순위: 이 스페이스에서 마지막으로 머문 herdr 탭(세션 없는 빈 탭 포함). 아직 존재할 때만.
-  // 이미 그 탭이 포커스면 보내지 않는다 - 불필요한 herdr 왕복과 에코를 만들지 않기 위해.
+  // 이 스페이스에서 마지막으로 머문 herdr 탭이 아직 존재하면 복원한다.
   const wsTabs = getTabsForSpace(id);
   const wantTab = lastTabBySpace[id];
   const tabExists = wantTab && wsTabs.some((x) => x.tabId === wantTab);
-  if (tabExists && !wsTabs.some((x) => x.tabId === wantTab && x.focused)) wsSend({ type: "tab-focus", tabId: wantTab });
   if (ags.length) {
     // 2순위: 마지막 에이전트. 기억한 탭이 있으면 그 탭에 속한 에이전트를 고른다.
     const byTab = tabExists ? ags.find((x) => x.tabId === wantTab) : null;
     const remembered = lastAgentBySpace[id];
     const pick = byTab ? byTab.paneId
       : (remembered && ags.some((x) => x.paneId === remembered)) ? remembered : ags[0].paneId;
-    selectSession(pick, true);
+    selectSession(pick, true, "space");
     revealAgentRow(pick);
-  } else renderAgents();
+  } else {
+    if (tabExists) wsSend({ type: "tab-focus", tabId: wantTab, origin: "space" });
+    else wsSend({ type: "workspace-focus", workspaceId: id, origin: "space" });
+    renderAgents();
+  }
 }
 // ── herdr → 우리 툴 역방향 상태 동기화 ──────────────────────────────────────
 function herdrSyncCurTarget() { return curTarget; }
@@ -819,7 +797,13 @@ initClosedTabs({ wsSend, openFile, showToast });
 // 보안 스위치와 ⌥Tab 창의 진짜 상태는 main 이 들고 있다. 여기 사본은 화면을 그리기 위한 것이고,
 // 값이 실제로 나가느냐를 정하는 것은 main 의 판정이다.
 let loginConv = { on: false, warned: false };
+// 위치·화면 공유·마이크·파일 쓰기. [{ id, name, on, allowed, blocked }]. 실제 판정은 main 이 한다.
+let sitePerms = [];
 let switcherModel = null;
+async function syncSitePermissions(arg) {
+  try { sitePerms = (await window.acHost?.sitePermissions(arg)) || sitePerms; } catch {}
+  renderKeymapPage();
+}
 async function syncLoginConvenience() {
   try { loginConv = (await window.acHost?.loginConvenience()) || loginConv; } catch {}
   renderKeymapPage();
@@ -859,16 +843,29 @@ initKeymapPage({
   // host가 든 것만: revision 방송으로 바뀐 행을 AX 재열거 없이 받는다.
   reloadWindows: () => syncSwitcher({ op: "list" }),
   openPermissions: (kind) => syncSwitcher({ op: "open-permissions", kind }),
+  setGlobalPriority: (on) => syncSwitcher({ op: "global-priority", on }),
   enableCapability: enableCapabilityNow,
   refreshRail: applyRailVisibility,
-  getSecurityToggles: () => [{
+  getSecurityToggles: () => [...sitePerms.map((p) => ({
+    id: "site:" + p.id,
+    name: `${p.name} 사용`,
+    desc: `켜면 사이트가 ${p.name}을(를) 요청할 때 사이트마다 따로 묻고, 허용한 사이트에만 줍니다. 끄면 묻지 않고 모두 거절합니다.`,
+    on: p.on,
+    clear: p.allowed + p.blocked ? { id: p.id, label: `기록 지우기 (허용 ${p.allowed} · 차단 ${p.blocked})` } : null,
+  })), {
     id: "login-convenience",
     name: "로그인 편의 기능",
     desc: "비밀번호 자동완성 · Chrome에서 가져오기 · 이 브라우저에서 새로 로그인한 것 저장. 끄면 셋이 모두 멈추고, 금고에 이미 있는 것도 꺼내 쓰지 않습니다(지우기는 그대로 됩니다).",
     on: !!loginConv.on,
     warn: loginConv.on ? "" : "켜면 이 기기 Keychain으로 잠근 금고에 비밀번호가 모입니다. AI가 브라우저를 조작하는 동안에는 전달되지 않습니다.",
   }],
+  clearSiteRecords: (kind) => syncSitePermissions({ clear: kind }),
   setSecurityToggle: async (id) => {
+    if (String(id).startsWith("site:")) {
+      const p = sitePerms.find((x) => "site:" + x.id === id);
+      if (p) await syncSitePermissions({ kind: p.id, on: !p.on });
+      return;
+    }
     if (id !== "login-convenience") return;
     try { loginConv = (await acHost.loginConvenience({ on: !loginConv.on })) || loginConv; } catch {}
   },
@@ -883,6 +880,7 @@ window.acHost?.onSwitcherState?.((state) => {
 });
 syncSwitcher({ op: "status" });
 syncLoginConvenience();
+syncSitePermissions();
 // 최근 닫은 탭은 브라우저 주소줄이 소유한다.
 initKeynav({
   wsSend, BROWSER_MODE, MEMO_MODE, acHost: window.acHost,
@@ -919,7 +917,7 @@ function handleWsOpen() {
   if (!MEMO_MODE) try { setTimeout(() => wsSend({ type: "browser-profiles", profiles: getProfiles().map((p) => ({ id: p.id, name: p.name })) }), 200); } catch (e) {}
   // 이 연결이 앱 UI임을 먼저 증명한다. 지목(권한 확대)은 이 증명이 있는 연결만 보낼 수 있다.
   // 루프백이라는 것만으로는 앱과 아무 로컬 프로세스가 구별되지 않기 때문이다.
-  try { const t = uiToken(); if (t) wsSend({ type: "ui-auth", token: t }); } catch (e) {}
+  try { reportNoticeFocus(); } catch (e) {}
   if (!MEMO_MODE) setTimeout(() => { for (const tid of getWebviewIds()) reportTabWc(getWebview(tid), tid); reportActiveBrowserWc(); }, 300);
   // 파일/docx/sheet 탭도 브라우저 탭과 같은 이유로 재연결마다 다시 요청해야 한다. 연결이
   // 끊겼거나 막 뜬 그 틈에 연 파일은 요청 자체가 안 나가 "불러오는 중…"에 영원히 갇힌다.
@@ -946,6 +944,9 @@ function handleWsBinary(data) {
     callHook("chatcopy.captureAfterWrite");
   }); }
 }
+
+// 방송 알림은 모든 창이 받음. 분리 브라우저 창마다 같은 알림이 겹치지 않게 콘솔 본 창에서만 표시
+const consoleOnly = (handler) => (m) => { if (!BROWSER_MODE) handler(m); };
 
 function dispatchWs(handler) {
   return (m) => {
@@ -988,7 +989,7 @@ function handleStateMessage(m) {
       if (curTarget) { const a = agentByPane(curTarget); if (a) { tName.textContent = nameOf(a); tSub.innerHTML = `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>`; paintStateDot(tDot, a); } }
       callHook("agentchat.sync"); // 에이전트 상태(답 기다림)와 pane 목록 변화를 채팅 보기에 알린다
       const running = agents.filter((a) => a.status === "working").length;
-      $("#meta").textContent = `${agents.length} · ${running}▶`;
+      $("#meta").innerHTML = `<span class="meta-count">${agents.length} · ${running}<span class="meta-run">▶</span></span>`;
 }
 
 function handleBrowserStateMessage(m) { applyBrowserState(m.state); }
@@ -1003,7 +1004,7 @@ function handleFsMessage(m) {
 }
 
 function handleFsOpMessage(m) {
-      if (m.error) { showToast("파일 조작 실패: " + m.error); }
+      if (m.error) { showToast("파일 조작 실패", { level: "err", detail: String(m.error) }); }
       else {
         if (m.from && m.newPath) retargetFileTabs(m.from, m.newPath); // rename/move: 열린 탭 경로 갱신
         if (m.parent && (m.op === "create-file" || m.op === "create-dir")) {
@@ -1011,10 +1012,10 @@ function handleFsOpMessage(m) {
           collapsed.dirs.delete(m.parent); saveCollapsed();
         }
         if (Array.isArray(m.refresh)) { for (const d of m.refresh) { dirCache.delete(d); requestDir(d); } renderFileTree(); }
-        if (m.op === "create-file" && m.newPath) { openFile(m.newPath); showToast("파일을 만들었습니다"); }
-        else if (m.op === "create-dir" && m.newPath) showToast("폴더를 만들었습니다");
-        else if (m.op === "create-sheet" && m.newPath) { openFile(m.newPath); showToast("새 스프레드시트를 만들었습니다"); }
-        else if (m.op === "copy" && m.newPath && m.open) { openFile(m.newPath); showToast("사본을 만들었습니다"); }
+        if (m.op === "create-file" && m.newPath) { openFile(m.newPath); showToast("파일을 만들었습니다", { level: "ok" }); }
+        else if (m.op === "create-dir" && m.newPath) showToast("폴더를 만들었습니다", { level: "ok" });
+        else if (m.op === "create-sheet" && m.newPath) { openFile(m.newPath); showToast("새 스프레드시트를 만들었습니다", { level: "ok" }); }
+        else if (m.op === "copy" && m.newPath && m.open) { openFile(m.newPath); showToast("사본을 만들었습니다", { level: "ok" }); }
       }
 }
 
@@ -1025,7 +1026,10 @@ function handleBrowserDialogMessage(m) {
         if (m.open) setTabDialog(hit, { kind: m.kind || "alert", message: String(m.message || ""), wc: m.wc, def: String(m.def || ""), byAi: !!m.byAi });
         else clearTabDialog(hit);
         renderBmTabs(); renderTabDialog();
-        if (m.open) { try { showToast("한 탭이 답을 기다립니다: " + String(m.message || m.kind).slice(0, 50)); } catch {} }
+        if (m.open) pushNotice({ id: `dialog-${m.wc}`, kind: "waiting",
+          title: "한 탭이 답을 기다립니다", body: String(m.message || m.kind || ""),
+          go: { label: "그 탭으로", run: () => gotoTabById(hit) } });
+        else removeNotice(`dialog-${m.wc}`);
       }
 }
 
@@ -1068,7 +1072,7 @@ function handleFileMessage(m, responseIoEntry) {
         const binaryTarget = responseIoEntry && responseIoEntry.tabRef;
         try { window.acHost && acHost.revealInFinder && acHost.revealInFinder(m.path); } catch (e) {}
         if (binaryTarget) removeTabsNow([{ space: responseIoEntry.owner.space, tabId: responseIoEntry.tabId, tabRef: binaryTarget }]);
-        showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다");
+        showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다", { level: "warn" });
         return;
       }
       // 편집 중(draft 존재)인 탭은 내용을 덮어쓰지 않는다(사용자 입력 보존). 최초 로드만 반영.
@@ -1103,7 +1107,7 @@ function handleFileSavedMessage(m, responseIoEntry) {
         else renderTabs();
         callHook("git.refreshFor", t.path);
       }
-      if (m.error && !m.requestId) showToast("저장 실패: " + m.error);
+      if (m.error && !m.requestId) showToast("저장 실패", { level: "err", detail: String(m.error) });
 }
 
 function handlePtyStartedMessage() {
@@ -1121,17 +1125,18 @@ function handleControlErrorMessage(m) {
 }
 
 function handleSpaceErrorMessage(m) {
-      showToast(m.message || "스페이스 조작 실패");
+      showToast("스페이스 조작 실패", { level: "err", detail: String(m.message || "") });
 }
 
 function handleSpaceCreatedMessage(m) {
+      callHook("worktrees.spaceCreated", m);
       // 방금 만든 스페이스로 바로 들어간다. 스페이스를 만든 이유가 그 안에서 작업하기 위해서다.
       // 목록은 recompute 브로드캐스트로 갱신되므로, 아직 안 왔으면 다음 state에서 잡는다.
       setPendingSpaceFocus(m.workspaceId || null);
       if (getPendingSpaceFocus() && orderedSpaces().some((s) => s.id === getPendingSpaceFocus())) {
         focusSpace(getPendingSpaceFocus()); setPendingSpaceFocus(null);
       }
-      showToast(`스페이스 "${m.label}" 생성됨`);
+      showToast(`스페이스 "${m.label}" 생성됨`, { level: "ok" });
 }
 
 function handleControlActiveMessage(m) {
@@ -1158,6 +1163,7 @@ function handleSpaceKeyMovedMessage(m) {
 function handleSpaceKeysMessage(m) {
       // 이 창의 저장분(파일 탭·기본 프로필·순서·접힘)도 같은 열쇠로 옮긴다. state보다 먼저 온다.
       applySpaceKeys(m.map || {}, m.remaps || {});
+      sendSpaceOrder();
 }
 
 function handleTabHandlesMessage(m) {
@@ -1208,6 +1214,16 @@ function handleAiLoginNoteMessage(m) {
       }
 }
 
+const serverAskIds = new Set();
+function handleUiAuthMessage(m) {
+  if (!m.ok || !Array.isArray(m.pendingAskIds)) return;
+  const pending = new Set(m.pendingAskIds.map(String));
+  for (const id of serverAskIds) if (!pending.has(id)) {
+    removeNotice(id);
+    serverAskIds.delete(id);
+  }
+}
+
 function handleAiAskMessage(m) {
       // AI가 대신할 수 없는 상황(결제·본인확인·캡차)에서 사용자를 호출한다. 강제로 화면을 바꾸지 않는다.
       // 부르고, 갈 길을 주고, 갔는지 아닌지만 알려준다.
@@ -1219,10 +1235,52 @@ function handleAiAskMessage(m) {
         // 에뮬레이터 기능이 그 기기의 탭을 갖고 있으면 그 탭으로 옮긴다. 없으면 서버가 시뮬레이터를 앞으로 가져온다.
         ? { label: "그 앱으로", run: () => { if (!callHook("emulator.focus", m.device || "")) wsSend({ type: "focus-app", device: m.device || "" }); } }
         : (m.tabId ? { label: "그 탭으로", run: () => gotoTabById(m.tabId) } : null);
-      showNotice({ hot: true, title: m.title || "AI가 사람을 부릅니다",
+      const fresh = !hasNotice(m.id);
+      serverAskIds.add(String(m.id));
+      showNotice({ id: m.id, hot: !m.kind || m.kind === "ask", approve: m.kind === "approve",
+        title: m.title || "AI가 사람을 부릅니다", wait: m.wait, round: m.round,
+        source: [m.session, m.space, m.tabId].filter(Boolean).join(" · "),
+        items: m.items, total: m.total, irreversible: m.irreversible,
+        approveLabel: m.approveLabel, denyLabel: m.denyLabel,
         body: m.text || (isApp ? "이 앱에서 사람이 직접 해야 하는 단계입니다."
                                : "이 탭에서 사람이 직접 해야 하는 단계입니다."),
-        action: goTo, choices: m.choices, answer: reply });
+        action: goTo, choices: m.choices, answer: reply, dismissOnAnswer: false });
+      if (fresh) window.acHost?.notify?.({ id: m.id, title: m.title || "Iris · 사람 차례", body: m.text || "답을 기다립니다", level: "ask" });
+}
+
+function handleAiAskClosedMessage(m) {
+  serverAskIds.delete(String(m.id));
+  if (m.expired) {
+    if (!expireNotice(m.id)) pushNotice({ id: m.id, kind: "approve", title: m.title || "승인 요청",
+      body: m.text, expired: true });
+  }
+  else removeNotice(m.id);
+}
+
+function handleAiNotifyMessage(m) {
+  const fresh = !hasNotice(m.id);
+  const go = m.device
+    ? { label: "그 앱으로", run: () => { if (!callHook("emulator.focus", m.device)) wsSend({ type: "focus-app", device: m.device }); } }
+    : m.tab ? { label: "그 탭으로", run: () => gotoTabById(m.tab) } : null;
+  pushNotice({ id: m.id, kind: m.level || "info", title: m.title || "알림", body: m.body,
+    detail: m.detail, source: [m.session, m.space, m.tab || m.device].filter(Boolean).join(" · "), go });
+  if (fresh && (m.level === "warn" || m.level === "err"))
+    window.acHost?.notify?.({ id: m.id, title: m.title, body: m.body || m.detail || "", level: m.level });
+}
+
+function handleAiProgressMessage(m) {
+  if (m.op === "start") pushNotice({ id: m.id, kind: "progress", title: m.title,
+    p: m.p, ttl: Date.now() + (m.ttl || 120) * 1000, source: m.session,
+    go: m.tab ? { label: "그 탭으로", run: () => gotoTabById(m.tab) } : null });
+  else if (m.op === "update") updateNotice(m.id, { ...(m.title ? { title: m.title } : {}),
+    ...(m.p != null ? { p: m.p } : {}), ttl: Date.now() + (m.ttl || 120) * 1000 });
+  else if (m.op === "end") updateNotice(m.id, { kind: m.result === "warn" ? "warn" : m.result || "info",
+    title: m.title || (m.result === "err" ? "작업 실패" : m.result === "warn" ? "응답 없음" : "작업 완료"), detail: m.detail });
+}
+
+function handleServerToastMessage(m) {
+  showToast(m.title || m.text || "알림", { level: m.level || "info", body: m.title ? m.text : undefined,
+    detail: m.detail });
 }
 
 function handleHerdrMessage(m) { if (!m.connected) $("#meta").textContent = "herdr 끊김"; }
@@ -1237,7 +1295,7 @@ const WS_DISPATCH = {
   "fs-op": dispatchWs(handleFsOpMessage),
   "browser-dialog": dispatchWs(handleBrowserDialogMessage),
   "dir-changed": dispatchWs(handleDirChangedMessage),
-  "tree": dispatchWs(handleFilePaletteTree),
+  "tree": dispatchWs((m) => { handleFilePaletteTree(m); callHook("unifiedsearch.tree", m); }),
   "file": dispatchWs(handleFileMessage),
   "file-saved": dispatchWs(handleFileSavedMessage),
   "pty.started": dispatchWs(handlePtyStartedMessage),
@@ -1258,8 +1316,13 @@ const WS_DISPATCH = {
   "space-keys": dispatchWs(handleSpaceKeysMessage),
   "tab-handles": dispatchWs(handleTabHandlesMessage),
   "ai-targets": dispatchWs(handleAiTargetsMessage),
-  "ai-login-note": dispatchWs(handleAiLoginNoteMessage),
-  "ai-ask": dispatchWs(handleAiAskMessage),
+  "ai-login-note": dispatchWs(consoleOnly(handleAiLoginNoteMessage)),
+  "ai-ask": dispatchWs(consoleOnly(handleAiAskMessage)),
+  "ai-ask-closed": dispatchWs(consoleOnly(handleAiAskClosedMessage)),
+  "ui-auth": dispatchWs(consoleOnly(handleUiAuthMessage)),
+  "ai-notify": dispatchWs(consoleOnly(handleAiNotifyMessage)),
+  "ai-progress": dispatchWs(consoleOnly(handleAiProgressMessage)),
+  "toast": dispatchWs(handleServerToastMessage),
   "herdr": dispatchWs(handleHerdrMessage),
   "error": dispatchWs(handleErrorMessage),
 };
@@ -1309,7 +1372,7 @@ function capabilityBootArgs(items) {
       // 두지 않는 것은 그것이 뷰어 모듈의 내부 이름이어서, 앱 셸이 같은 이름을 함수로
       // 두면 "남의 사설 상태를 부른다"로 읽히기 때문이다(검사가 잡는다).
       get docxPane() { return $("#docxview"); },
-      openBrowserTab: newBrowserTab, setPendingSpaceFocus,
+      openBrowserTab: newBrowserTab, setPendingSpaceFocus, focusSpace, selectSession,
       getCurrentAgent: () => (typeof agentByPane === "function" && typeof curTarget !== "undefined") ? agentByPane(curTarget) : null,
       spaceRootFor,
       getSelectedSpaceId: () => selectedSpaceId,
@@ -1342,7 +1405,7 @@ function capabilityBootArgs(items) {
       if (WS_DISPATCH[type]) { console.error("[capability] 이미 임자가 있는 메시지:", type, "←", id); return false; }
       WS_DISPATCH[type] = dispatchWs(fn);
     },
-    onError: (id, e) => { console.error("[capability]", id, e); showToast(`${id} 기능을 싣지 못했습니다`); },
+    onError: (id, e) => { console.error("[capability]", id, e); showToast(`${id} 기능을 싣지 못했습니다`, { level: "err", detail: String(e?.message || e) }); },
   };
 }
 

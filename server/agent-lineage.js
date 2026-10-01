@@ -167,8 +167,10 @@ function runtimeMatches(recorded, live) {
   return String(recorded || "").toLowerCase() === String(live || "").toLowerCase();
 }
 
-function sessionMatches(recorded, live) {
-  return !recorded || recorded === live;
+// 영수증의 session 은 실행기가 herdr 에서 읽은 값. Iris 상태의 sessionUuid 는 대화 기록 파일 기준이라 Claude 세션이
+// 이어지거나 분기하면(같은 프로세스, 새 기록 파일) herdr 값과 달라질 수 있음 → 둘 중 하나와 같으면 같은 세션
+function sessionMatches(recorded, live, raw) {
+  return !recorded || recorded === live || recorded === stringField(raw?.agent_session?.value);
 }
 
 function cycleMembers(edges) {
@@ -216,8 +218,8 @@ export function attachAgentLineage(state, rawAgents, options = {}) {
     const parent = stateByPane.get(rawParent.pane_id), child = stateByPane.get(rawChild.pane_id);
     if (!parent || !child || parent === child) continue;
     if (parent.terminalId !== record.parent.terminalId || child.terminalId !== record.child.terminalId) continue;
-    if (!sessionMatches(record.parent.sessionId, parent.sessionUuid)) continue;
-    if (!sessionMatches(record.child.sessionId, child.sessionUuid)) continue;
+    if (!sessionMatches(record.parent.sessionId, parent.sessionUuid, rawParent)) continue;
+    if (!sessionMatches(record.child.sessionId, child.sessionUuid, rawChild)) continue;
     edges.set(child.paneId, { record, parent, child, parentPaneId: parent.paneId });
   }
 

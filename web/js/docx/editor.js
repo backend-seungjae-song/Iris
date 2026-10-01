@@ -214,7 +214,7 @@ function docxInsertImage(t) {
       const data = new Uint8Array(await file.arrayBuffer());
       const mime = file.type;
       if (!DOCX_IMAGE_MIMES.has(mime)) {
-        showToast("지원하지 않는 이미지 형식입니다.");
+        showToast("지원하지 않는 이미지 형식입니다.", { level: "err" });
         return;
       }
       const image = await window.createImageBitmap(file);
@@ -234,10 +234,10 @@ function docxInsertImage(t) {
         widthPoints: widthPoints,
         heightPoints: heightPoints,
       });
-      if (result && result.ok === false && result.reason) showToast(result.reason);
+      if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
       docxRefreshChrome(t);
     } catch (error) {
-      showToast(error && error.message ? error.message : "이미지를 삽입하지 못했습니다.");
+      showToast("이미지를 삽입하지 못했습니다.", { level: "err", detail: String(error?.message || "원인 불명") });
     }
   };
   input.addEventListener("change", finish, { once: true });
@@ -256,7 +256,7 @@ async function docxInsertTable(t, anchorEl) {
   const cols = Number(colPick);
   docxRestoreSelection(editor, savedSel);
   if (!editor.surface.canInsertTable(rows, cols) || !editor.surface.insertTable(rows, cols)) {
-    showToast("현재 위치에 표를 삽입할 수 없습니다.");
+    showToast("현재 위치에 표를 삽입할 수 없습니다.", { level: "warn" });
     return;
   }
   docxRefreshChrome(t);
@@ -389,7 +389,7 @@ async function docxRunTableBorderSlot(t, slotId, anchorEl) {
     activeTarget: target,
     spec: { style, size, color: colorValue },
   });
-  if (outcome && outcome.result && outcome.result.ok === false && outcome.result.reason) showToast(outcome.result.reason);
+  if (outcome && outcome.result && outcome.result.ok === false && outcome.result.reason) showToast(outcome.result.reason, { level: "info" });
   docxRefreshChrome(t);
 }
 async function docxRunTableCellFillSlot(t, anchorEl) {
@@ -401,7 +401,7 @@ async function docxRunTableCellFillSlot(t, anchorEl) {
   t.docxLastCellFill = pick;
   docxRestoreSelection(editor, savedSel);
   const outcome = core.runTableChromeCommand(editor, "table.cellFill", docxColorValueFromInput(pick), { activeTarget: "all" });
-  if (outcome && outcome.result && outcome.result.ok === false && outcome.result.reason) showToast(outcome.result.reason);
+  if (outcome && outcome.result && outcome.result.ok === false && outcome.result.reason) showToast(outcome.result.reason, { level: "info" });
   docxRefreshChrome(t);
 }
 async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
@@ -437,11 +437,11 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
     }
     const percent = Number(pick);
     if (!Number.isFinite(percent) || percent < DOCX_ZOOM_MIN_PERCENT || percent > DOCX_ZOOM_MAX_PERCENT) {
-      showToast(`${DOCX_ZOOM_MIN_PERCENT}~${DOCX_ZOOM_MAX_PERCENT} 사이의 숫자를 입력하세요.`);
+      showToast(`${DOCX_ZOOM_MIN_PERCENT}~${DOCX_ZOOM_MAX_PERCENT} 사이의 숫자를 입력하세요.`, { level: "warn" });
       return true;
     }
     const result = editor.setZoom(percent / 100);
-    if (result && result.ok === false && result.reason) showToast(result.reason);
+    if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
     docxRefreshChrome(t);
     return true;
   }
@@ -463,7 +463,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
     if (raw == null) return true;
     const parts = raw.split(",").map((s) => Number(s.trim()));
     if (parts.length !== 6 || parts.some((n) => !Number.isFinite(n) || n <= 0)) {
-      showToast("6개의 양수(mm)를 쉼표로 구분해 입력하세요.");
+      showToast("6개의 양수(mm)를 쉼표로 구분해 입력하세요.", { level: "warn" });
       return true;
     }
     const [width, height, top, bottom, left, right] = parts;
@@ -475,7 +475,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
       marginLeft: toTwips(left), marginRight: toTwips(right),
       orientation: landscape ? "landscape" : "portrait",
     });
-    if (result && result.ok === false && result.reason) showToast(result.reason);
+    if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
     docxRefreshChrome(t);
     return true;
   }
@@ -489,8 +489,8 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
     // mm로 물어 왕복 변환.
     const editor = t.docxEditor;
     const img = editor.getSelectedImage();
-    if (!img) { showToast("이미지를 먼저 선택하세요."); return true; }
-    if (!img.canResize) { showToast("이 이미지는 크기를 바꿀 수 없습니다."); return true; }
+    if (!img) { showToast("이미지를 먼저 선택하세요.", { level: "warn" }); return true; }
+    if (!img.canResize) { showToast("이 이미지는 크기를 바꿀 수 없습니다.", { level: "warn" }); return true; }
     const EMU_PER_MM = 36000;
     const mm = (emu) => Math.round((emu / EMU_PER_MM) * 10) / 10;
     const toEmu = (v) => Math.round(v * EMU_PER_MM);
@@ -498,7 +498,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
     if (dimsRaw == null) return true;
     const dims = dimsRaw.split(",").map((s) => Number(s.trim()));
     if (dims.length !== 2 || dims.some((n) => !Number.isFinite(n) || n <= 0)) {
-      showToast("너비,높이(mm) 2개의 양수를 쉼표로 구분해 입력하세요.");
+      showToast("너비,높이(mm) 2개의 양수를 쉼표로 구분해 입력하세요.", { level: "warn" });
       return true;
     }
     const result = editor.exec({
@@ -508,7 +508,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
       widthEmu: toEmu(dims[0]),
       heightEmu: toEmu(dims[1]),
     });
-    if (result && result.ok === false && result.reason) showToast(result.reason);
+    if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
     docxRefreshChrome(t);
     return true;
   }
@@ -540,7 +540,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
         if (pick == null) return true;
       }
       const family = pick.trim();
-      if (!family) { showToast("글꼴 이름을 입력하세요."); return true; }
+      if (!family) { showToast("글꼴 이름을 입력하세요.", { level: "warn" }); return true; }
       docxRestoreSelection(editor, savedSel);
       editor.surface.setRunProperty("rFonts", { ascii: family, hAnsi: family });
     } else {
@@ -552,7 +552,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
         if (pick == null) return true;
       }
       const pt = Number(pick);
-      if (!Number.isFinite(pt) || pt <= 0) { showToast("양수(pt)를 입력하세요."); return true; }
+      if (!Number.isFinite(pt) || pt <= 0) { showToast("양수(pt)를 입력하세요.", { level: "warn" }); return true; }
       docxRestoreSelection(editor, savedSel);
       editor.surface.setRunProperty("sz", { val: String(Math.round(pt * 2)) });
     }
@@ -572,7 +572,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
     if (!picked) return true;
     docxRestoreSelection(editor, savedSel);
     const result = editor.exec({ type: "setParagraphStyle", styleId: picked.styleId });
-    if (result && result.ok === false && result.reason) showToast(result.reason);
+    if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
     docxRefreshChrome(t);
     return true;
   }
@@ -587,7 +587,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
     const multiple = Number(pick);
     docxRestoreSelection(editor, savedSel);
     const result = editor.exec({ type: "setLineSpacing", rule: "multiple", value: multiple });
-    if (result && result.ok === false && result.reason) showToast(result.reason);
+    if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
     docxRefreshChrome(t);
     return true;
   }
@@ -599,7 +599,7 @@ async function docxRunSpecialChromeSlot(t, slotId, anchorEl) {
     // insertBreak 호출로 처리한다.
     const editor = t.docxEditor;
     const result = editor.exec({ type: "insertBreak", kind: "section" });
-    if (result && result.ok === false && result.reason) showToast(result.reason);
+    if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
     docxRefreshChrome(t);
     return true;
   }
@@ -620,7 +620,7 @@ export function docxWireToolbar(t, toolbar) {
       if (pick.cancelled) return;
       docxRestoreSelection(editor, savedSel);
       const result = window.__docxEditorCore.runToolbarCommand(editor, slotId, pick.value);
-      if (result && result.ok === false && result.reason) showToast(result.reason);
+      if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
       docxRefreshChrome(t);
     });
   });
@@ -672,7 +672,7 @@ export function docxOpenMenu(t, anchor) {
       const editing = editor.getHeaderFooterState()?.editing;
       const result = editing ? editor.exec({ type: "exitHeaderFooter" })
         : editor.exec({ type: "editHeaderFooter", position: "header" });
-      if (result && result.ok === false && result.reason) showToast(result.reason);
+      if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
       docxRefreshChrome(t);
       return;
     }
@@ -685,14 +685,14 @@ export function docxOpenMenu(t, anchor) {
     if (DOCX_EXCLUDED_SLOTS.has(slotId)) return;
     const state = core.toolbarCommandState(editor, slotId);
     const enabled = DOCX_IRIS_OWNED_ENABLED_SLOTS.has(slotId) ? true : state.enabled;
-    if (!enabled) { if (state.disabledReason) showToast(state.disabledReason); return; }
+    if (!enabled) { if (state.disabledReason) showToast(state.disabledReason, { level: "info" }); return; }
     if (await docxRunSpecialChromeSlot(t, slotId, anchor)) return;
     const savedSel = docxCaptureSelection(editor);
     const pick = await docxChromeValue(t, slotId, anchor);
     if (pick.cancelled) return;
     docxRestoreSelection(editor, savedSel);
     const result = core.runToolbarCommand(editor, slotId, pick.value);
-    if (result && result.ok === false && result.reason) showToast(result.reason);
+    if (result && result.ok === false && result.reason) showToast(result.reason, { level: "info" });
     docxRefreshChrome(t);
   });
   box.querySelectorAll("[data-docx-menu-slot]").forEach((el) => {
@@ -794,7 +794,7 @@ export function docxApplyHyperlink(t) {
   const input = docxview.querySelector("#docx-link-url");
   if (!links || !input) return;
   if (links.applyHyperlink({ url: input.value.trim() })) docxShowLinkEditor(t, false);
-  else showToast("이 선택에는 링크를 적용할 수 없습니다.");
+  else showToast("이 선택에는 링크를 적용할 수 없습니다.", { level: "warn" });
   docxRefreshChrome(t);
 }
 // 실행취소로 원본과 같은 내용이 됐는지 판정할 유일한 근거다. core는 내용 동일성을 직접
@@ -905,8 +905,8 @@ export function docxSaveTab(t, space) {
     const editorIsCurrent = t.docxEditor === editor;
     if (!editorIsCurrent) throw new Error("DOCX_SAVE_STALE");
     if (resp.error) {
-      if (resp.conflict) showToast("외부에서 파일이 바뀌어 저장할 수 없습니다. 새로고침 후 다시 시도하세요");
-      else showToast("저장 실패: " + resp.error);
+      if (resp.conflict) showToast("외부에서 파일이 바뀌어 저장할 수 없습니다. 새로고침 후 다시 시도하세요", { level: "warn" });
+      else showToast("저장 실패", { level: "err", detail: String(resp.error) });
       throw new Error(resp.error);
     }
     t.docxRevision = resp.revision;

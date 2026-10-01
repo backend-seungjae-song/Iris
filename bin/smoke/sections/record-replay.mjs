@@ -54,12 +54,12 @@ check("오디오 입력만 모든 세션의 request/check 권한 경계에서 �
   return cases.every(([permission, details, denied]) => isAudioInputPermission(permission, details) === denied)
     && /sess\.setPermissionRequestHandler/.test(profileSessionPolicySource)
     && /sess\.setPermissionCheckHandler/.test(profileSessionPolicySource)
-    // 물어볼 때는 막고(callback(false)), 상태를 되물을 때도 같은 답이어야 한다. 한쪽만 막으면
+    // 물어볼 때는 사이트별 허용을 받고, 상태를 되물을 때도 같은 기준이어야 한다. 한쪽만 열면
     // 페이지는 "허용됨"으로 읽고 마이크를 켜려다 조용히 실패한다.
-    && /audioInputPermission\(permission, details\)\)\s*\{\s*callback\(false\)/.test(profileSessionPolicySource)
-    && /!audioInputPermission\(permission, details\)/.test(profileSessionPolicySource);
+    && /askSite\("microphone"/.test(profileSessionPolicySource)
+    && /audioInputPermission\(permission, details\) \? allowedSite\("microphone"/.test(profileSessionPolicySource);
 });
-check("WebAuthn은 안전한 origin이고 HID는 FIDO 장치일 때만 허용", () => {
+await checkAsync("WebAuthn은 안전한 origin이고 HID는 FIDO 장치일 때만 허용", async () => {
   const { createProfileSessionPolicy, isSecureWebAuthnOrigin, isFidoHidDevice } =
     require_("../native/electron/profile-session-policy.cjs");
   const handlers = {};
@@ -98,8 +98,8 @@ check("WebAuthn은 안전한 origin이고 HID는 FIDO 장치일 때만 허용", 
   if (handlers.device({ deviceType: "hid", origin: "http://remote.example", device: fido })) {
     throw new Error("안전하지 않은 origin의 FIDO 장치를 허용한다");
   }
-  let answer;
-  handlers.request(null, "media", (value) => { answer = value; }, { mediaTypes: ["audio"] });
+  // 사이트 권한을 켜지 않은 기본 상태에서는 마이크 요청도 거절한다.
+  const answer = await new Promise((resolve) => handlers.request(null, "media", resolve, { mediaTypes: ["audio"] }));
   if (answer !== false || handlers.check(null, "media", null, { mediaTypes: ["audio"] }) !== false) {
     throw new Error("일반 오디오 입력을 request/check 경계에서 막지 않는다");
   }

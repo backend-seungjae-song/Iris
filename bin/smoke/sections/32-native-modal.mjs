@@ -296,14 +296,16 @@ check("채운 비밀번호는 명령 결과에서 가려진다", () => {
 check("로그인 실패는 사용자에게 알리고 그 탭으로 데려간다", () => {
   const si = read("server/browser-message-handlers.js");
   return /msg\.type === "ai-login-note"/.test(si) && /type: "ai-login-note"/.test(si)
-    && /"ai-login-note": dispatchWs\(handleAiLoginNoteMessage\)/.test(mainJs)
+    && /"ai-login-note": dispatchWs\(consoleOnly\(handleAiLoginNoteMessage\)\)/.test(mainJs)
     && /function showNotice/.test(web) && /function gotoTabById/.test(web)
     && /저장된 로그인이 없습니다/.test(web);
 });
 // 방송은 모든 창이 받으므로, 분리 브라우저 창까지 같은 알림을 띄우면 중복된다.
+// 서버가 방송하는 알림은 모든 창이 받는다. 창마다 그리면 분리 브라우저 창 수만큼 같은 알림이 겹친다.
 check("알림은 콘솔 본 창에서만 뜬다", () => {
-  const i = web.indexOf("function showNotice");
-  return /if \(BROWSER_MODE\) return;/.test(web.slice(i, i + 400));
+  const types = ["ai-login-note", "ai-ask", "ai-ask-closed", "ai-notify", "ai-progress"];
+  return /const consoleOnly = \(handler\) => \(m\) => \{ if \(!BROWSER_MODE\) handler\(m\); \};/.test(web)
+    && types.every((type) => new RegExp(`"${type}": dispatchWs\\(consoleOnly\\(`).test(web));
 });
 // 항상 표시되는 버튼의 disabled만 토글하는 코드가 남아 있으면, 버튼을 제거한 뒤 첫 편집에서
 // 버튼이 다시 나타나지 않는다. 요소를 추가·제거하는 코드여야 한다.
@@ -356,7 +358,7 @@ check("사용자 지목은 앱 재시작을 견딘다", () => {
     && /function grantedByTabId/.test(browserRuntime)
     && /if \(grantedByTabId\(session, tabId\)\) return \{ ok: true \}/.test(browserRuntime)       // 권한 판정
     && /if \(grantedByTabId\(session, t\.tabId\)\) return true/.test(browserRuntime)               // 목록
-    && /addPin\(msg\.pane, pickedId\)/.test(browserMessages)                                // 지목도 정체성에 묶는다
+    && /pinnedTabsByPane\.set\(key, pins\)/.test(sliceBetween(browserRuntime, "function replaceDesignatedTabs", "function grantGroup", "사용자 지목은 앱 재시작을 견딘다")) // 지목도 정체성에 묶는다
     && !/userGrantTabs\.clear\(\)/.test(browserRuntime);                                            // 소켓 끊김에 안 버린다
 });
 // 지목은 사용자가 내린 결정이므로 앱뿐 아니라 서버를 재시작해도 남아야 한다. 확인 결과 서버를
@@ -364,7 +366,9 @@ check("사용자 지목은 앱 재시작을 견딘다", () => {
 check("지목은 서버 재시작도 견딘다", () => {
   return /const GRANT_PATH = path\.join\(IRIS_HOME, "grants\.json"\)/.test(browserRuntime)
     && /function persistGrants/.test(browserRuntime)
-    && /for \(const \[pane, ids\] of \(g\.tabs \|\| \[\]\)\) userGrantTabs\.set/.test(browserRuntime)
+    && /for \(const \[pane, ids\] of \(g\.designated \|\| \[\]\)\) designatedTabsByPane\.set/.test(browserRuntime)
+    && /for \(const \[pane, ids\] of \(g\.elements \|\| \[\]\)\) elementGrantTabsByPane\.set/.test(browserRuntime)
+    && /for \(const \[pane, ids\] of \(g\.tabs \|\| \[\]\)\) \{\s*designatedTabsByPane\.set/.test(browserRuntime) // 옛 파일
     && /for \(const \[pane, keys\] of \(g\.groups \|\| \[\]\)\) groupGrants\.set/.test(browserRuntime)
     && !/out\.wc/.test(browserRuntime);
 });
@@ -373,8 +377,9 @@ check("지목은 서버 재시작도 견딘다", () => {
 // 확인 결과 claude-group-9를 지목했는데 tabs는 claude-group-7을 자기 그룹으로 보고했다.
 check("지목한 그룹이 세션의 그룹이 된다", () => {
   const si = readAll("server");
-  return /function adoptGroup\(pane, space, gid\)/.test(si)
-    && /adoptGroup\(msg\.pane, msg\.space, msg\.group\)/.test(si)
+  return /function replaceDesignatedGroups\(pane, groups\)/.test(si)
+    && /adoptedGroup\.set\(key, values\[values\.length - 1\]\)/.test(si)
+    && /replaceGroups\(records\)[\s\S]{0,180}replaceDesignatedGroups\(session/.test(si)
     && /const a = adoptedOf\(session\);/.test(si)
     && /if \(a && spaceKey\.sameStorageSpace\(a\.space, sessionSpace\(session\)\) && groupExists\(a\.space, a\.gid\)\) return a\.gid;/.test(si)
     && /for \(const \[pane, key\] of \(g\.adopted \|\| \[\]\)\) adoptedGroup\.set/.test(si)   // 재시작을 견딘다
@@ -382,10 +387,8 @@ check("지목한 그룹이 세션의 그룹이 된다", () => {
 });
 // 그룹을 지목했는데 그 안 탭 하나에 고정해 버리면 "그룹 안에서 자유롭게 여러 탭"이 안 된다.
 check("그룹 지목은 탭 고정을 남기지 않는다", () => {
-  const si = read("server/browser-message-handlers.js");
-  const i = si.indexOf('msg.type === "browser-group-grant"');
-  const seg = si.slice(i, i + 1400);
-  return /dropPin\(msg\.pane, null\)/.test(seg) && !/addPin\(/.test(seg);
+  const seg = sliceFrom(browserRuntime, "function replaceDesignatedGroups", 700, "그룹 지목은 탭 고정을 남기지 않는다");
+  return /dropPin\(key, null\)/.test(seg) && !/addPin\(/.test(seg);
 });
 // 그룹 이름은 herdr에 실제로 붙은 이름이다. 지목받은 그룹에 세션 이름을 붙여 보고하면 사용자가
 // 앱에서 보는 이름과 일치하지 않는다.
@@ -429,7 +432,7 @@ check("지목은 탭이 진짜 닫힐 때만 거둬진다", () => {
   const seg = si.slice(i, i + 500);
   const gone = sliceFrom(si, 'msg.type === "browser-tab-gone"', 1000, "지목은 탭이 진짜 닫힐 때만 거둬진다");
   const closeOwner = sliceBetween(browserRuntime, "function removeClosedTab", "function unregisterGoneTab", "지목은 탭이 진짜 닫힐 때만 거둬진다");
-  const goneOwner = sliceBetween(browserRuntime, "function unregisterGoneTab", "// 지목은 현재 대화에서 쓸 탭을 정하는 것이다", "지목은 탭이 진짜 닫힐 때만 거둬진다");
+  const goneOwner = sliceBetween(browserRuntime, "function unregisterGoneTab", "function rebuildTabGrants", "지목은 탭이 진짜 닫힐 때만 거둬진다");
   return /removeClosedTab\(m\.id\)/.test(seg)
     && /for \(const grants of userGrantTabs\.values\(\)\) grants\.delete\(tabId\)/.test(closeOwner)
     // browserState의 close를 타지 않는 팝업만 gone을 진짜 종료로 본다. 일반 gone은 계속 보존한다.
@@ -456,7 +459,7 @@ check("북마크도 요소 선택으로 지목된다", () => {
     && !/여기로 이동하세요/.test(pickHost)     // 지목은 "지금 가라"가 아니다
     && /!pickBmkAt\(e\.target\)/.test(pickHost)               // 지목 중엔 그냥 이동하지 않는다
     && /\.picking-tabs \.bmk\.pick-hover/.test(css("25-pick-record")) // 무엇을 고르는지 보인다
-    && /msg\.type === "site-pick-relay"/.test(read("server/index.js")); // 분리창에서도 된다
+    && /type: "pickrec\.relay", kind: "site"/.test(pickHost); // 분리창에서도 인증된 기능 경로를 쓴다
 });
 // 쪽지는 계속 고쳐 쓰는 것이라, 어제 무엇을 적었는지는 남겨두지 않으면 사라진다.
 check("메모를 날짜로 보관한다", () => {
@@ -557,8 +560,10 @@ check("선택 안 된 그룹은 세션에게 보이지도 않는다", () => {
 // 지목 문구에 wc 숫자(@4)가 들어가면 그건 부를 수 있는 이름이 아니고, 숫자라 헷갈린다.
 check("탭 지목 문구도 서버가 매긴 핸들을 쓴다", () => {
   const si = read("server/browser-message-handlers.js");
-  return /type: "tab-granted"[\s\S]{0,240}handle: handleFor\(pickedId\)/.test(si)
-    && /"tab-granted": \(m\) => \{/.test(pickBoot)
+  return /const handle = handleFor\(pickedId\)/.test(si)
+    && /type: "target-pending"[\s\S]{0,240}handle/.test(si)
+    && /"target-pending": \(m\) => \{/.test(pickBoot)
+    && /등록 구분자: \$\{m\.delimiter\}/.test(pickBoot)
     && /탭: @\$\{m\.handle\}/.test(pickBoot)
     && !/핸들: @\$\{tab\.wc\}/.test(web);   // 창이 wc를 붙이던 옛 문구는 없어야 한다
 });
@@ -576,8 +581,10 @@ check("요소 지목 문구도 고른 그 탭의 핸들을 쓴다", () => {
 // 터미널에 붙는 문구에는 실제로 호출 가능한 이름이 들어가야 한다. 창이 임의로 만들면 안 된다.
 check("그룹 지목 문구의 핸들은 서버가 매긴다", () => {
   const si = read("server/browser-message-handlers.js");
-  return /type: "group-granted"[\s\S]{0,200}handle: groupHandleFor/.test(si)
-    && /"group-granted": \(m\) => \{/.test(pickBoot)
+  return /const handle = groupHandleFor/.test(si)
+    && /type: "target-pending"[\s\S]{0,260}kind: "group"/.test(si)
+    && /"target-pending": \(m\) => \{/.test(pickBoot)
+    && /등록 구분자: \$\{m\.delimiter\}/.test(pickBoot)
     && /그룹: \$\{m\.label\} \(\$\{m\.handle\}\)/.test(pickBoot)
     && !/그룹: \$\{g\.label\}/.test(web);   // 창이 짓던 옛 문구는 없어야 한다
 });
@@ -635,7 +642,8 @@ check("그룹째 지목할 수 있다", () => {
   const si = read("server/index.js");
   return /function grantGroup\(pane, space, gid\)/.test(browserRuntime)
     && /msg\.type === "browser-group-grant"/.test(si)
-    && /msg\.type === "group-pick-relay"/.test(si)
+    && /type: "pickrec\.relay", kind: "group"/.test(pickHost)
+    && /if \(!ws\._local \|\| !ws\._ui\)/.test(read("server/pickrec-relay.js"))
     && /function pickGroupAt/.test(pickHost)
     && /function deliverGroupPick/.test(pickHost)
     && /\.picking-tabs \.ctab, \.picking-tabs \.tgroup, \.picking-tabs \.bmk \{ cursor:crosshair/.test(css("25-pick-record"));
@@ -656,7 +664,8 @@ check("앱은 그 증명을 실제로 보낸다", () => {
   const pre = read("native/electron/preload.cjs"), mainH = read("native/electron/main.cjs");
   return /uiToken: \(\) => ipcRenderer\.sendSync\("ac-ui-token"\)/.test(pre)
     && /ipcMain\.on\("ac-ui-token"/.test(mainH)
-    && /wsSend\(\{ type: "ui-auth", token: t \}\)/.test(web);
+    && /const token = uiToken\(\);\s*if \(token\) wsSend\(\{ type: "ui-auth", token, focused: document\.hasFocus\(\) \}\)/.test(web)
+    && /이 연결이 앱 UI임을 먼저 증명[\s\S]{0,200}reportNoticeFocus\(\)/.test(web);
 });
 // 페이지가 던진 예외 메시지에 "연결 안 됨"이 들어 있으면 문자열 판별은 "안 나갔다"로 오판해
 // 이미 일어난 부수효과를 여러 번 반복한다. 전송 여부는 구조화된 값으로 판단한다.
@@ -721,7 +730,7 @@ check("부르기 전에 할 일이 남았는지 본다", () => {
   return /const UNFILLED_PROBE = /.test(si)
     && /password\|cc-\|card\|cvc\|cvv\|expiry\|one-time\|otp\|captcha/.test(si)   // 비밀 칸 제외
     && /아직 네가 채울 수 있는 칸이 남았습니다/.test(si)
-    && /if \(left\.length && !ready\)/.test(si)
+    && /if \(left\.length && !args\?\.ready\)/.test(si)
     && /AI가 못 채운 칸/.test(si)      // ready로 넘어가도 사용자에게는 보인다
     && /ready: \{ type: "boolean"/.test(mcp);
 });
@@ -758,25 +767,30 @@ check("알림은 여닫는 표식이 짝으로 나간다", () => {
 });
 // 부름은 "갔음"에서 끝나면 안 된다. 거기서 돌려주면 AI가 사람이 일을 마치기 전에 턴을 끝낸다.
 check("부름은 사람이 끝낼 때까지 붙잡는다", () => {
-  const si = readAll("server"), mcp = read("bin/iris-mcp.mjs");
-  return /if \(a === "갔음"\) \{ waitOn\(id, tabId, true\); return; \}/.test(si)   // 출발 신호로는 안 돌려준다
-    && /done: answer === "다 했음"/.test(si)
-    && /const deadline = Date\.now\(\) \+ waitMs;/.test(si)                        // 단계가 넘어가도 한 호출의 끝은 그대로
-    && /ASK_CALL_MAX_MS = 240000/.test(si)
-    && /data-done="1">다 했어요/.test(web) && /data-fail="1">못 하겠어요/.test(web)
-    && /answer\("다 했음"\)/.test(web)
-    && /턴을 끝내지 마/.test(mcp);
+  const si = read("server/browser-commands.js"), ui = read("web/js/core/notice-center.js");
+  const mcp = read("bin/iris-mcp.mjs");
+  return /if \(answer === "갔음"\) \{ waitOn\(\); return; \}/.test(si)
+    && /data\.done = record\.choices \? answer === record\.choices\[0\] : answer === "다 했음"/.test(si)
+    && /record\.deadline = Date\.now\(\) \+ waitMs/.test(si)
+    && /rawWait < 30 \|\| rawWait > 240/.test(si)
+    && /\["다 했어요", "못 하겠어요"\]/.test(ui)
+    && !/data-close|"나중에"/.test(ui)
+    && /턴을 끝내지 말고/.test(mcp);
 });
-check("기다리는 알림은 다른 알림에 밀려나지 않는다", () =>
-  /if \(answer\) el\.dataset\.wait = "1";/.test(web)
-  && /const victim = \[\.\.\.stack\.children\]\.find\(\(c\) => !c\.dataset\.wait\);/.test(web));
+check("기다리는 알림은 다른 알림에 밀려나지 않는다", () => {
+  const ui = read("web/js/core/notice-center.js");
+  return /const waits = items\.filter/.test(ui)
+    && /for \(const item of waits\) noticeList\.append\(card\(item\)\)/.test(ui)
+    && /rest\.slice\(0, 1\)/.test(ui);
+});
 // 호출이 끊긴 사이에 사람이 누른 답도 잃지 않는다. 그러지 않으면 알림을 두 번 띄우게 된다.
 check("끊긴 사이의 답과 부름을 이어받는다", () => {
-  const si = readAll("server");
-  return /const askGoing = new Map\(\)/.test(si) && /const askAnswers = new Map\(\)/.test(si)
-    && /if \(a === "갔음" && own\) askGoing\.set\(own\.session, aid\);/.test(si)
-    && /else \{ askAnswers\.set\(aid, a\);/.test(si)
-    && /const cont = askGoing\.get\(skey\);/.test(si);
+  const si = read("server/browser-commands.js");
+  return /const askByKey = new Map\(\)/.test(si) && /const askAnswers = new Map\(\)/.test(si)
+    && /askAnswers\.set\(aid, a\)/.test(si)
+    && /const resumed = providedId \? askOwner\.get\(providedId\) : null/.test(si)
+    && /let record = resumed \|\| askOwner\.get\(askByKey\.get\(key\)\)/.test(si)
+    && /record\.round \+= 1/.test(si);
 });
 // 이어받기는 호출 본문을 건너뛰고 곧바로 응답 조립으로 간다. 그 조립이 본문에서 선언되는 값을
 // 읽으면 서버가 종료된다(server.log의 ReferenceError: Cannot access 'askDevice' before
@@ -787,15 +801,22 @@ await checkAsync("끊긴 부름을 이어받아도 서버가 살아 있다", asy
   const sent = [];
   mod.initBrowserCommands({ broadcast: (m) => sent.push(m) });
   const sess = "smoke-ask-" + process.pid;
-  // 앱 대상이라 탭 폴백을 쓰지 않으므로, 실제 브라우저 없이 호출이 뜬다.
-  const first = mod.runBrowserCmd("ask", { message: "사람 손이 필요합니다", device: "smoke-sim", wait: 1 }, sess);
-  await new Promise((r) => setTimeout(r, 30));
-  const ask = sent.find((m) => m && m.type === "ai-ask");
-  if (!ask) return false;
-  mod.answerUserAsk(ask.id, "갔음");            // 사람이 출발만 알리고 아직 안 끝냈다
-  await first;                                   // 첫 호출은 제 시간이 다 되어 돌아온다
-  const again = await mod.runBrowserCmd("ask", { message: "이어받기", device: "smoke-sim", wait: 1 }, sess);
-  return !!(again && again.ok && again.data && again.data.device === "smoke-sim");
+  const original = globalThis.setTimeout;
+  let expire;
+  globalThis.setTimeout = (fn, ms, ...args) => ms > 29000 && ms <= 30000 ? (expire = fn, { fake: true }) : original(fn, ms, ...args);
+  try {
+    const first = mod.runBrowserCmd("ask", { message: "사람 손이 필요합니다", device: "smoke-sim", wait: 30 }, sess);
+    await Promise.resolve();
+    const ask = sent.find((m) => m && m.type === "ai-ask");
+    if (!ask || !expire) return false;
+    mod.answerUserAsk(ask.id, "갔음");
+    expire();
+    const timeout = await first;
+    if (timeout.data.answered || timeout.data.id !== ask.id) return false;
+    mod.answerUserAsk(ask.id, "다 했음");
+    const again = await mod.runBrowserCmd("ask", { message: "사람 손이 필요합니다", device: "smoke-sim", ask_id: ask.id, wait: 30 }, sess);
+    return !!(again.ok && again.data.id === ask.id && again.data.done && again.data.round === 2);
+  } finally { globalThis.setTimeout = original; }
 });
 
 // 여러 개를 골랐을 때 어느 문구가 어느 요소인지 대응시키는 라벨.
@@ -815,9 +836,12 @@ check("그룹 지목 글이 어느 탭인지 말해준다", () => {
     && /t\.showing \? "  \(보임\)" : ""/.test(pickBoot)
     && /스페이스 \$\{m\.space\}/.test(pickBoot);
 });
-check("요소를 고르면 그 탭이 등록된다", () => {
+check("요소를 고르면 nonce 블록을 받은 뒤 그 탭 권한이 등록된다", () => {
   const si = read("server/index.js"), commands = read("server/browser-commands.js"), mcp = read("bin/iris-mcp.mjs");
   return /type: "browser-target-set", pane: curTarget, tabId: pickedTab, via: "pick"/.test(pick)
+    && /pendingPickBlocks\.set\(request/.test(pick)
+    && /completePendingPick/.test(pick)
+    && /pickBlock\(pending\.pick, message\.delimiter\)/.test(pick)
     && /type: "ai-pick", pane: curTarget/.test(pick)
     && /msg\.type === "ai-pick"/.test(si)
     && /if \(cmd === "picks"\)/.test(commands)

@@ -63,7 +63,7 @@ test('filesystem permission keeps writes, directories, missing paths, and insecu
   ]) assert.equal(allowsFileSystemRead(permission,origin,details),false);
 });
 
-test('request and check handlers both grant only the bounded readable-file case',()=>{
+test('request and check handlers both grant only the bounded readable-file case',async()=>{
   let requestHandler=null,checkHandler=null;
   const sess={
     setDevicePermissionHandler(){},removeListener(){},on(){},setDisplayMediaRequestHandler(){},
@@ -81,7 +81,8 @@ test('request and check handlers both grant only the bounded readable-file case'
   assert.equal(requested,true);
   assert.equal(checkHandler(null,'fileSystem','https://chatgpt.com',readableFile),true);
   const writable={...readableFile,fileAccessType:'writable'};
-  requestHandler({isDestroyed:()=>false},'fileSystem',value=>{requested=value},writable);
+  // 쓰기 요청은 사이트 권한(기본 꺼짐) 판정을 기다리므로 비동기로 거절된다.
+  requested=await new Promise(resolve=>requestHandler({isDestroyed:()=>false},'fileSystem',resolve,writable));
   assert.equal(requested,false);
   assert.equal(checkHandler(null,'fileSystem','https://chatgpt.com',writable),false);
 });

@@ -162,8 +162,8 @@ test("상태 HTTP 계약: 원격 읽기·쓰기 거절, Origin 거절, 잘못된
     });
   }
   try {
-    assert.equal((await request("GET", undefined, "100.64.0.2")).status, 200);
-    assert.equal(JSON.parse((await request("GET", undefined, "100.64.0.2")).value).local, false);
+    // 서버 루프백 전용. Tailscale 대역 주소는 읽기도 연결 단계 거부
+    assert.equal((await request("GET", undefined, "100.64.0.2")).status, 403);
     assert.equal((await request("PUT", { hidden: [], baseRevision: 0 }, "100.64.0.2")).status, 403);
     assert.equal((await request("GET", undefined, "127.0.0.1", "https://evil.invalid")).status, 403);
     for (const body of ["{", null, { hidden: [3], baseRevision: 0 }, { hidden: [], baseRevision: -1 },

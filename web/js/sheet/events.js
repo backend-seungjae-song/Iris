@@ -187,8 +187,8 @@ export function initSheetEvents(deps) {
       svMenuAt(tab, svList([["이름 바꾸기", "rename"], ["복제", "dup"], ["숨기기", "hide"], ["삭제", "del"]]), (v) => {
         if (v === "rename") { askText("시트 이름", sh.name).then((name) => { if (name && name.trim()) svSheetMeta(t, sh.name, { rename: name.trim() }); }); return; }
         if (v === "dup") { svSheetMeta(t, sh.name, { duplicate: true }); return; }
-        if (v === "hide") { if (visCount <= 1) { showToast("마지막 남은 시트는 숨길 수 없습니다."); return; } svSheetMeta(t, sh.name, { hidden: true }); return; }
-        if (v === "del") { if (t.sheet.sheets.length <= 1) { showToast("마지막 남은 시트는 삭제할 수 없습니다."); return; } svSheetMeta(t, sh.name, { removeSheet: true }); return; }
+        if (v === "hide") { if (visCount <= 1) { showToast("마지막 남은 시트는 숨길 수 없습니다.", { level: "warn" }); return; } svSheetMeta(t, sh.name, { hidden: true }); return; }
+        if (v === "del") { if (t.sheet.sheets.length <= 1) { showToast("마지막 남은 시트는 삭제할 수 없습니다.", { level: "warn" }); return; } svSheetMeta(t, sh.name, { removeSheet: true }); return; }
       });
       return;
     }
@@ -405,7 +405,8 @@ export function initSheetEvents(deps) {
     e.clipboardData.setData("text/plain", txt);
     e.preventDefault();
     const s = svNorm(t._svSel);
-    showToast(s.r1 === s.r2 && s.c1 === s.c2 ? "칸 내용 복사됨" : `${(s.r2 - s.r1 + 1)}줄 × ${(s.c2 - s.c1 + 1)}칸 복사됨`);
+    showToast(s.r1 === s.r2 && s.c1 === s.c2 ? "칸 내용 복사됨" : `${(s.r2 - s.r1 + 1)}줄 × ${(s.c2 - s.c1 + 1)}칸 복사됨`,
+      { level: "ok", near: document.querySelector("#sv-grid td.sv-sel") || "action" });
   });
   document.addEventListener("cut", (e) => {
     const t = svTab(); if (!t || !t._svSel || t._svEd) return;
@@ -436,7 +437,7 @@ export function initSheetEvents(deps) {
     svApply(t, ch);
     t._svSel = { r1: s.r1, c1: s.c1, r2: Math.min(sh.rows, s.r1 + rows.length - 1), c2: Math.min(sh.colsCount, s.c1 + rows[0].length - 1) };
     svPaint(t);
-    showToast(`${rows.length}줄 붙여넣음`);
+    showToast(`${rows.length}줄 붙여넣음`, { level: "ok" });
   });
   
   

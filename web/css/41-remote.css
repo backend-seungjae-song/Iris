@@ -1,0 +1,72 @@
+.remote-panel { width:320px; }
+.remote-body { min-height:100%; padding:20px; color:var(--fg); background:var(--surface); }
+.remote-head { padding-bottom:16px; border-bottom:1px solid var(--line); }
+.remote-head h2 { margin:0; font-size:var(--fs-h); font-weight:var(--fw-semi); }
+.remote-head p { margin:5px 0 0; color:var(--muted); font-size:var(--fs-s); line-height:var(--lh); }
+.remote-card { margin-top:18px; padding:16px; border:1px solid var(--line); border-radius:var(--r); background:var(--raised); }
+.remote-pin-status { color:var(--muted); font-size:var(--fs-xs); }
+.remote-pin-detail { margin:12px 0; color:var(--muted); font-size:var(--fs-s); line-height:var(--lh); }
+.remote-pin-form { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; }
+.remote-pin-form label { color:var(--fg-2); font-size:var(--fs-xs); }
+.remote-pin-input { width:100%; height:36px; padding:0 10px; border:1px solid var(--line-strong); border-radius:var(--r-s); background:var(--surface); color:var(--fg); font-family:var(--mono); font-size:16px; letter-spacing:.16em; }
+.remote-pin-input:focus { outline:2px solid var(--focus); outline-offset:1px; }
+.remote-pin-form .cc-btn { grid-column:1 / -1; justify-self:start; margin-top:4px; }
+.remote-pin-idle { margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+.remote-pin-idle label { display:block; margin-bottom:7px; color:var(--fg-2); font-size:var(--fs-xs); }
+.remote-pin-idle select { width:100%; height:36px; padding:0 9px; border:1px solid var(--line-strong); border-radius:var(--r-s); background:var(--surface); color:var(--fg); }
+.remote-pin-idle p { margin:8px 0 0; color:var(--muted); font-size:var(--fs-xs); line-height:var(--lh); }
+.remote-state-line { display:flex; align-items:center; gap:8px; font-size:var(--fs); }
+.remote-dot { width:8px; height:8px; border-radius:50%; background:var(--muted); }
+.remote-body[data-tone="on"] .remote-dot { background:var(--ok); box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 12%, transparent); }
+.remote-body[data-tone="warn"] .remote-dot,
+.remote-body[data-tone="error"] .remote-dot { background:var(--pal-danger); }
+.remote-guide { margin-top:18px; }
+.remote-steps { display:grid; gap:0; margin:0; padding:0; list-style:none; }
+.remote-step { padding:12px 0; border-bottom:1px solid var(--line); }
+.remote-step-head { display:flex; align-items:center; gap:10px; font-size:var(--fs); }
+.remote-step-mark { display:inline-flex; flex:none; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; border:1px solid var(--line-strong); color:var(--muted); font-size:var(--fs-xs); font-weight:var(--fw-semi); }
+.remote-step[data-state="done"] .remote-step-mark { border-color:var(--ok); background:var(--ok); color:var(--surface); }
+.remote-step[data-state="current"] .remote-step-mark { border-color:var(--fg); color:var(--fg); }
+.remote-step[data-state="later"] { color:var(--muted); }
+.remote-step-summary,
+.remote-step-detail { margin:6px 0 0 32px; color:var(--muted); font-size:var(--fs-s); line-height:var(--lh); overflow-wrap:anywhere; }
+.remote-step[data-tone="error"] .remote-step-detail { color:var(--pal-danger); }
+.remote-step .remote-qr { margin:12px auto 4px; }
+.remote-step .cc-btn { margin:12px 0 0 32px; }
+.remote-step .remote-pin-form { width:calc(100% - 32px); margin:12px 0 0 32px; }
+.remote-step .remote-pin-form .cc-btn { margin:4px 0 0; }
+.remote-detail { min-height:2.6em; margin:8px 0 14px; color:var(--muted); font-size:var(--fs-s); line-height:var(--lh); }
+.remote-feedback { margin:12px 0 0; color:var(--pal-danger); font-size:var(--fs-s); line-height:var(--lh); }
+.remote-pair-card h3,
+.remote-section-head h3 { margin:0; font-size:var(--fs); font-weight:var(--fw-semi); }
+.remote-pair-card { text-align:center; }
+.remote-qr { display:block; max-width:100%; height:auto; margin:14px auto 10px; background:#fff; image-rendering:pixelated; }
+.remote-pair-device { margin:10px 0 6px; color:var(--fg-2); font-size:var(--fs-s); overflow-wrap:anywhere; }
+.remote-code-label { display:block; margin:0 0 10px; color:var(--muted); font-size:var(--fs-s); line-height:var(--lh); text-align:left; }
+.remote-code { width:100%; height:38px; margin:0 0 10px; border:1px solid var(--line-strong); border-radius:var(--r-s); background:var(--surface); color:var(--fg); font-family:var(--mono); font-size:20px; letter-spacing:.28em; text-align:center; }
+.remote-code:focus { outline:2px solid var(--focus); outline-offset:1px; }
+.remote-countdown { margin:10px 0 6px; color:var(--muted); font-size:var(--fs-xs); }
+.remote-devices,
+.remote-requests,
+.remote-hook { margin-top:22px; }
+.remote-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+.remote-device-list { display:grid; }
+.remote-device { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 0; border-bottom:1px solid var(--line); }
+.remote-device > div { min-width:0; }
+.remote-device strong,
+.remote-device span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.remote-device strong { font-size:var(--fs-s); font-weight:var(--fw-semi); }
+.remote-device span { margin-top:3px; color:var(--muted); font-size:var(--fs-xs); }
+.remote-device .cc-btn { flex:none; max-width:142px; }
+.remote-empty { margin:14px 0 0; color:var(--muted); font-size:var(--fs-s); }
+.remote-request-list { display:grid; gap:12px; margin-top:12px; }
+.remote-request { padding:12px; border:1px solid var(--line); border-radius:var(--r-s); background:var(--raised); }
+.remote-request h4 { margin:0 0 10px; font-size:var(--fs-s); font-weight:var(--fw-semi); }
+.remote-request-detail { max-height:220px; margin:0; padding:10px; overflow:auto; border-radius:var(--r-s); background:var(--surface); color:var(--fg-2); font:var(--fs-xs)/var(--lh) var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+.remote-request-actions { display:flex; gap:8px; margin-top:10px; }
+.remote-question { margin:0 0 12px; padding:0; border:0; }
+.remote-question legend { margin-bottom:7px; color:var(--fg-2); font-size:var(--fs-s); }
+.remote-question-option { display:flex; align-items:flex-start; gap:7px; margin:6px 0; color:var(--fg-2); font-size:var(--fs-xs); line-height:var(--lh); }
+.remote-question-option input { margin-top:3px; }
+.remote-question-text { width:100%; height:34px; margin-top:7px; padding:0 9px; border:1px solid var(--line-strong); border-radius:var(--r-s); background:var(--surface); color:var(--fg); }
+.remote-hook-status { margin:12px 0; color:var(--muted); font-size:var(--fs-s); line-height:var(--lh); }

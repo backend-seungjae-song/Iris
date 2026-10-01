@@ -15,7 +15,7 @@
 .ld-upd { font-size:var(--fs-xs); color:var(--faint); margin-left:4px; }
 .ld-sp { flex:1; }
 .ld-ibtn { width:24px; height:24px; display:grid; place-items:center; border-radius:var(--r-s); color:var(--muted); flex:none;
-  font:inherit; background:none; border:0; cursor:pointer; }
+  padding:0; font:inherit; background:none; border:0; cursor:pointer; }
 .ld-ibtn:hover { background:var(--hover); color:var(--fg); }
 .ld-ibtn:active { transform:scale(.94); }
 .ld-led { width:7px; height:7px; border-radius:50%; background:var(--faint); flex:none; display:inline-block; }

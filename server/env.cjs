@@ -34,20 +34,33 @@ function portWithLegacy() {
   return DEFAULT_PORT;
 }
 
-// Origin 검사에서 이 서버 자신의 주소 말고 더 받을 호스트 이름(MagicDNS 이름 등). 쉼표로 나눈다.
-// 호출할 때마다 읽는다. 검사가 값을 바꿔 가며 부른다.
+// Origin 추가 허용 호스트 이름. 쉼표 구분
+// 비교는 http://<이름>:<이 서버 포트> 전체 origin 기준
+// 호출마다 읽기. 검사가 값을 바꿔 가며 호출
 function allowedOriginHosts() {
-  return (process.env.IRIS_ALLOWED_ORIGIN_HOSTS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return (process.env.IRIS_ALLOWED_ORIGIN_HOSTS || "").split(",").map((s) => s.trim()).filter(isHostName);
 }
 
-// 원격(tailnet) 접속을 받는지. REMOTE=1 이면 모든 인터페이스에서 받는다.
-function remote() {
-  return process.env.REMOTE === "1";
+// 호스트 이름 형식 판정. 영문·숫자·하이픈 라벨의 점 연결만
+// 경로·포트·userinfo·query 포함 값 제외. 포함 시 URL 해석에서 포트 제한 무력화
+function isHostName(value) {
+  return /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(value);
 }
 
-// 서버가 받을 주소. 지정하지 않으면 원격 모드는 0.0.0.0, 아니면 루프백만.
+// 서버 네트워크 정책 버전. /healthz 응답에 포함
+// 앱은 같은 값의 서버에만 재사용 연결. 이전 정책(0.0.0.0 수신) 서버 재사용 방지
+const NET_POLICY = "loopback-only/1";
+
+// 기존 원격 설정(REMOTE·HOST) 중 지정된 항목 목록
+// 값과 무관하게 바인딩은 루프백 고정. 외부 접속은 원격 게이트웨이 전용
+// 이 목록은 기동 경고 표시용
+function ignoredRemoteEnv() {
+  return ["REMOTE", "HOST"].filter((name) => process.env[name]);
+}
+
+// 서버 수신 주소. 루프백 고정
 function host() {
-  return process.env.HOST || (remote() ? "0.0.0.0" : "127.0.0.1");
+  return "127.0.0.1";
 }
 
 // 앱이 자식 서버를 실행할 때 전달하는 설정. 읽는 위치와 쓰는 위치가 갈라지면 한쪽만
@@ -57,4 +70,4 @@ function childEnv({ port, stateDir }) {
   return { IRIS_PORT: String(port), IRIS_STATE_DIR: stateDir };
 }
 
-module.exports = { stateDirOverride, port, portWithLegacy, allowedOriginHosts, remote, host, DEFAULT_PORT, childEnv };
+module.exports = { stateDirOverride, port, portWithLegacy, allowedOriginHosts, ignoredRemoteEnv, host, NET_POLICY, DEFAULT_PORT, childEnv };

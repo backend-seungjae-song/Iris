@@ -148,6 +148,10 @@ body.layout-on .emu-column { display: flex; flex-direction: column; position: re
 
 .emu-toolbar { height: 40px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px; min-width: 0;
   border-bottom: 1px solid var(--line); background: var(--chrome); }
+.emu-phone-bar { flex: none; min-height: 42px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 8px;
+  padding: 4px 8px; border-top: 1px solid var(--line); background: var(--chrome); }
+.emu-phone-bar .emu-btn[hidden] { display: none; }
+.emu-toolbar .emu-btn[aria-pressed="true"] { color: var(--focus); background: var(--raised); }
 .emu-toolbar .emu-sp { min-width: 0; }
 .emu-tb-dd { display: flex; min-width: 0; flex: 0 1 auto; }
 .emu-tb-dd .cc-dd-trigger {
@@ -170,7 +174,16 @@ body.layout-on .emu-column { display: flex; flex-direction: column; position: re
 .emu-toolbar .emu-btn:hover:not(:disabled) { border-color: var(--line-strong); }
 .emu-toolbar .emu-btn-danger { border-color: color-mix(in srgb, var(--pal-danger) 40%, transparent); }
 .emu-tb-sep { width: 1px; height: 16px; background: var(--line-strong); flex: none; margin: 0 2px; }
+/* 기기 음량(아래 기기 조작 줄): 음소거 단추 + 막대 + 값. 값 글자는 좁은 폭에서 .emu-tb-label 규칙으로 빠짐 */
+.emu-vol { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.emu-vol[hidden] { display: none; }
+.emu-phone-bar .emu-vol-mute[aria-pressed="true"] { color: var(--muted); }
+.emu-vol-range { width: 76px; height: 16px; margin: 0 2px; accent-color: var(--accent); cursor: pointer; }
+.emu-vol-range:disabled { opacity: .45; cursor: default; }
+.emu-vol.muted .emu-vol-range { opacity: .45; }
+.emu-vol-val { min-width: 3.4em; font-size: var(--fs-s); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @container (max-width: 560px) {
+  .emu-vol-range { width: 56px; }
   .emu-toolbar { padding: 0 6px; gap: 2px; }
   .emu-tb-label, .emu-tb-rt, .emu-tb-status { display: none; }
   .emu-tb-dd .emu-tb-live { display: block; }
@@ -185,6 +198,9 @@ body.layout-on .emu-column { display: flex; flex-direction: column; position: re
   .emu-toolbar .emu-btn-danger, .emu-toolbar .emu-btn-danger:hover:not(:disabled) { color: var(--pal-danger); }
   .emu-toolbar .emu-btn-pri { color: var(--pal-ink); }
   .emu-toolbar .emu-btn-pri:hover:not(:disabled) { background: var(--focus); color: var(--pal-ink); }
+  .emu-phone-bar .emu-tb-label { display: none; }
+  .emu-phone-bar .emu-btn { width: 30px; height: 30px; padding: 3px; display: grid; place-items: center; }
+  .emu-phone-bar { column-gap: 4px; }
 }
 
 /* 붙기·종료·목록 실패 문장. 공백 없는 긴 경로도 줄 안에서 끊고, 아주 길면 이 줄 안에서 스크롤한다.
@@ -235,3 +251,40 @@ body.layout-on .emu-column .emu-frame-wrap { padding: 20px 12px; }
 .emu-launch-item:disabled { opacity: .45; cursor: default; }
 .emu-launch-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .emu-launch-runtime { margin-left: auto; flex: none; font-size: var(--fs-xs); color: var(--faint); font-family: var(--mono); }
+
+/* 기기별 화면은 유지하고 선택한 탭만 표시한다. */
+.emu-group { flex: 1; min-width: 280px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.emu-group-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.emu-stage-host { flex-direction: row; overflow-x: auto; }
+.emu-group + .emu-group { border-left: 1px solid var(--line); }
+.emu-group-head { padding: 0; gap: 0; min-width: 0; box-sizing: border-box; }
+.emu-group-tabs .ctab { font: inherit; background: transparent; white-space: nowrap; border: 0; border-right: 1px solid var(--line); border-radius: 0; cursor: pointer; }
+.emu-group-tabs .ctab.active { background: var(--surface); color: var(--fg); }
+.emu-group-tabs .ctab:hover { background: var(--hover); }
+.emu-group-tabs .ctab:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.emu-group-tools { flex: none; min-width: 0; }
+.emu-group-tools .emu-toolbar { height: 35px; min-height: 0; padding: 0 3px; gap: 0; border-bottom: 0; background: transparent; }
+.emu-group-tools .emu-tb-label, .emu-group-tools .emu-tb-sep, .emu-group-tools .emu-sp { display: none; }
+.emu-group-tools .emu-btn { height: 26px; width: 26px; padding: 0; justify-content: center; }
+.emu-group-tools .emu-toolbar .emu-btn { font-size: 0; gap: 0; }
+
+/* Device management */
+.emu-dp-list:has(.emu-dp-device) { overflow: visible; }
+.emu-dp-device { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.emu-dp-device:last-child { border-bottom: 0; }
+.emu-dp-readiness { margin: 0 8px 5px 20px; font-size: var(--fs-xs); color: var(--muted); line-height: 1.4; }
+.emu-dp-readiness.needs-install { color: var(--pal-yellow-pop); }
+.emu-dp-actions { display: flex; gap: 4px; padding: 0 4px 0 8px; align-items: center; }
+.emu-dp-actions .emu-btn { padding: 0 6px; }
+.emu-dp-placement { flex: 1; min-width: 0; }
+.emu-dp-placement .cc-dd-trigger { width: 100%; height: 24px; padding: 0 4px; font-size: var(--fs-xs); gap: 3px; }
+.emu-dp-placement .cc-dd-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.emu-dp-placement .cc-dd-menu { min-width: 128px; }
+.emu-dp-add { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px var(--pad) 12px; border-top: 1px solid var(--line); }
+.emu-dp-add .emu-dp-desc { width: 100%; }
+.emu-device-dialog { width: min(390px, calc(100vw - 40px)); padding: 18px; border: 1px solid var(--line-strong); border-radius: var(--r-m); background: var(--surface); color: var(--fg); font: inherit; box-shadow: var(--shadow); }
+.emu-device-dialog::backdrop { background: rgb(0 0 0 / .45); }
+.emu-device-dialog > .emu-dp-h3 { margin-bottom: 14px; }
+.emu-device-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.emu-device-form .cc-dd-trigger { max-width: 100%; }
+.emu-device-form .cc-dd-value, .emu-device-form .cc-dd-sub { overflow: hidden; text-overflow: ellipsis; }

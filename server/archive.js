@@ -11,22 +11,14 @@
 // 복원하면 보관한 이유인 메모리 사용량이 그대로 돌아온다.
 import fs from "node:fs";
 import path from "node:path";
+import { agentArgv } from "./agent-launch.js";
 import { claudeHome, codexHome } from "./agent-homes.js";
 import { stateHome } from "./state-home.cjs";
 
 const DATA_DIR = stateHome();
 const ARCHIVE_PATH = path.join(DATA_DIR, "archives.json");
 
-// 세션을 잇는 명령. 이 표에 없는 종류는 보관을 막는다(복원 방법을 모르는 채로 종료하지 않는다).
-const RESUME_ARGV = {
-  claude: (uuid) => ["claude", "--resume", uuid],
-  codex: (uuid) => ["codex", "resume", uuid],
-};
-export function canResume(agentKind) { return !!RESUME_ARGV[String(agentKind || "").toLowerCase()]; }
-export function resumeArgv(agentKind, uuid) {
-  const f = RESUME_ARGV[String(agentKind || "").toLowerCase()];
-  return f ? f(String(uuid)) : null;
-}
+export function canResume(agentKind) { return agentArgv(agentKind) !== null; }
 
 // ── 마지막 내용 ──
 // herdr의 pane.read는 화면에 보이는 만큼만 반환한다. lines를 올려도 뷰포트(≈55줄) 위쪽은 나오지
@@ -143,13 +135,14 @@ export function load() {
 }
 
 let saveTimer = null;
+function writeItems() {
+  fs.mkdirSync(path.dirname(ARCHIVE_PATH), { recursive: true });
+  fs.writeFileSync(ARCHIVE_PATH + ".tmp", JSON.stringify({ items }), { mode: 0o600 });
+  fs.renameSync(ARCHIVE_PATH + ".tmp", ARCHIVE_PATH);
+}
 function writeNow() {
   saveTimer = null;
-  try {
-    fs.mkdirSync(path.dirname(ARCHIVE_PATH), { recursive: true });
-    fs.writeFileSync(ARCHIVE_PATH + ".tmp", JSON.stringify({ items }), { mode: 0o600 });
-    fs.renameSync(ARCHIVE_PATH + ".tmp", ARCHIVE_PATH);
-  } catch {}
+  try { writeItems(); } catch {}
 }
 function persist() {
   clearTimeout(saveTimer);
@@ -190,6 +183,17 @@ export function add(entry) { items.unshift(entry); persist(); return entry; }
 export function addMany(entries) { items.unshift(...entries); persist(); return entries; }
 
 export function get(id) { return items.find((x) => x.id === id) || null; }
+
+export function update(id, changes) {
+  const index = items.findIndex((entry) => entry.id === id);
+  if (index < 0) throw new Error("갱신할 보관 기록을 찾지 못했습니다.");
+  items[index] = { ...items[index], ...changes, id };
+  clearTimeout(saveTimer); saveTimer = null;
+  // 이미 실행한 탭은 메모리에서도 제외한다. 저장 실패 후 같은 앱에서 재시도해도 중복 실행하지 않는다.
+  try { writeItems(); }
+  catch (error) { throw new Error(`복원 상태를 저장하지 못했습니다. 앱 재시작 전에 저장 상태를 확인하세요: ${error.message || error}`); }
+  return items[index];
+}
 
 export function remove(id) {
   const i = items.findIndex((x) => x.id === id);

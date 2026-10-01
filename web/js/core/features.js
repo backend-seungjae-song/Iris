@@ -152,6 +152,13 @@ const PRESET_ON = {
   get dev() { return inPreset("dev"); },
 };
 
+// 설정 「편의 기능」 목록을 그룹별로 거를 때의 구성원 id. null 은 전부(거르지 않음)
+export function presetMembers(presetId) {
+  if (!(presetId in PRESET_ON)) return null;
+  const want = PRESET_ON[presetId];
+  return want === null ? null : [...want];
+}
+
 // 프리셋을 적용하면 무엇이 켜지고 무엇이 꺼지는지. 실제로 바꾸기 전에 물어볼 수 있게 따로 낸다.
 // 꺼져 있는 기본 꺼짐 기능은 확인 창 없이 켜지면 안 되므로 프리셋 대상에서 뺀다. 켜진 것은 끌 수 있다.
 export function presetPlan(presetId) {

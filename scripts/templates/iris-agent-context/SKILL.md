@@ -17,6 +17,16 @@ Use `--runtime claude` for Claude Code. Reasons are `independent-work`, `indepen
 
 In Iris, clicking a parent row shows only the parent's chat and clicking a child row shows only that child's chat. Previous/next agent navigation cycles top-level sessions; from a child it uses the top-level parent's position. A selected row clicked again, or its arrow, toggles descendants. Cmd+W closes only the selected pane after its terminal identity is checked; held-key repeats are ignored. Preserve a child's result before closing its exact pane.
 
+## Worktrees
+
+When your work needs its own git worktree, create it through the same launcher as the `launch` command above, using its `worktree` subcommand, instead of `git worktree add`:
+
+```sh
+node <launcher path from the launch command above> worktree --name NAME [--base BRANCH] [--branch BRANCH] [--repo /absolute/repo]
+```
+
+Run it from your own terminal session (your normal shell tool inside the herdr pane is fine). It records that pane as the session that created the worktree, so the Iris sidebar can show who made it; a worktree made with plain git shows the creator as unknown. It prints JSON with the new `path`. By default the folder is `<repo>-worktrees/NAME` on a new branch `feat/NAME` from the current branch. Afterwards, run your commands with that path as the working directory (for example `cd PATH && ...`, or `--cwd PATH` for a child context) so Iris also shows your session as running there. Leave removing the worktree to the user.
+
 ## Non-interactive runs
 
 A `codex exec` or `claude -p` started straight from a shell is only a process. Iris cannot show it, because herdr has no way to adopt a running process into a pane. Start such a run inside a child pane instead:
@@ -28,5 +38,9 @@ node {{RUNNER}} --runtime codex --label JOB_NAME -- codex exec -m MODEL "task"
 This is transparent — stdin, stdout, stderr and the exit code match a direct run, and the two streams stay separate. The child gets its own tab, appears under its parent in the Agents tree, and its pane closes when the command ends. Outside herdr it runs the command unchanged. Use it whenever a script or tool of yours launches a subsession; a command typed straight into a shell is already wrapped for you.
 
 The launcher uses the installed Iris application. Re-run `pnpm install:app` from the Iris source repository after updating Iris to refresh this managed skill and launcher package. New Codex and Claude sessions discover the installed skill; do not assume an already-running thread reloads it.
+
+## Prompt target registration
+
+Iris adds tab, group, picked-element, and emulator delimiters to the chat input when the user designates a target in the app. The UserPromptSubmit hook registers only valid delimiters that arrive in the user's submitted message. Tab and group delimiters keep the existing handle before `~`; emulator delimiters use `@device:<udid>~<nonce>`. When several emulators are registered, every `app_*` tool call must include `device`.
 
 <!-- iris-agent-context-managed:v1 -->

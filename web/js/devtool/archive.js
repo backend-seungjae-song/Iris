@@ -32,7 +32,7 @@ export const panelHtml = `
   <div class="ar-split" id="ar-body">
     <div class="ar-side">
       <div class="ar-bar"><h2 class="ar-bar-title">보관함</h2><span class="ar-count" id="ar-count"></span><span class="ar-sp"></span>
-        <button type="button" class="ar-ib" id="ar-refresh" title="새로고침"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button></div>
+        <button type="button" class="ar-ib" id="ar-refresh" title="새로고침"><svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 0-2.3 5.7"/><path d="M20 5v7h-7"/></svg></button></div>
       <div class="ar-sbar"><label class="ar-search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><input type="search" id="ar-q" placeholder="이름·폴더·마지막 화면 내용으로 찾기" /></label></div>
       <div id="ar-busy"></div>
       <div class="ar-list" id="ar-list"></div>
@@ -56,6 +56,7 @@ let setPendingSpaceFocus = null;
 let getIsLocal = () => true;
 let getLastAgents = () => [];
 let askConfirm = async () => false;
+let arToastId = null;
 
 export function initArchive(deps) {
   // 스페이스 보관은 보관 기능의 조작이다. 앱 셸의 우클릭 메뉴가 이 이름으로 받아 가고, 보관을 끄면
@@ -84,9 +85,9 @@ export function initArchive(deps) {
     const more = e.target.closest("[data-ar-more]");
     if (more) { const id = more.dataset.arMore; arTailOpen.has(id) ? arTailOpen.delete(id) : arTailOpen.add(id); arRender(); return; }
     // 복원 중에는 다시 누르지 못하게 막는다. 목록이 그 사이 줄어들어 두 번째 요청이 다른 항목을 가리킨다.
-    if (arBusy && e.target.closest("[data-ar-restore-space],[data-ar-restore]")) { showToast("아직 되살리는 중입니다."); return; }
+    if (arBusy && e.target.closest("[data-ar-restore-space],[data-ar-restore]")) { showToast("아직 되살리는 중입니다.", { level: "info" }); return; }
     const resSpace = e.target.closest("[data-ar-restore-space]");
-    if (resSpace) { send({ type: "archive.restore", spaceCwd: resSpace.dataset.arRestoreSpace }); showToast("되살리는 중…"); return; }
+    if (resSpace) { send({ type: "archive.restore", spaceCwd: resSpace.dataset.arRestoreSpace }); arToastId = showToast("되살리는 중…", { level: "progress", ttl: Date.now() + 120000 }); return; }
     const forgetSpace = e.target.closest("[data-ar-forget-space]");
     if (forgetSpace) {
       const cwd = forgetSpace.dataset.arForgetSpace;
@@ -96,7 +97,7 @@ export function initArchive(deps) {
       return;
     }
     const res = e.target.closest("[data-ar-restore]");
-    if (res) { send({ type: "archive.restore", id: res.dataset.arRestore }); showToast("되살리는 중…"); return; }
+    if (res) { send({ type: "archive.restore", id: res.dataset.arRestore }); arToastId = showToast("되살리는 중…", { level: "progress", ttl: Date.now() + 120000 }); return; }
     const forget = e.target.closest("[data-ar-forget]");
     if (forget) {
       const it = archives.find((x) => x.id === forget.dataset.arForget);
@@ -304,9 +305,10 @@ export function handleArchiveMessage(m) {
     archives = Array.isArray(m.items) ? m.items : [];
     arRender();
   } else if (m.type === "archive-error") {
-    showToast(m.message || "보관 조작 실패");
+    showToast("보관 조작 실패", { level: "err", detail: String(m.message || "원인 불명"), id: arToastId });
+    arToastId = null;
   } else if (m.type === "archive-note") {
-    showToast(m.message);
+    showToast(m.message, { level: "info" });
   } else if (m.type === "archive-progress") {
     arBusy = { cwd: m.spaceCwd, done: m.done, total: m.total, name: m.name };
     arRender();
@@ -314,7 +316,8 @@ export function handleArchiveMessage(m) {
     arBusy = null;
     // 복원한 스페이스로 들어간다. 복원의 목적이 그 스페이스에서 작업을 이어가는 것이다.
     if (m.workspaceId) setPendingSpaceFocus(m.workspaceId);
-    showToast(m.note || "되살렸습니다.");
+    showToast(m.note || "되살렸습니다.", { level: "ok", id: arToastId });
+    arToastId = null;
   } else return false;
   return true;
 }

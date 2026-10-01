@@ -92,42 +92,16 @@ body.right-collapsed #right-restore { display:block; }
 
 /* 누를 수 있는 요소의 전환. 전역 와일드카드로 걸면 터미널 글자 판까지 전환이 걸리므로 요소마다 준다. */
 .right-head .sidebar-toggle, .right-head .collapse-btn, #right-restore, .htab, .htab-add, .htab-x,
-.ctxmenu .ci, .ci-dot, .notice button, .askbox button, .askbox input, .changebar button, .pal-item {
+.ctxmenu .ci, .ci-dot, .askbox button, .askbox input, .askwrap .mdl button,
+.iris-notice-actions button, .iris-notice-close, .iris-notices-more, .changebar button, .pal-item {
   transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
-
-/* 뜨는 위치는 창 가운데가 아니라 채팅 칸 가운데, 즉 복사한 위치다.
-   1.6초 뒤 사라지므로 놓치면 다시 볼 수 없다. 그래서 테두리를 강조색으로 둔다. */
-.copied-toast { position:absolute; bottom:36px; left:50%; transform:translate(-50%, 6px); z-index:50;
-  height:28px; display:flex; align-items:center; padding:0 10px; white-space:nowrap;
-  background:var(--raised); border:1px solid var(--focus); border-radius:var(--r);
-  box-shadow:0 10px 28px color-mix(in srgb, var(--pal-ink) 85%, transparent);
-  color:var(--fg); font-size:var(--fs-s); font-weight:600; opacity:0; pointer-events:none;
-  transition:opacity var(--t) var(--ease), transform .12s var(--ease); }
-.copied-toast.show { opacity:1; transform:translate(-50%, 0); }
-
-/* 알림. 토스트는 1.6초 뒤 사라진다. 로그인처럼 반드시 확인해야 하는 것은 사람이 볼 때까지 남아야 하고,
-   그 위치로 이동하는 수단도 함께 있어야 한다. */
-/* 알림은 우측 상단. 창 위쪽 30px는 드래그용 타이틀바라 그 아래에 붙인다. */
-.noticestack { position:fixed; right:16px; top:38px; z-index:220; display:flex; flex-direction:column; gap:6px; max-width:340px; }
-.notice { padding:10px; background:var(--raised); color:var(--fg); border:1px solid var(--line-strong); border-radius:var(--r);
-  box-shadow:0 10px 28px color-mix(in srgb, var(--pal-ink) 85%, transparent); font-size:var(--fs);
-  animation:notice-in var(--t) var(--ease); }
 @keyframes notice-in { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:none; } }
-/* 등급은 제목 앞 점으로 가른다. 왼쪽에 굵은 띠를 세우면 알림마다 두께가 달라 줄이 들쭉날쭉해진다. */
-.notice .nt { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-weight:600; }
-.notice .nt::before { content:""; flex:none; width:6px; height:6px; border-radius:50%; background:var(--accent); }
-.notice.warn .nt::before { background:var(--pal-danger); }
-/* 사람이 직접 해야 진행되는 단계(결제·본인확인)는 다른 알림과 섞이면 안 되므로 점에 테두리를 둘러 구분한다. */
-.notice.call .nt::before { background:var(--pal-yellow-pop); box-shadow:0 0 0 3px color-mix(in srgb, var(--pal-yellow-pop) 22%, transparent); }
-.notice .nb { color:var(--muted); font-size:var(--fs-s); line-height:1.45; word-break:break-word; }
-.notice .na { display:flex; justify-content:flex-end; gap:6px; margin-top:10px; }
-/* 알림과 확인창의 단추는 같은 모양이다. 같은 동작을 하는 요소는 같게 보여야 한다. */
-.notice button, .askbox button { height:24px; padding:0 9px; display:inline-flex; align-items:center; gap:6px; flex:none;
+.askbox button { height:24px; padding:0 9px; display:inline-flex; align-items:center; gap:6px; flex:none;
   border:1px solid var(--line-strong); border-radius:var(--r-s); background:none; color:var(--fg-2);
   font:inherit; font-size:var(--fs-s); white-space:nowrap; cursor:pointer; }
-.notice button:hover, .askbox button:hover { background:var(--hover); color:var(--fg); }
-.notice button.hot, .askbox button.primary { background:var(--accent); border-color:transparent; color:var(--pal-ink); font-weight:600; }
-.notice button.hot:hover, .askbox button.primary:hover { background:var(--focus); color:var(--pal-ink); }
+.askbox button:hover { background:var(--hover); color:var(--fg); }
+.askbox button.primary { background:var(--accent); border-color:transparent; color:var(--pal-ink); font-weight:600; }
+.askbox button.primary:hover { background:var(--focus); color:var(--pal-ink); }
 
 .ctxmenu { position:fixed; z-index:300; min-width:190px; padding:4px; background:var(--raised); border:1px solid var(--line-strong);
   border-radius:var(--r); box-shadow:0 10px 28px color-mix(in srgb, var(--pal-ink) 85%, transparent); font-size:var(--fs); user-select:none; }
@@ -147,10 +121,10 @@ body.right-collapsed #right-restore { display:block; }
 /* 입력 창. Electron 렌더러에는 window.prompt 가 없다("prompt() is not supported." 예외). 이름을
    묻는 곳은 전부 이것을 쓴다. */
 .askwrap { position:fixed; inset:0; z-index:400; display:flex; align-items:center; justify-content:center;
-  background:rgb(var(--pal-shadow) / .45); animation:askwrap-in var(--t) var(--ease); }
+  animation:askwrap-in var(--t) var(--ease); }
 @keyframes askwrap-in { from { opacity:0; } to { opacity:1; } }
 .askbox { width:min(400px,86vw); padding:12px; background:var(--raised); border:1px solid var(--line-strong); border-radius:var(--r);
-  box-shadow:0 10px 28px color-mix(in srgb, var(--pal-ink) 85%, transparent); font-size:var(--fs); animation:askbox-in var(--t) var(--ease); }
+  box-shadow:var(--menu-shadow); font-size:var(--fs); animation:askbox-in var(--t) var(--ease); }
 @keyframes askbox-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
 .askbox .asktitle { margin-bottom:4px; color:var(--fg); font-size:var(--fs-h); font-weight:600; }
 .askbox .asknote { margin-bottom:10px; color:var(--muted); font-size:var(--fs-s); word-break:break-all; }
@@ -160,6 +134,98 @@ body.right-collapsed #right-restore { display:block; }
 .askbox input:focus { border-color:var(--focus); }
 .askbox .askrow { display:flex; justify-content:flex-end; gap:6px; margin-top:12px; }
 
+.askwrap .dim { position:absolute; inset:0; background:rgb(var(--pal-shadow) / .45); }
+.askwrap .modal { position:relative; display:grid; place-items:center; width:100%; pointer-events:none; }
+.askwrap .mdl { width:min(380px, 90vw); padding:16px; background:var(--raised); border:1px solid var(--line-strong);
+  border-radius:var(--r-card); box-shadow:var(--menu-shadow); pointer-events:auto; animation:askbox-in var(--t) var(--ease); }
+.askwrap .mdl .tt { color:var(--fg); font-size:var(--fs-h); font-weight:600; }
+.askwrap .mdl .tb { color:var(--muted); font-size:var(--fs-s); margin-top:4px; overflow-wrap:anywhere; }
+.askwrap .mdl .target { margin-top:10px; border:1px solid var(--line); border-radius:var(--r-s); }
+.askwrap .mdl .target div { padding:5px 8px; border-bottom:1px solid var(--line); color:var(--fg-2); font-size:var(--fs-s); overflow-wrap:anywhere; }
+.askwrap .mdl .target div:last-child { border-bottom:0; }
+.askwrap .mdl-row { display:flex; align-items:center; justify-content:flex-end; gap:6px; margin-top:14px; }
+.askwrap .mdl-row .hint { margin-right:auto; color:var(--faint); font-size:var(--fs-xs); }
+.askwrap .mdl-row .kc { padding:1px 4px; border:1px solid var(--line-strong); border-radius:var(--r-s); }
+.askwrap .mdl button { height:24px; padding:0 9px; border:1px solid var(--line-strong); border-radius:var(--r-s);
+  background:none; color:var(--fg-2); font:inherit; cursor:pointer; }
+.askwrap .mdl button:hover { background:var(--hover); color:var(--fg); }
+.askwrap .mdl button.primary { background:var(--pal-babyblue); border-color:transparent; color:var(--pal-ink); font-weight:600; }
+.askwrap .mdl input { width:100%; height:24px; margin-top:10px; padding:0 8px; border:1px solid var(--line-strong);
+  border-radius:var(--r-s); background:var(--raised); color:var(--fg); font:inherit; outline:none; }
+
+/* 위치는 notice-center.js 가 채팅 탭줄 아래로 계산해 변수로 넣음. 변수가 없으면 창 오른쪽 위 */
+.iris-notices { position:fixed; z-index:450; top:var(--notice-top, 38px); right:var(--notice-right, 12px);
+  width:min(var(--notice-width, 340px), calc(100vw - 24px));
+  display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+.iris-notices-list { display:flex; flex-direction:column; gap:6px; max-height:calc(100vh - var(--notice-top, 38px) - 46px); overflow-y:auto; pointer-events:auto; }
+.iris-notice-section { display:flex; align-items:center; gap:8px; padding:0 2px; color:var(--muted); font-size:var(--fs-xs); font-weight:600; }
+.iris-notice-section::after { content:""; flex:1; height:1px; background:var(--line); }
+.iris-notice { position:relative; padding:10px 10px 11px; background:var(--raised); color:var(--fg);
+  border:1px solid var(--line-strong); border-radius:var(--r); box-shadow:var(--menu-shadow); overflow:hidden;
+  animation:notice-in var(--t) var(--ease); --notice-color:var(--accent); }
+.iris-notice-ok { --notice-color:var(--ok); }
+.iris-notice-warn, .iris-notice-ask, .iris-notice-approve, .iris-notice-waiting { --notice-color:var(--st-question); }
+.iris-notice-err { --notice-color:var(--pal-danger); }
+.iris-notice-ask, .iris-notice-approve, .iris-notice-waiting { border-color:color-mix(in srgb, var(--st-question) 50%, var(--line-strong)); }
+.iris-notice-head { display:flex; align-items:flex-start; gap:7px; }
+.iris-notice-icon { display:grid; place-items:center; flex:none; width:16px; height:16px; color:var(--notice-color); }
+.iris-notice-icon svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.iris-notice-wait-mark { width:9px; height:9px; transform:rotate(45deg); border-radius:1.5px; background:var(--notice-color);
+  animation:iris-notice-wait 1.8s var(--ease) infinite; }
+@keyframes iris-notice-wait { 70% { box-shadow:0 0 0 6px color-mix(in srgb, var(--notice-color) 0%, transparent); } }
+.iris-notice-title { flex:1; min-width:0; font-weight:600; line-height:1.45; overflow-wrap:anywhere; }
+.iris-notice-close { flex:none; width:20px; height:20px; padding:0; border:0; background:none; color:var(--faint); cursor:pointer; }
+.iris-notice-source { display:flex; align-items:center; gap:6px; margin:3px 0 0 23px; color:var(--faint); font-size:var(--fs-xs); }
+.iris-notice-ai { padding:2px 4px; border-radius:var(--r-s); color:var(--pal-ink); background:var(--ai); font:600 var(--fs-xs)/1 var(--mono); }
+.iris-notice-body { margin:3px 0 0 23px; color:var(--muted); font-size:var(--fs-s); line-height:1.5; overflow-wrap:anywhere; }
+.iris-notice-detail { margin:6px 0 0 23px; border:1px solid var(--line); border-radius:var(--r-s); cursor:pointer; }
+.iris-notice-detail pre { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+  margin:0; padding:6px 8px; color:var(--fg-2); font:var(--fs-s)/1.5 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+.iris-notice-detail.expanded pre { display:block; }
+.iris-notice-detail button { margin:0 6px 6px auto; display:block; }
+.iris-notice-items { margin:6px 0 0 23px; padding:0; list-style:none; border:1px solid var(--line); border-radius:var(--r-s); }
+.iris-notice-items li { padding:3px 8px; border-bottom:1px solid var(--line); color:var(--fg-2); font:var(--fs-s) var(--mono); overflow-wrap:anywhere; }
+.iris-notice-items li:last-child { border:0; }
+.iris-notice-irreversible { margin:6px 0 0 23px; color:var(--pal-danger); font-size:var(--fs-s); }
+.iris-notice-progress { height:2px; margin:8px 0 0 23px; background:var(--line-strong); overflow:hidden; }
+.iris-notice-progress span { display:block; width:calc(var(--notice-progress, .3) * 100%); height:100%; background:var(--notice-color); }
+.iris-notice-progress.indeterminate span { animation:iris-notice-progress 1.2s var(--ease) infinite; }
+@keyframes iris-notice-progress { from { transform:translateX(-100%); } to { transform:translateX(340%); } }
+.iris-notice-round, .iris-notice-left, .iris-notice-expired { display:block; margin:6px 0 0 23px; color:var(--faint); font:var(--fs-xs) var(--mono); }
+.iris-notice-expired { color:var(--st-question); }
+.iris-notice-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-top:10px; }
+.iris-notice-actions button, .iris-notices-more, .iris-notice-detail button { height:24px; padding:0 9px;
+  border:1px solid var(--line-strong); border-radius:var(--r-s); background:none; color:var(--fg-2); font:var(--fs-s) var(--sans); cursor:pointer; }
+.iris-notice-actions button:hover, .iris-notices-more:hover { background:var(--hover); color:var(--fg); }
+.iris-notice-actions button.primary { background:var(--pal-babyblue); color:var(--pal-ink); border-color:transparent; font-weight:600; }
+.iris-notice-life { position:absolute; left:0; bottom:0; width:100%; height:2px; background:var(--notice-color); transform-origin:left; animation:iris-notice-life linear forwards; }
+@keyframes iris-notice-life { from { transform:scaleX(var(--life-from, 1)); } to { transform:scaleX(0); } }
+/* 마우스를 올리면 사라지는 시간도 멈춤(notice-center.js 의 시간 계산과 같은 조건) */
+.iris-notices:hover .iris-notice-life { animation-play-state:paused; }
+/* 모션을 끄면 애니메이션 대신 0.2초마다 바뀌는 인라인 길이 */
+body.motion-off .iris-notice-life { animation:none !important; }
+.iris-notices-more { width:100%; text-align:left; border-style:dashed; background:var(--raised); pointer-events:auto; }
+.iris-notices-more[hidden] { display:none; }
+/* 조작 옆 알림(core/action-notice.js): 상태 색을 채운 칩, 꼬리(--tail)가 누른 곳을 가리킴 */
+.action-notice { position:fixed; z-index:460; display:flex; align-items:center; gap:6px; max-width:min(320px, calc(100vw - 16px));
+  padding:4px 9px; border-radius:var(--r); background:var(--notice-color); color:var(--pal-ink); box-shadow:var(--menu-shadow);
+  font:600 var(--fs-s)/1.4 var(--sans); --notice-color:var(--accent); }
+.action-notice[hidden] { display:none; }
+.action-notice.in { animation:action-notice-in var(--t) var(--ease); }
+@keyframes action-notice-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.action-notice.down.in { animation-name:action-notice-in-down; }
+@keyframes action-notice-in-down { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+.action-notice::after { content:""; position:absolute; left:var(--tail, 50%); bottom:-5px; width:10px; height:10px; margin-left:-5px;
+  background:var(--notice-color); transform:rotate(45deg); border-radius:1px; }
+.action-notice.down::after { bottom:auto; top:-5px; }
+.action-notice span { position:relative; z-index:1; min-width:0; overflow-wrap:anywhere; }
+.action-notice svg { position:relative; z-index:1; flex:none; width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.action-notice-ok { --notice-color:var(--ok); }
+.action-notice-warn { --notice-color:var(--st-question); }
+.action-notice-err { --notice-color:var(--pal-danger); }
+:root[data-theme="light"] .action-notice { color:#fff; }
+/* 밝은 테마의 --pal-danger 는 흰 글자 대비가 낮아 진한 빨강 */
+:root[data-theme="light"] .action-notice-err { --notice-color:var(--pal-danger-2); }
 /* 돌아와 보니 바뀐 세션이 있으면 머리 위에 한 줄로 알린다. 점은 사이드바의 바뀐 세션 표시와 같다. */
 .changebar { display:none; height:30px; flex:none; align-items:center; gap:6px; padding:0 8px 0 12px;
   background:var(--chrome); border-bottom:1px solid var(--line); color:var(--fg-2); font-size:var(--fs-s); }

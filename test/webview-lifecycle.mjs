@@ -39,6 +39,7 @@ function fixture(overrides = {}) {
   const forgotten = [];
   const primers = {};
   let attached = false;
+  let openHandler = null;
   const dbg = {
     isAttached: () => attached,
     attach: (v) => { attachCalls.push(v); attached = true; },
@@ -54,7 +55,8 @@ function fixture(overrides = {}) {
     getType: () => "webview",
     isDestroyed: () => false,
     setBackgroundThrottling() {},
-    setWindowOpenHandler() {},
+    setWindowOpenHandler: (fn) => { openHandler = fn; },
+    getURL: () => "https://app.example/page",
     hostWebContents: { isDestroyed: () => false, send() {} },
     on: (name, fn) => { (wcHandlers[name] = wcHandlers[name] || []).push(fn); },
     once: (name, fn) => { (wcHandlers[name] = wcHandlers[name] || []).push(fn); },
@@ -86,7 +88,7 @@ function fixture(overrides = {}) {
   appHandlers["web-contents-created"](null, wc);
   const emit = (name, ...args) => { for (const fn of wcHandlers[name] || []) fn(...args); };
   return {
-    wc, dbg, mainFrame, attachCalls, navigations, forgotten, primers, emit,
+    wc, dbg, mainFrame, attachCalls, navigations, forgotten, primers, emit, open: (details) => openHandler(details),
     setAttached: (value) => { attached = value; },
     hasDebuggerListener: () => typeof dbgHandlers.message === "function",
   };
@@ -145,4 +147,24 @@ test("탭이 사라지면 primer 등록을 지우고 부착 정책에도 알린�
   f.emit("destroyed");
   assert.deepEqual(f.forgotten, [51]);
   assert.deepEqual(registrations.at(-1), [51, "object"]);   // null 등록 = 해제
+});
+
+test("새 창으로 여는 앱 주소는 창을 만들지 않고 앱 열기로 넘기고, 로컬 파일은 넘기지 않는다", () => {
+  const asked = [];
+  const f = fixture({ openAppUrl: (wc, url, from) => asked.push([wc.id, url, from]) });
+  assert.deepEqual(f.open({ url: "mailto:a@example.com", disposition: "foreground-tab", referrer: { url: "http://ad.example/" } }), { action: "deny" });
+  assert.deepEqual(f.open({ url: "zoommtg://zoom.us/join?x=1", disposition: "new-window" }), { action: "deny" });
+  assert.deepEqual(f.open({ url: "file:///etc/hosts", disposition: "foreground-tab" }), { action: "deny" });
+  assert.deepEqual(asked, [[51, "mailto:a@example.com", "http://ad.example/"], [51, "zoommtg://zoom.us/join?x=1", undefined]]);
+});
+
+test("beforeunload 가 이동을 막으면 사람에게 묻고, 나가기를 고른 때만 이동을 허용한다", () => {
+  let answer = false;
+  const asked = [];
+  const f = fixture({ confirmLeave: (wc) => { asked.push(wc.id); return answer; } });
+  const unload = () => { let prevented = false; f.emit("will-prevent-unload", { preventDefault: () => { prevented = true; } }); return prevented; };
+  assert.equal(unload(), false, "취소면 머문다");
+  answer = true;
+  assert.equal(unload(), true, "나가기면 beforeunload 를 무시하고 이동한다");
+  assert.deepEqual(asked, [51, 51]);
 });

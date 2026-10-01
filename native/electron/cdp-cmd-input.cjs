@@ -1,10 +1,11 @@
 // 사람이 쓰는 입력 경로를 보존하는 CDP command handler.
 //
 // 소유 범위
-//   click·dblclick·type·bulkfill·key·hover·focus·clear·check·select·fill·scroll·scrollto의 실행 순서와 응답.
+//   click·dblclick·mouse·type·bulkfill·key·hover·focus·clear·check·select·fill·scroll·scrollto의 실행 순서와 응답.
 //
 // 제공 API
-//   createInputCommands(ctx)가 명령 이름별 async handler 표를 준다. 원시 상태 컨테이너는 내주지 않는다.
+//   createInputCommands(ctx)가 명령 이름별 async handler 표를 주고 dispatchMouse가 원격 좌표 입력을 보낸다.
+//   원시 상태 컨테이너는 내주지 않는다.
 //
 // 의존 대상
 //   조립부가 주입하는 withLayout·nodeFromArgs·insertTextInChunks·isTabShown·run·webContentsMod 접근자와
@@ -17,6 +18,38 @@
 // 영향 범위
 //   공급자는 cdp-control.cjs의 ref/프레임/텍스트 chunk/dispatcher 포트다. 양방향 소비자는
 //   cdp-control.cjs handler 표·default 안내, hidden viewport·observation 분류와 CLI/MCP 입력 명령이다.
+
+async function dispatchMouse(send, args) {
+  const action = String(args.action || "");
+  const x = Number(args.x), y = Number(args.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0
+      || !["move", "click", "double", "context", "wheel", "down", "drag", "up"].includes(action)) {
+    throw new Error("마우스 좌표나 동작이 올바르지 않습니다");
+  }
+  if (action === "wheel") {
+    const dy = Number(args.dy);
+    if (!Number.isFinite(dy) || !dy || Math.abs(dy) > 20000) throw new Error("휠 값이 올바르지 않습니다");
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: dy });
+    return { ok: true, action, at: { x: Math.round(x), y: Math.round(y) }, dy };
+  }
+  if (action === "move" || action === "drag") {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y,
+      ...(action === "drag" ? { button: "left", buttons: 1 } : {}) });
+    return { ok: true, action, at: { x: Math.round(x), y: Math.round(y) } };
+  }
+  if (action === "down" || action === "up") {
+    await send("Input.dispatchMouseEvent", { type: action === "down" ? "mousePressed" : "mouseReleased",
+      x, y, button: "left", clickCount: 1 });
+    return { ok: true, action, at: { x: Math.round(x), y: Math.round(y) } };
+  }
+  const clickCount = action === "double" ? 2 : 1;
+  const button = action === "context" ? "right" : "left";
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, clickCount });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, clickCount });
+  return { ok: true, action, at: { x: Math.round(x), y: Math.round(y) } };
+}
 
 function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isTabShown, run, webContentsMod }) {
   async function clickTarget(send, wc, args, clickCount) {
@@ -316,6 +349,188 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       return { ok: true, key, code, modifiers: Object.keys(mods).filter((k) => mods[k]),
                did: v.did, prevented: !!v.prevented, on: v.on };
     },
+    async phonekey(send, _wc, args) {
+      const parts = String(args.key || "Enter").split("+").map((value) => value.trim()).filter(Boolean);
+      const name = parts.pop();
+      if (!name) throw new Error("누를 키가 없습니다");
+      const modifierNames = { shift: "shiftKey", ctrl: "ctrlKey", control: "ctrlKey",
+        alt: "altKey", option: "altKey", meta: "metaKey", cmd: "metaKey", command: "metaKey" };
+      const modifiers = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
+      for (const part of parts) {
+        const modifier = modifierNames[part.toLowerCase()];
+        if (!modifier) throw new Error(`모르는 수식키: "${part}"`);
+        modifiers[modifier] = true;
+      }
+      const named = {
+        enter: ["Enter", "Enter", 13], tab: ["Tab", "Tab", 9], escape: ["Escape", "Escape", 27],
+        esc: ["Escape", "Escape", 27], backspace: ["Backspace", "Backspace", 8],
+        delete: ["Delete", "Delete", 46], arrowup: ["ArrowUp", "ArrowUp", 38],
+        arrowdown: ["ArrowDown", "ArrowDown", 40], arrowleft: ["ArrowLeft", "ArrowLeft", 37],
+        arrowright: ["ArrowRight", "ArrowRight", 39], home: ["Home", "Home", 36], end: ["End", "End", 35],
+      };
+      const keySpec = named[name.toLowerCase()];
+      if (!keySpec) throw new Error(`폰 페이지 키로 지원하지 않는 키: "${name}"`);
+      const [key, code, keyCode] = keySpec;
+      const evaluate = {
+        returnByValue: true,
+        expression: `(() => {
+          const key=${JSON.stringify(key)}, code=${JSON.stringify(code)}, keyCode=${keyCode};
+          const mods=${JSON.stringify(modifiers)};
+          const el=document.activeElement;
+          if(!el||el===document.body||el===document.documentElement)return {ok:false,error:"입력 초점이 없습니다"};
+          const init={key,code,keyCode,which:keyCode,bubbles:true,cancelable:true,composed:true,...mods};
+          const allowed=el.dispatchEvent(new KeyboardEvent("keydown",init));
+          let did="이벤트만";
+          const notify=(inputType,data=null)=>{
+            el.dispatchEvent(new InputEvent("input",{bubbles:true,inputType,data}));
+            el.dispatchEvent(new Event("change",{bubbles:true}));
+          };
+          if(allowed&&el.tagName==="SELECT"&&(key==="ArrowUp"||key==="ArrowDown")){
+            const next=Math.max(0,Math.min(el.options.length-1,el.selectedIndex+(key==="ArrowUp"?-1:1)));
+            if(next!==el.selectedIndex){el.selectedIndex=next;notify("insertReplacementText");did="항목 이동";}
+          }else if(allowed&&el.matches&&el.matches("input,textarea")){
+            const start=el.selectionStart??0,end=el.selectionEnd??start;
+            let from=start,to=end,text=null,inputType=null,caret=start;
+            if(key==="Backspace"){from=start===end?Math.max(0,start-1):start;inputType="deleteContentBackward";caret=from;}
+            else if(key==="Delete"){to=start===end?Math.min(el.value.length,end+1):end;inputType="deleteContentForward";caret=start;}
+            else if(key==="Enter"&&el.tagName==="TEXTAREA"){text="\\n";inputType="insertLineBreak";caret=start+1;}
+            else if(key==="ArrowLeft"||key==="ArrowRight"){
+              const delta=key==="ArrowLeft"?-1:1,target=Math.max(0,Math.min(el.value.length,(delta<0?start:end)+delta));
+              el.setSelectionRange(target,target);did="커서 이동";
+            }else if(key==="Home"||key==="End"){
+              const target=key==="Home"?0:el.value.length;el.setSelectionRange(target,target);did="커서 이동";
+            }
+            if(inputType){
+              const before=new InputEvent("beforeinput",{bubbles:true,cancelable:true,inputType,data:text});
+              if(el.dispatchEvent(before)){
+                const value=el.value.slice(0,from)+(text||"")+el.value.slice(to);
+                const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),"value")?.set;
+                if(setter)setter.call(el,value);else el.value=value;
+                el.setSelectionRange(caret,caret);notify(inputType,text);did=text==null?"지움":"입력";
+              }
+            }
+            if(allowed&&key==="Enter"&&el.tagName==="INPUT"&&el.form){
+              if(typeof el.form.requestSubmit==="function")el.form.requestSubmit();
+              else el.form.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));
+              did="폼 보냄";
+            }
+          }else if(allowed&&el.isContentEditable){
+            const selection=el.ownerDocument.getSelection();
+            const edit=(command,inputType)=>{
+              const before=new InputEvent("beforeinput",{bubbles:true,cancelable:true,inputType});
+              if(!el.dispatchEvent(before))return false;
+              let changed=false;try{changed=el.ownerDocument.execCommand(command,false,null);}catch{}
+              if(changed){el.dispatchEvent(new InputEvent("input",{bubbles:true,inputType}));did="편집";}
+              return changed;
+            };
+            if(key==="Backspace")edit("delete","deleteContentBackward");
+            else if(key==="Delete")edit("forwardDelete","deleteContentForward");
+            else if(key==="Enter")edit(mods.shiftKey?"insertLineBreak":"insertParagraph",mods.shiftKey?"insertLineBreak":"insertParagraph");
+            else if(selection&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"].includes(key)){
+              const direction=(key==="ArrowLeft"||key==="ArrowUp"||key==="Home")?"backward":"forward";
+              const granularity=(key==="ArrowUp"||key==="ArrowDown")?"line":((key==="Home"||key==="End")?"lineboundary":"character");
+              selection.modify(mods.shiftKey?"extend":"move",direction,granularity);did="커서 이동";
+            }
+          }
+          if(allowed&&key==="Tab"){
+            const targets=[...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]')]
+              .filter((item)=>!item.disabled&&item.offsetParent!==null);
+            const index=targets.indexOf(el),step=mods.shiftKey?-1:1;
+            const next=targets[(index+step+targets.length)%targets.length];
+            if(next){next.focus();did="포커스 이동";}
+          }
+          el.dispatchEvent(new KeyboardEvent("keyup",init));
+          return {ok:true,did,prevented:!allowed,on:el.tagName};
+        })()`,
+      };
+      let value = {};
+      for (const sid of (typeof send.frames === "function" ? send.frames() : [null])) {
+        try {
+          const target = typeof send.on === "function" ? send.on(sid) : send;
+          const response = await target("Runtime.evaluate", evaluate);
+          value = response?.result?.value || {};
+          if (value.ok === true) break;
+        } catch {}
+      }
+      if(value.ok===false)throw new Error(value.error||"페이지 키 입력 실패");
+      if(value.ok!==true)throw new Error("페이지 키 입력 실패");
+      return {ok:true,key,code,modifiers:Object.keys(modifiers).filter((name)=>modifiers[name]),
+        did:value.did,prevented:!!value.prevented,on:value.on};
+    },
+    async phonefocus(send) {
+      const expression = `(() => {
+        const el=document.activeElement;
+        const selectedText=String(globalThis.getSelection?.()||"").slice(0,4000);
+        if(!el||el===document.body||el===document.documentElement)
+          return {editable:false,kind:"none",multiline:false,selectedText};
+        const tag=String(el.tagName||"").toLowerCase();
+        const type=String(el.getAttribute?.("type")||"text").toLowerCase();
+        const blocked=new Set(["button","checkbox","color","file","hidden","image","radio","range","reset","submit"]);
+        const field=tag==="textarea"||(tag==="input"&&!blocked.has(type));
+        const editable=!el.disabled&&!el.readOnly&&(field||el.isContentEditable);
+        let selection=selectedText;
+        if(!selection&&field&&Number.isInteger(el.selectionStart)&&Number.isInteger(el.selectionEnd))
+          selection=String(el.value||"").slice(el.selectionStart,el.selectionEnd).slice(0,4000);
+        return {editable,kind:tag==="select"?"select":editable?(tag==="textarea"||el.isContentEditable?"multiline":"text"):"none",
+          multiline:tag==="textarea"||!!el.isContentEditable,selectedText:selection};
+      })()`;
+      let fallback = { editable: false, kind: "none", multiline: false, selectedText: "" };
+      for (const sid of (typeof send.frames === "function" ? send.frames() : [null])) {
+        try {
+          const target = typeof send.on === "function" ? send.on(sid) : send;
+          const result = await target("Runtime.evaluate", { expression, returnByValue: true });
+          const value = result?.result?.value;
+          if (!value || typeof value !== "object") continue;
+          if (sid == null) fallback = value;
+          if (value.editable || value.kind === "select" || value.selectedText) return { ok: true, ...value };
+        } catch {}
+      }
+      return { ok: true, ...fallback };
+    },
+    async phonetype(send, _wc, args) {
+      const text = String(args.text || "");
+      const expression = `(() => {
+        const text=${JSON.stringify(text)},el=document.activeElement;
+        if(!el||el===document.body||el===document.documentElement)return {ok:false,error:"입력 초점이 없습니다"};
+        if(el.matches?.("input,textarea")){
+          if(el.disabled||el.readOnly)return {ok:false,error:"입력할 수 없는 칸입니다"};
+          const start=el.selectionStart??el.value.length,end=el.selectionEnd??start;
+          const before=new InputEvent("beforeinput",{bubbles:true,cancelable:true,inputType:"insertText",data:text});
+          if(!el.dispatchEvent(before))return {ok:false,error:"페이지가 입력을 막았습니다"};
+          const value=el.value.slice(0,start)+text+el.value.slice(end);
+          const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),"value")?.set;
+          if(setter)setter.call(el,value);else el.value=value;
+          el.setSelectionRange(start+text.length,start+text.length);
+          el.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"insertText",data:text}));
+          return {ok:true,kind:el.tagName==="TEXTAREA"?"multiline":"text"};
+        }
+        if(el.isContentEditable){
+          const before=new InputEvent("beforeinput",{bubbles:true,cancelable:true,inputType:"insertText",data:text});
+          if(!el.dispatchEvent(before))return {ok:false,error:"페이지가 입력을 막았습니다"};
+          let inserted=false;try{inserted=el.ownerDocument.execCommand("insertText",false,text);}catch{}
+          if(!inserted){
+            const selection=el.ownerDocument.getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null;
+            if(!range)return {ok:false,error:"글을 넣을 커서가 없습니다"};
+            range.deleteContents();const node=el.ownerDocument.createTextNode(text);range.insertNode(node);
+            range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);
+          }
+          el.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"insertText",data:text}));
+          return {ok:true,kind:"multiline"};
+        }
+        return {ok:false,error:"입력할 수 없는 요소입니다"};
+      })()`;
+      let value = {};
+      for (const sid of (typeof send.frames === "function" ? send.frames() : [null])) {
+        try {
+          const target = typeof send.on === "function" ? send.on(sid) : send;
+          const response = await target("Runtime.evaluate", { expression, returnByValue: true });
+          value = response?.result?.value || {};
+          if (value.ok === true) break;
+        } catch {}
+      }
+      if (value.ok !== true) throw new Error(value.error || "페이지 글자 입력 실패");
+      return { ok: true, typed: text.length, kind: value.kind };
+    },
     // 절대 위치로 이동. 녹화 재현은 절대 y를 기록하므로 상대 scroll로는 재생이 밀린다.
     async scrollto(send, _wc, args) {
       const y = Number(args.y || 0), x = Number(args.x || 0);
@@ -549,4 +764,4 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
   };
 }
 
-module.exports = { createInputCommands };
+module.exports = { createInputCommands, dispatchMouse };
