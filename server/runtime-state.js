@@ -9,7 +9,7 @@ import path from "node:path";
 //
 // 제공 API
 //   initRuntimeState, 현재 참조를 읽는 snapshot, 경로 경계 isPathAllowed,
-//   publish용 replace, 재진입 guard를 통과시키는 requestRecompute, 열린 파일의 note/save 판정,
+//   publish용 replace·subscribeRuntimeState, 재진입 guard를 통과시키는 requestRecompute, 열린 파일의 note/save 판정,
 //   Git 상태 cache의 get/set/clear 함수. 원시 Map은 내보내지 않는다.
 //
 // 의존 대상
@@ -35,6 +35,7 @@ let computing = false;
 let dirty = false;
 const gitStatusCache = new Map();
 const openedForEdit = new Map();
+const subscribers = new Set();
 const OPENED_MAX = 500;
 
 export function initRuntimeState(deps) {
@@ -53,6 +54,15 @@ export function isPathAllowed(p) {
 
 export function replace(next) {
   current = { ...current, ...next };
+  for (const subscriber of [...subscribers]) {
+    try { subscriber(current); } catch {}
+  }
+}
+
+export function subscribeRuntimeState(subscriber) {
+  if (typeof subscriber !== "function") throw new TypeError("subscriber must be a function");
+  subscribers.add(subscriber);
+  return () => subscribers.delete(subscriber);
 }
 
 export function getGitStatusCache(root) {

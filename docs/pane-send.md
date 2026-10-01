@@ -30,7 +30,7 @@ server/index.js msg.type === "send" → handleControl
  │
 server/herdr-handlers.js 전송 권한·로컬 판정 뒤 herdr.agentSend(target, text)
  │ 그 뒤 400·1200·2600·5000ms 에 pane 을 읽어 되돌린다
-server/herdr.js herdr 의 agent.send 호출
+server/herdr.js herdr 의 agent.prompt 호출
  │
 herdr 대상 pane 에 사람 입력으로 넣는다
 ```
@@ -77,8 +77,8 @@ A 를 선택하고 B 에게 질문할 내용을 입력하면, A 의 입력창에
 
 ```js
 // 보낼 내용. 지시문과 본문을 구분선으로 나눈다
-function askText(toName, body) {
- return `"${toName}" 세션에 SendMessage로 아래를 물어보고, 답이 오면 정리해서 알려줘.\n\n---\n${body}\n---`;
+function askText(targetSessionId, body) {
+ return `세션 ID "${targetSessionId}"의 현재 pane을 확인하고 SendMessage로 아래를 물어봐 줘. 해당 세션이 없으면 다른 세션으로 대체하지 말고 알려줘. 답이 오면 정리해 줘.\n\n---\n${body}\n---`;
 }
 
 // 전송. 서버의 기존 제어 경로를 그대로 쓴다
@@ -102,7 +102,41 @@ function sendTo(paneId, text) {
 
 ## 대상 주소 확인 방법
 
-`paneId` 는 herdr 이 할당한다. 요소 선택 모드에서 AGENTS 목록의 세션 행을 누르면
+알림 대상은 그 알림이 필요한 작업이나 자원 사용 조건으로 찾는다. 표시 이름, cwd,
+`idle` 여부 중 하나만으로 수신자를 정하지 않는다. 다음 확인은 `SendMessage`와
+`herdr pane run` 등 모든 세션 간 전송에 적용한다.
+
+1. Task.md에 알림 시점과 대상 조건을 적는다. 예: `install:app 직전, Iris 앱이나
+   에뮬레이터를 사용해 QA 중인 세션에 재시작을 알림`. 확인했던 이름은 참고로만 남긴다.
+2. `ListAgents` 또는 `herdr agent list`에서 현재 후보를 찾는다. 기록된 세션이 없으면
+   조건으로 다시 찾고 비슷한 이름으로 대체하지 않는다. 사용자가 특정 세션만 지정했다면
+   다른 세션으로 바꾸기 전에 사용자에게 묻는다.
+3. 후보의 현재 cwd와 실행 명령을 `herdr pane get <paneId>`와
+   `herdr pane process-info --pane <paneId>`로 확인한다.
+   `herdr pane read <paneId> --source recent --lines 80`으로 최근 작업도 확인한다.
+   같은 프로젝트의 다른 작업이나 오래된 로그를 현재 자원 사용의 증거로 삼지 않는다.
+   `idle` 상태여도 진행 중인 QA가 브라우저나 기기를 사용하고 있을 수 있다.
+4. 조건에 맞는 수신자의 세션 ID, pane 주소, 확인 시각과 근거를 Task.md에 함께 기록한다.
+   조건에 맞는 세션이 여럿이면 각각 확인한다. 도구 조회가 실패하거나 자원 사용 여부를
+   판단할 수 없으면 전송을 보류하고 사용자에게 확인할 대상과 부족한 근거를 알린다.
+5. 보내기 직전에 목록이나 `herdr agent get <주소>`를 다시 조회해 세션 ID와 pane의
+   대응이 그대로인지 확인한다. 세션 ID를 제공하지 않는 도구라면 현재 터미널·프로세스
+   식별자와 pane을 대조한다. 대응이 달라졌으면 2번부터 다시 확인한다.
+   전송 도구가 받는 정확한 주소를 사용하고 표시 이름으로 보내지 않는다.
+6. 전송 결과에 나온 수신 주소를 기록한 주소와 대조한다. 전송 결과가 불확실하면 실제
+   수신 상태를 확인한 뒤 재시도한다. 전송 성공만으로 상대가 읽거나 동의했다고 판단하지 않는다.
+
+기록 예시:
+
+```text
+알림 시점: install:app 직전
+대상 조건: Iris 앱 또는 에뮬레이터를 사용해 QA 중인 세션
+확인한 수신자: <session ID>, <pane ID>, <확인 시각>
+근거: <현재 cwd>, <실행 명령>, <최근 출력에서 확인한 작업>
+전송 결과: <실제 수신 주소와 성공·실패·미확인 상태>
+```
+
+`paneId` 는 herdr 이 할당한다. 요소 선택 모드에서 Spaces · Agents 목록의 세션 행을 누르면
 해당 주소가 블록 형식으로 채팅에 추가된다(`web/js/browser/pick-host.js` 의 `deliverAgentPick`).
 
 ```

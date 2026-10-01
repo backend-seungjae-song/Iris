@@ -36,6 +36,7 @@ let getCurTarget, uiToken, getXterm;
 export let pickMode = false;
 let hoverTabEl = null;
 let lastPickAt = 0, lastPickTab = null, pickBurst = 0;
+const pendingPickBlocks = new Map();
 
 export function initPick(deps) {
   ({ $, BROWSER_MODE, bNote, wsSend, fileview, setOrca, pickSheetElementAt,
@@ -114,6 +115,7 @@ export function hasDocxContext() {
 export function togglePickMode() { wsSend({ type: "pick-mode", op: "toggle" }); }
 export function applyPickMode(on) {
   pickMode = !!on;
+  callHook("emulator.pickMode", pickMode);
   const r = activeWv();
   // 두 창(메인/분리)이 같은 문서를 쓰지만 레이아웃에 따라 없는 요소가 있을 수 있어, 없어도 오류가 나지 않게 한다.
   $("#wv-pick")?.classList.toggle("on", pickMode);
@@ -158,7 +160,9 @@ function wirePickCursor() {
       const overDocx = docxPickElementAt(under); // docx 본문·헤더·툴바도 같은 좌표 기반 호버를 탄다
       const overCell = callHook("viewer.sheetCellAt", under) || null;   // Sheet 칸
       const overSheet = pickSheetElementAt(under); // Sheet 메뉴바·도구모음·수식입력줄도 같은 좌표 기반 호버
-      const want = overTab && overTab.dataset.tab && getWebview(overTab.dataset.tab) ? overTab
+      const overEmulator = callHook("emulator.pickTarget", under) || null;
+      const want = overEmulator ? overEmulator.el
+        : overTab && overTab.dataset.tab && getWebview(overTab.dataset.tab) ? overTab
         : (overGroup && overGroup.dataset.group ? overGroup
         : (overBmk && overBmk.dataset.url ? overBmk
         : (overAgent && overAgent.dataset.target ? overAgent
@@ -226,7 +230,8 @@ export async function deliverPick(p, fromTabId) {
     return;
   }
   if (BROWSER_MODE) {
-    wsSend({ type: "pick-relay", pick: p }); bNote.textContent = "요소 전달됨 → 콘솔 터미널.";
+    wsSend({ type: "pickrec.relay", kind: "element", payload: p });
+    bNote.textContent = "요소 전달됨 → 콘솔 터미널.";
     try { window.acHost && acHost.refocusConsole && acHost.refocusConsole(); } catch {} // 채팅 포커스 복귀
     return;
   }
@@ -282,7 +287,7 @@ export function codeLines(p) {
   return out;
 }
 // 선택한 요소를 사람이 읽고 AI가 grep할 수 있는 블록 문자열로. 즉시 전달과 녹화 기록이 같은 형식을 쓴다.
-export function pickBlock(p) {
+export function pickBlock(p, delimiter = null) {
   const idStr = p.id ? "#" + p.id : "";
   const clsStr = p.cls && p.cls.length ? "." + p.cls.slice(0, 4).join(".") : "";
   // 어느 탭에서 고른 것인지는 pick이 알고 있다. "지금 콘솔이 보고 있는 탭"을 적으면
@@ -309,6 +314,7 @@ export function pickBlock(p) {
   const headUrl = tabUrl || p.url;
   const inFrame = !!(p.url && headUrl && p.url !== headUrl);
   const lines = [
+    delimiter ? `등록 구분자: ${delimiter}` : null,
     ...codeLines(p),
     p.title ? `제목: ${p.title}` : null,
     `요소: <${p.tag}${idStr}${clsStr}>` + (p.text ? ` "${p.text}"` : ""),
@@ -345,17 +351,39 @@ export function deliverPickLocal(p) {
   p.burst = pickBurst;
   p.otherTab = !!(pickBurst > 1 && lastPickTab && pickedTab && lastPickTab !== pickedTab);
   lastPickAt = now; lastPickTab = pickedTab || null;
-  if (pickedTab) {
-    try { wsSend({ type: "browser-target-set", pane: curTarget, tabId: pickedTab, via: "pick", token: uiToken() }); } catch (e) {}
+  const needsGrant = !!(pickedTab && getTabHandles()[pickedTab]);
+  if (needsGrant) {
+    const request = crypto.randomUUID();
+    const timer = setTimeout(() => pendingPickBlocks.delete(request), 10_000);
+    pendingPickBlocks.set(request, { pick: p, timer });
+    try { wsSend({ type: "browser-target-set", pane: curTarget, tabId: pickedTab, via: "pick", request, token: uiToken() }); } catch (e) {}
   }
   // 구조화된 원본도 함께 보관한다. 터미널에 붙는 글은 사람이 읽는 형식이고, 도구로 다시 꺼내
   // 쓰려면 필드가 살아 있어야 한다(선택자·소스 파일·속성).
   try { wsSend({ type: "ai-pick", pane: curTarget, tabId: pickedTab || null, pick: p }); } catch (e) {}
-  const block = pickBlock(p);
-  // 멀티라인 블록을 프롬프트에 넣되 제출되지 않게 bracketed paste로 주입한다. Claude Code가 붙여넣기
-  // 텍스트로 받아 내부 개행으로 두고, 사용자가 이어서 지시를 타이핑한 뒤 Enter로 제출한다.
+  if (needsGrant) {
+    bNote.textContent = "요소 지목 등록 준비 중…";
+  } else {
+    wsSend({ type: "pty.input", data: "\x1b[200~" + pickBlock(p) + "\x1b[201~" });
+    bNote.textContent = "요소 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
+    const xterm = getXterm();
+    if (xterm) setTimeout(() => xterm.focus(), 0);
+  }
+}
+
+export function completePendingPick(message) {
+  const pending = pendingPickBlocks.get(message?.request);
+  if (!pending) return false;
+  clearTimeout(pending.timer);
+  pendingPickBlocks.delete(message.request);
+  if (!message.ok || !message.delimiter) {
+    bNote.textContent = `요소 지목 준비 실패: ${message.error || "알 수 없는 오류"}`;
+    return true;
+  }
+  const block = pickBlock(pending.pick, message.delimiter);
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
-  bNote.textContent = "요소 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
+  bNote.textContent = "채팅 입력에 요소 지목을 추가했습니다. 보내면 이 세션 권한에 등록됩니다.";
   const xterm = getXterm();
   if (xterm) setTimeout(() => xterm.focus(), 0);
+  return true;
 }

@@ -1,4 +1,4 @@
-// 창 레이아웃(desklayout)의 진입점. 단축키·화면 변화 감지·15분 타이머·로그인 판정·잠금 감지·
+// 창 레이아웃(desklayout)의 진입점. 단축키·화면 변화 감지·로그인 판정·잠금 감지·
 // 알림·로그인 항목 등록을 여기서 연결하고, 저장·복원은 store.cjs·mac.cjs·geometry.cjs를 부른다.
 //
 // 소유 범위
@@ -9,15 +9,15 @@
 //   createHost(ctx)는 검사·개발 확인용으로 함께 내보낸다.
 //
 // 의존 대상
-//   ctx: app · screen · BrowserWindow · ipcMain · stateDir · isTrustedSender · log · error
-//   (main.cjs가 준다). ctx에 없는 globalShortcut · powerMonitor · Notification은
+//   ctx: app · screen · BrowserWindow · ipcMain · stateDir · isTrustedSender · notice · log · error
+//   (main.cjs가 준다). ctx에 없는 globalShortcut · powerMonitor · systemPreferences는
 //   require("electron")으로 직접 가져온다(emulator-host.cjs의 dialog와 같은 전례).
 //
 // 유지 조건
-//   개발 실행(app.isPackaged === false)에서는 단축키·로그인 항목·자동 저장 타이머·자동 복원을
+//   개발 실행(app.isPackaged === false)에서는 단축키·로그인 항목·자동 복원을
 //   하지 않는다. 두 Iris가 같은 창을 동시에 움직이면 상태 소유자가 둘인 것과 같은 사고가 된다.
 //   개발 확인은 IPC(ac-desklayout-save-now · ac-desklayout-restore-now)로 직접 부른다.
-//   자동 복원(모니터 수 변경·로그인)은 위치·크기만 적용하고 데스크톱을 넘기지 않는다.
+//   저장은 수동으로만 한다. 자동 복원(모니터 수 변경·앱 시작)은 위치·크기만 적용하고 데스크톱을 넘기지 않는다.
 //   단축키 복원(ctrl+alt+R)만 데스크톱까지 되돌린다.
 //   알림에 적는 수는 실제로 성공한 것만 센다.
 //   이 기능은 기본 꺼짐(optIn)이라 사용자가 설정에서 켠 뒤에만 로드된다. 끌 때는 ac-desklayout-disable 로
@@ -29,16 +29,15 @@
 
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 
 const { createStore } = require("./store.cjs");
 const { createMac } = require("./mac.cjs");
+const { createHud } = require("./hud.cjs");
 const {
   monitorSlots, matchMonitorSlots, rectToRatio, ratioToRect, computeEdges, pinEdges, pairAppWindows,
 } = require("./geometry.cjs");
 
-const AUTO_SAVE_INTERVAL_MS = 15 * 60 * 1000;
 const DISPLAY_CHANGE_DEBOUNCE_MS = 3000;
 const PENDING_RESTORE_WINDOW_MS = 10 * 60 * 1000;
 const PENDING_POLL_MS = 5000;
@@ -124,16 +123,20 @@ function createHost(ctx) {
     pending: null,
     pendingTimer: null,
     displayDebounceTimer: null,
-    autoSaveTimer: null,
     busy: false,
   };
 
-  function notify(message) {
-    if (ctx.notify) { ctx.notify(message); return; }
+  // Iris 알림(앱 화면)으로. macOS 알림은 Iris 알림이 꺼져 있으면 안 보임. 채널이 한 줄만 받아 여러 줄은 이어 붙임
+  function notify(message, level = "info") {
+    if (ctx.notify) { ctx.notify(message, level); return; }
     try {
-      const { Notification } = require("electron");
-      if (Notification.isSupported()) new Notification({ title: "창 레이아웃", body: message }).show();
+      if (ctx.notice) ctx.notice({ text: `창 레이아웃: ${String(message).split("\n").join(". ")}`, level });
     } catch (e) { ctx.error && ctx.error("[desklayout] 알림 실패", e); }
+  }
+  // 단축키 저장·복원 결과는 모니터 가운데(hud.cjs). 그 창을 못 만드는 환경(검사)은 Iris 알림
+  const hud = ctx.hud || null;
+  function centerNotice(state, text, level) {
+    if (hud) hud.show(state); else notify(text, level);
   }
 
   // Iris 자신의 창: CG 창 번호 → BrowserWindow. getMediaSourceId()는 "window:<CGWindowID>:0" 이다.
@@ -161,7 +164,7 @@ function createHost(ctx) {
     for (const w of listed.windows) {
       const isOwn = w.pid === selfPid;
       const bw = isOwn ? own.get(w.cgId) : null;
-      if (isOwn && (!bw || !bw.isVisible() || bw.isMinimized())) continue;
+      if (isOwn && (!bw || (hud && hud.owns(bw)) || !bw.isVisible() || bw.isMinimized())) continue;
       const display = displayContaining(displays, w.rect);
       live.push({
         ...w,
@@ -188,6 +191,7 @@ function createHost(ctx) {
 
   // ── 저장 ────────────────────────────────────────────────────────────────
   async function saveNow(trigger) {
+    if (trigger !== "shortcut") return { saved: false, reason: "manual-only" };
     // 사람이 저장한 배치가 기준이 되므로, 옛 저장본 자리로 옮기려던 보류 목록은 버린다(설계 5.3).
     if (trigger === "shortcut") await settlePending();
     if (state.busy) return { saved: false, reason: "busy" };
@@ -203,19 +207,25 @@ function createHost(ctx) {
       });
       state.consecutiveSaveFailures = 0;
       if (decision.skip) {
-        if (trigger === "shortcut") notify(c.locked ? "잠금 화면에서는 저장하지 않습니다" : "저장할 창이 없습니다");
+        if (trigger === "shortcut") {
+          const why = c.locked ? "잠금 화면에서는 저장하지 않습니다" : "저장할 창이 없습니다";
+          centerNotice({ kind: "warn", title: "저장하지 않음", sub: why }, why, "warn");
+        }
         return { saved: false, reason: decision.reason };
       }
       const monitorCount = c.displays.length;
       const result = store.writeLayout(monitorCount, { windows: c.records, monitors: c.monitors }, { force: trigger === "shortcut" });
       if (result.written) await saveApps();
-      if (trigger === "shortcut") notify(`저장했습니다: 모니터 ${monitorCount}대, 창 ${c.records.length}개`);
+      if (trigger === "shortcut") {
+        centerNotice({ kind: "ok", title: "창 레이아웃 저장함", sub: `모니터 ${monitorCount}대 · 창 ${c.records.length}개` },
+          `저장했습니다: 모니터 ${monitorCount}대, 창 ${c.records.length}개`, "ok");
+      }
       return { saved: !!result.written, reason: result.reason, monitorCount, windows: c.records.length };
     } catch (e) {
       state.consecutiveSaveFailures += 1;
       ctx.error && ctx.error("[desklayout] 저장 실패", e);
-      if (state.consecutiveSaveFailures === CONSECUTIVE_SAVE_FAILURE_ALERT) notify("레이아웃 저장이 계속 실패하고 있습니다.");
-      if (trigger === "shortcut") notify(`저장하지 못했습니다: ${e.message}`);
+      if (state.consecutiveSaveFailures === CONSECUTIVE_SAVE_FAILURE_ALERT) notify("레이아웃 저장이 계속 실패하고 있습니다.", "err");
+      if (trigger === "shortcut") centerNotice({ kind: "err", title: "저장하지 못함", sub: e.message }, `저장하지 못했습니다: ${e.message}`, "err");
       return { saved: false, reason: "error" };
     }
   }
@@ -349,11 +359,17 @@ function createHost(ctx) {
     if (state.busy) return { restored: false, reason: "busy" };
     const count = ctx.screen.getAllDisplays().length;
     const layout = store.readLayout(count);
-    if (!layout) { notify(`모니터 ${count}대 레이아웃이 아직 없습니다`); return { restored: false, reason: "no-layout" }; }
+    if (!layout) {
+      centerNotice({ kind: "warn", title: "복원할 레이아웃 없음", sub: `모니터 ${count}대 레이아웃이 아직 없습니다` }, `모니터 ${count}대 레이아웃이 아직 없습니다`, "warn");
+      return { restored: false, reason: "no-layout" };
+    }
     state.busy = true;
     try {
       const c = await collect();
-      if (!c.ok) { notify(`복원하지 못했습니다: 창 목록 실패(${c.reason})`); return { restored: false, reason: c.reason }; }
+      if (!c.ok) {
+        centerNotice({ kind: "err", title: "복원하지 못함", sub: `창 목록 실패(${c.reason})` }, `복원하지 못했습니다: 창 목록 실패(${c.reason})`, "err");
+        return { restored: false, reason: c.reason };
+      }
       const { entries, missing } = planEntries(layout.latest, c);
       const { outcome, elsewhere } = await applyReachable(entries);
 
@@ -384,7 +400,8 @@ function createHost(ctx) {
           .sort(([a], [b]) => (a === here ? -1 : b === here ? 1 : a - b))
           .map(([index, items]) => ({ index, items }));
         if (plan.length) {
-          notify("창을 옮기는 중입니다. 끝날 때까지 마우스와 키보드를 쓰지 마세요.");
+          centerNotice({ kind: "progress", title: "창 레이아웃 복원 중", sub: "마우스·키보드 잠시 금지" },
+            "창을 옮기는 중입니다. 끝날 때까지 마우스와 키보드를 쓰지 마세요.", "info");
           const res = await mac.restoreAcrossDesktops({ order, visits: plan, budgetSeconds: MOVE_BUDGET_SECONDS });
           for (const v of plan) {
             for (const it of v.items) {
@@ -407,7 +424,13 @@ function createHost(ctx) {
       }
       if (skippedDesktop.length) lines.push(`모니터별 데스크톱 설정이라 데스크톱 이동은 하지 않았습니다(${skippedDesktop.length}개)`);
       if (missing.length) lines.push(`실행 중이 아닌 창 ${missing.length}개`);
-      notify(lines.join("\n"));
+      // 가운데 알림은 요약. 옮기지 못한 창 이름 등 전체 내용은 Iris 알림 목록에도(가운데 알림은 몇 초 뒤 사라짐)
+      const short = [`창 ${placed}개`];
+      if (failed.length) short.push(`못\u00a0옮긴\u00a0창 ${failed.length}개`);
+      if (missing.length) short.push(`안\u00a0열린\u00a0창 ${missing.length}개`);
+      const partial = failed.length || skippedDesktop.length;
+      centerNotice({ kind: failed.length ? "warn" : "ok", title: "창 레이아웃 복원함", sub: short.join(" · ") }, lines.join("\n"), failed.length ? "warn" : "ok");
+      if (hud && partial) notify(lines.join("\n"), failed.length ? "warn" : "ok");
       return { restored: true, placed, moved, failed: failed.length, missing: missing.length };
     } finally {
       state.restoreEndedAt = Date.now();
@@ -487,9 +510,8 @@ function createHost(ctx) {
   }
 
   return {
-    saveNow, restoreAuto, restoreWithDesktops, loginRestore, openedAtLogin, onDisplaysChanged,
+    saveNow, restoreAuto, restoreWithDesktops, loginRestore, openedAtLogin, onDisplaysChanged, notify,
     collect, planEntries, stopPending,
-    importLegacy: () => store.importFromWsSnap({ wsSnapDir: path.join(os.homedir(), ".ws-snap") }),
     state,
   };
 }
@@ -515,7 +537,7 @@ function releaseLoginItem(ctx) {
 
 function initCapability(ctx) {
   const packaged = ctx.app && ctx.app.isPackaged === true;
-  const host = createHost(ctx);
+  const host = createHost({ ...ctx, hud: createHud({ BrowserWindow: ctx.BrowserWindow, screen: ctx.screen, error: ctx.error }) });
   // 켜진 동안 등록한 것을 되돌리는 함수. 개발 실행은 아무것도 등록하지 않으므로 되돌릴 것도 없다.
   let teardown = () => ({ ok: true, loginItem: "untouched" });
 
@@ -528,14 +550,19 @@ function initCapability(ctx) {
     if (!ctx.isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
     return { ok: true, result: await host.restoreAuto("manual") };
   });
+  // 설정 화면의 단축키 줄 등록 상태. 개발 실행은 등록하지 않음
+  ctx.ipcMain.handle("ac-desklayout-status", (e) => {
+    if (!ctx.isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
+    return { ok: true, packaged, shortcuts: host.state.shortcuts || null };
+  });
   ctx.ipcMain.handle("ac-desklayout-disable", (e) => {
     if (!ctx.isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
     try { return teardown(); } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   });
 
-  // 개발 실행은 여기서 멈춘다. 단축키·로그인 항목·자동 저장·자동 복원은 설치 앱에서만 켠다.
+  // 개발 실행은 여기서 멈춘다. 단축키·로그인 항목·자동 복원은 설치 앱에서만 켠다.
   if (!packaged) return;
-  // 이 함수는 앱 준비 전에 불린다. screen·globalShortcut·Notification 은 준비 뒤에만 쓸 수 있다(실측: 준비 전에
+  // 이 함수는 앱 준비 전에 불린다. screen·globalShortcut 은 준비 뒤에만 쓸 수 있다(실측: 준비 전에
   // screen 을 읽어 예외가 났고 기능 전체가 조용히 빠졌다).
   ctx.app.whenReady()
     .then(() => { teardown = startPackaged(ctx, host); })
@@ -549,21 +576,24 @@ function initCapability(ctx) {
 // 설치 앱에서 켜진 뒤 앱 준비가 끝나면 부른다. 등록한 것을 되돌리는 함수를 돌려준다.
 function startPackaged(ctx, host) {
   host.state.lastMonitorCount = ctx.screen.getAllDisplays().length;
-  const importResult = host.importLegacy();
-  if (importResult.imported) ctx.log && ctx.log("[desklayout] 옛 ~/.ws-snap 저장본을 가져왔다", importResult.monitorCounts);
 
-  const { globalShortcut, powerMonitor, Notification, systemPreferences } = require("electron");
+  const { globalShortcut, powerMonitor, systemPreferences } = require("electron");
+  // 시작 알림: 이 시점엔 Iris 창이 아직 없음(main.cjs 가 창을 나중에 만듦). 화면 로드 뒤에 보내야 보임
+  const noticeAfterLoad = (message, level) => {
+    const open = ctx.BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.webContents.getURL() && !w.webContents.isLoading());
+    if (open) { host.notify(message, level); return; }
+    ctx.app.once("browser-window-created", (_e, win) => win.webContents.once("did-finish-load", () => host.notify(message, level)));
+  };
   // 다른 앱의 창을 읽고 옮기려면 손쉬운 사용 권한이 필요하다. 없으면 알리고 시스템 요청 창을 띄운다.
   if (!systemPreferences.isTrustedAccessibilityClient(false)) {
-    if (Notification.isSupported()) {
-      new Notification({ title: "창 레이아웃", body: "창을 옮기려면 손쉬운 사용 권한이 필요합니다. 시스템 설정에서 Iris 를 허용해 주세요." }).show();
-    }
+    noticeAfterLoad("창을 옮기려면 손쉬운 사용 권한이 필요합니다. 시스템 설정에서 Iris 를 허용해 주세요.", "warn");
     systemPreferences.isTrustedAccessibilityClient(true);
   }
   const saveOk = globalShortcut.register(SHORTCUT_ACCELS.save, () => { host.saveNow("shortcut"); });
   const restoreOk = globalShortcut.register(SHORTCUT_ACCELS.restore, () => { host.restoreWithDesktops(); });
-  if ((!saveOk || !restoreOk) && Notification.isSupported()) {
-    new Notification({ title: "창 레이아웃", body: "단축키(ctrl+alt+S/R) 등록에 실패했습니다. 다른 앱이 이미 쓰고 있을 수 있습니다." }).show();
+  host.state.shortcuts = { save: saveOk, restore: restoreOk };
+  if (!saveOk || !restoreOk) {
+    noticeAfterLoad("단축키(ctrl+alt+S/R) 등록에 실패했습니다. 다른 앱이 이미 쓰고 있을 수 있습니다.", "err");
   }
   const lock = () => { host.state.locked = true; };
   // 잠금 중에 모니터 수가 바뀌었으면 그때 못 한 복원을 지금 한다.
@@ -576,19 +606,17 @@ function startPackaged(ctx, host) {
   const displayEvents = ["display-added", "display-removed", "display-metrics-changed"];
   for (const name of displayEvents) ctx.screen.on(name, host.onDisplaysChanged);
 
-  host.state.autoSaveTimer = setInterval(() => { host.saveNow("auto"); }, AUTO_SAVE_INTERVAL_MS);
-
   try { claimLoginItem(ctx); } catch (e) { ctx.error && ctx.error("[desklayout] 로그인 항목 등록 실패", e); }
 
-  let loginTimer = null;
-  if (host.openedAtLogin()) {
-    // 로그인 직후 다른 초기화와 겹치지 않도록 잠깐 늦춘다.
-    loginTimer = setTimeout(() => { host.loginRestore(); }, LOGIN_START_DELAY_MS);
-  }
+  // 로그인 때는 저장된 앱도 다시 열고, 일반 재실행 때는 열린 창의 배치만 복원한다.
+  const loginTimer = setTimeout(() => {
+    const restore = host.openedAtLogin() ? host.loginRestore() : host.restoreAuto("startup");
+    restore.catch((e) => { ctx.error && ctx.error("[desklayout] 시작 복원 실패", e); });
+  }, LOGIN_START_DELAY_MS);
 
   const stopRunning = () => {
     try { globalShortcut.unregister(SHORTCUT_ACCELS.save); globalShortcut.unregister(SHORTCUT_ACCELS.restore); } catch {}
-    clearInterval(host.state.autoSaveTimer);
+    host.state.shortcuts = { save: false, restore: false };
     clearTimeout(loginTimer);
     clearTimeout(host.state.displayDebounceTimer);
     host.stopPending();

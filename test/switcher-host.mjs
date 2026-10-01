@@ -138,7 +138,7 @@ function setup(options = {}) {
   const host = createSwitcherHost({
     core, catalog, iconRunner, mediaRunner, fs, path, stateHome: () => HOME, globalShortcut: shortcuts,
     defaultRelay: DEFAULT_RELAY, killProbe: options.killProbe || (() => true),
-    raiseOwnWindow: options.raiseOwnWindow, ownPid: options.ownPid,
+    raiseOwnWindow: options.raiseOwnWindow, ownPid: options.ownPid, irisKey: options.irisKey,
     isTrustedSender: (event, expected) => event?.trusted === true && expected === "http://iris.test",
     isTrustedMediaSender: options.isTrustedMediaSender || ((event) => event?.trusted === true),
     expectedAppUrl: "http://iris.test", broadcast: (payload) => broadcasts.push(payload),
@@ -249,6 +249,35 @@ test("T5 체크가 0개면 전역 단축키를 등록하지 않는다", () => {
   host.start();
   assert.equal(shortcuts.isRegistered("Alt+Tab"), false);
   assert.deepEqual(host.getStatus().registered, { next: false, prev: false });
+});
+
+test("전역 우선 사용을 켜면 체크가 0개여도 다음 창 키만 등록하고 누르면 irisKey 를 부른다", async () => {
+  let irisKeys = 0;
+  const { host, fs, shortcuts } = setup({ irisKey: () => { irisKeys += 1; } });
+  host.start();
+  const out = await host.handle(trusted, { op: "global-priority", on: true });
+  assert.equal(out.status.globalPriority, true);
+  assert.equal(shortcuts.isRegistered("Alt+Tab"), true);
+  assert.equal(shortcuts.isRegistered("Alt+Shift+Tab"), false);
+  assert.deepEqual(host.getStatus().registered, { next: true, prev: false });
+  assert.deepEqual(JSON.parse(fs.files.get(path.join(HOME, "window-switcher-options.json"))), { globalPriority: true });
+  shortcuts.callbacks.get("Alt+Tab")();
+  assert.equal(irisKeys, 1);
+
+  await host.handle(trusted, { op: "global-priority", on: false });
+  assert.equal(shortcuts.isRegistered("Alt+Tab"), false);
+  assert.equal(host.getStatus().globalPriority, false);
+});
+
+test("전역 우선 사용은 재시작 뒤에도 유지되고 잘못된 값은 거절한다", async () => {
+  const fs = memoryFs({ [path.join(HOME, "window-switcher-options.json")]: JSON.stringify({ globalPriority: true }) });
+  const { host, shortcuts } = setup({ fs });
+  host.start();
+  assert.equal(host.getStatus().globalPriority, true);
+  assert.equal(shortcuts.isRegistered("Alt+Tab"), true);
+  assert.deepEqual(await host.handle(trusted, { op: "global-priority", on: "yes" }), { error: "bad-value" });
+  assert.deepEqual(await host.handle({ trusted: false }, { op: "global-priority", on: false }), { error: "untrusted" });
+  assert.equal(host.getStatus().globalPriority, true);
 });
 
 test("T13·T24 마지막 체크 해제는 자기 가속기만 풀고 픽 단축키를 보존한다", async () => {
@@ -865,7 +894,7 @@ test("상태 IPC와 접근성 설정 열기, 상태 변경 방송의 공개 모�
   await refresh(host);
   await host.handle(trusted, { op: "pick", id: 101 });
   assert.deepEqual(Object.keys(broadcasts.at(-1)).sort(),
-    ["accelerators", "conflict", "listRevision", "pickedMode", "registerError", "registered"]);
+    ["accelerators", "conflict", "globalPriority", "listRevision", "pickedMode", "registerError", "registered"]);
 });
 
 test("media는 host가 고른 앱 열쇠와 화면 권한으로 아이콘·빈 thumbs·누락 사유를 만든다", async () => {
@@ -1063,9 +1092,9 @@ test("media 호출 뒤에도 publicStatus와 revision 방송에 그림 키를 �
   await host.handle(trusted, { op: "pick", id: 101 });
 
   assert.deepEqual(Object.keys(host.getStatus()).sort(),
-    ["accelerators", "listRevision", "permission", "pickedMode", "registerError", "registered", "titleLookupMs"]);
+    ["accelerators", "globalPriority", "listRevision", "permission", "pickedMode", "registerError", "registered", "titleLookupMs"]);
   assert.deepEqual(Object.keys(broadcasts.at(-1)).sort(),
-    ["accelerators", "conflict", "listRevision", "pickedMode", "registerError", "registered"]);
+    ["accelerators", "conflict", "globalPriority", "listRevision", "pickedMode", "registerError", "registered"]);
 });
 
 test("host를 멈추면 catalog와 icon runner를 각각 취소한다", () => {
@@ -1246,3 +1275,17 @@ test("고른 창이 없으면 그 사실이 진단에 남는다", async () => {
 });
 
 // 한 번 실패한 창을 매번 다시 시도하면 그 차례마다 몇 초를 다시 쓴다.
+
+// 사용자 2026-09-28 "창전환이 콘솔이나 브라우저 포커싱 중이 아니면 발동을 안함": 메모·에뮬레이터 분리 창에 토글을
+// 보내면 아무도 처리하지 않음 → 그 창이나 다른 앱이 앞이면 마지막 콘솔·브라우저 창을 앞으로
+test("⌥Tab 은 토글을 받는 창이 앞일 때만 토글하고, 아니면 마지막 콘솔·브라우저 창을 올린다", () => {
+  const { irisKeyAction } = require("../native/electron/switcher-host.cjs");
+  const win = (kind, destroyed = false) => ({ kind, isDestroyed: () => destroyed });
+  const takes = (w) => w.kind === "console" || w.kind === "browser";
+  const main = win("console"), browser = win("browser"), memo = win("memo"), emu = win("emulator");
+  assert.deepEqual(irisKeyAction({ focused: browser, lastSwitch: browser, main }, takes), { action: "toggle", win: browser });
+  assert.deepEqual(irisKeyAction({ focused: memo, lastSwitch: browser, main }, takes), { action: "raise", win: browser });
+  assert.deepEqual(irisKeyAction({ focused: emu, lastSwitch: null, main }, takes), { action: "raise", win: main });
+  assert.deepEqual(irisKeyAction({ focused: null, lastSwitch: win("browser", true), main }, takes), { action: "raise", win: main });
+  assert.deepEqual(irisKeyAction({ focused: null, lastSwitch: null, main: null }, takes), { action: "none", win: null });
+});

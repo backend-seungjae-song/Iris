@@ -31,7 +31,9 @@ check("stdout은 JSON-RPC 전용 — 로그는 stderr", () => /process\.stderr\.
 check("CLI와 같은 경로(/browser-cmd)·같은 세션 식별", () =>
   /path: "\/browser-cmd"/.test(mcp) && /HERDR_PANE_ID/.test(mcp) && /currentSession\(\)/.test(mcp));
 check("MCP 환경에서 pane 값이 빠지면 호출 프로세스로 복구", () =>
-  /pane\.process_info/.test(mcp) && /processAncestry\(\)/.test(mcp) && /chooseHerdrPane\(/.test(mcp));
+  /createSessionResolver\(\)/.test(mcp)
+    && /pane\.process_info/.test(read("bin/iris-session.mjs"))
+    && /processAncestry/.test(read("bin/iris-session.mjs")));
 check("프로세스 기반 pane 복구는 가장 가까운 유일 일치만 허용", () => {
   const agents = [{ pane_id: "w1:p1" }, { pane_id: "w2:p1" }];
   const infos = [

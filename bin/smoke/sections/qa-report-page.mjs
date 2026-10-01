@@ -402,7 +402,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
       && /<li>목록 화면<\/li><li>저장 버튼 클릭<\/li>/.test(plain)   // 흐름이 단계로 나뉜다
       && /Case 1/.test(plain) && !/>P1</.test(plain)                   // 장부 번호 대신 순서 번호
       && /<h3>수량 저장<\/h3>/.test(plain) && /href="#w1">Case 1 통과/.test(plain) // 기능 → 케이스
-      && /확인 빈 곳<br>음수 입력 거부/.test(plain)                    // 기능 안 빈 검증
+      && /확인하지 않은 것<br>음수 입력 거부/.test(plain)                    // 기능 안 빈 검증
       && /확인 케이스 없음/.test(plain) && /코드 구조 요구/.test(plain)       // 검증 없는 기능이 드러남
       && /href="#q1">수량 저장/.test(plain)                            // 케이스 → 기능
       && /<svg class="dia"[^>]*role="img"/.test(plain) && /lanes1-title/.test(plain) // 역할별 흐름도

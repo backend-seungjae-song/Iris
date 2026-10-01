@@ -156,6 +156,24 @@ test("attaches only a currently matching terminal, workspace, runtime, and sessi
   assert.equal(missingChildSession[1].parentPaneId, null);
 });
 
+// 사용자 2026-09-28: 부모 Claude 세션이 이어져 기록 파일(sessionUuid)이 바뀐 뒤 띄운 builder-54 가 최상위로 보임.
+// 영수증은 herdr 세션 값을 적으므로 herdr 값이 같으면 같은 세션. herdr 값도 바뀌면(창 재사용) 연결하지 않음
+test("parent transcript continued under a new id still matches the herdr session recorded in the receipt", (t) => {
+  const options = fixture(t);
+  writeAgentLineage(record(options), options);
+  const raw = live().map((a) => ({ ...a, agent_session: { value: a.terminal_id === "term_parent" ? "parent-session" : "child-session" } }));
+  const forked = state();
+  forked[0].sessionUuid = "continued-session";
+  attachAgentLineage(forked, raw, options);
+  assert.equal(forked[1].parentPaneId, "w1:p1");
+  assert.equal(forked[1].parentSessionUuid, "continued-session");
+
+  const reusedPane = state();
+  reusedPane[0].sessionUuid = "replacement-session";
+  attachAgentLineage(reusedPane, raw.map((a) => a.terminal_id === "term_parent" ? { ...a, agent_session: { value: "replacement-session" } } : a), options);
+  assert.equal(reusedPane[1].parentPaneId, null);
+});
+
 test("supports nested explicit lineage and rejects cycles", (t) => {
   const options = fixture(t);
   writeAgentLineage(record(options), options);

@@ -44,7 +44,11 @@ function createMenu({
     const win = getMainWindow();
     try {
       const profs = cookieImport.listChromeProfiles();
-      if (!profs.length) return dialog.showMessageBox(win, { type: "info", message: "가져올 브라우저 프로필 없음", detail: "설치된 Chrome/Brave/Edge의 Cookies를 찾지 못했습니다." });
+      if (!profs.length) {
+        const blocked = cookieImport.chromiumDataBlockedMessage();
+        if (blocked) return dialog.showMessageBox(win, { type: "warning", message: "브라우저 폴더를 읽을 권한 없음", detail: blocked });
+        return dialog.showMessageBox(win, { type: "info", message: "가져올 브라우저 프로필 없음", detail: "설치된 Chrome/Brave/Edge의 Cookies를 찾지 못했습니다." });
+      }
       let chosen = profs[0];
       if (profs.length > 1) {
         const pick = await dialog.showMessageBox(win, {

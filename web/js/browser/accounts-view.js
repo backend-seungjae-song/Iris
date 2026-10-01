@@ -53,9 +53,11 @@ export function accountsHeadSum(profileCount, totalLogins) {
 // Chrome 프로필 칸은 두 번 렌더된다. 처음 한 번과, 목록이 실제로 도착하면 다시 한 번. 그 둘이
 // 갈라지지 않게 여기 하나만 둔다. null 은 "아직 모른다", 빈 배열은 "없다" 로 서로 다른 사실이다.
 // 항목의 target 은 가져오면 들어갈 프로필이다({ name, isNew }). 판정할 수 없으면 비워 둔다.
-export function accountsChromeBox(list) {
+// blocked 는 macOS 가 브라우저 폴더 읽기를 막았을 때의 안내 문구다. 그때 빈 목록은 "설치 안 됨"이 아니다.
+export function accountsChromeBox(list, blocked = "") {
   const esc = escapeHtml;
   if (list == null) return `<div class="acct-empty"><span class="acct-spin"></span>불러오는 중…</div>`;
+  if (!list.length && blocked) return `<div class="acct-empty">${esc(blocked)}</div>`;
   if (!list.length) return `<div class="acct-empty">설치된 Chrome 프로필 없음(macOS만 지원)</div>`;
   return list.map((cp) => {
     const t = cp.target;

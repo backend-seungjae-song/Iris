@@ -105,7 +105,16 @@ return outp`;
       : "지금 막고 있는 네이티브 시트는 없습니다.",
   };
 }
+// 사람에게만 묻는 확인 창(앱 열기)이 떠 있는 동안은 에이전트가 OS 창 버튼·키를 누르지 못하게 한다.
+// 확인 창이 겹쳐 뜰 수 있어 창마다 하나씩 쌓는다. 먼저 닫힌 창이 남은 창의 보호까지 풀지 않는다.
+const heldReasons = [];
+function holdNativeInput(reason) {
+  if (reason) heldReasons.push(reason);
+  else heldReasons.pop();
+}
+
 async function axClick(button) {
+  if (heldReasons.length) return { ok: false, error: `${heldReasons[heldReasons.length - 1]} 확인 창은 사람이 답합니다.` };
   // 이름을 그대로 AppleScript 문자열에 넣으므로 따옴표·역슬래시를 막는다.
   const safe = button.replace(/[\\"]/g, "");
   const script = `tell application "System Events"
@@ -136,6 +145,7 @@ return "NOTFOUND"`;
 }
 
 async function axKey(key) {
+  if (heldReasons.length) return { ok: false, error: `${heldReasons[heldReasons.length - 1]} 확인 창은 사람이 답합니다.` };
   const which = String(key || "escape").toLowerCase();
   const code = which === "enter" || which === "return" ? 36 : which === "escape" || which === "esc" ? 53 : null;
   if (code == null) return { error: "escape 또는 enter만 보낼 수 있습니다." };
@@ -143,4 +153,4 @@ async function axKey(key) {
   return r.ok ? { ok: true, key: which } : { ok: false, error: r.error };
 }
 
-module.exports = { axDescribe, axClick, axKey };
+module.exports = { axDescribe, axClick, axKey, holdNativeInput };

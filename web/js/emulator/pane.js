@@ -5,10 +5,13 @@
 //   DOM 과 그 뒤의 세션 상태(붙이기·종료·기기 목록·회전). RPC 는 host.rpc 로만 부른다.
 //
 // 제공 API
-//   mountEmulatorPane(container, opts) → { dispose(), close(), setVisible(visible), snapshot(), current() }.
-//   opts: host(window.acHost.emulator) · workspaceId(스페이스 id) · deviceId(처음 붙일 udid, 없으면 기본 기기) ·
+//   mountEmulatorPane(container, opts) → { dispose(), close(), stop(), setVisible(visible), snapshot(), current(), connect() }.
+//   opts: host(window.acHost.emulator) · workspaceId(탭의 세션 키) · deviceId(처음 붙일 udid, 없으면 기본 기기) ·
 //   onDeviceChange(udid) · onRequestDetach() · detachable(분리 버튼 표시) · onSketch(있으면 스케치 버튼 표시) ·
+//   onPick/pickOn · onRecord/recordOn(기능이 켜졌을 때 제어 버튼과 상태 표시) ·
 //   actions([{ label, icon, title, onClick }], 창으로 분리 자리에 붙는 버튼. icon 은 TB_ICON 의 이름).
+//   headerHost(도구 막대를 붙일 외부 요소) · fixedDevice(기기 고정, 외부 도구 막대에서는 기기 표시도 숨김).
+//   열 때 꺼진 기기는 켜지 않음(이미 켜진 기기만 화면을 붙임). 켜기는 사람의 [연결]·기기 고르기, 에이전트는 connect().
 //   snapshot() 은 지금 보이는 프레임을 { bytes(PNG), title } 로 주고, 그릴 프레임이 없으면 null 이다.
 //   dispose() 는 화면만 떼고 세션을 남기며, close() 는 이 화면이 켠 기기와 헬퍼까지 끈다.
 //
@@ -22,10 +25,8 @@
 //   dispose() 는 DOM·구독·스트림만 정리하고 에뮬레이터 세션은 남긴다(창으로 옮길 때 다시 붙일
 //   세션이 있어야 한다). close() 는 탭을 완전히 닫을 때만 부르고, Orca 의 관리 세션 정리
 //   (managedOnly shutdown)를 그대로 한다. 둘을 바꿔 부르면 세션이 새지거나 헛통화가 남는다.
-//   붙이기 재시도 중 dispose 되면 방금 붙은 기기가 아무도 안 쓰는 채로 켜져 남으므로, 그 경우도
-//   종료 요청을 보낸다(Orca useEmulatorPaneSession 의 "attach 가 unmount 뒤에 끝나는" 경로).
-//   mountEmulatorPane() 은 vendor 번들 로딩 중에도 dispose·close·setVisible 을 동기로 받을 수
-//   있어 큐에 쌓았다가 번들이 준비되면 흘려보낸다(맨 아래 mountEmulatorPane 주석 참고).
+//   attach 중 dispose 되어도 세션은 옮긴 화면에서 쓴다. close 뒤 attach가 끝나면 해당 세션을 정리한다.
+//   번들 로딩 중 화면을 떼거나 닫으면 그 화면의 DOM을 만들지 않는다.
 //
 // 영향 범위
 //   web/js/emulator/boot.js, web/emulator-window/window.js.
@@ -43,6 +44,7 @@ import { createDropdown } from "../core/dropdown.js";
 import { runtimeLabel } from "./devices-panel.js";
 import { xcodeGuidance } from "./xcode-guidance.js";
 import { androidGuidance } from "./android-guidance.js";
+import { phoneControls } from "./controls.js";
 
 const VENDOR_URL = new URL("../../vendor/orca-emulator-pane.esm.js", import.meta.url).href;
 const vendorReady = import(VENDOR_URL);
@@ -68,7 +70,44 @@ const TB_ICON = {
   tocolumn: TB_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
   power: TB_SVG('<path d="M12 3v8"/><path d="M6.3 7.5a8 8 0 1 0 11.4 0"/>'),
   close: TB_SVG('<path d="M6 6l12 12M18 6 6 18"/>'),
+  back: TB_SVG('<path d="m15 5-7 7 7 7"/>'),
+  recents: TB_SVG('<rect x="5" y="5" width="14" height="14" rx="2"/>'),
+  volume_down: TB_SVG('<path d="M4 10v4h4l5 4V6l-5 4z"/>'),
+  volume_up: TB_SVG('<path d="M4 10v4h4l5 4V6l-5 4zM16 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/>'),
+  lock: TB_SVG('<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'),
+  pick: TB_SVG('<path d="M4 4v15l4-4 3 5 2-1-3-5 6-1z"/>'),
+  // 홈(빈 원)과 구분: 녹화 표준 모양인 테두리 원 + 속이 찬 가운데 점
+  record: TB_SVG('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>'),
+  sound: TB_SVG('<path d="M4 10v4h4l5 4V6l-5 4zM16 9a4 4 0 0 1 0 6"/>'),
+  sound_off: TB_SVG('<path d="M4 10v4h4l5 4V6l-5 4zM16 10l4 4M20 10l-4 4"/>'),
 };
+
+// 기기별 마지막 화면 크기. 기기가 붙기 전(꺼진 기기·앱 재시작 복원)에도 그 기기의 실제 비율로 틀 그리기.
+// 분리 창도 같은 출처라 같은 저장분 사용
+const SCREEN_SIZES_KEY = "ac.emulator.screen-sizes";
+function knownScreenSize(udid) {
+  if (!udid) return null;
+  try {
+    const s = JSON.parse(localStorage.getItem(SCREEN_SIZES_KEY) || "{}")[udid];
+    return s && s.width > 0 && s.height > 0 ? { width: s.width, height: s.height } : null;
+  } catch { return null; }
+}
+function rememberScreenSize(udids, size) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SCREEN_SIZES_KEY) || "{}");
+    let changed = false;
+    for (const udid of udids) {
+      if (!udid || (all[udid] && all[udid].width === size.width && all[udid].height === size.height)) continue;
+      delete all[udid];
+      all[udid] = { width: size.width, height: size.height };
+      changed = true;
+    }
+    if (!changed) return;
+    const keys = Object.keys(all);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 50))) delete all[k]; // 오래된 것부터 50개만
+    localStorage.setItem(SCREEN_SIZES_KEY, JSON.stringify(all));
+  } catch {}
+}
 
 // Orca callRuntimeRpc 와 같은 모양: 성공하면 result 를 돌려주고, 실패하면 던진다.
 async function rpcCall(host, method, params) {
@@ -118,8 +157,16 @@ function buildPane(container, opts, vendor) {
     visualOrientation: "portrait",
     nextRotateOrientation: "landscape_left",
     visualOrientationEpoch: 0,
+    initializing: true,
   };
   let disposed = false;
+  let closed = false;
+  let attachTask = null;
+  let stopTask = null;
+  let stopRequested = false;
+  let sessionStopEpoch = 0;
+  const fixedAliases = new Set(opts.deviceId ? [opts.deviceId] : []);
+  let fixedAvdName = null;
   let tabVisible = true;
   let windowVisible = document.visibilityState !== "hidden";
   let windowVisibleTimer = 0;
@@ -131,11 +178,13 @@ function buildPane(container, opts, vendor) {
   const errorBar = el("div", "emu-error-bar");
   errorBar.hidden = true;
   const frameWrap = el("div", "emu-frame-wrap");
-  root.append(toolbar, errorBar, frameWrap);
+  const phoneBar = el("div", "emu-phone-bar");
+  root.append(toolbar, errorBar, frameWrap, phoneBar);
+  if (opts.headerHost) opts.headerHost.append(toolbar);
   container.append(root);
 
   // ---- 툴바 ----
-  // 한 줄: 기기 고르기 · 런타임 · 연결 상태 | 회전 · 홈 · 스케치 | 창으로 분리(또는 옮기기) | 종료.
+  // 상단: Iris 제어. 폰 조작은 기기 아래 줄.
   // 폭이 좁으면(세로 열) CSS 컨테이너 조건이 글자를 빼고 아이콘만 남긴다. 그래서 단추마다 title 을 둔다.
   const tbDevice = createDropdown({
     items: [],
@@ -149,11 +198,16 @@ function buildPane(container, opts, vendor) {
     },
   });
   const tbDeviceTrigger = tbDevice.el.querySelector("button");
-  if (tbDeviceTrigger) tbDeviceTrigger.title = "기기 바꾸기";
+  if (tbDeviceTrigger) {
+    tbDeviceTrigger.title = "기기 바꾸기";
+    // 다른 탭·에이전트가 켜고 끈 기기도 목록을 열 때 최신 켜짐 상태로
+    tbDeviceTrigger.addEventListener("pointerdown", () => { if (!state.loading) void refreshDevices(state.liveTarget || undefined); });
+  }
   let tbDeviceKey = "";
   const tbLiveDot = el("i", "emu-tb-live");
   (tbDeviceTrigger || tbDevice.el).prepend(tbLiveDot);
   const tbRuntime = el("span", "emu-tb-rt");
+  const tbDeviceName = el("span", "emu-tb-device-name");
   const tbStatus = el("span", "emu-tb-status");
   const tbStatusText = el("span");
   tbStatus.append(el("i", "emu-tb-live"), tbStatusText);
@@ -168,22 +222,61 @@ function buildPane(container, opts, vendor) {
     return b;
   };
   const tbSep = () => el("span", "emu-tb-sep");
-  const tbRotate = tbButton("회전", "rotate");
-  tbRotate.addEventListener("click", () => { void sendRotate(); });
-  const tbHome = tbButton("홈", "home");
-  tbHome.addEventListener("click", () => { void sendButton("home"); });
+  const phoneLabels = { back: "뒤로", home: "홈", recents: "최근 앱", rotate: "회전", volume_down: "볼륨 내림", volume_up: "볼륨 올림", lock: "잠금" };
+  const phoneButtons = new Map();
+  for (const [name, label] of Object.entries(phoneLabels)) {
+    const button = tbButton(label, name);
+    button.addEventListener("click", () => { if (name === "rotate") void sendRotate(); else sendButton(name); });
+    phoneButtons.set(name, button);
+    phoneBar.append(button);
+  }
   const tbPrimary = tbButton("연결", "power", "기기에 연결합니다");
   const tbPrimaryLabel = tbPrimary.querySelector(".emu-tb-label");
   tbPrimary.addEventListener("click", () => {
-    if (isLiveNow()) void shutdown(state.selectedUdid || undefined);
+    if (isLiveNow()) void stop();
     else void attach(state.selectedUdid || undefined);
   });
-  toolbar.append(tbDevice.el, tbRuntime, tbStatus, tbSpacer, tbRotate, tbHome);
+  if (!opts.fixedDevice) toolbar.append(tbDevice.el, tbRuntime, tbStatus);
+  else if (!opts.headerHost) toolbar.append(tbDeviceName, tbRuntime, tbStatus);
+  toolbar.append(tbSpacer);
+  // 기기 음량: Mac 으로 나오는 이 기기 소리(폰 볼륨 단추는 기기 안 음량). 기기를 다루는 조작이라 아래 줄. 기기마다 저장
+  const vol = { device: null, key: null, volume: 1, muted: false, seq: 0, sending: false, dirty: false, error: null };
+  const volBox = el("div", "emu-vol");
+  const volMute = el("button", "emu-btn emu-vol-mute");
+  volMute.type = "button";
+  const volRange = el("input", "emu-vol-range");
+  volRange.type = "range"; volRange.min = "0"; volRange.max = "100"; volRange.step = "5";
+  volRange.setAttribute("aria-label", "이 기기 음량");
+  const volValue = el("span", "emu-tb-label emu-vol-val");
+  volBox.append(volMute, volRange, volValue);
+  volBox.hidden = !host.useVolume;
+  volRange.addEventListener("input", () => { vol.volume = Number(volRange.value) / 100; vol.muted = false; syncVolume(); void pushVolume(); });
+  volMute.addEventListener("click", () => { vol.muted = !vol.muted; syncVolume(); void pushVolume(); });
+  phoneBar.append(tbSep(), volBox);
+  syncVolume();
   if (opts.onSketch) {
     const tbSketch = tbButton("스케치", "sketch", "지금 앱 화면을 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다");
     tbSketch.addEventListener("click", () => { opts.onSketch(); });
     toolbar.append(tbSketch);
   }
+  const modeButtons = [];
+  if (opts.onPick) {
+    const button = tbButton("요소 선택", "pick", "요소 선택 모드 켜기 또는 끄기");
+    button.addEventListener("click", () => opts.onPick());
+    modeButtons.push([button, opts.pickOn]);
+    toolbar.append(button);
+  }
+  if (opts.onRecord) {
+    const button = tbButton("기록", "record", "활성 브라우저 탭의 조작 기록 켜기 또는 끄기");
+    button.addEventListener("click", () => opts.onRecord());
+    modeButtons.push([button, opts.recordOn]);
+    toolbar.append(button);
+  }
+  const syncModeButtons = () => {
+    for (const [button, on] of modeButtons) button.setAttribute("aria-pressed", String(!!on?.()));
+  };
+  syncModeButtons();
+  const modeTimer = setInterval(syncModeButtons, 250);
   const placeButtons = [];
   if (detachable) {
     const tbDetach = tbButton("창으로 분리", "detach", "이 화면을 별도 창으로 옮깁니다");
@@ -197,6 +290,63 @@ function buildPane(container, opts, vendor) {
   }
   if (placeButtons.length) toolbar.append(tbSep(), ...placeButtons);
   toolbar.append(tbSep(), tbPrimary);
+
+  function syncVolume() {
+    const pct = Math.round(vol.volume * 100);
+    const silent = vol.muted || pct === 0;
+    volRange.value = String(pct);
+    volRange.disabled = volMute.disabled = !vol.device;
+    volRange.setAttribute("aria-valuetext", vol.muted ? `음소거(${pct}%)` : `${pct}%`);
+    volRange.title = `이 기기 음량 ${pct}%`;
+    volValue.textContent = vol.muted ? "음소거" : `${pct}%`;
+    volMute.innerHTML = TB_ICON[silent ? "sound_off" : "sound"];
+    volMute.setAttribute("aria-label", vol.muted ? "이 기기 소리 켜기" : "이 기기 소리 끄기");
+    volMute.title = vol.muted ? "이 기기 소리 켜기" : "이 기기 소리 끄기";
+    volMute.setAttribute("aria-pressed", String(vol.muted));
+    volBox.classList.toggle("muted", vol.muted);
+  }
+  // 음량 저장 키: iOS 는 udid, Android 는 AVD 이름(켜면 id 가 emulator-NNNN 으로 바뀌어도 같은 값)
+  function volumeKey(device) {
+    const row = state.devices.find((d) => d.udid === device);
+    const name = row && row.runtime === "Android" ? row.name : null;
+    return name && /^[\w.:-]{1,128}$/.test(name) ? name : device;
+  }
+  // 보이는 기기가 바뀌면 그 기기 저장값을 받아 표시
+  function syncVolumeTarget() {
+    if (!host.useVolume) return;
+    const device = state.selectedUdid || null;
+    const key = device && volumeKey(device);
+    if (device === vol.device && key === vol.key) return;
+    Object.assign(vol, { device, key, volume: 1, muted: false });
+    const seq = ++vol.seq;
+    syncVolume();
+    if (!device) return;
+    host.useVolume({ device, key }).then((r) => {
+      if (disposed || seq !== vol.seq || !r) return;
+      if (typeof r.volume === "number") { vol.volume = r.volume; vol.muted = !!r.muted; syncVolume(); }
+      showVolumeResult(r);
+    }).catch(() => {});
+  }
+  // 음량 실패 문장은 오류 줄에. 다음 성공 때 그 문장만 지움(다른 오류는 유지)
+  function showVolumeResult(r) {
+    if (!r) return;
+    if (!r.ok) { vol.error = r.error || "음량을 바꾸지 못했습니다."; state.error = vol.error; render(); }
+    else if (vol.error && state.error === vol.error) { vol.error = null; state.error = null; render(); }
+  }
+  // 끌기 중 연속 입력은 보내는 중이면 마지막 값만 한 번 더
+  async function pushVolume() {
+    if (!vol.device || !host.setVolume) return;
+    if (vol.sending) { vol.dirty = true; return; }
+    vol.sending = true;
+    try {
+      do {
+        vol.dirty = false;
+        const r = await host.setVolume({ device: vol.device, key: vol.key, volume: vol.volume, muted: vol.muted }).catch((e) => ({ ok: false, error: e?.message }));
+        if (disposed) return;
+        showVolumeResult(r);
+      } while (vol.dirty);
+    } finally { vol.sending = false; }
+  }
 
   // ---- 기기 프레임 ----
   const frameShell = el("div", "emu-frame-shell");
@@ -212,6 +362,27 @@ function buildPane(container, opts, vendor) {
   function isLiveNow() {
     return Boolean(simulatorPreviewStreamUrl(state.session && state.session.info) && state.session && state.session.attached);
   }
+  function selectedPlatform() {
+    const runtime = state.devices.find((d) => d.udid === state.selectedUdid)?.runtime || "";
+    return runtime === "Android" ? "Android" : /(?:SimRuntime\.)?iOS[- ]/.test(runtime) ? "iOS" : null;
+  }
+
+  function attachTarget(devices, deviceTarget) {
+    if (opts.fixedDevice) return state.selectedUdid || opts.deviceId || undefined;
+    return resolveEmulatorAttachTarget({ configuredDefaultUdid, devices, deviceTarget, selectedUdid: state.selectedUdid });
+  }
+
+  async function acceptsFixedSession(info) {
+    if (!opts.fixedDevice) return true;
+    const target = info && (info.deviceUdid || info.device);
+    if (target && fixedAliases.has(target)) return true;
+    // 재사용한 세션 응답에는 backend가 없으므로 목록의 AVD 이름으로 같은 기기인지 확인한다.
+    if (!fixedAvdName || /^emulator-\d+$/.test(state.selectedUdid || "") || !/^emulator-\d+$/.test(target || "")) return false;
+    const rows = await refreshDevices();
+    if (disposed || !rows.some((d) => d.udid === target && d.runtime === "Android" && d.name === fixedAvdName && d.state === "Booted")) return false;
+    fixedAliases.add(target);
+    return true;
+  }
 
   // ---- 기기 목록 ----
   async function refreshDevices(bootedTarget) {
@@ -223,6 +394,8 @@ function buildPane(container, opts, vendor) {
       const hadError = state.deviceRefreshError !== null;
       state.deviceRefreshError = null;
       state.devices = next;
+      const fixedRow = opts.fixedDevice && next.find((d) => d.runtime === "Android" && d.name === opts.deviceId);
+      if (fixedRow && !/^emulator-\d+$/.test(opts.deviceId || "")) fixedAvdName = fixedRow.name;
       if (hadError) state.error = null;
       render();
       return next;
@@ -252,7 +425,7 @@ function buildPane(container, opts, vendor) {
     state.session = { attached, info: enriched };
     state.liveTarget = attached ? target || null : null;
     state.loading = false;
-    if (attached) state.suppressAutoAttach = false;
+    if (attached) state.suppressAutoAttach = stopRequested;
     state.error = null;
     if (attached && simulatorPreviewStreamUrl(enriched)) state.streamKey = String(Date.now());
     if (info && (info.deviceUdid || info.device)) {
@@ -268,6 +441,12 @@ function buildPane(container, opts, vendor) {
     state.devices = markSimulatorDeviceShutdown(state.devices, target);
     state.session = null;
     state.liveTarget = null;
+    if (opts.fixedDevice && fixedAvdName && state.selectedUdid !== opts.deviceId) {
+      state.selectedUdid = opts.deviceId;
+      fixedAliases.clear();
+      fixedAliases.add(opts.deviceId);
+      onDeviceChange && onDeviceChange(opts.deviceId);
+    }
     state.suppressAutoAttach = true;
     state.streamKey = null;
     resetVisualOrientation();
@@ -275,8 +454,16 @@ function buildPane(container, opts, vendor) {
     render();
   }
 
-  async function attach(deviceTarget) {
-    if (state.loading) return;
+  function attach(deviceTarget) {
+    if (disposed || state.loading || stopRequested || attachTask) return attachTask || Promise.resolve({ ok: false, canceled: true });
+    const task = runAttach(deviceTarget);
+    attachTask = task;
+    void task.finally(() => { if (attachTask === task) attachTask = null; });
+    return task;
+  }
+
+  async function runAttach(deviceTarget) {
+    const stopEpoch = sessionStopEpoch;
     state.suppressAutoAttach = false;
     state.loading = true;
     state.loadingStage = "기기 목록 확인 중…";
@@ -287,10 +474,9 @@ function buildPane(container, opts, vendor) {
     try {
       let list = state.devices;
       if (list.length === 0) list = (await refreshDevices()) || [];
+      if (disposed) return { ok: false, canceled: true };
       if (list.length === 0 && state.deviceRefreshError) throw state.deviceRefreshError;
-      const target = resolveEmulatorAttachTarget({
-        configuredDefaultUdid, devices: list, deviceTarget, selectedUdid: state.selectedUdid,
-      });
+      const target = attachTarget(list, deviceTarget);
       if (!target) throw new Error("에뮬레이터 기기를 찾을 수 없습니다. Xcode 에서 iOS 시뮬레이터를 추가하거나 Android Studio 에서 AVD 를 만드세요.");
       requestedTarget = target;
       state.loadingStage = "가상 기기 시작 중…";
@@ -301,18 +487,23 @@ function buildPane(container, opts, vendor) {
       }
       const res = await rpcCall(host, "emulator.attach", { device: target, worktree: workspaceId, focus: false });
       if (disposed) {
-        // Why: dispose 가 attach 진행 중에 왔으면 방금 붙은 기기를 아무도 쓰지 않는다.
-        void rpcCall(host, "emulator.shutdown", { worktree: workspaceId, managedOnly: true }).catch(() => {});
-        return;
+        // close가 먼저 끝났어도 attach 완료 시 관리 세션이 새로 등록될 수 있다.
+        if (closed) void rpcCall(host, "emulator.shutdown", { worktree: workspaceId, managedOnly: true }).catch(() => {});
+        return { ok: false, canceled: true };
       }
+      if (stopEpoch !== sessionStopEpoch) return { ok: false, canceled: true };
       const attached = !!(res && res.attached);
+      if (attached && !await acceptsFixedSession(res.info)) throw new Error("지정한 기기와 연결 응답의 기기가 다릅니다.");
+      if (disposed || stopEpoch !== sessionStopEpoch) return { ok: false, canceled: true };
       const bootedTarget = (res && res.info && (res.info.deviceUdid || res.info.device)) || target;
-      const nextList = attached ? markSimulatorDeviceBooted(list, bootedTarget) : list;
+      const nextList = attached ? markSimulatorDeviceBooted(state.devices, bootedTarget) : state.devices;
       if (attached) state.devices = nextList;
       applySession(res && res.info, attached);
       if (attached) void refreshDevices(bootedTarget);
+      return attached ? { ok: true, udid: bootedTarget } : { ok: false, error: "기기에 연결하지 못했습니다." };
     } catch (e) {
-      if (requestedTarget && state.liveTarget === requestedTarget) return;
+      if (disposed) return { ok: false, canceled: true };
+      if (requestedTarget && state.liveTarget === requestedTarget) return { ok: true, udid: state.liveTarget };
       state.suppressAutoAttach = true;
       const targetRow = state.devices.find((device) => device.udid === requestedTarget);
       const availability = await host.rpc("emulator.availability", {}).catch(() => null);
@@ -324,16 +515,19 @@ function buildPane(container, opts, vendor) {
           state.setupGuidance = xcodeGuidance(availability.result);
         }
       }
-      if (disposed) return;
+      if (disposed) return { ok: false, canceled: true };
       state.error = state.setupGuidance?.message || emulatorPaneErrorMessage(e, "에뮬레이터를 시작하지 못했습니다. 기기 설정을 확인한 뒤 다시 시도하세요.");
       render();
+      return { ok: false, error: String(state.error.message || state.error) };
     } finally {
       if (!disposed) { state.loading = false; state.loadingStage = ""; render(); }
     }
   }
 
   async function shutdown(deviceTarget) {
-    if (state.loading) return;
+    if (disposed) return { ok: false, canceled: true };
+    if (!deviceTarget) return { ok: false, error: "종료할 기기가 지정되지 않았습니다." };
+    state.suppressAutoAttach = true;
     state.loading = true; state.error = null; render();
     state.loadingStage = "가상 기기 종료 중…"; render();
     try {
@@ -341,11 +535,31 @@ function buildPane(container, opts, vendor) {
       const shutdownTarget = (res && res.deviceUdid) || deviceTarget;
       clearSessionAfterShutdown(shutdownTarget);
       void refreshDevices();
+      return { ok: true, deviceUdid: shutdownTarget };
     } catch (e) {
       state.error = emulatorPaneErrorMessage(e, "에뮬레이터를 종료하지 못했습니다. 다시 시도하거나 에뮬레이터 관리자에서 직접 끄세요.");
+      return { ok: false, error: String(state.error.message || state.error) };
     } finally {
       if (!disposed) { state.loading = false; state.loadingStage = ""; render(); }
     }
+  }
+
+  function stop() {
+    if (disposed) return Promise.resolve({ ok: false, canceled: true });
+    if (stopTask) return stopTask;
+    stopRequested = true;
+    state.suppressAutoAttach = true;
+    const pending = attachTask;
+    const task = (async () => {
+      await settingsReady;
+      if (pending) await pending;
+      return shutdown(state.liveTarget || state.selectedUdid || opts.deviceId || undefined);
+    })();
+    stopTask = task;
+    void task.finally(() => {
+      if (stopTask === task) { stopTask = null; stopRequested = false; }
+    });
+    return task;
   }
 
   function sendTap(x, y) { rpcCall(host, "emulator.tap", { x, y, worktree: workspaceId }).catch(() => {}); }
@@ -367,11 +581,23 @@ function buildPane(container, opts, vendor) {
   // Why: Orca 는 이 알림을 앱 셸(content-creation-ipc-bridge)이 받아 탭을 새로 만들거나
   // 이미 열린 pane 에 세션을 얹는다. Iris 는 탭이 이미 있을 때만 이 알림을 받으므로 "새 탭 생성"
   // 쪽은 옮기지 않았다(boot.js 영역, 이번 포트 파일 목록 밖).
-  const offAutoAttach = host.onAutoAttach ? host.onAutoAttach((detail) => {
+  const offAutoAttach = host.onAutoAttach ? host.onAutoAttach(async (detail) => {
+    const stopEpoch = sessionStopEpoch;
     if (!detail || detail.worktreeId !== workspaceId) return;
     if (!detail.info || (!detail.info.streamUrl && !detail.info.wsUrl)) return;
+    if (disposed) return;
+    if (!await acceptsFixedSession(detail.info) || disposed || stopEpoch !== sessionStopEpoch) return;
     applySession(detail.info, true);
     void refreshDevices(detail.info.deviceUdid || detail.info.device);
+  }) : null;
+  const offSessionStopped = host.onSessionStopped ? host.onSessionStopped((detail) => {
+    if (!detail || disposed) return;
+    const target = detail.device;
+    if (detail.worktree !== workspaceId && (!target || (target !== state.liveTarget && target !== state.selectedUdid))) return;
+    sessionStopEpoch += 1;
+    state.loading = false;
+    state.loadingStage = "";
+    clearSessionAfterShutdown(target);
   }) : null;
 
   // ---- 창 레벨 표시 여부(occlusion) 파킹. Orca use-window-stream-visibility 의 지연치만 옮긴다.
@@ -748,6 +974,7 @@ function buildPane(container, opts, vendor) {
   function handleStreamSize(size) {
     streamError = false;
     if (!streamSize || streamSize.width !== size.width || streamSize.height !== size.height) { streamSize = size; renderFrameLayout(); }
+    rememberScreenSize([state.liveTarget, state.selectedUdid], size);
   }
   // Why: canInteractNow(외부 render() 가 계산)까지 다시 맞춰야 하므로 renderScreenContent 가
   // 아니라 render 를 부른다. renderScreenContent 안에서 이 함수를 부르면 서로 되부르는 무한
@@ -822,9 +1049,13 @@ function buildPane(container, opts, vendor) {
   function renderFrameLayout() {
     const view = buildEmulatorPaneSessionView({ devices: state.devices, selectedUdid: state.selectedUdid, session: state.session });
     lastVisualStreamGeometry = resolveVisualStreamGeometry(streamSize, state.visualOrientation);
+    // 스트림 전: 그 기기의 마지막 화면 크기(없으면 Orca 기본 9:19). 회전 계산(lastVisualStreamGeometry)은 실제 스트림만
+    const known = streamSize ? null : knownScreenSize(state.selectedUdid);
+    const shape = known ? resolveVisualStreamGeometry(known, state.visualOrientation) : lastVisualStreamGeometry;
+    const size = streamSize || known;
     const deviceName = view.displayName;
-    const frameKind = resolveDeviceFrameKind(deviceName, streamSize ? streamSize.width / streamSize.height : 9 / 19);
-    const layout = fitDeviceFrameToPane(paneSize, lastVisualStreamGeometry.aspectRatio, frameKind);
+    const frameKind = resolveDeviceFrameKind(deviceName, size ? size.width / size.height : 9 / 19);
+    const layout = fitDeviceFrameToPane(paneSize, shape.aspectRatio, frameKind);
     frameShell.querySelectorAll(".emu-hw-btn").forEach((n) => n.remove());
     if (layout) {
       frameShell.style.width = layout.width + "px";
@@ -852,7 +1083,7 @@ function buildPane(container, opts, vendor) {
       frameScreen.style.borderRadius = "54px";
       screenSurface.style.inset = "";
       screenSurface.style.borderRadius = "44px";
-      screenSurface.style.aspectRatio = String(lastVisualStreamGeometry.aspectRatio);
+      screenSurface.style.aspectRatio = String(shape.aspectRatio);
     }
     renderScreenContent();
   }
@@ -878,6 +1109,7 @@ function buildPane(container, opts, vendor) {
 
   // ================= 렌더 =================
   function render() {
+    if (disposed) return;
     const view = buildEmulatorPaneSessionView({ devices: state.devices, selectedUdid: state.selectedUdid, session: state.session });
     const statusLabel = view.isLive ? "연결됨" : state.loading ? (state.loadingStage || "연결 중…") : "연결 안 됨";
     tbStatusText.textContent = statusLabel;
@@ -885,15 +1117,21 @@ function buildPane(container, opts, vendor) {
     tbLiveDot.classList.toggle("live", view.isLive);
     tbLiveDot.title = statusLabel;
     // 목록에 없는 기기(아직 목록을 못 받았거나 붙는 중)를 보고 있어도 트리거에는 그 이름이 보여야 한다.
-    const items = state.devices.map((d) => ({ value: d.udid, label: d.name, sub: runtimeLabel(d.runtime) }));
+    // 켜진 기기 표시(모바일 기기 목록의 켜짐 점과 같은 정보). 공용 드롭다운이라 보조 글자로
+    const items = state.devices.map((d) => ({ value: d.udid, label: d.name, sub: runtimeLabel(d.runtime) + (d.state === "Booted" ? " · 켜짐" : "") }));
     if (!items.some((it) => it.value === state.selectedUdid)) items.unshift({ value: state.selectedUdid, label: view.displayName || "기기 없음" });
     const key = JSON.stringify(items) + "\n" + state.selectedUdid;
     if (key !== tbDeviceKey) { tbDeviceKey = key; tbDevice.setItems(items); tbDevice.setValue(state.selectedUdid); }
     const row = state.devices.find((d) => d.udid === state.selectedUdid);
+    tbDeviceName.textContent = view.displayName === "Mobile Emulator" ? state.selectedUdid || "기기 없음" : view.displayName;
     tbRuntime.textContent = row ? runtimeLabel(row.runtime) : "";
     if (tbDeviceTrigger) tbDeviceTrigger.disabled = state.loading || state.devices.length === 0;
-    tbRotate.disabled = !view.isLive || state.loading;
-    tbHome.disabled = !view.isLive || state.loading;
+    const platform = selectedPlatform();
+    const enabled = phoneControls(platform);
+    for (const [name, button] of phoneButtons) {
+      button.hidden = !enabled.includes(name);
+      button.disabled = !view.isLive || state.loading;
+    }
     if (view.isLive) {
       tbPrimaryLabel.textContent = "종료"; tbPrimary.setAttribute("aria-label", "종료"); tbPrimary.title = "기기와의 연결을 끊고 끕니다";
       tbPrimary.classList.add("emu-btn-danger"); tbPrimary.classList.remove("emu-btn-pri");
@@ -945,31 +1183,44 @@ function buildPane(container, opts, vendor) {
     if (!canInteractNow) { screenSurface.classList.remove("emu-screen-capturing"); keyboardCaptureActive = false; }
     updateControlStream(view.wsUrl, canInteractNow);
     renderFrameLayout();
+    syncVolumeTarget();
   }
 
-  // 초기 진입: 기기 목록을 받고, 항상 자동으로 붙는다(Iris 는 탭이 보일 때만 mount 하므로
-  // Orca 의 isActive=false 사전-mount 경로는 필요 없다).
+  // 초기 진입: 기기 목록을 받고, 이미 켜진 기기면 화면만 붙임. 꺼진 기기는 기본 기기로 골라만 두고 켜지 않음
+  // (창을 열거나 앱을 다시 켤 때 기기가 저절로 켜지지 않게. 창 분리·복귀는 켜진 기기라 그대로 붙음)
   render();
   void (async () => {
-    await settingsReady;
-    await refreshDevices();
-    if (disposed || state.session || state.loading || state.suppressAutoAttach) return;
-    void attach(state.selectedUdid || undefined);
+    try {
+      await settingsReady;
+      const list = await refreshDevices();
+      if (disposed || state.session || state.loading || state.suppressAutoAttach) return;
+      const target = attachTarget(list);
+      const row = list.find((d) => d.udid === target || d.name === target);
+      if (row && row.state === "Booted") { await attach(target); return; }
+      if (target && target !== state.selectedUdid) { state.selectedUdid = target; onDeviceChange && onDeviceChange(target); render(); }
+    } finally {
+      state.initializing = false;
+      render();
+    }
   })();
 
   function teardownDom() {
+    clearInterval(modeTimer);
     if (resizeObserver) resizeObserver.disconnect(); else window.removeEventListener("resize", scheduleSizeUpdate);
     if (sizeFrameId) cancelAnimationFrame(sizeFrameId);
     document.removeEventListener("visibilitychange", onDocVisibilityChange);
     if (windowVisibleTimer) clearTimeout(windowVisibleTimer);
     if (offAutoAttach) offAutoAttach();
+    if (offSessionStopped) offSessionStopped();
+    tbDevice.destroy();
     teardownControlStream();
     teardownFrameStream();
     teardownVideoStream();
     const pending = wheelGesture;
     if (pending) { if (pending.timerId != null) clearTimeout(pending.timerId); if (pending.live) sendTouch(Object.assign(clampEmulatorScreenPoint(pending.end), { type: "end" })); }
     if (liveTouch && lastTouchPoint) sendTouch(buildEmulatorGesturePoint(lastTouchPoint, "end", liveTouchEdge));
-    container.replaceChildren();
+    toolbar.remove();
+    root.remove();
   }
 
   // 스케치가 부른다. 지금 그리고 있는 프레임을 화면에 보이는 방향 그대로 PNG 로 만든다. 프레임은 기기
@@ -1007,21 +1258,33 @@ function buildPane(container, opts, vendor) {
     // 꺼져 있던 AVD 는 AVD 이름으로 붙고 시리얼로 돌아와, 붙는 순간의 표시 이름이 비어 있을 수 있다. 지금 목록에서 다시 찾는다.
     const row = state.liveTarget ? state.devices.find((d) => d.udid === state.liveTarget) : null;
     return { udid: state.liveTarget || null, name: (row && row.name) || (info && info.displayName) || "", attached: !!info,
-      loading: !!state.loading, error: state.error ? String(state.error.message || state.error) : null };
+      initializing: state.initializing, loading: state.initializing || !!state.loading,
+      error: state.error ? String(state.error.message || state.error) : null };
   }
 
   return {
     snapshot,
     current,
+    platform: selectedPlatform,
+    stop,
+    // 에이전트 요청(boot.js openForAgent): 꺼진 기기도 켬. 기본 기기 설정을 읽은 뒤 붙음
+    async connect() {
+      await settingsReady;
+      if (disposed) return { ok: false, canceled: true };
+      if (stopRequested) return { ok: false, error: "기기를 종료하고 있습니다." };
+      if (attachTask) return attachTask;
+      if (isLiveNow()) return { ok: true, udid: state.liveTarget };
+      return attach(state.selectedUdid || undefined);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       teardownDom();
     },
     close() {
-      if (disposed) { void rpcCall(host, "emulator.shutdown", { worktree: workspaceId, managedOnly: true }).catch(() => {}); return; }
-      disposed = true;
-      teardownDom();
+      if (closed) return;
+      closed = true;
+      if (!disposed) { disposed = true; teardownDom(); }
       void rpcCall(host, "emulator.shutdown", { worktree: workspaceId, managedOnly: true }).catch(() => {});
     },
     setVisible(visible) {
@@ -1031,21 +1294,26 @@ function buildPane(container, opts, vendor) {
   };
 }
 
-// 위 buildPane 은 vendor 번들이 있어야 돈다. import() 가 끝나기 전에도 boot.js 는 dispose·
-// close·setVisible 을 동기로 부를 수 있어(탭을 바로 닫는 등) 그동안의 호출을 큐에 쌓아 두었다가
-// vendor 가 준비되면 그대로 흘려보낸다. Orca 에는 없는 갈래이며 이 파일 안의 번들 로딩 방식
-// 때문에 생긴 것이다(위 vendorReady 주석 참고).
+// 번들을 기다리는 동안 종료된 화면은 같은 container를 쓰는 새 화면에 DOM을 추가하면 안 된다.
 export function mountEmulatorPane(container, opts) {
   let real = null;
   let queuedVisible = true;
   let queuedDispose = false;
   let queuedClose = false;
-  void vendorReady.then((vendor) => {
+  let queuedConnect = false;
+  let queuedStop = false;
+  let queuedStopTask = null;
+  let queuedConnectTask = null;
+  let vendorError = null;
+  const paneReady = vendorReady.then((vendor) => {
+    if (queuedDispose || queuedClose) return;
     real = buildPane(container, opts, vendor);
-    if (queuedClose) { real.close(); return; }
-    if (queuedDispose) { real.dispose(); return; }
     real.setVisible(queuedVisible);
+    if (queuedStop) queuedStopTask = real.stop();
+    else if (queuedConnect) queuedConnectTask = real.connect();
   }).catch((e) => {
+    if (queuedDispose || queuedClose) return;
+    vendorError = e;
     console.error("[emulator] 렌더러 번들을 불러오지 못했습니다", e);
     container.replaceChildren();
     const msg = document.createElement("p");
@@ -1055,9 +1323,36 @@ export function mountEmulatorPane(container, opts) {
   });
   return {
     dispose() { if (real) real.dispose(); else queuedDispose = true; },
-    close() { if (real) real.close(); else queuedClose = true; },
+    close() {
+      if (real) real.close();
+      else if (!queuedClose) {
+        queuedClose = true;
+        void rpcCall(opts.host, "emulator.shutdown", { worktree: opts.workspaceId, managedOnly: true }).catch(() => {});
+      }
+    },
+    stop() {
+      if (queuedDispose || queuedClose) return Promise.resolve({ ok: false, canceled: true });
+      if (real) return real.stop();
+      queuedStop = true;
+      queuedConnect = false;
+      return paneReady.then(() => queuedStopTask || { ok: false, ...(vendorError
+        ? { error: String(vendorError.message || vendorError) } : { canceled: true }) });
+    },
     setVisible(visible) { queuedVisible = !!visible; if (real) real.setVisible(visible); },
     snapshot() { return real ? real.snapshot() : Promise.resolve(null); },
-    current() { return real ? real.current() : { udid: null, name: "", attached: false, loading: true, error: null }; },
+    current() {
+      const initializing = !queuedDispose && !queuedClose && !vendorError;
+      return real ? real.current() : { udid: null, name: "", attached: false, initializing, loading: initializing,
+        error: vendorError ? String(vendorError.message || vendorError) : null };
+    },
+    platform() { return real ? real.platform() : null; },
+    connect() {
+      if (queuedDispose || queuedClose) return Promise.resolve({ ok: false, canceled: true });
+      if (real) return real.connect();
+      queuedConnect = true;
+      queuedStop = false;
+      return paneReady.then(() => queuedConnectTask || { ok: false, ...(vendorError
+        ? { error: String(vendorError.message || vendorError) } : { canceled: true }) });
+    },
   };
 }

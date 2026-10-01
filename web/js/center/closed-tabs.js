@@ -86,7 +86,7 @@ export function pickReopen(browserList, centerList) {
 
 export function reopenLastClosed() {
   const pick = pickReopen(closedBrowser, closedCenter);
-  if (!pick) { showToast && showToast("되살릴 닫힌 탭이 없습니다"); return false; }
+  if (!pick) { showToast && showToast("되살릴 닫힌 탭이 없습니다", { level: "info" }); return false; }
   if (pick.kind === "center") {
     // 고른 항목만 제거한다. 맨 위를 pop 하면 그사이 다른 탭이 닫혔을 때 엉뚱한 항목이 빠진다.
     const i = closedCenter.lastIndexOf(pick.entry);

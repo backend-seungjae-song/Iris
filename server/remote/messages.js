@@ -1,0 +1,43 @@
+// 원격 설정 오류 코드별 화면 문구. 상태 카드와 요청 오류가 같은 문구를 씀
+const MESSAGES = Object.freeze({
+  "registry-invalid": "원격 등록부를 읽지 못했습니다.",
+  "registry-save-failed": "원격 설정을 저장하지 못했습니다.",
+  "pin-required": "접속 PIN을 먼저 설정하세요.",
+  "pin-invalid": "저장된 접속 PIN 정보를 읽지 못했습니다.",
+  "invalid-pin": "접속 PIN은 숫자 6자리 이상이어야 합니다.",
+  "pin-mismatch": "접속 PIN 확인 값이 일치하지 않습니다.",
+  "pin-save-failed": "접속 PIN을 저장하지 못했습니다.",
+  "session-policy-invalid": "저장된 PIN 기한 설정을 읽지 못했습니다.",
+  "session-policy-save-failed": "PIN 기한 설정을 저장하지 못했습니다.",
+  "invalid-session-policy": "PIN 기한은 10분, 20분, 30분, 60분 중에서 고르세요.",
+  "tailscale-cli-not-found": "Tailscale CLI를 찾지 못했습니다.",
+  "tailscale-address-unavailable": "Tailscale IPv4 주소가 없습니다.",
+  "tailscale-address-mismatch": "Tailscale 주소가 이 Mac의 네트워크 주소와 일치하지 않습니다.",
+  "certificate-failed": "원격 TLS 인증서를 준비하지 못했습니다.",
+  "gateway-restart-limit": "원격 게이트웨이가 반복해서 종료되었습니다.",
+  "gateway-stop-failed": "원격 게이트웨이 프로세스를 종료하지 못했습니다.",
+  "gateway-start-failed": "외부 수신을 시작하지 못했습니다.",
+  "agent-socket-failed": "에이전트 응답 연결을 시작하지 못했습니다.",
+  "initializing": "원격 설정을 확인하고 있습니다.",
+  "feature-hidden": "원격 제어 기능이 숨겨져 있습니다.",
+  "pairing-unavailable": "원격 제어가 켜져 있을 때 기기를 추가할 수 있습니다.",
+  "pairing-not-active": "진행 중인 기기 추가가 없습니다.",
+  "pairing-expired": "기기 추가 시간이 지났습니다.",
+  "pairing-code-mismatch": "코드가 일치하지 않습니다.",
+  "pairing-attempts-exceeded": "코드를 세 번 잘못 입력해 기기 추가를 취소했습니다.",
+  "device-exists": "이미 등록된 기기입니다.",
+  "settings-invalid": "Claude 설정 파일의 JSON 형식을 확인하세요.",
+  "settings-save-failed": "Claude 설정 파일을 저장하지 못했습니다.",
+  "tailscale-busy": "Tailscale 작업이 진행 중입니다.",
+  "tailscale-brew-not-found": "Homebrew가 없어 Tailscale을 설치할 수 없습니다. tailscale.com에서 설치하세요.",
+  "tailscale-install-failed": "Tailscale을 설치하지 못했습니다.",
+  "tailscale-daemon-not-found": "Tailscale 서비스 실행 파일을 찾지 못했습니다.",
+  "tailscale-start-cancelled": "관리자 암호 입력을 취소했습니다.",
+  "tailscale-start-failed": "Tailscale 서비스를 켜지 못했습니다.",
+  "tailscale-operator-required": "Tailscale 사용 권한이 없습니다. 서비스 켜기를 다시 눌러 주세요.",
+  "tailscale-connect-failed": "Tailscale에 연결하지 못했습니다.",
+});
+
+export function messageFor(code, fallback = "원격 설정 요청을 처리하지 못했습니다.") {
+  return Object.hasOwn(MESSAGES, code) ? MESSAGES[code] : fallback;
+}

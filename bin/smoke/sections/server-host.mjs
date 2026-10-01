@@ -60,7 +60,8 @@ export default async function run() {
     const hostSrc = read("native/electron/server-host.cjs");
     const mainHost = read("native/electron/main.cjs");
     check("앱이 서버를 자식으로 띄운다", () =>
-      /new ServerHost\(\{ app, port: APP_PORT, stateDir: IRIS_HOME \}\)/.test(mainHost)
+      /new ServerHost\(\{\s*app, port: APP_PORT, stateDir: IRIS_HOME[,\s}]/.test(mainHost)
+      && /onPolicyMismatch: \(health\) => quitForServerPolicy\(/.test(mainHost)
       && /await serverHost\.start\(\)/.test(mainHost)
       && existsSync(path.join(ROOT, "native/electron/server-host.cjs")));
     check("서버는 창보다 먼저 뜬다", () => {

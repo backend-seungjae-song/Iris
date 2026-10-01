@@ -33,12 +33,25 @@ function filesUnder(dir) {
 }
 function shippedSources() {
   const native = filesUnder("native/electron").filter((rel) => rel.endsWith(".cjs"));
-  return ["bin/agent-context.mjs", ...native, ...filesUnder("server"), ...filesUnder("web")].sort();
+  return ["bin/agent-context.mjs", "bin/iris-session.mjs", ...native, ...filesUnder("server"), ...filesUnder("web")].sort();
 }
 
 const shipped = shippedSources();
 
 if (mode === "pre") {
+  // web/vendor 는 git 이 담지 않는 빌드 산출물(pnpm build:vendor)이다. git worktree 처럼 그것이 없는
+  // 트리에서 빌드하면 post 대조는 양쪽이 같이 비어 통과하고, 설치 앱의 터미널·편집기가 빈 화면이 된다.
+  // 웹 코드가 부르는 vendor 경로를 참조에서 뽑아 실제로 있는지 본다.
+  const missingVendor = new Set();
+  for (const rel of shipped.filter((source) => !source.startsWith("web/vendor/") && /\.(html|m?js|css)$/.test(source))) {
+    for (const [ref] of fs.readFileSync(path.join(ROOT, rel), "utf8").matchAll(/vendor\/[A-Za-z0-9._\/-]*[A-Za-z0-9_-]/g)) {
+      if (!fs.existsSync(path.join(ROOT, "web", ref))) missingVendor.add(`web/${ref}  ←  ${rel}`);
+    }
+  }
+  if (missingVendor.size) {
+    for (const line of missingVendor) console.error("  " + line);
+    fail("웹 코드가 부르는 vendor 파일이 없습니다. pnpm build:vendor 로 만든 뒤 다시 실행하세요.");
+  }
   const dupes = [];
   // vendor 자산은 외부 배포 트리라 루트 소스와 basename이 같아도 미사용 사본이 아니다.
   // post에서는 실제 출하 바이트이므로 계속 전부 대조한다.

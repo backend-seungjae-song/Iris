@@ -85,10 +85,8 @@ check("memo-window-manager가 main 조립부에 연결됨", () =>
   && /memoWindowManager\.registerMemoIpc\(\)/.test(main)
   && /memoWindowManager\.memoWindowSnapshot\(\)\.records/.test(main)
   && /memoWindowManager\.createMemoModeWindow\(record\)/.test(main));
-// native 전체에서 계산한다. 창을 만드는 코드가 여러 모듈로 흩어져도(main-window ·
-// browser-window-manager · memo-window-manager) 총 개수는 셋이어야 하고, 네 번째가
-// 생기면 걸린다. main.cjs 만 보면 모듈을 옮긴 순간 0이 되어 검사가 무력해진다.
-check("사용자 UI BrowserWindow 생성 지점은 정해진 다섯 곳뿐이다", () => {
+// native 전체에서 계산해야 새 모듈에서 추가한 창도 확인할 수 있다.
+check("사용자 UI BrowserWindow 생성 지점은 정해진 일곱 곳뿐이다", () => {
   // 두 종류를 각각 검사로 강제한다. 어느 쪽이 늘어도 실패하고, 메시지가 어느 쪽인지 알려 준다.
   // 한쪽만 계산하면 새 창이 다른 종류로 들어가 검사를 통과한다.
   const src = readAll("native");
@@ -99,9 +97,11 @@ check("사용자 UI BrowserWindow 생성 지점은 정해진 다섯 곳뿐이다
   }
   // offscreen 하나는 전체 캡처 타일을 canvas 로 이어 붙이는 보이지 않는 창이다(cdp-capture-tools).
   // 넷째는 탭 하나만 담는 창이다(detached-tab-window). 다섯째는 에뮬레이터 분리 창이다
-  // (emulator/emulator-host.cjs). 창 종류가 늘면 이 수를 직접 올리게 하는 것이 이 검사의 목적이다.
+  // (emulator/emulator-host.cjs). 여섯째는 창 레이아웃 단축키 결과를 모니터 가운데에 띄우는 투명 알림 창이다
+  // (desk-layout/hud.cjs). 일곱째는 현재 프로필의 확장 팝업·설정 창이다(browser-extensions.cjs).
+  // 창 종류가 늘면 이 수를 직접 올리게 하는 것이 이 검사의 목적이다.
   // 창을 늘리는 것은 검토 없이 지나가면 안 되는 결정이다.
-  if (ui !== 5) throw new Error(`사용자 UI 창 생성 ${ui}곳 — 메인·브라우저·메모·탭분리·에뮬레이터 다섯이어야 한다`);
+  if (ui !== 7) throw new Error(`사용자 UI 창 생성 ${ui}곳 — 메인·브라우저·메모·탭분리·에뮬레이터·창 레이아웃 알림·확장 팝업 일곱이어야 한다`);
   if (offscreen !== 1) throw new Error(`보이지 않는 유틸 창 생성 ${offscreen}곳 — 타일 합성 하나뿐이어야 한다`);
   return true;
 });

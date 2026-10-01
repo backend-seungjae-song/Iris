@@ -170,7 +170,7 @@ function noteHtml(dir, nt, h) {
 // 맨 위는 기능 추적표다. 사용자의 최종 요구를 기능 단위로 종합하고, 확인자가 그것을 어떻게
 // 이해해서 무엇을 만들었는지, 어느 케이스가 스크린샷으로 확인했는지를 기능 한 줄로 잇는다.
 // 이 보고서 한 장으로 요구·이해·구현·검증을 대조하려는 것이다. 요청 발화를 하나씩 늘어놓지 않는다.
-// 기능 안에서 케이스가 없는 부분은 "확인 빈 곳"으로 그 자리에 드러낸다.
+// 기능 안에서 케이스가 없는 부분은 "확인하지 않은 것"으로 그 자리에 적는다.
 function asLines(v) {
   return (Array.isArray(v) ? v : splitLines(v)).map((x) => String(x).trim()).filter(Boolean);
 }
@@ -182,7 +182,7 @@ function featuresHtml(features, caseOf, h) {
   const withGap = list.filter((q) => !linked(q).length || gapsOf(q).length).length;
   return `<h2>기능과 구현 ${list.length}</h2>
   <p class="tally"><span class="chip gray">기능 ${list.length}</span>${
-    withGap ? `<span class="chip yellow">확인 빈 곳이 있는 기능 ${withGap}</span>` : ""}</p>
+    withGap ? `<span class="chip yellow">확인하지 않은 것이 있는 기능 ${withGap}</span>` : ""}</p>
   <ol class="req">${list.map((q, k) => {
     const cs = linked(q);
     const gaps = gapsOf(q);
@@ -193,7 +193,7 @@ function featuresHtml(features, caseOf, h) {
     <div class="cases"><h4>확인</h4>${cs.length
       ? cs.map((c) => `<a class="chip ${c.color}" href="#w${c.i + 1}">Case ${c.i + 1} ${PLAIN[c.color]}</a>`).join("")
       : `<span class="chip yellow">확인 케이스 없음</span>`}${
-      gaps.length || (!cs.length && q.why) ? `<small class="gap">확인 빈 곳<br>${[...gaps, ...(!cs.length && q.why ? [q.why] : [])].map(h.esc).join("<br>")}</small>` : ""}</div></li>`;
+      gaps.length || (!cs.length && q.why) ? `<small class="gap">확인하지 않은 것<br>${[...gaps, ...(!cs.length && q.why ? [q.why] : [])].map(h.esc).join("<br>")}</small>` : ""}</div></li>`;
   }).join("")}</ol>`;
 }
 

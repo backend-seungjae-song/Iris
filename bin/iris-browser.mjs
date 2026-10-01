@@ -51,9 +51,10 @@
 // 조작 범위: 이 세션이 소유한 *그룹* + 사용자가 앱에서 직접 지목해준 탭·그룹. 그 밖은 목록에도
 // 나오지 않는다. 그룹이 없으면 첫 명령 때 그룹과 탭이 생긴다. 지목은 여러 개 쌓인다.
 //
-// 세션 식별: herdr가 pane마다 HERDR_PANE_ID를 주입한다. 고정은 이 값 기준이라 같은 머신의 다른
-// 세션과 서로 간섭하지 않는다. 고정이 없으면 자기 그룹 안에서 마지막에 쓴 탭을 이어 쓴다.
+// 현재 대화 ID나 호출 프로세스로 pane을 확인한다. 공유 서버에서 물려받은 HERDR_PANE_ID만으로
+// 선택하지 않는다. 고정이 없으면 자기 그룹 안에서 마지막에 쓴 탭을 이어 쓴다.
 import http from "node:http";
+import { createSessionResolver } from "./iris-session.mjs";
 import { port as acPort } from "../server/env.cjs";
 
 // --tab @5 : 이 명령만 그 탭에서 실행한다(고정을 갈아끼우지 않고 여러 탭을 오갈 때).
@@ -205,8 +206,8 @@ switch (cmd) {
   }
 }
 
-// 세션 = herdr pane. IRIS_SESSION으로 덮어쓸 수 있다(herdr 밖 셸에서 특정 세션을 흉내낼 때).
-const session = process.env.IRIS_SESSION || process.env.HERDR_PANE_ID || null;
+// 공유 서버에서 물려받은 pane ID 대신 현재 대화의 소유 관계를 확인한다.
+const session = await createSessionResolver()();
 
 if (adhocTab != null) args.tab = adhocTab;
 const payload = JSON.stringify({ cmd, args, session });

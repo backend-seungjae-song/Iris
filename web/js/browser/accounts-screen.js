@@ -41,7 +41,7 @@ import { activeBrowserId } from "./webview.js";
 // 이 기능의 마크업 위치. index.html 에 두면 기능을 꺼도 바깥 요소가 파싱되므로 여기서 만든다.
 // 바깥 요소(aside 의 id·class)는 rail 표가 정본이고 여기는 안쪽만 담는다.
 export const panelHtml = `
-  <div class="acct-head"><h1>구글 계정</h1><span class="acct-sum" id="acct-sum"></span><span class="acct-sp"></span><button class="acct-ib" id="acct-refresh" title="새로고침" aria-label="새로고침"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button></div>
+  <div class="acct-head"><h1>구글 계정</h1><span class="acct-sum" id="acct-sum"></span><span class="acct-sp"></span><button class="acct-ib" id="acct-refresh" title="새로고침" aria-label="새로고침"><svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 0-2.3 5.7"/><path d="M20 5v7h-7"/></svg></button></div>
   <div class="acct-body" id="acct-body"></div>
 `;
 // 스페이스 기본 계정 드롭다운. 다시 그릴 때마다 새로 만들므로 이전 것은 닫고 떼어 낸다.
@@ -76,23 +76,23 @@ async function renameProfile(profileId, newName) {
   const current = profileById(profileId);
   newName = (newName || "").trim();
   if (!current || !newName || newName === current.name) { acctRefresh(); return; }
-  if (newName === PROFILE_DEFAULT) { showToast("기본 프로필 이름은 바꿀 수 없습니다"); acctRefresh(); return; }
-  if (getProfiles().some((p) => p.id !== profileId && p.name === newName)) { showToast("이미 있는 프로필 이름입니다"); acctRefresh(); return; }
+  if (newName === PROFILE_DEFAULT) { showToast("기본 프로필 이름은 바꿀 수 없습니다", { level: "warn" }); acctRefresh(); return; }
+  if (getProfiles().some((p) => p.id !== profileId && p.name === newName)) { showToast("이미 있는 프로필 이름입니다", { level: "info" }); acctRefresh(); return; }
   const oldName = current.name;
   renameProfileRecord(profileId, newName);
-  updateProfileBtn(); acctRefresh(); showToast(`프로필 이름 변경: ${oldName} → ${newName}`);
+  updateProfileBtn(); acctRefresh(); showToast(`프로필 이름 변경: ${oldName} → ${newName}`, { level: "info" });
 }
 // 프로필 삭제. 저장된 로그인(자격증명)까지 함께 삭제한다. 이 프로필을 쓰던 탭·스페이스
 // 기본값은 기본 프로필로 되돌린다(파티션 불변이라 webview 재생성).
 async function deleteProfile(profileId) {
   const name = profileName(profileId);
-  if (!profileId) { showToast("기본 프로필은 삭제할 수 없습니다"); acctRefresh(); return; }
+  if (!profileId) { showToast("기본 프로필은 삭제할 수 없습니다", { level: "warn" }); acctRefresh(); return; }
   // 1) 저장된 로그인(자격증명)을 먼저 삭제한다. 실패하면 프로필도 지우지 않고 알린다.
   try {
     if (!(window.acHost && acHost.clearCreds)) throw new Error("자격증명 삭제 불가(로컬 앱에서만)");
     const result = await acHost.clearCreds(partitionFor(profileId));
     if (!(result && result.ok)) throw new Error((result && result.error) || "자격증명 삭제 실패");
-  } catch (e) { showToast("로그인 삭제 실패. 프로필 삭제 취소: " + (e && e.message || e)); acctRefresh(); return; }
+  } catch (e) { showToast("로그인을 지우지 못해 프로필 삭제를 취소했습니다", { level: "err", detail: String(e && e.message || e) }); acctRefresh(); return; }
   // 2) 프로필 목록·Chrome 소스 매핑·스페이스 기본값 정리.
   // 삭제는 전용 연산으로 보낸다. 목록 전체 저장으로 보내면 마지막 하나를 지울 때 빈 목록이 되고,
   // 서버는 빈 목록을 (부팅 경합으로 보고) 거부하므로 지워지지 않는다. 크롬 연결·스페이스 기본값
@@ -117,7 +117,7 @@ async function deleteProfile(profileId) {
   } catch { purged = false; }
   updateProfileBtn(); acctRefresh();
   showToast(purged ? `프로필 삭제됨: ${name} (로그인 포함)`
-    : `프로필 삭제됨: ${name}. 다만 저장소를 비우지 못했습니다(앱 재시작 후 다시 시도)`);
+    : `프로필 삭제됨: ${name}. 다만 저장소를 비우지 못했습니다(앱 재시작 후 다시 시도)`, { level: purged ? "ok" : "err" });
 }
 export function acctRefresh() {
   const body = $("#acct-body"); if (!body) return;
@@ -181,7 +181,9 @@ export function acctRefresh() {
       } catch {}
       return { ...cp, target };
     });
-    box.innerHTML = accountsChromeBox(withTarget);
+    let blocked = "";
+    if (!profs.length) { try { blocked = (window.acHost && acHost.chromeDataBlocked) ? await acHost.chromeDataBlocked() : ""; } catch {} }
+    box.innerHTML = accountsChromeBox(withTarget, blocked);
     const n = body.querySelector("#acct-chrome-n"); if (n) n.textContent = String(profs.length);
   })();
 }
@@ -192,12 +194,12 @@ function acctSaveSpaceDefault(space, value) {
   const id = profileIdForStored(value);
   if (acctDefPending) clearTimeout(acctDefPending.timer);
   acctDefPending = null;
-  if ((getSpaceDefaults()[space] || PROFILE_DEFAULT_ID) === id) { showToast("스페이스 기본 계정 저장됨"); return; }
+  if ((getSpaceDefaults()[space] || PROFILE_DEFAULT_ID) === id) { showToast("스페이스 기본 계정 저장됨", { level: "ok" }); return; }
   const pend = { space, id, timer: null };
   pend.timer = setTimeout(() => {
     if (acctDefPending !== pend) return;
     acctDefPending = null;
-    showToast("스페이스 기본 계정을 저장하지 못했습니다");
+    showToast("스페이스 기본 계정을 저장하지 못했습니다", { level: "err" });
     acctApplyServerState();   // 선택 값을 서버에 있는 값으로 되돌린다
   }, ACCT_DEF_CONFIRM_MS);
   acctDefPending = pend;
@@ -208,7 +210,7 @@ function acctApplyServerState() {
   if (acctDefPending && (defaults[acctDefPending.space] || PROFILE_DEFAULT_ID) === acctDefPending.id) {
     clearTimeout(acctDefPending.timer);
     acctDefPending = null;
-    showToast("스페이스 기본 계정 저장됨");
+    showToast("스페이스 기본 계정 저장됨", { level: "ok" });
   }
   const body = $("#acct-body"); if (!body || !body.isConnected || !acctSpaces.length) return;
   const usedBy = accountsUsedBy(acctSpaces, defaults, PROFILE_DEFAULT_ID);
@@ -253,21 +255,21 @@ function wireAccounts() {
     const del = e.target.closest("[data-del-prof]");
     if (del) { const id = del.dataset.delProf, name = profileName(id); if (confirm(`"${name}" 프로필을 삭제할까요?\n저장된 로그인(자격증명)도 함께 삭제되고, 이 프로필을 쓰던 탭은 기본 프로필로 되돌아갑니다.`)) { await deleteProfile(id); } return; }
     const add = e.target.closest("#acct-new-add");
-    if (add) { const inp = $("#acct-new-name"); const v = (inp.value || "").trim(); if (v) { if (!addProfile(v)) showToast("이미 있는 프로필 이름입니다"); else inp.value = ""; acctRefresh(); } return; }
+    if (add) { const inp = $("#acct-new-name"); const v = (inp.value || "").trim(); if (v) { if (!addProfile(v)) showToast("이미 있는 프로필 이름입니다", { level: "info" }); else inp.value = ""; acctRefresh(); } return; }
     const imp = e.target.closest("[data-imp-cid]");
     if (imp) {
       const cid = imp.dataset.impCid, label = imp.dataset.impLabel; imp.innerHTML = '<span class="acct-spin"></span>가져오는 중…'; imp.disabled = true;
       const withPw = !!(document.getElementById("acct-with-pw") || {}).checked;
       const res = await importChromeToProfile(cid, label, withPw);
-      if (res && res.error) { imp.textContent = "실패"; imp.classList.add("acct-btn-danger"); showToast("가져오기 실패: " + res.error); }
+      if (res && res.error) { imp.textContent = "실패"; imp.classList.add("acct-btn-danger"); showToast("가져오기 실패", { level: "err", detail: String(res.error) }); }
       // 바로 넣지 못한 쿠키는 다음 실행 때 한 번 적용을 시도할 뿐이고, 그사이 로그인 상태가 바뀌면 버려진다.
       else if (res && !res.live && res.staged) {
         imp.textContent = "미완료";
-        showToast(`가져오기 미완료: ${label} 쿠키 ${res.staged}개를 바로 넣지 못했습니다. 앱을 다시 시작하면 한 번 더 적용을 시도합니다.`);
+        showToast(`가져오기 미완료: ${label} 쿠키 ${res.staged}개를 바로 넣지 못했습니다. 앱을 다시 시작하면 한 번 더 적용을 시도합니다.`, { level: "err" });
       } else {
         // 비밀번호를 가져오지 않은 것은 실패가 아니라 선택이므로, 화면에 그대로 구분해 표시한다.
         const pw = res && res.loginsSkipped ? "로그인 미포함" : `로그인 ${(res && res.logins) || 0}`;
-        showToast(`가져오기 완료: ${label} (쿠키 ${(res && res.imported) || 0}, ${pw})`); acctRefresh();
+        showToast(`가져오기 완료: ${label} (쿠키 ${(res && res.imported) || 0}, ${pw})`, { level: "ok" }); acctRefresh();
       }
       return;
     }

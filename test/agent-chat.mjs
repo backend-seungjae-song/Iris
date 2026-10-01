@@ -54,6 +54,28 @@ test("Claude: 서명만 남은 빈 생각과 기계가 쓴 사용자 턴은 버�
   assert.deepEqual(decodeLine("claude", line({ type: "attachment", attachment: {} })), []);
 });
 
+test("Claude: 작업 중 사람이 보낸 입력(queued_command)은 사용자 글로 보이고 다른 세션·작업 알림은 빠진다", () => {
+  const queued = (origin, prompt, commandMode = "prompt") => line({ type: "attachment", uuid: "q1", timestamp: TS,
+    attachment: { type: "queued_command", prompt, commandMode, origin, timestamp: TS } });
+  const human = decodeLine("claude", queued({ kind: "human" }, "요소 선택 꺼도 강조가 남아"));
+  assert.deepEqual(human.map((m) => [m.id, m.role, m.blocks[0].text]), [["q1", "user", "요소 선택 꺼도 강조가 남아"]]);
+  assert.deepEqual(decodeLine("claude", queued({ kind: "peer", name: "iris-0d" }, "<cross-session-message>x")), []);
+  assert.deepEqual(decodeLine("claude", queued(null, "<task-notification>x", "task-notification")), []);
+});
+
+test("Claude: 서명에 narration 표시가 있는 thinking 은 사람에게 보인 중간 답이라 답변 글로 읽는다", () => {
+  const narration = Buffer.concat([Buffer.from([8, 4, 18, 10, 10, 17, 8, 18, 24, 2, 56, 1, 66, 9]), Buffer.from("narration"), Buffer.alloc(24, 7)]).toString("base64");
+  const plain = Buffer.concat([Buffer.from([8, 4, 18, 10]), Buffer.alloc(40, 3)]).toString("base64");
+  const out = decodeLine("claude", line({ type: "assistant", uuid: "a9", timestamp: TS, message: { content: [
+    { type: "thinking", thinking: "원인을 찾았습니다.", signature: narration },
+    { type: "thinking", thinking: "속으로 생각", signature: plain },
+    { type: "tool_use", id: "toolu_9", name: "Bash", input: { command: "ls" } },
+  ] } }));
+  assert.deepEqual(out.map((m) => m.role), ["reasoning", "assistant"]);
+  assert.equal(out[0].blocks[0].text, "속으로 생각");
+  assert.deepEqual(out[1].blocks.map((b) => [b.type, b.text ?? b.name]), [["text", "원인을 찾았습니다."], ["tool-call", "Bash"]]);
+});
+
 test("Codex: response_item 만 읽어 같은 말이 두 번 나오지 않는다", () => {
   const recs = [
     { type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "지침" }] } },

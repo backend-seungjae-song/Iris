@@ -193,7 +193,7 @@ const { handleRec, legacyHandle, groupRec, HANDLE_PATH } = handles;
 // 앱이 재시작하면 같은 숫자가 다른 탭을 가리키므로 저장하지 않는다.
 function tabIdOfRef(ref) {
   if (ref == null) return null;
-  const s = String(ref).trim().replace(/^@/, "").toLowerCase();
+  const s = String(ref).trim().replace(/~[A-Za-z0-9_-]{8,128}$/, "").replace(/^@/, "").toLowerCase();
   // 정체성은 끝에 붙은 난수(h)다. 앞의 스페이스 이름은 읽기 위한 부분이라 판정에 쓰지
   // 않는다. 이름이 바뀌거나 다른 스페이스와 겹쳐도 같은 값으로 해석되고, 난수만 지정해도 된다.
   const mh = s.match(/^(?:.*-)?(?:tab|group)-([a-z][0-9a-f]{5})$/) || s.match(/^([a-z][0-9a-f]{5})$/);
@@ -315,6 +315,8 @@ function uiTokenOk(v) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 const userGrantTabs = new Map(); // pane → Set<tabId>
+const designatedTabsByPane = new Map(); // pane → Set<tabId>. 탭 지목 구분자가 교체하는 몫
+const elementGrantTabsByPane = new Map(); // pane → Set<tabId>. 요소 선택으로 누적되는 몫
 // 지목은 사용자가 내린 결정이므로 서버 재시작으로 사라지면 안 된다(확인 결과: 재시작 한 번에
 // 지목이 사라져 명령이 세션 그룹 탭으로 돌아갔다). 정체성으로 된 것만 저장한다(wc는 저장하지 않는다).
 const GRANT_PATH = path.join(IRIS_HOME, "grants.json");
@@ -325,6 +327,8 @@ function writeGrantsNow() {
     fs.mkdirSync(path.dirname(GRANT_PATH), { recursive: true });
     const out = { tabs: [], groups: [], adopted: [] };
     for (const [pane, s] of userGrantTabs) if (s.size) out.tabs.push([pane, [...s]]);
+    for (const [pane, s] of designatedTabsByPane) if (s.size) out.designated = (out.designated || []).concat([[pane, [...s]]]);
+    for (const [pane, s] of elementGrantTabsByPane) if (s.size) out.elements = (out.elements || []).concat([[pane, [...s]]]);
     for (const [pane, s] of groupGrants) if (s.size) out.groups.push([pane, [...s]]);
     for (const [pane, key] of adoptedGroup) out.adopted.push([pane, key]);
     for (const [pane, ids] of pinnedTabsByPane) for (const tabId of ids) out.pinned = (out.pinned || []).concat([[pane, tabId]]);
@@ -431,6 +435,8 @@ function removeClosedTab(tabId) {
   unregTab(tabId);
   // 탭이 실제로 닫힌 경우이며 여기서만 지목을 회수한다. webview가 사라지는 것(앱 종료·도킹 전환)과는 다르다.
   for (const grants of userGrantTabs.values()) grants.delete(tabId);
+  for (const grants of designatedTabsByPane.values()) grants.delete(tabId);
+  for (const grants of elementGrantTabsByPane.values()) grants.delete(tabId);
   for (const [pane, current] of [...lastTabByPane]) if (current === tabId) { lastTabByPane.delete(pane); persistGrants(); }
   persistGrants();
 }
@@ -440,6 +446,8 @@ function unregisterGoneTab(tabId, wc) {
   if (popupClosed) {
     for (const [pane, ids] of [...pinnedTabsByPane]) if (ids.includes(tabId)) dropPin(pane, tabId);
     for (const grants of userGrantTabs.values()) grants.delete(tabId);
+    for (const grants of designatedTabsByPane.values()) grants.delete(tabId);
+    for (const grants of elementGrantTabsByPane.values()) grants.delete(tabId);
     for (const [pane, current] of [...lastTabByPane]) if (current === tabId) lastTabByPane.delete(pane);
     persistGrants();
   }
@@ -448,55 +456,38 @@ function unregisterGoneTab(tabId, wc) {
   if (popupClosed) broadcastAiTargets();
   return !!popupClosed;
 }
-// 지목은 현재 대화에서 쓸 탭을 정하는 것이다. 한 채팅 안에서 여러 번 지목하면 그 전부가 대상이고,
-// 다음 채팅에서 다시 지목하면 그때부터 새 대상이다. 그러지 않으면 지목이 계속 쌓인다.
-// 채팅 경계는 창이 알려준다(사용자가 프롬프트를 제출한 순간). 요소 선택은 대상을 다시 정하는 행위가
-// 아니므로 세트를 비우지 않고 이 채팅 몫으로 더하기만 한다. 그룹 권한은 어느 쪽도 건드리지 않는다.
-const chatTabs = new Map();      // pane → Set<tabId>. 이번 채팅에서 연결된 탭(지목·선택 모두)
-const designedThisChat = new Set(); // pane. 이번 채팅에 지목이 있었는지 여부
-function noteChatTab(pane, tabId) {
+function rebuildTabGrants(pane) {
   const key = String(pane);
-  let s = chatTabs.get(key); if (!s) { s = new Set(); chatTabs.set(key, s); }
-  s.add(tabId);
+  const tabs = new Set([...(elementGrantTabsByPane.get(key) || []), ...(designatedTabsByPane.get(key) || [])]);
+  if (tabs.size) userGrantTabs.set(key, tabs); else userGrantTabs.delete(key);
+  return tabs;
 }
+function noteChatTab() {}
 function designateTab(pane, tabId) {
   const key = String(pane);
-  if (!designedThisChat.has(key)) {
-    // 이번 채팅의 첫 지목이며 이전 채팅의 지목은 여기서 끝난다. 같은 채팅에서 고른 요소의 탭은 남긴다.
-    userGrantTabs.set(key, new Set(chatTabs.get(key) || []));
-    designedThisChat.add(key);
-  }
-  noteChatTab(key, tabId);
-  grantTab(key, tabId);
+  const tabs = new Set(designatedTabsByPane.get(key) || []);
+  if (tabId) tabs.add(tabId);
+  designatedTabsByPane.set(key, tabs);
+  rebuildTabGrants(key);
+  persistGrants();
 }
-// 그룹도 같은 규칙이다. 한 대화에서 여러 그룹을 지목하면 그 전부가 대상이고,
-// 다음 대화의 첫 그룹 지목이 대상을 새로 정한다. 그러지 않으면 그룹 권한이 계속 쌓인다.
-const chatGroups = new Map();       // pane → Set<"space\ngroupId">
-const designedGroupsThisChat = new Set();
 function designateGroup(pane, space, gid) {
-  const key = String(pane), gk = String(space) + "\n" + String(gid);
-  if (!designedGroupsThisChat.has(key)) {
-    groupGrants.set(key, new Set(chatGroups.get(key) || []));
-    designedGroupsThisChat.add(key);
-  }
-  let s = chatGroups.get(key); if (!s) { s = new Set(); chatGroups.set(key, s); }
-  s.add(gk);
-  grantGroup(key, space, gid);
+  grantGroup(pane, space, gid);
 }
-function endChat(pane) {
-  const key = String(pane);
-  chatTabs.delete(key); designedThisChat.delete(key);
-  chatGroups.delete(key); designedGroupsThisChat.delete(key);
-}
+function endChat() {}
 function designatedHandles(pane) {
   const s = userGrantTabs.get(String(pane));
   return s ? [...s].filter((id) => tabReg.has(id)).map((id) => handleFor(id)) : [];
 }
 // 회수 경로가 없으면 지목이 계속 남는다. UI가 해제로 안내하는 동작이 실제로 회수해야 한다.
 function revokeTab(pane, tabId) {
-  const s = userGrantTabs.get(String(pane));
-  if (s && s.delete(tabId)) { if (!s.size) userGrantTabs.delete(String(pane)); persistGrants(); return true; }
-  return false;
+  const key = String(pane);
+  const before = userGrantTabs.get(key)?.has(tabId) || false;
+  designatedTabsByPane.get(key)?.delete(tabId);
+  elementGrantTabsByPane.get(key)?.delete(tabId);
+  rebuildTabGrants(key);
+  if (before) persistGrants();
+  return before;
 }
 function grantedByTabId(session, tabId) {
   const s = grantTabIdsOf(session);
@@ -508,10 +499,23 @@ function groupGrantsOf(session) { return groupGrants.get(String(session)) || nul
 function grantTab(pane, tabId) {
   if (!tabId) return;
   const key = String(pane);
-  let ts = userGrantTabs.get(key);
-  if (!ts) { ts = new Set(); userGrantTabs.set(key, ts); }
-  ts.add(tabId);   // 여러 탭을 차례로 지목하면 전부 쓸 수 있다(덮어쓰지 않는다)
+  let ts = elementGrantTabsByPane.get(key);
+  if (!ts) { ts = new Set(); elementGrantTabsByPane.set(key, ts); }
+  ts.add(tabId);
+  rebuildTabGrants(key);
   persistGrants();
+}
+function replaceDesignatedTabs(pane, tabIds) {
+  const key = String(pane);
+  const tabs = [...new Set((tabIds || []).filter(Boolean))];
+  if (tabs.length) designatedTabsByPane.set(key, new Set(tabs)); else designatedTabsByPane.delete(key);
+  rebuildTabGrants(key);
+  const pins = tabs.slice(-MAX_PINS);
+  if (pins.length) pinnedTabsByPane.set(key, pins); else pinnedTabsByPane.delete(key);
+  if (tabs.length) lastTabByPane.set(key, tabs[tabs.length - 1]); else lastTabByPane.delete(key);
+  persistGrants();
+  broadcastAiTargets();
+  return tabs;
 }
 function grantGroup(pane, space, gid) {
   const key = String(pane);
@@ -519,6 +523,19 @@ function grantGroup(pane, space, gid) {
   if (!s) { s = new Set(); groupGrants.set(key, s); }
   s.add(String(space) + "\n" + String(gid));
   persistGrants();
+}
+function replaceDesignatedGroups(pane, groups) {
+  const key = String(pane);
+  const values = [...new Set((groups || []).map((g) => String(g.space) + "\n" + String(g.group)))];
+  if (values.length) groupGrants.set(key, new Set(values)); else groupGrants.delete(key);
+  if (values.length) adoptedGroup.set(key, values[values.length - 1]); else adoptedGroup.delete(key);
+  dropPin(key, null);
+  const last = groups && groups[groups.length - 1];
+  const firstId = last ? groupTabIds(String(last.space), String(last.group)).find((id) => wcOfTabId(id)) : null;
+  if (firstId) lastTabByPane.set(key, firstId); else lastTabByPane.delete(key);
+  persistGrants();
+  broadcastAiTargets();
+  return values;
 }
 // 그룹 단위 지목은 접근 허용을 넘어 이 세션의 그룹 자체를 그 그룹으로 바꾼다. 지목 안내 문구가
 // 지정 없이 이 그룹 안에서 실행된다고 알리는데, 세션 그룹이 자동 생성된 ai:<pane> 그룹으로
@@ -539,7 +556,17 @@ function adoptGroup(pane, space, gid) {
 function loadGrants() {
   try {
     const g = JSON.parse(fs.readFileSync(GRANT_PATH, "utf8")) || {};
-    for (const [pane, ids] of (g.tabs || [])) userGrantTabs.set(String(pane), new Set(ids));
+    if (Array.isArray(g.designated) || Array.isArray(g.elements)) {
+      for (const [pane, ids] of (g.designated || [])) designatedTabsByPane.set(String(pane), new Set(ids));
+      for (const [pane, ids] of (g.elements || [])) elementGrantTabsByPane.set(String(pane), new Set(ids));
+      for (const pane of new Set([...designatedTabsByPane.keys(), ...elementGrantTabsByPane.keys()])) rebuildTabGrants(pane);
+    } else {
+      // 출처가 없던 옛 파일은 직접 지목으로 본다. 첫 새 탭 지목이 이전 대상을 교체한다.
+      for (const [pane, ids] of (g.tabs || [])) {
+        designatedTabsByPane.set(String(pane), new Set(ids));
+        rebuildTabGrants(pane);
+      }
+    }
     for (const [pane, keys] of (g.groups || [])) groupGrants.set(String(pane), new Set(keys));
     for (const [pane, tabId] of (g.pinned || [])) addPin(pane, tabId);
     for (const [pane, tabId] of (g.last || [])) lastTabByPane.set(String(pane), tabId);
@@ -889,6 +916,14 @@ function markControl(tabId, session) {
   if (!controlSweep) controlSweep = setInterval(sweepControl, 1000);
 }
 
+// 사람이 직접 다루기로 한 탭의 짧은 AI 조작 표시만 지움
+function releaseControl(tabId) {
+  const changed = controlByTab.delete(tabId);
+  aiUseByTab.delete(tabId);
+  if (changed) broadcastControl();
+  return changed;
+}
+
 const spaceStateParticipant = {
   backupPaths: () => [HANDLE_PATH],
   remap(map) {
@@ -961,6 +996,7 @@ export {
   hasProfiles,
   hasTab,
   markControl,
+  releaseControl,
   metaOfWc,
   noteChatTab,
   normalizeClosedTabHistory,
@@ -976,6 +1012,8 @@ export {
   registerCdpExecutor,
   removeClosedTab,
   replacePaneSpaces,
+  replaceDesignatedGroups,
+  replaceDesignatedTabs,
   requestCdp,
   resolveCdpResult,
   resolveTabWcWaiters,

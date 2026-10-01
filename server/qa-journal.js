@@ -377,7 +377,7 @@ function tallyFor(st, id, path) {
     if (!lanes.some((l) => Array.isArray(l) && l[0] === id && l[1] === path)) continue;
     // 설명을 붙여 직접 촬영한 장면도 그 줄의 장면이다. 자동 프레임만 집계하면 직접 남긴
     // 증거가 빠진 채 장면 없음으로 판정된다.
-    if (e.kind === "frame" || e.kind === "artifact") { if (!aside.has(String(e.path))) frames += 1; }
+    if (e.kind === "frame" || e.kind === "artifact") { if (!aside.has(String(e.path || e.shot))) frames += 1; }
     else if (e.kind === "assertion") {
       if (voided.has(String(e.id))) continue;
       receipts += 1;
@@ -813,7 +813,9 @@ function asideFrames(st, id, path, want, why) {
     for (const line of fs.readFileSync(path_(st), "utf8").split("\n")) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
-      if (e.kind === "frame" && which.includes(String(e.path))) seen += 1;
+      // 조작이 남긴 프레임만 찾으면 캡션을 달아 찍은 장면은 제외할 수 없다. 그 장면은 artifact 로
+      // 들어오고, 위 수정 전에 기록된 회차에는 경로가 shot 에만 있다.
+      if ((e.kind === "frame" || e.kind === "artifact") && which.includes(String(e.path || e.shot))) seen += 1;
     }
   } catch {}
   if (!seen) return { ok: false, error: "이 회차에 없는 장면입니다 — 장부에 적힌 경로를 그대로 줍니다." };
@@ -1176,6 +1178,10 @@ export function handleQaSessionCmd(cmd, args, session, runId) {
     if (out.detail != null) out.detail = detailOf(out.detail);
     if (out.shot) out.shot = persistArtifact(st, out.shot);
     if (out.path) out.path = persistArtifact(st, out.path);
+    // 앱 도구와 알림 감시는 장면 경로를 shot 에 넣어 보내는데, 보고서와 aside 와 증거 개수를 세는 곳은
+    // path 를 읽는다. path 가 비어 있으면 보고서는 화면이 직전과 같아서 파일을 만들지 않은 것으로 보고
+    // 장면을 넣지 않는다. 캡션을 달아 찍은 앱 장면이 보고서에서 전부 빠졌다(2026-09-28).
+    if (kind === "artifact" && out.shot && !out.path) out.path = out.shot;
     if (kind === "assertion" && !out.id) out.id = "r" + (++st.receipts);
     if (kind === "accepted" && !out.call_id) out.call_id = "c" + (++st.calls);
     const rec = appendEvent(st, out);

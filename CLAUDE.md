@@ -62,6 +62,12 @@
 
 ## 규칙은 검사로 강제한다
 
+자동 검사·스크린샷은 `bin/headless-browser.cjs`의 `headlessLaunchOptions()`를 Puppeteer에
+전달한다. 이 도구는 `chrome-headless-shell`만 실행하며 없으면 중단한다. 일반 Chrome은
+`headless: true`여도 Dock에 나타날 수 있으므로 임시 `.working/` 스크립트에도 직접 지정하지 않는다.
+사용자의 명시적 Chrome 열기·인증·미러 기능처럼 실제 Chrome이 필요한 경우만 예외다.
+셸에서는 `node bin/headless-browser.cjs`로 실행 파일 경로를 얻는다.
+
 이 저장소는 규칙을 `bin/smoke.mjs` 검사로 강제한다. 위 규칙들도 검사가 있다. 규칙을 바꾸면 검사도
 함께 바꾸고, 새 검사는 위반 상태를 만들어 실제로 실패하는지 확인한 뒤에 통과를 신뢰한다.
 

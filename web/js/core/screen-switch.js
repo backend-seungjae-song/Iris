@@ -42,6 +42,7 @@ const lastMainTab = new Map();
 export function initScreenSwitch(deps) {
   ({ BROWSER_MODE, BOUND_SPACE, MEMO_MODE, acHost } = deps);
   try { acHost?.onSwitcherState?.(rememberSwitcherState); } catch {}
+  try { acHost?.onSwitcherToggle?.(() => { toggleMainBrowser(); }); } catch {}
   try {
     Promise.resolve(acHost?.windowSwitcher?.({ op: "status" }))
       .then(rememberSwitcherState, () => {});
@@ -76,7 +77,8 @@ export function planScreen(target, ctx) {
 }
 
 export function planSwitcherKey({ pickedMode = false, registered = {}, dir = 1 } = {}) {
-  if (!pickedMode) return dir === 1 ? "legacy" : "none";
+  // 전역 우선 사용이면 고른 창이 없어도 다음 창 키가 전역으로 등록되고, 토글은 메인 프로세스가 보낸다.
+  if (!pickedMode) return dir === 1 ? (registered && registered.next ? "global" : "legacy") : "none";
   const direction = dir === -1 ? "prev" : "next";
   return registered && registered[direction] ? "global" : "step";
 }

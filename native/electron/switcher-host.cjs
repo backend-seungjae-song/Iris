@@ -64,7 +64,7 @@ const { stateHome: canonicalStateHome } = require("../../server/state-home.cjs")
 
 function createSwitcherHost({
   core, catalog, iconRunner, mediaRunner, fs, path, stateHome = canonicalStateHome, globalShortcut, defaultRelay, killProbe,
-  raiseOwnWindow, ownPid,
+  raiseOwnWindow, ownPid, irisKey,
   isTrustedSender, isTrustedMediaSender, expectedAppUrl, broadcast, shell,
   setTimeout, clearTimeout, setInterval, clearInterval,
   now = () => Date.now(),
@@ -84,6 +84,8 @@ function createSwitcherHost({
   const diagFile = path.join(stateHome(), "window-switcher-diag.json");
   const backupFile = stateFile + ".bak";
   const keymapFile = path.join(stateHome(), "keymap.json");
+  // 전역 우선 사용 옵션. 선택 목록 파일은 switcher-core 가 모양을 소유하므로 따로 둔다.
+  const optionsFile = path.join(stateHome(), "window-switcher-options.json");
   const timers = [];
   const stepLog = [];
   let liveTimer = null;
@@ -108,11 +110,30 @@ function createSwitcherHost({
     permission: false,
     titleLookupMs: 0,
     pickedMode: false,
+    globalPriority: false,
     registered: { next: false, prev: false },
     registerError: {},
     accelerators: { next: null, prev: null },
     listRevision: 0,
   };
+
+  function loadOptions() {
+    try {
+      const parsed = JSON.parse(String(fs.readFileSync(optionsFile, "utf8")));
+      return { globalPriority: !!(parsed && parsed.globalPriority === true) };
+    } catch { return { globalPriority: false }; }
+  }
+
+  function persistOptions() {
+    try {
+      fs.mkdirSync(path.dirname(optionsFile), { recursive: true });
+      fs.writeFileSync(optionsFile + ".tmp", JSON.stringify({ globalPriority: status.globalPriority }) + "\n", "utf8");
+      fs.renameSync(optionsFile + ".tmp", optionsFile);
+      return true;
+    } catch { return false; }
+  }
+
+  status.globalPriority = loadOptions().globalPriority;
 
   function canonicalText(value) {
     return JSON.stringify(core.serialize(value), null, 2) + "\n";
@@ -169,6 +190,7 @@ function createSwitcherHost({
       permission: status.permission,
       titleLookupMs: status.titleLookupMs,
       pickedMode: status.pickedMode,
+      globalPriority: status.globalPriority,
       registered: { ...status.registered },
       registerError: { ...status.registerError },
       accelerators: { ...status.accelerators },
@@ -184,6 +206,7 @@ function createSwitcherHost({
   function broadcastPayload() {
     return {
       pickedMode: status.pickedMode,
+      globalPriority: status.globalPriority,
       registered: { ...status.registered },
       registerError: { ...status.registerError },
       accelerators: { ...status.accelerators },
@@ -268,7 +291,7 @@ function createSwitcherHost({
       return;
     }
     try {
-      const ok = globalShortcut.register(accelerator, () => { void requestStep(dir === "next" ? 1 : -1); });
+      const ok = globalShortcut.register(accelerator, () => { onHotkey(dir); });
       status.registered[dir] = ok === true;
       if (ok === true) registeredAccelerators[dir] = accelerator;
       else status.registerError[dir] = "register-failed";
@@ -276,6 +299,13 @@ function createSwitcherHost({
       status.registered[dir] = false;
       status.registerError[dir] = "register-error";
     }
+  }
+
+  // 고른 창이 있으면 그 창들 사이를 오간다. 없으면 전역 우선 사용으로 등록된 다음 창 키이고,
+  // Iris 가 앞이면 기존 토글, 다른 앱이 앞이면 Iris 를 앞으로 가져온다(irisKey 가 판정).
+  function onHotkey(dir) {
+    if (status.pickedMode) { void requestStep(dir === "next" ? 1 : -1); return; }
+    if (dir === "next" && typeof irisKey === "function") { try { irisKey(); } catch {} }
   }
 
   function syncRegistration({ reload = false, force = false } = {}) {
@@ -297,7 +327,7 @@ function createSwitcherHost({
     status.registerError = {};
     delete status.conflict;
 
-    if (!ready || stopped || !status.pickedMode) {
+    if (!ready || stopped || (!status.pickedMode && !status.globalPriority)) {
       unregisterDirection("next");
       unregisterDirection("prev");
       writeDiag();
@@ -311,12 +341,14 @@ function createSwitcherHost({
     if (internalNext || internalPrev) status.conflict = "internal:pick-mode";
     else if (same) status.conflict = "same-accelerator";
 
+    // 고른 창이 없으면 이전 창 키는 할 일이 없으므로 전역으로 잡지 않는다. 잡으면 다른 앱의 키만 빼앗는다.
     const allowed = {
       next: !!accelerators.next && !internalNext,
-      prev: !!accelerators.prev && !internalPrev && !same,
+      prev: status.pickedMode && !!accelerators.prev && !internalPrev && !same,
     };
+    if (!status.pickedMode) unregisterDirection("prev");
     for (const dir of ["next", "prev"]) {
-      if (!accelerators[dir]) status.registerError[dir] = "unsupported";
+      if (!accelerators[dir] && (dir === "next" || status.pickedMode)) status.registerError[dir] = "unsupported";
       if (!allowed[dir] || status.registered[dir]) continue;
       registerDirection(dir, accelerators[dir]);
     }
@@ -735,6 +767,7 @@ function createSwitcherHost({
         at: new Date().toISOString(),
         ownPid: ownPid == null ? null : ownPid,
         pickedMode: status.pickedMode,
+        globalPriority: status.globalPriority,
         pickedCount: state.picked.length,
         accelerators: status.accelerators,
         registered: status.registered,
@@ -870,6 +903,18 @@ function createSwitcherHost({
       if (!isTrustedMediaSender(event)) return { error: "untrusted" };
       return refreshMedia();
     }
+    if (arg.op === "global-priority") {
+      if (typeof arg.on !== "boolean") return { error: "bad-value" };
+      if (status.globalPriority !== arg.on) {
+        status.globalPriority = arg.on;
+        if (!persistOptions()) {
+          status.globalPriority = !arg.on;
+          return { error: "save-failed", status: publicStatus() };
+        }
+        syncRegistration({ force: true });
+      }
+      return response();
+    }
     if (arg.op === "step") {
       if (arg.dir !== 1 && arg.dir !== -1) return { error: "bad-dir" };
       return requestStep(arg.dir);
@@ -945,4 +990,15 @@ function createSwitcherHost({
   return { start, stop, handle, keymapChanged, getStatus: publicStatus };
 }
 
-module.exports = { createSwitcherHost };
+// 고른 창 없이 받은 ⌥Tab 의 대상. 토글은 콘솔·브라우저 창만 처리(screen-switch.js). 그 창이 앞이면 토글,
+// 다른 Iris 창(메모·에뮬레이터 분리 창)이나 다른 앱이 앞이면 마지막으로 쓴 콘솔·브라우저 창을 앞으로.
+// windows: { focused, lastSwitch, main }, takesToggle(win) → 참이면 토글을 받는 창
+function irisKeyAction(windows, takesToggle) {
+  const alive = (w) => !!w && !w.isDestroyed();
+  const { focused, lastSwitch, main } = windows || {};
+  if (alive(focused) && takesToggle(focused)) return { action: "toggle", win: focused };
+  const win = [lastSwitch, main].find((w) => alive(w) && takesToggle(w));
+  return win ? { action: "raise", win } : { action: "none", win: null };
+}
+
+module.exports = { createSwitcherHost, irisKeyAction };

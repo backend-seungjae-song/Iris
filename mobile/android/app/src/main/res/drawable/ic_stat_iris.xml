@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Iris 마크(assets/icon.svg)의 두 호와 점. 상태 표시줄 규격상 흰색 한 색 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="630"
+    android:viewportHeight="630">
+    <group android:translateX="-197" android:translateY="-197">
+        <path android:pathData="M378,288 A272,272 0 0,0 378,736" android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="74" android:strokeLineCap="round" />
+        <path android:pathData="M646,288 A272,272 0 0,1 646,736" android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="74" android:strokeLineCap="round" />
+        <path android:pathData="M512,434 a78,78 0 1,0 0.1,0 z" android:fillColor="#FFFFFFFF" />
+    </group>
+</vector>

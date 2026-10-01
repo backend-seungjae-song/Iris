@@ -306,6 +306,19 @@ function listChromeProfiles() {
   return out;
 }
 
+// macOS 는 다른 앱의 데이터 폴더 읽기를 권한으로 막는다(macOS 27 에서 Chrome·Brave·Edge 폴더가 막혔다).
+// 막히면 listChromeProfiles 는 빈 목록을 돌려주므로, 목록이 빈 이유가 설치 여부가 아니라 권한임을 여기서 알린다.
+function chromiumDataBlockedMessage() {
+  if (process.platform !== "darwin") return "";
+  const base = path.join(os.homedir(), "Library", "Application Support");
+  const blocked = CHROMIUM_BROWSERS.filter((b) => {
+    try { fs.readdirSync(path.join(base, b.root)); return false; }
+    catch (e) { return !!e && (e.code === "EPERM" || e.code === "EACCES"); }
+  }).map((b) => b.label);
+  if (!blocked.length) return "";
+  return `macOS가 ${blocked.join(", ")} 폴더 읽기를 막았습니다. 시스템 설정 > 개인정보 보호 및 보안 > 전체 디스크 접근 권한에서 Iris를 켠 뒤 Iris를 다시 여세요.`;
+}
+
 function chromiumTsToUnix(ts) {
   try { const b = BigInt(ts || 0); if (b === 0n) return 0; return Math.max(Number(b / 1000000n - CHROMIUM_EPOCH_OFFSET), 0); }
   catch { return 0; }
@@ -1149,7 +1162,7 @@ async function importCookiesFromChrome(profileEntry, targetPartition) {
 try { applyPendingCookieImports(); } catch {}
 
 module.exports = {
-  importCookiesFromFile, importCookiesFromChrome, listChromeProfiles,
+  importCookiesFromFile, importCookiesFromChrome, listChromeProfiles, chromiumDataBlockedMessage,
   readDecryptedCookies, putCookies, refreshFromChrome, userAgentForPartition, rememberBrowserUserAgent, applyBrowserUserAgentToPartition,
   // 비밀번호/자동완성 임포트(password-import.cjs)가 재사용하는 복호화 헬퍼.
   getMacKey, decryptValue, queryChromiumDb,

@@ -24,5 +24,5 @@ body.browser-mode .rail-panel, body.sidebar-collapsed .rail-panel { display:none
 
 /* ── 별도 메모 창 모드: 창 전체가 메모다. 무엇을 내리고 무엇을 올릴지는 기능이 아니라
  앱 셸이 정하고, main 이 이 클래스를 단다.*/
-body.memo-mode .app, body.memo-mode .copied-toast, body.memo-mode .noticestack, body.memo-mode .ctxmenu { display:none !important; }
+body.memo-mode .app, body.memo-mode .ctxmenu { display:none !important; }
 /* 메모가 그 창에서 어떻게 배치되는지는 그 기능의 CSS 가 정한다(12-dock-memo.css).*/

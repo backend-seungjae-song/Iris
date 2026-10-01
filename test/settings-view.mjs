@@ -344,3 +344,50 @@ test("마지막 전환이 실패했으면 그 사실을 화면에 적는다", ()
     switcher: { ...base, status: { permission: true, lastStep: { at: "x", how: "own-window" } } } });
   assert.ok(!/마지막 전환 실패/.test(okOne), "잘 됐을 때는 적지 않는다");
 });
+
+test("전역 우선 사용 토글은 상태를 그대로 보이고 켜진 상태의 다음 창 키 등록 실패만 경고한다", () => {
+  const base = { windows: [], picked: [], media: null };
+  const view = (status) => settingsMarkup({ section: "windows", items: [], toggles: [], screens: [], conflicts: [], changed: 0,
+    switcher: { ...base, status: { permission: true, ...status } } });
+
+  const off = view({ globalPriority: false, registered: { next: false, prev: false } });
+  assert.match(off, /data-sw-global=""[\s\S]{0,40}aria-checked="false"/);
+  // 창 목록 줄과 같은 오른쪽 끝 스위치 열. 켜짐·꺼짐 글자 칸이 붙으면 스위치가 왼쪽으로 밀림
+  assert.match(off, /class="km-toggle top km-sw-global"/);
+  assert.match(off, /aria-label="전역 우선 사용"><i><\/i><\/button>\s*<\/div>/, "전역 우선 줄은 스위치로 끝남(상태 글자 칸 없음)");
+  assert.ok(!/다른 앱이 쓰고 있습니다/.test(off), "꺼져 있고 고른 창이 없으면 등록하지 않는 것이 정상이다");
+
+  const on = view({ globalPriority: true, registered: { next: true, prev: false }, accelerators: { next: "Alt+Tab" } });
+  assert.match(on, /data-sw-global=""[\s\S]{0,40}aria-checked="true"/);
+  assert.ok(!/km-warn/.test(on), "고른 창이 없을 때 이전 창 키는 등록하지 않으므로 실패가 아니다");
+
+  const taken = view({ globalPriority: true, registered: { next: false, prev: false }, registerError: { next: "register-failed" }, accelerators: { next: "Alt+Tab" } });
+  assert.match(taken, /다음 창 키\([^)]*\)를 다른 앱이 쓰고 있습니다/);
+  assert.ok(!/이전 창 키/.test(taken));
+});
+
+// 편의 기능의 전부·최소·개발자 단추는 목록만 거른다(설정을 바꾸지 않음, 사용자 결정 2026-09-28)
+test("편의 기능 그룹 단추는 보기만 거르고 항상 켜진 기능은 늘 보인다", () => {
+  const screens = [
+    { id: "workspace", label: "작업", on: true, lock: "항상 켜짐", readonly: false },
+    { id: "sourcecontrol", label: "소스 제어", on: true },
+    { id: "usage", label: "사용량", on: false },
+  ];
+  const view = (presetView, presetMembers) => settingsMarkup({ section: "features", items: [], toggles: [], screens, conflicts: [], changed: 0,
+    presetView, presetMembers, motion: true });
+  const dev = view("dev", ["sourcecontrol"]);
+  assert.match(dev, /소스 제어/);
+  assert.match(dev, /작업/);
+  assert.doesNotMatch(dev, /사용량/);
+  assert.match(dev, /data-set-preset="dev" aria-pressed="true"/);
+  const all = view("full", null);
+  assert.match(all, /사용량/);
+  assert.match(all, /data-set-preset="full" aria-pressed="true"/);
+});
+
+test("그룹 단추 클릭은 기능 구성을 적용하지 않는다", async () => {
+  const { readFileSync } = await import("node:fs");
+  const page = readFileSync(new URL("../web/js/devtool/keymap-page.js", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /applyPreset/);
+  assert.match(page, /presetView = pre\.dataset\.setPreset;\s*renderKeymapPage\(\);\s*return;/);
+});

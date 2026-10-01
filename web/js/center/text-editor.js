@@ -30,8 +30,8 @@ const ICON_MINIMAP = svg('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/
   + '<path d="M12 5.5h1.5M12 7.5h1.5M12 9.5h1"/>');
 // 줄바꿈: 넘친 줄이 꺾여 다음 줄로 이어진다. 메모도 같은 아이콘을 쓴다. 같은 뜻의 버튼이
 // 화면마다 다르게 생기면 매번 다시 익혀야 한다.
-export const ICON_WRAP = svg('<path d="M2 3.5h12"/><path d="M2 8h9.5a2.5 2.5 0 0 1 0 5H8"/>'
-  + '<path d="m9.5 11 -1.5 2 1.5 2"/><path d="M2 12.5h3"/>');
+export const ICON_WRAP = svg('<path d="M2 2.25h12"/><path d="M2 6.75h9.5a2.5 2.5 0 0 1 0 5H8"/>'
+  + '<path d="m9.5 9.75 -1.5 2 1.5 2"/><path d="M2 11.25h3"/>');
 
 function fileHostEditable() {
   return !!(fileHostTab && fileHostTab === getRenderedFileOwner() && fileHostToken === getRenderedFileToken()
@@ -380,21 +380,27 @@ function askOverwrite(name) {
 }
 function askOverwriteNow(name) {
   return new Promise((resolve) => {
+    const previous = document.activeElement;
     const wrap = document.createElement("div");
     wrap.className = "askwrap";
-    wrap.innerHTML = `<div class="askbox">
-      <div class="asktitle">저장하지 못했습니다</div>
-      <div class="asknote">${esc(name)}<br>이 파일이 밖에서 바뀌었습니다. 덮어쓰면 그 변경은 사라집니다.</div>
-      <div class="askrow"><button data-act="cancel">취소</button><button class="primary" data-act="overwrite">덮어쓰기</button></div>
-    </div>`;
+    wrap.innerHTML = `<div class="dim"></div><div class="modal"><div class="mdl" role="dialog" aria-modal="true">
+      <div class="tt">저장하지 못했습니다</div>
+      <div class="tb">${esc(name)}<br>이 파일이 밖에서 바뀌었습니다. 덮어쓰면 그 변경은 사라집니다.</div>
+      <div class="mdl-row"><span class="hint"><span class="kc">esc</span>취소</span><button data-act="cancel">취소</button><button class="primary" data-act="overwrite">덮어쓰기</button></div>
+    </div></div>`;
     let settled = false;
-    const finish = (v) => { if (settled) return; settled = true; wrap.remove(); resolve(v); };
+    const finish = (v) => { if (settled) return; settled = true; wrap.remove(); previous?.focus?.(); resolve(v); };
     wrap.addEventListener("click", (event) => {
-      if (event.target === wrap) { finish(false); return; }
+      if (event.target === wrap || event.target.classList?.contains("dim")) { finish(false); return; }
       const button = event.target.closest("button[data-act]");
       if (button) finish(button.dataset.act === "overwrite");
     });
+    wrap.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); finish(false); }
+      event.stopPropagation();
+    });
     document.body.appendChild(wrap);
+    wrap.querySelector('[data-act="overwrite"]')?.focus();
   });
 }
 // 저장 한 번. 읽어 둔 기준(t.revision)을 함께 보내 그사이 디스크가 바뀌었으면 쓰지 않게 한다.
@@ -411,7 +417,7 @@ function sendFileSave(t, space, snapshot, baselineRevision, overwrite) {
     const response = await pending;
     if (response && response.conflict) {
       if (t._saving === saving) t._saving = null;
-      if (!(await askOverwrite(t.label || t.path))) { showToast("저장하지 않았습니다. 밖에서 바뀐 내용을 그대로 뒀습니다"); return response; }
+      if (!(await askOverwrite(t.label || t.path))) { showToast("저장하지 않았습니다. 밖에서 바뀐 내용을 그대로 뒀습니다", { level: "info" }); return response; }
       // 기준은 그대로 들고 가고 덮어쓰기라고 밝힌다. 서버가 준 diskRevision 을 기준으로 삼으면
       // 그다음 평범한 저장이 남의 변경 위에 조용히 쓰게 된다.
       return await sendFileSave(t, space, snapshot, baselineRevision, true);
@@ -420,7 +426,7 @@ function sendFileSave(t, space, snapshot, baselineRevision, overwrite) {
     return response;
   })().catch((error) => {
     if (t._saving === saving) t._saving = null;
-    showToast("저장 실패: " + error.message);
+    showToast("저장 실패", { level: "err", detail: String(error.message) });
     throw error;
   }).finally(() => { if (t._saveInFlight === completion) t._saveInFlight = null; });
   saving.promise = completion;

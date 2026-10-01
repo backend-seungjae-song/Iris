@@ -66,7 +66,7 @@ const hiddenViewport = createHiddenViewport({
 });
 const { createDeviceEmulation } = require("./cdp-device-emulation.cjs");
 const { createPageCommands } = require("./cdp-cmd-page.cjs");
-const { createInputCommands } = require("./cdp-cmd-input.cjs");
+const { createInputCommands, dispatchMouse } = require("./cdp-cmd-input.cjs");
 const { createInspectCommands } = require("./cdp-cmd-inspect.cjs");
 const { createCaptureCommands } = require("./cdp-cmd-capture.cjs");
 const { createNativeCommands } = require("./cdp-cmd-native.cjs");
@@ -265,7 +265,7 @@ function withCmdTimeout(promise, wcId, cmd) {
 // 막힌 것을 푸는 명령은 대기열에 서면 안 된다. 명령은 탭마다 한 줄로 실행되는데, 확인 창에 걸려
 // 멈춘 명령 뒤에 서면 그것을 닫을 명령까지 함께 갇혀 아무것도 실행할 수 없다.
 // 이 명령들은 페이지가 멈춰 있어도 실행되는 것들이다(브라우저 층 또는 OS 접근성).
-const QUEUE_BYPASS = new Set(["dialog", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff"]);
+const QUEUE_BYPASS = new Set(["dialog", "dialoginfo", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff"]);
 // CDP 없이 실행되는 명령. Google 로그인 호스트에서는 이것만 허용한다. tabs·target·newtab 은 서버가
 // 처리해 여기 오지 않는다. dialog 는 CDP 로 닫는 명령이라 빠지고, dialogs(계획 무장)는 장부만 바꾼다.
 const CDP_FREE_CMDS = new Set(["goto", "url", "back", "forward", "reload", "wait", "text", "screenshot",
@@ -286,7 +286,7 @@ const KEYS_NEED_PAINT = (cmd) => NEEDS_KEYS.has(cmd) && cmd !== "login";
 // 그 사이 사용자가 누른 다운로드가 취소되고 파일 선택창이 빈 채로 닫힌다.
 // 페이지 상태를 읽기만 하거나 우리 장부만 보는 것들이다.
 const READ_ONLY_CMDS = new Set(["snapshot", "text", "url", "tabs", "shotsizes", "screenshot",
-  "diff", "a11y", "locate", "expect", "picks", "app-picks", "nativewin", "observe", "history"]);
+  "diff", "a11y", "locate", "expect", "picks", "app-picks", "dialoginfo", "nativewin", "observe", "history"]);
 const causality = createAiCausality();
 function enterAiCommand(wcId, cmd) { return READ_ONLY_CMDS.has(cmd) ? null : causality.enter(wcId); }
 function leaveAiCommand(ticket) { causality.leave(ticket); }
@@ -390,7 +390,7 @@ function diagSince(wcId, since, webContentsMod) {
   void webContentsMod;
   return observation.diagSince(wcId, since);
 }
-const NEEDS_KEYS = new Set(["fill", "type", "key", "login"]);
+const NEEDS_KEYS = new Set(["fill", "type", "key", "phonetype", "phonekey", "login"]);
 // 이 탭이 지금 화면에 그려지고 있는가. main이 렌더러 보고로 채우며, 모르면 안 보이는 쪽으로 가정한다
 // (붙잡기는 보이는 탭에 걸어도 해가 없고, 반대로 빠뜨리면 입력이 조용히 사라진다).
 let shownProbe = null;
@@ -713,7 +713,7 @@ async function cdpExecInner(send, wc, cmd, args, webContentsMod) {
   // 캡처와 같은 방식으로 그 순간에만 합성 대상으로 올리고 포커스를 준 뒤 되돌린다.
   // 붙잡는 이유는 둘이다. 키 입력이 도달하게 하는 것과, 조작 뒤 화면이 실제로 그려지게 하는
   // 것. 둘 다 같은 붙잡기를 쓰므로 한 번만 잡고 한 번만 놓는다.
-  const wantsFrames = observation.animates(cmd);
+  const wantsFrames = cmd === "mouse" || observation.animates(cmd);
   const wantsKeys = NEEDS_KEYS.has(cmd);
   // 그림이 실제로 있어야 하는 명령만 창 상태를 따진다. 보이는 탭이어도 그 창이 최소화·앱 숨김이면
   // 그림이 나오지 않으므로 보이는 탭인지보다 먼저 확인한다. 순서가 뒤집히면 이 검사가 우회된다.
@@ -735,20 +735,23 @@ async function cdpExecInner(send, wc, cmd, args, webContentsMod) {
   try {
     const out = await runCdpCmd(send, wc, cmd, args, webContentsMod);
     // 조작이 시작시킨 트랜지션이 끝날 때까지만 더 붙잡는다. 정지 화면이면 곧바로 해제한다.
-    if (held && wantsFrames) await observation.settleAnimations(send);
+    if (held && wantsFrames && !(cmd === "mouse" && ["move", "drag"].includes(args?.action))) {
+      await observation.settleAnimations(send);
+    }
     return out;
   }
   finally { if (held) { try { await captureHold(wc.id, false); } catch {} } }
 }
 async function runCdpCmd(send, wc, cmd, args, webContentsMod) {
+  if (cmd === "mouse") return await dispatchMouse(send, args);
   const handler = commandHandlers[cmd];
   if (handler) return await handler(send, wc, args);
   switch (cmd) {
     // 무엇이 있는지 함께 알려 준다. 없다고 판단해 사람에게 넘기는 일이 있었다(확인 결과).
     default: throw new Error("알 수 없는 명령: " + cmd + ". 쓸 수 있는 것: snapshot text url screenshot shotsizes observe tabs "
-      + "goto back forward reload viewport wait click dblclick hover fill type bulkfill key select focus clear check scroll scrollto "
+      + "goto back forward reload viewport wait click dblclick hover fill type phonetype bulkfill key phonekey phonefocus select focus clear check scroll scrollto "
       + "eval expect diff a11y locate "
-      + "pdf login upload download dialog dialogs nativewin nativeclick nativekey newtab target untarget");
+      + "pdf login upload download dialog dialoginfo dialogs nativewin nativeclick nativekey newtab target untarget");
   }
 }
 

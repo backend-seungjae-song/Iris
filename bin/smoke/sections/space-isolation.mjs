@@ -39,12 +39,13 @@ check("고정 전 대상도 자기 그룹 안에서만", () => {
 check("공유 창은 지목 없이 접근 불가", () => /meta\.space === SHARED_SPACE/.test(browserRuntime) && /if \(grantedByTabId\(session, tabId\)\) return \{ ok: true \}/.test(browserRuntime));
 check("사용자 지목(UI 픽)만 경계를 넘는 통로", () => {
   const seg = sliceFrom(browserMessages, '"browser-target-set"', 1400, "사용자 지목(UI 픽)만 경계를 넘는 통로");
-  // 지목 기록은 이 로컬 경로에서만 일어나야 한다. AI 명령 경로에 grantTab이 있으면 스스로 권한을 만든다.
-  const grantCalls = (allServer.match(/grantTab\(/g) || []).length;
-  // 정의 1 + designateTab 안 1 + 선택 경로 1. designateTab도 이 로컬 경로에서만 불린다.
-  const designCalls = (allServer.match(/designateTab\(/g) || []).length;
-  return /grantTab\(/.test(seg) && /ws\._local/.test(seg) && grantCalls === 3
-    && designCalls === 2 && /designateTab\(msg\.pane/.test(seg);
+  const activation = sliceFrom(browserCommands, 'cmd === "prompt-targets"', 1500, "사용자 지목(UI 픽)만 경계를 넘는 통로 활성화");
+  // UI 경로는 nonce가 든 대기 지정만 만들고, 실제 권한은 제출 훅이 그 nonce를 검증한 뒤에만 바꾼다.
+  return /ws\._local && ws\._ui/.test(seg)
+    && /issuePromptTarget/.test(seg) && /type: "target-pending"/.test(seg)
+    && !/grantTab\(|designateTab\(|addPin\(/.test(seg)
+    && /activatePromptTargets/.test(activation)
+    && /addElements\(records\)[\s\S]{0,220}grantTab\(session/.test(activation);
 });
 check("tabs 목록도 그룹으로 걸러짐", () => {
   const seg = sliceBetween(browserRuntime, "function visibleTabsFor", "function tabBrief", "tabs 목록도 그룹으로 걸러짐");

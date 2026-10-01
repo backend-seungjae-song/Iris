@@ -1,0 +1,25 @@
+{
+  "target": {
+    "domain": "iris-remote-conn/1",
+    "v": 1,
+    "serverInstance": "11111111111111111111111111111111",
+    "connId": "22222222222222222222222222222222",
+    "deviceId": "33333333333333333333333333333333",
+    "nonce": "4444444444444444444444444444444444444444444444444444444444444444",
+    "certHash": "5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "canonical": "{\"certHash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"connId\":\"22222222222222222222222222222222\",\"deviceId\":\"33333333333333333333333333333333\",\"domain\":\"iris-remote-conn/1\",\"nonce\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"serverInstance\":\"11111111111111111111111111111111\",\"v\":1}",
+  "publicKeySpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwRsz1ycbCeQkJVqnSnpeciKwqQ9YL17/Dnj5/VWZFPc8NZogh25hcxTwJVSgTpFMhN3sI9IGEF+28qanAkmXTw==",
+  "otherPublicKeySpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE99I7WI9DPhfQBSmGJlaCJ7R4p+ZIN6vrwRsYJm6q4H/cTKyWzjfTVtyZqvi68qHTkTMQ+SQxiIeS4pAjF5Af3Q==",
+  "derBase64": "MEUCIANzMGPHwSpq7yzUlbJp1Cy81ru4Xr1XN7yNZTPTgICKAiEAyfZ8f6T0Q/0FC3A06pamyl4VJPlhUP7+j9inFfTCkGs=",
+  "mutations": [
+    { "field": "domain", "value": "fffff" },
+    { "field": "v", "value": 2 },
+    { "field": "serverInstance", "value": "ffffffffffffffffffffffffffffffff" },
+    { "field": "connId", "value": "ffffffffffffffffffffffffffffffff" },
+    { "field": "deviceId", "value": "ffffffffffffffffffffffffffffffff" },
+    { "field": "nonce", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" },
+    { "field": "certHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+  ],
+  "malformedDerBase64": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ=="
+}
