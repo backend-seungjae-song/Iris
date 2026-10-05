@@ -16,8 +16,11 @@ const VIEW_FIELDS = "number,title,url,state,isDraft,headRefName,baseRefName,auth
 
 // Dock·Spotlight 로 연 앱의 PATH 는 /usr/bin:/bin:/usr/sbin:/sbin 뿐. Homebrew 로 설치한 gh 경로 보강
 export function commandEnv(env = process.env) {
-  const PATH = [env.PATH || "", "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
-  return { ...env, PATH, GH_PROMPT_DISABLED: "1", GH_PAGER: "cat", GIT_TERMINAL_PROMPT: "0" };
+  const windows = process.platform === "win32";
+  const pathKey = windows ? Object.keys(env).find(key => key.toLowerCase() === "path") || "PATH" : "PATH";
+  const extra = windows ? [env.ProgramFiles && path.join(env.ProgramFiles, "GitHub CLI")] : ["/opt/homebrew/bin", "/usr/local/bin"];
+  const PATH = [env[pathKey] || "", ...extra].filter(Boolean).join(windows ? path.delimiter : ":");
+  return { ...env, [pathKey]: PATH, GH_PROMPT_DISABLED: "1", GH_PAGER: "cat", GIT_TERMINAL_PROMPT: "0" };
 }
 
 async function runCommand(file, args, { cwd, maxBuffer = MAX_JSON } = {}) {
@@ -32,6 +35,9 @@ function commandError(error, command) {
   if (error?.code === "ENOENT" && command === "gh") return fail("gh_missing", "GitHub CLI(gh)가 설치되어 있지 않습니다.");
   if (error?.killed || error?.code === "ETIMEDOUT") return fail("timeout", "GitHub 응답 시간이 초과되었습니다. 다시 시도하세요.");
   if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || /maxBuffer/i.test(message)) return fail("output_limit", "GitHub 응답이 너무 커서 표시할 수 없습니다.");
+  // 원격 없음·GitHub 아닌 원격. 뒤 문구에 "gh auth login" 이 있어 로그인 판정보다 먼저 대조
+  if (/no git remotes found/i.test(message)) return fail("no_remote", "이 저장소에 원격(remote)이 없어 PR 을 찾을 수 없습니다.");
+  if (/none of the git remotes .*known GitHub host/i.test(message)) return fail("not_github", "이 저장소의 원격이 GitHub 가 아니어서 PR 을 찾을 수 없습니다.");
   if (/authentication required|not logged in|gh auth login|authenticate|401 Unauthorized|HTTP 401/i.test(message)) return fail("auth_required", "gh auth login 으로 GitHub에 로그인하세요.");
   if (/no pull requests found|could not find a pull request|no pull request found|not found for current branch/i.test(message)) return fail("no_pr", "현재 브랜치에 연결된 PR이 없습니다.");
   return fail("command_failed", `${command === "gh" ? "GitHub" : "Git"} 정보를 읽지 못했습니다.`);

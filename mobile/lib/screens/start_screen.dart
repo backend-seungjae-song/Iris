@@ -44,13 +44,13 @@ class StartScreen extends StatelessWidget {
               ),
               const SizedBox(height: 22),
               Text(
-                'Mac과 연결',
+                '컴퓨터과 연결',
                 key: const Key('start-title'),
                 style: IrisType.title.copyWith(color: context.iris.foreground),
               ),
               const SizedBox(height: 12),
               Text(
-                'Mac의 Iris 원격 화면에 표시된 QR 코드를 읽어 이 폰을 등록하세요.',
+                '컴퓨터의 Iris 원격 화면에 표시된 QR 코드를 읽어 이 폰을 등록하세요.',
                 style: TextStyle(
                   color: context.iris.muted,
                   fontSize: 17,

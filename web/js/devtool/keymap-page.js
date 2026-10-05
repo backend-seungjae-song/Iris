@@ -23,7 +23,7 @@
 
 import { featureEnableNote, featureNeedsRestart, featureOptIn, featureRestartNote, presetMembers } from "../core/features.js";
 import {
-  bindingFromEvent, findConflicts, formatBinding, resolvedKeymap, sameBinding,
+  bindingFromEvent, findConflicts, formatBinding, resolvedKeymap, sameBinding, shortcutLabel,
 } from "../core/keymap.js";
 import { artifactsClick, artifactsModel, enterArtifacts, initArtifacts } from "./artifacts-page.js";
 import { optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
@@ -52,7 +52,8 @@ export function initKeymapPage(deps) {
 
   root.addEventListener("input", (e) => {
     if (!e.target.matches("#km-search")) return;
-    query = String(e.target.value || "").trim().toLowerCase();
+    // 화면을 다시 그리면 입력칸 값이 query 로 바뀐다. 여기서 trim 하면 친 공백이 바로 지워진다
+    query = String(e.target.value || "").toLowerCase();
     renderKeymapPage();
   });
 
@@ -146,7 +147,7 @@ export function initKeymapPage(deps) {
         // 서버·네이티브 짝이 있는 것을 렌더러만 먼저 로드하면 절반만 적용되므로 재시작까지 미룬다.
         if (featureNeedsRestart(id)) { showToast && showToast(featureEnableNote(id), { level: "info" }); return; }
         const loadedNow = enableCapability ? await enableCapability(id) : false;
-        showToast && showToast(loadedNow ? featureEnableNote(id) : "⌘⇧R 로 다시 읽으면 켜집니다", { level: "info" });
+        showToast && showToast(loadedNow ? featureEnableNote(id) : shortcutLabel("⌘⇧R 로 다시 읽으면 켜집니다"), { level: "info" });
       }
       return;
     }
@@ -169,11 +170,12 @@ export function initKeymapPage(deps) {
     if (mo) { setMotion(!motionOn()); renderKeymapPage(); return; }
   });
 
-  // 녹음 중에는 이 화면이 먼저 받는다. 캡처 단계여야 keynav 의 캡처 핸들러보다 앞선다.
-  document.addEventListener("keydown", (e) => {
+  // 녹음 중에는 이 화면이 먼저 받는다. document 캡처 핸들러(keynav·touch-drag)는 먼저 등록돼 있어
+  // 같은 document 에 걸면 그쪽이 먼저 실행된다. window 캡처는 document 보다 앞이라 여기서 끊는다.
+  window.addEventListener("keydown", (e) => {
     if (!recording) return;
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
     if (e.key === "Escape") { recording = null; renderKeymapPage(); return; }
     const b = bindingFromEvent(e);
     if (!b) { renderKeymapPage(); return; }   // 아직 수식키만 눌렸으므로 계속 기다린다

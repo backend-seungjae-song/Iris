@@ -1,3 +1,4 @@
+import { isHostWindows, pathDirname } from "../core/host-path.js";
 // 통합 검색 기능의 사이드바 버튼과 검색 대화상자.
 //
 // 소유 범위
@@ -177,7 +178,7 @@ function highlight(text, query) {
 function detailText(row) {
   const space = ctx.orderedSpaces().find((s) => s.id === row.spaceId);
   const owner = space?.label || row.spaceId;
-  if (row.kind === "스페이스") return row.path ? row.path.replace(/\/[^/]+\/?$/, "") || "/" : row.detail;
+  if (row.kind === "스페이스") return row.path ? isHostWindows() ? pathDirname(row.path) : row.path.replace(/\/[^/]+\/?$/, "") || "/" : row.detail;
   if (row.kind === "파일") return `${owner} / ${row.detail.slice(owner.length + 3)}`;
   if (row.kind === "에이전트") {
     const agent = ctx.getLastAgents().find((a) => a.paneId === row.id && a.workspaceId === row.spaceId);

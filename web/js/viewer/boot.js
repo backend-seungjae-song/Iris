@@ -2,7 +2,7 @@
 //
 // 소유 범위
 //   sheet 일곱 모듈과 docx 두 모듈의 조립 순서, 그리고 이 기능이 앱 셸에 등록하는 이름들.
-//   서버가 보내는 docx · sheet · sheet-saved 세 메시지의 처리도 여기가 소유한다.
+//   서버가 보내는 docx · docx-saved · sheet · sheet-saved 네 메시지의 처리도 여기가 소유한다.
 //
 // 제공 API
 //   initCapability(ctx) 는 { ws } 를 돌려준다. 화면(screen)은 없다. 이 기능은 rail 화면이
@@ -170,6 +170,8 @@ export function initCapability(ctx) {
       "docx": (m, responseIoEntry) => handleDocxMessage(m, responseIoEntry, { showToast, renderDocxPanelBody }),
       "sheet": (m, responseIoEntry) => handleSheetMessage(m, responseIoEntry, { showToast, browserMode, fileview, docxview }),
       "sheet-saved": (m, responseIoEntry) => handleSheetSavedMessage(m, responseIoEntry, { $, showToast }),
+      // 결과 처리는 docxSaveTab 이 받은 응답으로 함. 등록이 없으면 응답이 저장 요청에 안 닿아 시간 초과까지 저장 중
+      "docx-saved": () => {},
     },
   };
 }
@@ -182,6 +184,9 @@ function handleDocxMessage(m, responseIoEntry, { showToast, renderDocxPanelBody 
     target.docxError = m.error;
     target.docxData = null;
     showToast("파일을 열지 못했습니다", { level: "err", detail: String(m.error) });
+  } else if (m.reason === "watch" && m.revision && m.revision === target.docxRevision) {
+    // 이 탭이 방금 저장한 내용 그대로. 다시 읽으면 편집기를 새로 만들어 커서·실행취소 기록이 사라짐
+    return;
   } else if (m.reason === "watch" && (isTabDirty(target) || target._saveInFlight)) {
     target.docxDiskData = m.data;
     target.docxDiskRevision = m.revision;

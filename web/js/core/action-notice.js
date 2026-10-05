@@ -19,6 +19,9 @@ addEventListener("keydown", (event) => {
   if (!["Shift", "Control", "Alt", "Meta"].includes(event.key)) last = { key: true, element: document.activeElement, at: Date.now() };
 }, true);
 
+// 새 메뉴를 열면 지난 조작의 알림을 내린다. 같은 자리에서 다시 우클릭하면 알림이 메뉴 항목(붙여넣기 등)을 덮는다
+addEventListener("contextmenu", () => hide(), true);
+
 const point = (x, y) => ({ left: x, right: x, top: y, bottom: y });
 
 function visibleRect(element) {

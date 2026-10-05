@@ -12,7 +12,7 @@ void main() {
 
   test('실제 요청 결과 문구를 구분한다', () {
     expect(requestAnswerResultText('delivered'), '전달함');
-    expect(requestAnswerResultText('already-answered'), '이미 답함(Mac 또는 터미널)');
+    expect(requestAnswerResultText('already-answered'), '이미 답함(컴퓨터 또는 터미널)');
     expect(requestAnswerResultText('expired'), '만료됨');
     expect(requestAnswerResultText('failed'), '실패');
     expect(agentMessageResultText('sent'), '전송함');

@@ -96,7 +96,7 @@ check("사용자 UI BrowserWindow 생성 지점은 정해진 일곱 곳뿐이다
     if (/offscreen:\s*true/.test(opts)) offscreen++; else ui++;
   }
   // offscreen 하나는 전체 캡처 타일을 canvas 로 이어 붙이는 보이지 않는 창이다(cdp-capture-tools).
-  // 넷째는 탭 하나만 담는 창이다(detached-tab-window). 다섯째는 에뮬레이터 분리 창이다
+  // 넷째는 탭을 빼낸 분리 창이다(detached-tab-window). 다섯째는 에뮬레이터 분리 창이다
   // (emulator/emulator-host.cjs). 여섯째는 창 레이아웃 단축키 결과를 모니터 가운데에 띄우는 투명 알림 창이다
   // (desk-layout/hud.cjs). 일곱째는 현재 프로필의 확장 팝업·설정 창이다(browser-extensions.cjs).
   // 창 종류가 늘면 이 수를 직접 올리게 하는 것이 이 검사의 목적이다.

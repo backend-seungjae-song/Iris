@@ -201,7 +201,7 @@ check("파생 탭은 opener의 space·group·profile을 한 번에 상속", () =
   return /openerSpace = spaceOfTabId\(hit\)/.test(open)
     && /openerGroup = owner && owner\.group/.test(open)
     && /background: m\.background, profile, space: openerSpace, group: openerGroup/.test(open)
-    && /if \(opts && opts\.group\) mut\.group = opts\.group;\s*bsMutate\(mut\)/.test(open)
+    && /if \(opts && opts\.group\) mut\.group = opts\.group;(?:\s*\/\/[^\n]*|\s*const claim = [^\n]*|\s*if \(claim\) \{[^\n]*bsMutate\(mut\)[^\n]*)*\s*(?:else )?bsMutate\(mut\)/.test(open)
     && !/bsMutate\(\{ op: "tab\.group"[^}]*opts\.group/.test(open);
 });
 check("OAuth 팝업 경로는 살아 있음", () => /overrideBrowserWindowOptions: popupByAi \? \{ \.\.\.SAFE_POPUP_WINDOW_OPTIONS, show: false \} : SAFE_POPUP_WINDOW_OPTIONS/

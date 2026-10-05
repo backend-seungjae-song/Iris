@@ -74,7 +74,14 @@ function localLoginFor(origin) {
   } catch {
     return null;
   }
-  const cwd = cwdOfPort(portOf(u));
+  if (process.platform === "win32") {
+    return require("./win-native.cjs").request({ op: "portCwd", port: Number(portOf(u)) })
+      .then((result) => result.ok && result.cwd ? loginAt(u, result.cwd) : null);
+  }
+  return loginAt(u, cwdOfPort(portOf(u)));
+}
+
+function loginAt(u, cwd) {
   if (!cwd) return null;
   const decl = findDecl(cwd);
   if (!decl) return null;

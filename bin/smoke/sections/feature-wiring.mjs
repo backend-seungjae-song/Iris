@@ -36,6 +36,11 @@ for (const [name, re, source = web] of [
   ["분리창 선택모드는 서버 방송을 따름", /"pick-mode": \(m\) => applyPickMode\(!!m\.on\)/, pickBoot],
   // 쿨다운 중 포커스 변경을 버리면 머리 이름과 실제 입력 대상이 어긋난다. 동작 검사는 test/herdr-sync.mjs
   ["herdr 역동기화(focused)", /clearTimeout\(herdrSyncTimer\);[\s\S]*herdrSyncPane = paneId && paneId !== getCurTarget\(\) \? paneId : null;[\s\S]*Math\.max\(300, lastUserSelect \+ 1500 - Date\.now\(\)\)[\s\S]*setTimeout\(\(\) => applyHerdrFocus\(herdrSyncPane\), wait\);[\s\S]*if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*Date\.now\(\) - lastUserSelect < 1500\) \{ scheduleHerdrSync\(paneId\); return; \}[\s\S]*const a = agentByPane\(paneId\);[\s\S]*if \(!a\) return/, herdrSync],
+  // 위 동기화는 에이전트 pane 만 따라가서, 셸만 있는 스페이스로 시작하거나 선택한 스페이스가 herdr 에서 닫히면
+  // 탐색기·실행·메모가 비거나 닫힌 스페이스에 남는다.
+  ["에이전트 없는 포커스 스페이스도 선택", /scheduleHerdrSync\(foc\.paneId\);[^\n]*\n(?:\s*\/\/[^\n]*\n)+\s*else if \(!BROWSER_MODE && !getSpaces\(\)\.some\(\(s\) => s\.id === selectedSpaceId\)\) \{ const w = getSpaces\(\)\.find\(\(x\) => x\.focused\); if \(w\) switchToSpaceOf\(\{ workspaceId: w\.id \}\); \}/, mainJs],
+  // 깃 화면은 앱에서 저장한 파일만 다시 물었다. 터미널·외부 편집기 변경은 폴더 감시 알림으로만 알 수 있다.
+  ["폴더 변경 알림이 깃 화면도 갱신", /function handleDirChangedMessage\(m\) \{[\s\S]{0,500}?callHook\("git\.refreshFor", m\.dir\);/, mainJs],
   ["프로필 안정 id 파티션", /persist:acprof:/, webviewFactory],
   ["프로필 id 해석 함수", /function profileIdForStored/, profiles],
   ["프로필 메뉴 닫기(guest pointerdown)", /ac-guest-pointerdown/, webviewFactory],
@@ -44,6 +49,14 @@ for (const [name, re, source = web] of [
   ["중앙 도크 새 메모·공유 메모 진입점", /id="memo-new-window"[\s\S]*id="memo-shared-window"/],
 ]) check("web " + name, () => re.test(source));
 check("web 별도 메모 창 편집·충돌 보존", () => /function initMemoWindow\(\)/.test(memoWindow));
+// Electron 의 window.confirm 단추는 영문(OK·Cancel)이고 창 전체를 막음. 앱 화면은 askConfirm 만
+check("web 앱 화면 확인 창은 askConfirm", () => {
+  const files = sourceFiles("web").filter((rel) => rel.startsWith("web/js/") && rel.endsWith(".js"));
+  if (files.length < 60) throw new Error(`렌더러 파일이 너무 적음: ${files.length}`);
+  const hits = files.filter((rel) => /(?<![\w.])confirm\(|window\.confirm\(/.test(read(rel).replace(/^\s*\/\/.*$/gm, "")));
+  if (hits.length) throw new Error(`네이티브 confirm 사용: ${hits.join(", ")}`);
+  return true;
+});
 check("web 메모 창 키입력 실시간 공유", () => /mwOwnsLive = true; mwLiveText = text; mwSendLive\(text\);/.test(memoWindow));
 check("web 같은 로컬 메모 새 창 진입점", () =>
   /id="mw-duplicate"/.test(web) && /openLocalMemo\?\.\(\{ spaceKey: MW_SPACE, noteId: MW_NOTE/.test(memoWindow));
@@ -56,6 +69,16 @@ check("메모 창 항상 위 토글은 신뢰 IPC 브리지로 연결됨", () =>
 });
 
 check("native webview preload 부착", () => /will-attach-webview/.test(readAll("native")));
+// 투명 게스트는 다크 색 구성 페이지(다크 모드 text/plain)의 바탕을 비워 흰 바탕 위 흰 글자가 된다.
+// webview 를 붙이는 창마다 같은 설정이어야 창에 따라 그 페이지가 빈 화면이 되지 않는다.
+check("브라우저 탭 webview 를 붙이는 창마다 게스트를 불투명으로 붙인다", () => {
+  const files = sourceFiles("native").filter((f) => /webPreferences\.preload = webviewPreloadPath/.test(read(f)));
+  return files.length >= 3 && files.every((f) => {
+    const src = read(f);
+    return (src.match(/webPreferences\.preload = webviewPreloadPath/g) || []).length
+      === (src.match(/webPreferences\.transparent = false/g) || []).length;
+  });
+});
 check("webview-lifecycle anti-detection document-start 주입", () =>
   /addScriptToEvaluateOnNewDocument/.test(webviewLifecycleSource));
 for (const [name, re, source = main] of [

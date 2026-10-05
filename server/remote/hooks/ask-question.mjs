@@ -1,4 +1,4 @@
-import net from "node:net";
+import { connectAgent } from "../agent-endpoint.mjs";
 
 import { questionHookOutput } from "./protocol.mjs";
 
@@ -24,7 +24,7 @@ function run(input) {
   const paneId = process.env.HERDR_PANE_ID || "";
   const cliSession = process.env.CLAUDE_CODE_SESSION_ID || input.session_id || "unknown";
   if (!paneId) return finish(null, null);
-  const socket = net.createConnection(socketPath);
+  const { socket, auth } = connectAgent(socketPath);
   socket.setEncoding("utf8");
   let buffer = "";
   const connectTimer = setTimeout(() => finish(socket, null), CONNECT_TIMEOUT);
@@ -32,7 +32,7 @@ function run(input) {
   connectTimer.unref?.(); processTimer.unref?.();
   socket.on("connect", () => {
     clearTimeout(connectTimer);
-    socket.write(`${JSON.stringify({ role: "question-hook", v: 1, paneId, cliSession })}\n`);
+    socket.write(`${JSON.stringify({ role: "question-hook", v: 1, paneId, cliSession, ...auth })}\n`);
     socket.write(`${JSON.stringify({ type: "question", questions })}\n`);
   });
   socket.on("data", (chunk) => {

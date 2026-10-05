@@ -1,3 +1,4 @@
+import { isHostWindows, pathBasename, joinPath } from "../core/host-path.js";
 // diff: 소스 제어에서 연 변경 내용을 center의 읽기 전용 탭으로 보여준다.
 //
 // 소유 범위
@@ -9,6 +10,7 @@
 //   openDiff(file, opts): diff 탭을 열고 서버에 내용을 요청한다.
 //   renderDiffView(tab): 응답이 들어온 현재 diff 탭을 그린다.
 //   handleGitDiffMessage(m): git-diff 응답을 받은 탭에 저장하고 보이는 탭이면 다시 그린다.
+//   refreshDiffTabs(status): status 가 다시 온 레포의 열린 diff 탭 내용을 다시 요청한다.
 //
 // 의존 대상
 //   DOM·escape·전송과 center 렌더, source-control 레포 이름을 init 에서 받고 tab-store를 import한다.
@@ -67,12 +69,12 @@ export function openDiff(file, opts) {
   const id = diffTabId(root, file, opts.staged, mode, base);
   let t = getTabs(sp).find((x) => x.id === id);
   const suffix = mode ? " ◦" + (DIFF_TAG[mode] || "Base") : (opts.staged ? " ◦스테이지" : "");
-  if (!t) { t = addTab(sp, { id, kind: "diff", label: file.split("/").pop() + suffix, path: file, root, rel: opts.rel || "", staged: !!opts.staged, untracked: !!opts.untracked, mode, base, oldRel: opts.oldRel || "", patch: null }); }
-  else { t.patch = null; t.root = root || t.root; if (opts.rel) t.rel = opts.rel; }
+  if (!t) { t = addTab(sp, { id, kind: "diff", label: pathBasename(file) + suffix, path: file, root, rel: opts.rel || "", staged: !!opts.staged, untracked: !!opts.untracked, mode, base, oldRel: opts.oldRel || "", patch: null }); }
+  else { t.patch = null; t.root = root || t.root; if (opts.rel) t.rel = opts.rel; t.oldRel = opts.oldRel || ""; }
   setCenterSpace(sp); setActiveTab(sp, id); renderTabs(); showActiveTab();
   send(mode
     ? { type: "git.diff", path: root || file, file, mode, base, untracked: !!opts.untracked, oldRel: opts.oldRel || "" }
-    : { type: "git.diff", path: root || file, file, staged: !!opts.staged, untracked: !!opts.untracked });
+    : { type: "git.diff", path: root || file, file, staged: !!opts.staged, untracked: !!opts.untracked, oldRel: opts.oldRel || "" });
 }
 // PR 서버에서 받은 patch를 그대로 표시해 로컬 작업 트리의 변경과 섞이지 않게 한다.
 export function openPatchDiff({ root, file, patch = null, number, base, spaceId, requestId, error = "", activate = true }) {
@@ -82,8 +84,8 @@ export function openPatchDiff({ root, file, patch = null, number, base, spaceId,
   let tab = getTabs(sp).find((item) => item.id === id);
   // 닫힌 탭을 응답이 다시 열거나 이전 요청이 새 클릭의 결과를 덮지 않게 한다.
   if (!activate && (!tab || tab.patchRequest !== requestId)) return false;
-  if (!tab) tab = addTab(sp, { id, kind: "diff", label: `${file.split("/").pop()} · PR #${number}`,
-    path: `${root}/${file}`, root, rel: file, mode: "pullrequest", prNumber: number });
+  if (!tab) tab = addTab(sp, { id, kind: "diff", label: `${pathBasename(file)} · PR #${number}`,
+    path: isHostWindows() ? joinPath(root, file) : `${root}/${file}`, root, rel: file, mode: "pullrequest", prNumber: number });
   Object.assign(tab, { patch, base, error, patchRequest: requestId });
   if (activate) {
     setCenterSpace(sp); setActiveTab(sp, id); renderTabs(); showActiveTab();
@@ -96,7 +98,8 @@ export function openPatchDiff({ root, file, patch = null, number, base, spaceId,
 export function diffRows(patch) {
   const rows = [];
   let oldNo = 0, newNo = 0, inHunk = false;
-  for (const line of String(patch == null ? "" : patch).split("\n")) {
+  // git diff 출력은 줄바꿈으로 끝난다. 그대로 나누면 마지막 빈 조각이 번호 달린 문맥 줄이 된다.
+  for (const line of String(patch == null ? "" : patch).replace(/\n$/, "").split("\n")) {
     const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
     if (m) {
       oldNo = Number(m[1]); newNo = Number(m[2]); inHunk = true;
@@ -143,7 +146,7 @@ export function renderDiffView(t) {
     ? `<button class="dv-meta" type="button" aria-pressed="${t.showMeta ? "true" : "false"}" title="${t.showMeta ? "파일 머리 줄 접기" : "파일 머리 줄 보기"}">${idx ? "index " + escapeHtml(idx[1]) : "머리 줄"}</button>`
     : "";
   const bar = `<div class="dv-bar"><span class="dv-tag">${escapeHtml(tag)}</span>`
-    + `<span class="dv-crumb" title="${escapeHtml(t.root ? t.root + "/" + rel : t.label)}">${crumb}</span>` + meta + `</div>`;
+    + `<span class="dv-crumb" title="${escapeHtml(t.root ? (isHostWindows() ? joinPath(t.root, rel) : t.root + "/" + rel) : t.label)}">${crumb}</span>` + meta + `</div>`;
   if (t.error) { dv.innerHTML = bar + `<div class="dv-empty" role="alert">${escapeHtml(t.error)}</div>`; return; }
   if (t.patch == null) { dv.innerHTML = bar + `<div class="dv-empty">불러오는 중…</div>`; return; }
   const fold = hasHunk && !t.showMeta ? " fold-meta" : "";
@@ -166,7 +169,7 @@ export function renderDiffView(t) {
 // 큰 patch 는 토큰화가 화면을 멈추게 하므로 칠하지 않고 줄 배경만 남긴다.
 const HL_MAX_LINES = 20000;
 function langFor(monaco, filePath) {
-  const base = String(filePath || "").split("/").pop();
+  const base = pathBasename(String(filePath || ""));
   const dot = base.lastIndexOf(".");
   const ext = dot > 0 ? base.slice(dot).toLowerCase() : "";
   for (const l of monaco.languages.getLanguages()) {
@@ -225,14 +228,26 @@ async function highlightDiff(pre, t) {
 // 서버가 보낸 diff 한 장. 어느 탭의 것인지는 레포·경로·스테이지 여부가 함께 정한다.
 // 중첩 레포는 같은 절대경로를 각자 추적하므로 경로만으로 가르면 남의 탭을 덮는다.
 // root 가 없는 응답(구버전 서버)도 받는다. 그때는 경로·스테이지 여부만으로 탭을 찾는다.
+// status 가 다시 온 레포의 열린 diff 탭을 다시 요청. 응답 전까지 지금 patch 를 남겨 화면이 비지 않음.
+// 커밋 전 보기는 지금 untracked 인지로 요청을 고름. 커밋한 새 파일을 /dev/null 대비로 다시 받으면 전체 추가로 보임
+export function refreshDiffTabs(status) {
+  const untracked = new Set((status.changes || []).filter((f) => f.code === "U").map((f) => f.abs));
+  for (const sp of getTabSpaces()) for (const t of getTabs(sp)) {
+    if (t.kind !== "diff" || t.mode === "pullrequest" || !t.root || t.root !== status.root) continue;
+    if (t.mode) send({ type: "git.diff", path: t.root, file: t.path, mode: t.mode, base: t.base || "", untracked: !!t.untracked, oldRel: t.oldRel || "" });
+    else { t.untracked = untracked.has(t.path); send({ type: "git.diff", path: t.root, file: t.path, staged: !!t.staged, untracked: t.untracked, oldRel: t.oldRel || "" }); }
+  }
+}
 export function handleGitDiffMessage(m) {
   // Base 보기 응답은 mode·base 가 같은 탭에만 들어간다. 커밋 전 보기 탭은 둘 다 비어 있다.
   const hit = (t) => t.kind === "diff" && t.path === m.file && !!t.staged === !!m.staged
     && (t.mode || "") === (m.mode || "") && (!m.mode || (t.base || "") === (m.base || ""))
     && (!m.root || !t.root || t.root === m.root);
   const patch = m.error ? ("[오류] " + m.error) : (m.patch || "");
-  for (const sp of getTabSpaces()) for (const t of getTabs(sp)) if (hit(t)) t.patch = patch;
   const sp = getCenterSpace();
   const at = getTabs(sp).find((x) => x.id === getActiveTabId(sp));
-  if (at && hit(at)) renderDiffView(at);
+  const shown = at && hit(at) ? at.patch : undefined;
+  for (const s of getTabSpaces()) for (const t of getTabs(s)) if (hit(t)) t.patch = patch;
+  // 같은 내용으로 다시 그리면 읽던 스크롤 위치가 처음으로 돌아감
+  if (at && hit(at) && shown !== patch) renderDiffView(at);
 }

@@ -103,7 +103,7 @@ class _CodeScreenState extends State<CodeScreen> {
                     ),
                     const SizedBox(height: 24),
                     Text(
-                      'Mac의 Iris 원격 화면에 이 코드를 입력하세요',
+                      '컴퓨터의 Iris 원격 화면에 이 코드를 입력하세요',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: context.iris.foreground2,
@@ -130,7 +130,7 @@ class _CodeScreenState extends State<CodeScreen> {
                               ? '연결 확인 중…'
                               : retrySeconds > 0
                               ? '$retrySeconds초 후 다시 시도'
-                              : 'Mac에 입력했습니다',
+                              : '컴퓨터에 입력했습니다',
                           tone: IrisButtonTone.primary,
                           height: 58,
                           onPressed: _busy || retrySeconds > 0

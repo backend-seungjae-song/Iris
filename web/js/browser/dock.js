@@ -1,3 +1,7 @@
+import { isHostWindows } from "../core/host-path.js";
+import { cycleRail } from "../devtool/rail.js";
+import { closeCurrentHerdrPane } from "../core/keynav.js";
+import { startInlineRename } from "../herdr/agents.js";
 // 분리 브라우저 창 렌더와 문서 탭 동기화, 콘솔 도킹 전환 및 관련 최상위 연결을 맡는다.
 //
 // 소유 범위
@@ -26,12 +30,13 @@ import { profileIdForStored, spaceDefaultProfile, updateProfileBtn } from "./pro
 import {
   bmTabs, boundSpace, bsMutate, getBrowserState, isBrowserStateLoaded,
 } from "./state.js";
-import { renderBmTabs, syncAiGlow, wireBrowserModeTabstrip } from "./tabs.js";
+import { renderBmTabs, shownBmTabs, syncAiGlow, wireBrowserModeTabstrip } from "./tabs.js";
+import { navigationDisplay } from "./navigation-feedback.js";
 import {
-  createWebview, forgetTabWc, navigateOn, reportActiveBrowserWc,
+  createWebview, forgetTabWc, navigateOn, reportActiveBrowserWc, reportTabWc,
 } from "./webview-factory.js";
 import {
-  getDiscardedWebview, getDiscardedWebviewIds, getWebview, getWebviewEntries,
+  getDiscardedWebview, getDiscardedWebviewIds, getLoadFailure, getWebview, getWebviewEntries,
   getWebviewIds, removeDiscardedWebview, removeLoadFailure, removeWebview,
   removeWebviewLastUsed, removeWebviewStatus,
 } from "./webview-store.js";
@@ -95,7 +100,7 @@ export function initDock(deps) {
   // 메인 프로세스가 before-input-event로 가로채 이름으로 전달 → 포커스 무관하게 동작하게 한다.
   if (window.acHost && window.acHost.onShortcut) {
     window.acHost.onShortcut((name) => {
-      if (MEMO_MODE) { if (name === "memo-archive") callHook("memo.archiveWindow"); return; }
+      if (MEMO_MODE) { if (name === "memo-archive") callHook("memo.archiveWindow"); else if (name === "app-refresh" && isHostWindows()) window.acHost?.appReload?.(); return; }
       const centerSpace = getCenterSpace();
       const t = curTabs().find((x) => x.id === getActiveTabId(centerSpace));
       const isBrowser = t && t.kind === "browser";
@@ -107,6 +112,11 @@ export function initDock(deps) {
         case "rec-toggle": if (activeWv()) callHook("record.set", !callHook("record.on")); break; // ⌘⇧A 녹화 토글. 문서 탭에는 webview가 없다
         case "memo-archive": callHook("memo.archive"); break; // ⌘⇧S. webview에 포커스가 있어도 보관된다
         case "agent-chat": callHook("agentchat.toggle"); break; // ⌘⇧J. 채팅 보기 기능이 꺼져 있으면 아무 일도 없다
+        case "rail-prev": cycleRail(-1); break;
+        case "rail-next": cycleRail(1); break;
+        case "close-pane": if (!BROWSER_MODE) closeCurrentHerdrPane(); break;
+        case "rename-pane": if (!BROWSER_MODE) startInlineRename(); break;
+        case "app-refresh": window.acHost?.appReload?.(); break;
         case "tab-prev": cycleCenterTab(-1); break;
         case "tab-next": cycleCenterTab(1); break;
         case "agent-prev": cycleAgent(-1); break;
@@ -147,7 +157,7 @@ export function initDock(deps) {
   // 안정 id로 정규화하고 로컬 연결만 기존 tab.profile mutation으로 1회 영속화한다.
   initAiTabs({
     BROWSER_MODE, BOUND_SPACE, createWebview, renderTabs, reconcileBrowserMode,
-    reconcileDocTabs, reconcileConsoleDock, reportActiveBrowserWc,
+    reconcileDocTabs, reconcileConsoleDock, reportActiveBrowserWc, reportTabWc,
   });
   renderBookmarks(); renderUrlDatalist();
 }
@@ -157,7 +167,7 @@ export function initDock(deps) {
 export function reconcileBrowserMode() {
   if (!BROWSER_MODE) return;
   const sp = boundSpace(), tabs = bmTabs();
-  // 이 창의 활성 탭이다. 한 탭에 묶인 창에서는 스페이스의 공유 활성 탭이 아니라 그 탭이다.
+  // 이 창의 활성 탭이다. 분리 창에서는 스페이스의 공유 활성 탭이 아니라 그 창이 고른 탭이다.
   // 그러지 않으면 창 둘이 같은 페이지를 표시한다.
   const act = activeBrowserId();
   bmSpace = sp;
@@ -172,12 +182,22 @@ export function reconcileBrowserMode() {
     removeWebview(id); removeWebviewLastUsed(id); removeWebviewStatus(id); removeLoadFailure(id);
   }
   for (const id of getDiscardedWebviewIds()) if (!allWant.has(id)) { removeDiscardedWebview(id); removeWebviewLastUsed(id); removeWebviewStatus(id); removeLoadFailure(id); }
+  // 다른 창이 보여 주는 탭(분리 창으로 간 탭, 분리 창이면 자기 것이 아닌 탭)은 이 창에서 내린다. 남겨 두면
+  // 한 탭에 페이지가 둘이 되고, 돌아왔을 때 이 창에 남은 옛 페이지가 다시 보인다(분리 전 주소로 돌아감).
+  // 잠든 기록도 지운다. 잠든 기록의 주소는 분리 전 것이라, 깨우면 같은 증상이 난다.
+  const shownIds = new Set(shownBmTabs().map((t) => t.id));
+  for (const t of tabs) if (!shownIds.has(t.id)) {
+    const webview = getWebview(t.id);
+    if (webview) { forgetTabWc(webview, t.id); try { webview.el.remove(); } catch {} removeWebview(t.id); }
+    if (getDiscardedWebview(t.id)) removeDiscardedWebview(t.id);
+  }
   sleepDeadSpaceWebviews();   // 접은 스페이스의 탭은 기록만 남기고 내려놓는다
   // 공유(__shared__) 탭은 전용 공유 창(BOUND_SPACE=__shared__)만 호스팅한다. 비결속 창이 "그 탭으로"
   // goto로 activeSpace=__shared__를 따라와 여기서 만들면 같은 탭에 webview가 둘 생긴다(공유 창 + 이 창).
   const hostShared = !BOUND_SPACE && sp === "__shared__";
   for (const t of tabs) { // 현재 스페이스 탭은 방문 시 생성(없으면). 이미 있으면 살려둔 채 재사용.
     if (hostShared) break;
+    if (!shownIds.has(t.id)) continue;
     if (isFileKindId(t.kind)) continue;   // 문서 탭은 webview 가 아니다. 어느 것이 문서인지는 표가 안다
     let rec = getWebview(t.id);
     const wantProfile = t.profile == null ? spaceDefaultProfile(sp) : profileIdForStored(t.profile);
@@ -202,11 +222,16 @@ export function reconcileBrowserMode() {
   const active = act && getWebview(act);
   if (active) {
     markWebviewUsed(act);
-    urlInput.value = isNewTab(active.url, active) ? "" : (active.url || "");
+    // 여는 중·실패한 주소 포함. active.url 만 쓰면 실패한 이동 뒤 주소줄이 빔
+    const { url: shownUrl } = navigationDisplay(active);
+    urlInput.value = isNewTab(shownUrl, active) ? "" : shownUrl;
     syncBookmarkStar();
   }
   syncNavButtons();
-  bNote.hidden = tabs.length > 0;
+  // 탭이 있으면 시작 안내는 숨김. 활성 탭의 로드 실패 문구는 표시(없으면 흰 화면만 남음)
+  const failure = act && getLoadFailure(act);
+  if (failure) bNote.textContent = failure;
+  bNote.hidden = tabs.length > 0 && !failure;
   updateProfileBtn();
   updateSizeBtn(); viewportLayout(); syncTouchDrag(false);
   syncAiGlow();
@@ -245,10 +270,10 @@ export function reconcileDocTabs() {
   }
   syncWatchDirs();
   setCenterSpace(sp);
-  // 한 탭에 묶인 창은 그 탭 하나가 전부다. 스페이스의 공유 활성 탭이 문서 탭이면 그 창까지
-  // 브라우저를 닫고 문서를 띄우게 되어, 자기 탭이 아닌 것을 표시한다.
+  // 분리 창은 그 창이 고른 탭을 본다. 스페이스의 공유 활성 탭이 문서 탭이면 그 창까지 브라우저를
+  // 닫고 문서를 띄우게 되어, 자기 탭이 아닌 것을 표시한다.
   const boundTab = callHook("detach.boundTab") || null;
-  const activeId = boundTab ? null : ((state.activeBySpace && state.activeBySpace[sp]) || null);
+  const activeId = boundTab || ((state.activeBySpace && state.activeBySpace[sp]) || null);
   const activeTab = activeId ? getTabs(sp).find((t) => t.id === activeId) : null;
   if (activeTab) {
     setActiveTab(sp, activeId);
@@ -271,6 +296,13 @@ export function reconcileDocTabs() {
   }
 }
 
+// 도킹할 스페이스 탭. 시트·문서 탭은 제외(webview 를 만들면 about:blank 제목이 서버 탭 제목을 덮음).
+// 웹 탭은 kind 가 없음. 문서 종류 등록표는 기능이 로드된 뒤에 차므로 쓰지 않음
+function dockedWebTabs(sp) {
+  const stabs = (getBrowserState().tabsBySpace || {})[sp] || [];
+  return stabs.filter((st) => st && (!st.kind || st.kind === "browser"));
+}
+
 // 콘솔(도킹) 렌더: docked 상태 전환을 반영한다.
 export function reconcileConsoleDock() {
   if (BROWSER_MODE) return;
@@ -278,19 +310,38 @@ export function reconcileConsoleDock() {
   const nowDocked = !!state.docked;
   if (nowDocked && !consoleDocked) {
     const sp = boundSpace() || consoleSpace();
-    const stabs = (state.tabsBySpace && state.tabsBySpace[sp]) || [];
+    const stabs = dockedWebTabs(sp);
     ensureTabSpace(sp);
     setCenterSpace(sp);
     for (const st of stabs) {
       if (!getTabs(sp).find((t) => t.id === st.id)) {
-        addTab(sp, { id: st.id, kind: "browser", label: st.title || "브라우저", path: null });
+        addTab(sp, { id: st.id, kind: "browser", label: st.name || st.title || "브라우저", path: null });
         const rec = createWebview(st.id);
         if (st.url && st.url !== "about:blank") navigateOn(rec, st.url);
       }
     }
-    const act = (state.activeBySpace && state.activeBySpace[sp]) || (stabs[0] && stabs[0].id);
+    const saved = state.activeBySpace && state.activeBySpace[sp];
+    const act = (stabs.some((st) => st.id === saved) && saved) || (stabs[0] && stabs[0].id);
     if (act) setActiveTab(sp, act);
     renderTabs(); showActiveTab();
+  } else if (nowDocked) {
+    // 스페이스 전환·창 다시 읽기 뒤: 그 스페이스의 탭이 가운데 목록에 없으면 도킹 영역이 비고 ⌥2 도 열 탭이 없음
+    const sp = getCenterSpace() || consoleSpace();
+    ensureTabSpace(sp);
+    const stabs = dockedWebTabs(sp);
+    let added = false;
+    for (const st of stabs) {
+      if (getTabs(sp).find((t) => t.id === st.id)) continue;
+      addTab(sp, { id: st.id, kind: "browser", label: st.name || st.title || "브라우저", path: null });   // webview 는 탭을 열 때 생성
+      added = true;
+    }
+    // 처음 가는 스페이스는 고른 탭이 없어 탭 줄만 있고 가운데가 빔. 그 스페이스에서 보던 탭을 고름
+    const cur = getActiveTabId(sp);
+    if (stabs.length && !(cur && getTabs(sp).some((t) => t.id === cur))) {
+      const saved = state.activeBySpace && state.activeBySpace[sp];
+      setActiveTab(sp, (stabs.some((st) => st.id === saved) && saved) || stabs[0].id);
+      renderTabs(); showActiveTab();
+    } else if (added) renderTabs();
   } else if (!nowDocked && consoleDocked) {
     for (const sp of getTabSpaces()) {
       for (const t of getTabs(sp).filter((x) => x.kind === "browser")) {

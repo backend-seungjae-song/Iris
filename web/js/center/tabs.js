@@ -1,3 +1,4 @@
+import { isHostWindows, samePath, normalizePath, pathBasename, pathDirname } from "../core/host-path.js";
 // 가운데 탭 화면. tab-store 상태를 파일·브라우저·문서 화면으로 렌더하고 파일 I/O를 연결한다.
 //
 // 소유 범위
@@ -29,8 +30,7 @@ import { tabViewOf, tabViews } from "../core/tab-views.js";
 import { aiBusyLabels } from "../browser/ai-state.js";
 import { renderBookmarks } from "../browser/bookmarks.js";
 import { bsMutate, getBrowserState } from "../browser/state.js";
-import { syncAiGlow } from "../browser/tabs.js";
-import { getWebviewStatus } from "../browser/webview-store.js";
+import { renderBmTabs, revealActiveTab, syncAiGlow } from "../browser/tabs.js";
 import { cancelPendingReveal, expandedDirs, startPendingReveal } from "../explorer/tree.js";
 import { sendPtyResize, terminalBarePathToken } from "../panel/xterm-wiring.js";
 import { fitTerminal, getCropEnabled, setCropEnabled } from "../panel/terminal.js";
@@ -71,6 +71,12 @@ export function initCenterTabs(deps) {
     updateActiveWebview, newBrowserTab,
     agentByPane, getHostHome, getCurTarget, getLastAgents, getSelectedSpaceId,
     spk, spid, getWs, getWsGeneration } = deps);
+  // 탭 이름을 줄이지 않아 탭 줄이 넘침. 스크롤 막대는 숨기고 세로 휠을 가로 이동으로 바꿈
+  if (tabstrip) tabstrip.addEventListener("wheel", (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || tabstrip.scrollWidth <= tabstrip.clientWidth) return;
+    tabstrip.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
 
   // 머리줄 아이콘은 여기서 넣는다. 이모지는 OS 버전마다 모양·색·크기가 달라 옆 아이콘과 어긋나고,
   // 색이 고정이라 currentColor 로 상태를 나타낼 수 없다(rail 도 같은 이유로 선 아이콘을 쓴다).
@@ -188,6 +194,8 @@ const TAB_KIND = {
 export const TAB_CLOSE = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 
 export function renderTabs() {
+  // 분리 브라우저 창의 #tabstrip 은 renderBmTabs 가 그림. 여기서 그리면 브라우저 탭 칩이 사라짐(renderBmTabs 의 반대 방향)
+  if (BROWSER_MODE) { renderBmTabs(); return; }
   callHook("memo.render"); // 스페이스가 바뀌면 쪽지도 그 스페이스 것으로 (메모를 끄면 아무 일도 없다)
   const centerSpace = getCenterSpace();
   const act = getActiveTabId(centerSpace);
@@ -200,12 +208,10 @@ export function renderTabs() {
     // 지금 조작 중인 탭만 빛나고 ●가 붙는다. 조작이 끝나면 둘 다 사라진다.
     const busy = t.kind === "browser" ? aiBusyLabels(t.id) : [];
     const ai = busy.length ? `<span class="cai" title="${esc(busy.join(", "))} 세션이 지금 이 탭을 조작 중">●${busy.length > 1 ? busy.length : ""}</span>` : "";
-    const status = getWebviewStatus(t.id);
-    const sleeping = t.kind === "browser" && !!(status && status.sleeping);
-    const sleep = sleeping ? '<span class="csleep" title="메모리를 회수한 잠자는 탭 · 클릭하면 다시 엽니다"></span>' : "";
-    const lead = sleeping ? sleep : (t.kind === "browser" ? TAB_KIND.browser : TAB_KIND.file);
-    return `<div class="ctab${t.id === act ? " active" : ""}${d ? " dirty" : ""}${busy.length ? " ai-held" : ""}${sleeping ? " sleeping" : ""}" data-tab="${esc(t.id)}" title="${sleeping ? "잠자는 탭 · 클릭하면 다시 엽니다" : ""}">${lead}${d ? '<span class="cdirty" title="저장 안 됨"></span>' : ""}${ai}<span class="cname">${esc(label)}</span><button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기">${TAB_CLOSE}</button></div>`;
+    const lead = t.kind === "browser" ? TAB_KIND.browser : TAB_KIND.file;
+    return `<div class="ctab${t.id === act ? " active" : ""}${d ? " dirty" : ""}${busy.length ? " ai-held" : ""}" data-tab="${esc(t.id)}">${lead}${d ? '<span class="cdirty" title="저장 안 됨"></span>' : ""}${ai}<span class="cname">${esc(label)}</span><button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기">${TAB_CLOSE}</button></div>`;
   }).join("");
+  revealActiveTab(tabstrip);
   syncAiGlow();
   updateCenterVisibility();
 }
@@ -253,7 +259,7 @@ export function makeFileTab(path) {
   // revision 은 이 내용을 읽은 시점의 디스크 상태다. 저장할 때 그대로 돌려보내면 그사이
   // 외부에서 바뀌었는지 서버가 대조한다(server/fs-handlers.js 의 baselineRevision).
   const tab = { id: "file:" + path, kind: (kind && kind.tabKind) || "file",
-    label: path.split("/").pop(), path, content: null, revision: null, hasDiskSnapshot: false };
+    label: pathBasename(path), path, content: null, revision: null, hasDiskSnapshot: false };
   // 뷰어가 쓰는 필드는 그 뷰어가 선언한다. 등록된 필드는 모든 파일 탭이 함께 갖는다. 필드의
   // 유무로 탭 정체성 비교(닫기 확인의 지문)가 달라지면 안 되기 때문이다.
   for (const spec of fileKinds()) if (typeof spec.tabFields === "function") Object.assign(tab, spec.tabFields());
@@ -297,7 +303,7 @@ export function syncWatchDirs() {
     watchTimer = null;
     const dirs = new Set();
     for (const sp of getTabSpaces()) {
-      for (const t of getTabs(sp)) if (isFileLikeKind(t.kind) && t.path) dirs.add(t.path.slice(0, t.path.lastIndexOf("/")) || "/");
+      for (const t of getTabs(sp)) if (isFileLikeKind(t.kind) && t.path) dirs.add(pathDirname(t.path) || "/");
     }
     for (const d of expandedDirs()) dirs.add(d);
     const list = [...dirs].filter(Boolean);
@@ -436,8 +442,13 @@ export function persistFileTabs() {
       // 같은 localStorage 키를 마지막 쓰기로 덮어써 서로의 저장분을 지울 수 있다.
       // 뷰어가 그리고 있는 탭도 담지 않으며, 그 판정은 뷰어가 한다. 뷰어가 로드되지 않았으면
       // 답이 없고, 그때는 그 파일이 텍스트로 열리므로 담는 것이 맞다.
-      const files = getTabs(sp).filter((t) => t.kind === "file" && !callHook("viewer.presentsTab", t)).map((t) => t.path);
-      if (files.length) out[spk(sp)] = { files, active: getActiveTabId(sp) || null };
+      const seen = new Set();
+      const files = getTabs(sp).filter((t) => t.kind === "file" && !callHook("viewer.presentsTab", t)).map((t) => isHostWindows() ? normalizePath(t.path) : t.path).filter((p) => { const k = isHostWindows() ? p.toLowerCase() : p; if (seen.has(k)) return false; seen.add(k); return true; });
+      if (files.length) {
+        const active = getActiveTabId(sp);
+        const path = active?.startsWith("file:") ? files.find((p) => samePath(p, active.slice(5))) : null;
+        out[spk(sp)] = { files, active: path ? "file:" + path : active || null };
+      }
     }
     localStorage.setItem("ac.filetabs", JSON.stringify(out));
     localStorage.setItem("ac.centerspace", spk(getCenterSpace()) || "");
@@ -451,15 +462,22 @@ export function restoreFileTabs() {
   for (const k of Object.keys(saved)) {
     const sp = spid(k);                          // 저장은 폴더 열쇠, 화면은 workspace_id
     ensureTabSpace(sp);
-    for (const path of (saved[k].files || [])) {
+    const seen = new Set();
+    for (const rawPath of (Array.isArray(saved[k]?.files) ? saved[k].files : [])) {
+      if (typeof rawPath !== "string" || !rawPath || rawPath.includes("\0")) continue;
+      const path = isHostWindows() ? normalizePath(rawPath) : rawPath;
+      const pathKey = isHostWindows() ? path.toLowerCase() : path;
+      if (seen.has(pathKey)) continue;
+      seen.add(pathKey);
       if (fileKindOf(path)) continue; // 이전 저장분 방어. 문서 탭의 정본은 sbState 다
       const id = "file:" + path;
-      if (!getTabs(sp).find((t) => t.id === id)) {
-        const tab = addTab(sp, makeFileTab(path)); requestFileContent(path); trackFileWatch(sp, tab);
+      if (!getTabs(sp).find((t) => t.id === id || (t.path && samePath(t.path, path)))) {
+        const tab = addTab(sp, makeFileTab(path)); requestFileContent(path, "open", sp, tab.id); trackFileWatch(sp, tab);
       }
     }
-    const act = saved[k].active;
-    if (act && getTabs(sp).find((t) => t.id === act)) setActiveTab(sp, act);
+    const act = saved[k]?.active;
+    const active = typeof act === "string" && getTabs(sp).find((t) => t.id === act || (isHostWindows() && act.startsWith("file:") && t.path && samePath(t.path, act.slice(5))));
+    if (active) setActiveTab(sp, active.id);
   }
   const cs = localStorage.getItem("ac.centerspace");
   if (cs && saved[cs]) { setCenterSpace(spid(cs)); renderTabs(); showActiveTab(); }

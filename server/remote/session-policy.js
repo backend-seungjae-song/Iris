@@ -1,3 +1,4 @@
+import { privatePathAsync } from "./windows-private.cjs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -28,6 +29,7 @@ export function createSessionPolicyStore(options = {}) {
   async function durableWrite(next) {
     await fsp.mkdir(remoteDir, { recursive: true, mode: 0o700 });
     await fsp.chmod(remoteDir, 0o700);
+    if (process.platform === "win32") await privatePathAsync(remoteDir);
     const temporary = `${policyFile}.${process.pid}.${++sequence}.tmp`;
     let renamed = false;
     try {

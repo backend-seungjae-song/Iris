@@ -1,3 +1,4 @@
+import { request as winRequest } from "./win-native.cjs";
 // 등록된 대화 ID를 우선한다. 공유 daemon의 열린 파일은 여러 pane의 대화를 포함하므로
 // 등록이 없을 때만 해당 pane의 프로세스와 자손에서 기록 파일을 찾는다.
 import { execFile } from "node:child_process";
@@ -52,6 +53,17 @@ async function scan() {
   if (now - scanCache.at < SCAN_TTL_MS) return scanCache;
   if (scanning) return scanning;
   scanning = (async () => {
+    if (process.platform === "win32") {
+      const result = await winRequest({ op: "processes" });
+      const children = new Map();
+      if (result.ok) for (const row of result.processes) {
+        if (!children.has(row.ppid)) children.set(row.ppid, []);
+        children.get(row.ppid).push({ pid: row.pid, comm: String(row.name || "").replace(/\.exe$/i, "").toLowerCase() });
+      }
+      scanCache = { at: Date.now(), byPid: new Map(), children };
+      scanning = null;
+      return scanCache;
+    }
     const [lsofOut, psOut] = await Promise.all([
       run("lsof", ["-c", "codex", "-Fpn"]),
       run("ps", ["-axo", "pid=,ppid=,comm="]),
@@ -163,7 +175,7 @@ export async function resolveCodexSession(herdr, paneId) {
     ]);
     const pi = info?.process_info || info || {};
     const fg = Array.isArray(pi.foreground_processes) ? pi.foreground_processes : [];
-    const foreground = fg.find((p) => p.name === "codex" || p.argv0 === "codex");
+    const foreground = fg.find((p) => p.name === "codex" || p.argv0 === "codex" || (process.platform === "win32" && [p.name, p.argv0, p.argv?.[0]].some((name) => /^codex(?:\.exe|\.cmd)?$/i.test(path.win32.basename(name || "")))));
     let pid = foreground?.pid || null;
     if (!pid && pi.shell_pid) pid = findCodexDescendant(children, Number(pi.shell_pid));
     if (!pid) return null;

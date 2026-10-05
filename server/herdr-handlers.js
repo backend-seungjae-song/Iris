@@ -166,12 +166,13 @@ export async function handlePty(ws, msg) {
   try {
     if (msg.type === "pty.start") {
       if (!ws._local) { ws.send(JSON.stringify({ type: "control-error", message: "원격에서는 터미널 사용 불가(AC5) — 로컬 앱에서만" })); return; }
-      ptyMgr.start(ws, msg.cols, msg.rows, (data) => {
+      const started = ptyMgr.start(ws, msg.cols, msg.rows, (data) => {
         if (ws.readyState !== 1) return;
         // node-pty(encoding:null)는 Buffer를 준다. 바이너리 프레임으로 그대로 전송.
         const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data), "utf8");
         ws.send(buf, { binary: true });
       });
+      if (!started) { ws.send(JSON.stringify({ type: "pty.exit", reason: "herdr-missing" })); return; }
       ws.send(JSON.stringify({ type: "pty.started" }));
     } else if (msg.type === "pty.input") {
       if (!ws._local) return;

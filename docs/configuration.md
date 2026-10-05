@@ -53,3 +53,7 @@ codex mcp remove iris-mcp
 | `IRIS_SERVER_ROOT` | 앱에 포함된 소스 대신 사용할 서버 소스 위치 |
 
 CLI나 MCP를 개발 환경에 연결할 때는 `IRIS_PORT=4291`과 `IRIS_STATE_DIR`를 함께 지정하세요. 명령과 환경 분리 조건은 [개발 환경 안내](two-flows.md)에 있습니다.
+
+## Windows 경로
+
+Windows 설치·개발 명령은 [Windows 안내](windows.md)를 참고하세요. 브라우저 프로필은 `%APPDATA%\Iris`, 사용자 상태는 `%USERPROFILE%\.iris`에 저장합니다. 개발 환경은 포트 4291과 `%USERPROFILE%\.iris-dev`를 함께 지정합니다.

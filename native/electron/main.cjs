@@ -64,14 +64,15 @@ const switcherCore = require("./switcher-core.cjs");
 const { createWindowCatalog } = require("./window-catalog.cjs");
 const { createWindowIcons } = require("./window-icons.cjs");
 const { createWindowMedia } = require("./window-media.cjs");
-const { createSwitcherHost, irisKeyAction } = require("./switcher-host.cjs");
+const { acceleratorFor, createSwitcherHost, irisKeyAction } = require("./switcher-host.cjs");
 const { createChromeHandoffIpc } = require("./chrome-handoff-ipc.cjs");
 const { createAiLoginPolicy } = require("./ai-login-policy.cjs");
 const { localLoginFor } = require("../../server/local-login.cjs");
 const { port: acPort } = require("../../server/env.cjs");
+const { createTouchDragArm } = require("./touch-drag-arm.cjs");
 const { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setShownKnownProbe, applyViewportTo, setTouchDrag, forgetSecrets, clearAutoViewport, setShownProbe, setDefaultViewport, noteChildSession, dropChildSession, noteFrameOrigin, injectOverlayAllFrames, hoverAtPoint, diagSince,
   registerSessionPrimer, noteNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, runCdp, aiDriving, aiDrivingAnywhere,
-  holdAiCausality, setPaintableProbe } = require("./cdp-control.cjs"); // AI→브라우저 CDP 제어 실행기
+  holdAiCausality, setPaintableProbe, setContextActionProvider } = require("./cdp-control.cjs"); // AI→브라우저 CDP 제어 실행기
 const downloadState = require("./download-state.cjs");
 
 
@@ -213,6 +214,19 @@ ipcMain.on("ac-clipboard-read", (e) => { if (!isTrustedSender(e)) { e.returnValu
 // 터미널 복사 쓰기. 렌더러의 navigator.clipboard.writeText가 Electron webview 컨텍스트에서
 // 실패해 빈 값이 복사되는 문제가 있다. 붙여넣기와 동일하게 메인 프로세스 clipboard로 쓴다.
 ipcMain.handle("ac-clipboard-write", (e, text) => { if (!isTrustedSender(e)) return false; try { clipboard.writeText(String(text ?? "")); return true; } catch { return false; } });
+if (process.platform === "win32") ipcMain.handle("ac-terminal-shell", async (event, paneId) => {
+  if (!isTrustedSender(event) || typeof paneId !== "string" || !/^[\w:-]{1,128}$/.test(paneId)) return null;
+  try {
+    const { HerdrClient } = await import("../../server/herdr.js");
+    const info = await new HerdrClient().call("pane.process_info", { pane_id: paneId });
+    const pid = (info?.process_info || info)?.shell_pid;
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    const r = await require("../../server/win-native.cjs").request({ op: "processes", pids: [pid] });
+    const name = String(r.ok && r.processes.find((p) => p.pid === pid)?.name || "").replace(/\.exe$/i, "").toLowerCase();
+    return /^(powershell|pwsh)$/.test(name) ? "powershell" : name === "cmd" ? "cmd" : /^(bash|zsh|sh)$/.test(name) ? "posix" : null;
+  } catch { return null; }
+});
+
 let switcherHost = null;
 // 창이 보내온 단축키 표. webview 포커스에서의 중계 판정이 이 표를 본다. 창의 판정과 같은 표를
 // 봐야 화면에서 바꾼 키가 페이지 위에서도 동작한다. 도착하기 전까지는 main-window 의 기본표를 쓴다.
@@ -221,6 +235,7 @@ ipcMain.on("ac-keymap", (e, map) => {
   if (!map || typeof map !== "object" || Array.isArray(map) || Object.keys(map).length > 200) return;
   setRelayKeymap(map);
   switcherHost?.keymapChanged();
+  pickMode.registerGlobalShortcut(acceleratorFor(map["pick-toggle"] || DEFAULT_RELAY["pick-toggle"]));
 });
 // 신뢰 발신자는 이 앱의 렌더러(APP_URL origin)다. webview 게스트(임의 사이트)나 원격 프레임은 거부한다.
 // 렌더러 오염 시에도 파일조작 IPC가 워크스페이스 밖으로 확대되지 않도록 경계에서 강제.
@@ -229,6 +244,7 @@ function isTrustedSender(e) {
 }
 
 const webviewContextActions = createWebviewContextActions();
+setContextActionProvider((host) => webviewContextActions.get(host));
 ipcMain.on("ac-context-action-register", (e, action) => {
   if (!isTrustedSender(e)) return;
   webviewContextActions.register(e.sender, action);
@@ -300,10 +316,11 @@ ipcMain.handle("ac-viewport", async (e, arg) => {
     if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
     const target = webContents.fromId(Number(arg?.wcId));
     if (!target || target.isDestroyed() || target.getType() !== "webview") return { ok: false, error: "그 탭을 찾을 수 없습니다." };
-    if (arg && arg.touchDrag !== undefined) return await setTouchDrag(target, !!arg.touchDrag);
+    if (arg && arg.touchDrag !== undefined) return await touchDragArm.arm(target, !!arg.touchDrag && arg.rect);
     return await applyViewportTo(target, arg || {});
   } catch (e2) { return { ok: false, error: String(e2 && e2.message || e2) }; }
 });
+const touchDragArm = createTouchDragArm({ screen, BrowserWindow, setTouchDrag });
 // AI가 iris-browser viewport로 크기를 바꿨을 때 그 탭을 품은 창의 주소줄 버튼도 같이 바꾼다.
 setViewportNotify((wcId, vp) => {
   try {
@@ -697,6 +714,7 @@ const windowLayout = createWindowLayout({
 const mainWindow = createMainWindow({
   app,
   BrowserWindow,
+  dialog,
   shell,
   webContents,
   windowLayout,
@@ -871,7 +889,13 @@ switcherHost = createSwitcherHost({
 // 창 전환 요청은 host 한 경계로만 들어간다. 신뢰 판정도 host가 매 호출 첫 단계에서 한다.
 ipcMain.handle("ac-window-switcher", (e, payload) => switcherHost.handle(e, payload));
 // 픽 전달 직후 콘솔 창으로 포커스를 되돌린다. 클릭이 브라우저 창을 활성화해도 사용자는 채팅을 계속 입력한다.
-ipcMain.on("ac-refocus-console", () => { try { const win = getMainWindow(); if (win && !win.isDestroyed()) win.focus(); } catch {} });
+// 콘솔 창을 닫아도 브라우저 창이 남으면 앱이 계속 뜬다. 그때 부르면 콘솔을 다시 만든다
+function showConsoleWindow() {
+  const win = getMainWindow();
+  if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); return; }
+  mainWindow.createWindow();
+}
+ipcMain.on("ac-refocus-console", () => { try { showConsoleWindow(); } catch {} });
 // 메인 창 ⌘⇧R = 앱 강제 재로딩(메인 + 열려 있는 브라우저 창 전부). 캐시를 무시하고 다시 읽는다.
 // 녹화 전문 저장. 채팅에 모두 넣기에 긴 기록은 파일로 두고 경로만 넘긴다(로컬 전용).
 ipcMain.handle("ac-save-recording", (e, text) => {
@@ -914,7 +938,7 @@ ipcMain.on("ac-notify", (event, message) => {
   notice.show();
 });
 ipcMain.on("ac-open-browser", (_e, opts) => { try { browserWindowManager.createBrowserModeWindow(false, opts); } catch {} });
-ipcMain.on("ac-open-shared-browser", () => { try { browserWindowManager.createBrowserModeWindow(true); } catch {} });
+ipcMain.on("ac-open-shared-browser", (_e, opts) => { try { browserWindowManager.createBrowserModeWindow(true, opts); } catch {} });
 ipcMain.on("ac-dock-browser", () => { browserWindowManager.dockBrowserModeWindows(); });
 memoWindowManager.registerMemoIpc();
 // 네이티브 기능은 표를 통해서만 등록된다. 이 위치에 기능 이름이 나오지 않는 것이 핵심이다.
@@ -1001,7 +1025,8 @@ const serverHost = new ServerHost({
 });
 // 앱이 종료될 때 자식 프로세스도 함께 종료한다. 여기서 종료하지 않으면 서버만 남아, 다음에 실행한
 // 앱이 이전 서버에 붙어 수정이 반영되지 않는다.
-app.on("will-quit", () => { try { serverHost.stop(); } catch {} });
+if (process.platform === "win32") app.on("will-quit", (event) => serverHost.handleWindowsQuit(event));
+else app.on("will-quit", () => { try { serverHost.stop(); } catch {} });
 app.on("will-quit", () => { try { switcherHost.stop(); } catch {} });
 
 app.whenReady().then(async () => {
@@ -1068,7 +1093,8 @@ app.whenReady().then(async () => {
   for (const [index, record] of memoWindowManager.memoWindowSnapshot().records.entries()) {
     setTimeout(() => { try { if (memoWindowManager.hasMemoRecord(record.instanceId)) memoWindowManager.createMemoModeWindow(record); } catch {} }, 1850 + index * 80);
   }
-  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow.createWindow(); });
+  // Dock 클릭. 다른 창이 남아 있어도 콘솔이 없으면 다시 연다
+  app.on("activate", () => { const win = getMainWindow(); if (!win || win.isDestroyed()) mainWindow.createWindow(); });
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 // SIGTERM(예: kill로 재기동)에 graceful quit 한다. before-quit/close 핸들러가 실행되어 창 bounds가 저장된다.

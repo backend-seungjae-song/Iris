@@ -1,3 +1,4 @@
+import { isHostWindows, pathWithin, pathBasename } from "../core/host-path.js";
 // 설정의 「부산물」 분류 연결: 목록을 받아 들고, 사람이 누른 것을 열거나 휴지통으로 보낸다.
 //
 // 소유 범위
@@ -95,7 +96,7 @@ export function artifactsMessage(m) {
     preview = m;
     // 폴더를 열었으면 그 목록을 유지한다. 안의 파일을 열어도 옆 파일로 넘어갈 수 있어야 한다.
     if (m.what === "dir") dirPreview = m;
-    else if (!dirPreview || !String(m.path || "").startsWith(`${dirPreview.path}/`)) dirPreview = null;
+    else if (!dirPreview || !(isHostWindows() ? pathWithin(dirPreview.path, m.path) : String(m.path || "").startsWith(`${dirPreview.path}/`))) dirPreview = null;
     rerender();
     return true;
   }
@@ -145,7 +146,7 @@ export function artifactsClick(e) {
   if (open) {
     const p = open.dataset.artOpen;
     if (knownPath(p) && wsSend) {
-      preview = { path: p, name: p.split("/").pop() };
+      preview = { path: p, name: pathBasename(p) };
       wsSend({ type: "artifacts.preview", path: p });
       rerender();
     }

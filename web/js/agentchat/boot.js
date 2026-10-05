@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../core/keymap.js";
 // 에이전트 채팅 보기. 오른쪽 터미널의 Claude Code·Codex pane 을 대화 기록 기반 채팅 화면으로
 // 바꿔 보고, 서브에이전트 줄을 누르면 그 서브에이전트의 대화를 읽기 전용으로 연다.
 //
@@ -93,7 +94,7 @@ export function initCapability(c) {
     <button class="cc-btn achat-latest" type="button" hidden>${ICON_DOWN}최신으로</button>
     <div class="achat-hint" hidden><span>에이전트가 답을 기다립니다. 선택지는 터미널에서 고릅니다.</span><button class="cc-btn" type="button" data-achat-term>터미널에서 답하기</button></div>
     <form class="achat-compose">
-      <textarea class="achat-input" rows="1" placeholder="메시지 보내기 · Enter 전송, ⇧Enter 줄바꿈" aria-label="에이전트에게 보낼 메시지"></textarea>
+      <textarea class="achat-input" rows="1" placeholder="${shortcutLabel("메시지 보내기 · Enter 전송, ⇧Enter 줄바꿈")}" aria-label="에이전트에게 보낼 메시지"></textarea>
       <button class="cc-btn cc-btn-pri achat-send" type="submit">보내기</button>
     </form>`;
   terminal.appendChild($root);
@@ -184,7 +185,7 @@ function sync() {
   $toggle.classList.toggle("on", chat);
   $toggle.setAttribute("aria-pressed", String(chat));
   $toggle.innerHTML = chat ? ICON_TERM : ICON_CHAT;
-  $toggle.title = chat ? "터미널로 보기 (⌘⇧J)" : "채팅으로 보기 (⌘⇧J)";
+  $toggle.title = chat ? shortcutLabel("터미널로 보기 (⌘⇧J)") : shortcutLabel("채팅으로 보기 (⌘⇧J)");
   $toggle.setAttribute("aria-label", $toggle.title);
 
   // 서브에이전트 보기는 부모 pane 에 딸려 있다. 다른 pane 을 고르면 닫는다.

@@ -295,7 +295,9 @@ export function svEdit(t, r, c, seed) {
   ta.style.minWidth = er0.width + "px";
   ta.style.minHeight = er0.height + "px";
   host.appendChild(ta);
-  t._svEd = { r, c, el: ta, si: t.sheetIdx || 0, orig: ta.value };
+  // orig 는 칸의 원래 값이다. 글자를 쳐서 시작하면 입력칸이 그 글자로 열리는데, 그것을 orig 로 두면
+  // 한 글자만 치고 확정한 편집이 "바뀐 것 없음"으로 판정되어 버려진다.
+  t._svEd = { r, c, el: ta, si: t.sheetIdx || 0, orig: svSrcAt(sh, r, c) };
   ta.focus();
   if (seed != null) { ta.selectionStart = ta.selectionEnd = ta.value.length; } else ta.select();
   const grow = () => { ta.style.height = "auto"; ta.style.height = Math.max(er0.height, ta.scrollHeight) + "px"; };

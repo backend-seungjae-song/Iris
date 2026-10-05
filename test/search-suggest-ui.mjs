@@ -145,7 +145,8 @@ test("같은 스페이스에서 탭이나 주소창 값이 바뀌면 이전 추�
   assert.deepEqual(await rows(page), []);
 }));
 
-test("한글 조합 중에는 추천·방향키 선택·Enter 탐색을 실행하지 않는다", async () => fixture(async (page) => {
+// 조합 끝(스페이스 등)까지 추천을 미루면 입력하는 동안 추천이 안 뜬다. 방향키·Enter 는 입력기 것이라 조합 중에는 무시한다.
+test("한글 조합 중에도 추천을 갱신하고, 방향키 선택·Enter 탐색은 실행하지 않는다", async () => fixture(async (page) => {
   await page.focus("#url");
   await page.$eval("#url", (input) => {
     input.dispatchEvent(new CompositionEvent("compositionstart")); input.value = "서";
@@ -153,12 +154,13 @@ test("한글 조합 중에는 추천·방향키 선택·Enter 탐색을 실행�
     input.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter", isComposing: true }));
     input.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowDown", isComposing: true }));
   });
-  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 220)));
-  assert.deepEqual(await page.evaluate(() => requests), []);
-  assert.deepEqual(await page.evaluate(() => goCalls), []);
-  await page.$eval("#url", (input) => { input.value = "서울"; input.dispatchEvent(new CompositionEvent("compositionend")); });
   await page.waitForFunction(() => requests.length === 1);
-  assert.deepEqual(await page.evaluate(() => requests), ["서울"]);
+  assert.deepEqual(await page.evaluate(() => requests), ["서"]);
+  assert.deepEqual(await page.evaluate(() => goCalls), []);
+  assert.equal(await page.$eval("#url", (input) => input.value), "서");
+  await page.$eval("#url", (input) => { input.value = "서울"; input.dispatchEvent(new CompositionEvent("compositionend")); });
+  await page.waitForFunction(() => requests.length === 2);
+  assert.deepEqual(await page.evaluate(() => requests), ["서", "서울"]);
 }));
 
 test("추천 기능을 끄면 기록·북마크와 원래 값 복귀를 유지한다", async () => fixture(async (page) => {

@@ -58,7 +58,7 @@ export function accountsChromeBox(list, blocked = "") {
   const esc = escapeHtml;
   if (list == null) return `<div class="acct-empty"><span class="acct-spin"></span>불러오는 중…</div>`;
   if (!list.length && blocked) return `<div class="acct-empty">${esc(blocked)}</div>`;
-  if (!list.length) return `<div class="acct-empty">설치된 Chrome 프로필 없음(macOS만 지원)</div>`;
+  if (!list.length) return `<div class="acct-empty">설치된 Chrome 프로필 없음</div>`;
   return list.map((cp) => {
     const t = cp.target;
     const to = !t ? ""

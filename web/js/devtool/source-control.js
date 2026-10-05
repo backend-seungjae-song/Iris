@@ -1,3 +1,5 @@
+import { shortcutLabel } from "../core/keymap.js";
+import { isHostWindows, pathWithin, pathBasename, samePath } from "../core/host-path.js";
 // 소스 제어: 열린 스페이스와 pane의 git repo를 모아 stage·commit·push/pull·브랜치 전환을 한다.
 //
 // 소유 범위
@@ -6,7 +8,7 @@
 //   source-control DOM 렌더·입력/클릭 연결과 git-status/ok/error 메시지 적용.
 //
 // 제공 API
-//   initSourceControl(deps): DOM·전송·workspace/session 조회와 diff 열기 콜백을 받는다.
+//   initSourceControl(deps): DOM·전송·workspace/session 조회, diff 열기 콜백과 확인 창(askConfirm)을 받는다.
 //   scRoot(), scSync(), scRefresh(), scRefreshFor(file), scRepoName(root): main의 기존 호출부용 API.
 //   handleSourceControlMessage(message): 소스 제어 메시지를 처리했으면 true를 돌려준다.
 //
@@ -27,7 +29,7 @@
 import { callHook, provide } from "../core/hooks.js";
 import { repoNameOf } from "../core/repo-name.js";
 import { registerTabView } from "../core/tab-views.js";
-import { handleGitDiffMessage, initDiff, openPatchDiff, openDiff as openDiffTab, renderDiffView } from "./diff.js";
+import { handleGitDiffMessage, initDiff, openPatchDiff, openDiff as openDiffTab, refreshDiffTabs, renderDiffView } from "./diff.js";
 import { getActiveTabId, getCenterSpace, getTabs } from "../center/tab-store.js";
 import { createDropdown } from "../core/dropdown.js";
 import { icon } from "../core/glyphs.js";
@@ -109,6 +111,7 @@ let getSelectedSpaceId = null;
 let getSpaces = null;
 let getLastAgents = null;
 let openDiff = null;
+let askConfirm = async () => false;
 
 export function initSourceControl(deps) {
   $ = deps.$;
@@ -120,6 +123,7 @@ export function initSourceControl(deps) {
   getSpaces = deps.getSpaces;
   getLastAgents = deps.getLastAgents;
   openDiff = deps.openDiff;
+  askConfirm = deps.askConfirm || askConfirm;
   const refresh = $("#sc-refresh");
   if (refresh) refresh.onclick = () => { scDead.clear(); scRefresh(); }; // 막혔다고 지워둔 후보도 다시 본다
   const pull = $("#sc-pull"), push = $("#sc-push");
@@ -136,7 +140,12 @@ export function initSourceControl(deps) {
           for (const { primary, root } of targets) scSelectRoot(primary, root, false);
           scFocusedRoots.set(scCurrentSpaceId(), targets[0].root);
           scVer++; renderSc();
-        } else scSelectValue(scTarget, value);
+        } else {
+          scSelectValue(scTarget, value);
+          // 브랜치 항목은 전환 요청일 뿐이라 선택기는 지금 워크트리로 되돌림. 거절되면 목록이 그대로라 아래
+          // scPaintHead 가 다시 그리지 않아, 고른 브랜치가 남고 같은 항목을 다시 골라도 onChange 가 오지 않음
+          if (value.startsWith("branch:") && scTarget) scDd.setValue(scTarget);
+        }
       },
     });
     ddBox.appendChild(scDd.el);
@@ -205,10 +214,13 @@ export function initSourceControl(deps) {
       const a = act.dataset.act;
       if (a === "stage") scOp("stage", root, { paths: [rel] });
       else if (a === "unstage") scOp("unstage", root, { paths: [rel] });
-      else if (a === "discard") { if (confirm(`${scRepoName(root)}의 변경을 되돌릴까요? 복구할 수 없습니다:\n${rel}`)) scOp("discard", root, untracked ? { untracked: [rel] } : { paths: [rel] }); }
+      else if (a === "discard") {
+        askConfirm(`${scRepoName(root)}의 변경을 되돌릴까요?`, `복구할 수 없습니다: ${rel}`)
+          .then((ok) => { if (ok) scOp("discard", root, untracked ? { untracked: [rel] } : { paths: [rel] }); });
+      }
       return;
     }
-    openDiff(abs, { staged, untracked, root, rel });
+    openDiff(abs, { staged, untracked, root, rel, oldRel: row.dataset.old || "" });
   });
 }
 
@@ -230,6 +242,7 @@ function scCurrentSpaceId() {
 // 어느 폴더가 그 폴더 안쪽인지 판정한다. 접두사만 보면 `/a/bc` 가 `/a/b` 안으로 나오므로 경계에 / 를 붙인다.
 export function scUnder(root, dir) {
   if (!root || !dir) return false;
+  if (isHostWindows()) return pathWithin(root, dir);
   if (dir === root) return true;
   return dir.startsWith(root.endsWith("/") ? root : root + "/");
 }
@@ -307,7 +320,7 @@ export function scRefresh() {
 export function scRefreshFor(file) {
   if (!file || !document.body.classList.contains("sc-active")) return;
   let hit = null;
-  for (const root of scRepos.keys()) if ((file === root || file.startsWith(root + "/")) && (!hit || root.length > hit.length)) hit = root;
+  for (const root of scRepos.keys()) if ((isHostWindows() ? pathWithin(root, file) : file === root || file.startsWith(root + "/")) && (!hit || root.length > hit.length)) hit = root;
   if (hit) wsSend({ type: "git.status", path: hit }); else scSync(); // 모르는 곳이면 후보부터 다시 본다
 }
 // done = 서버가 끝났다고 답한 결과. 진행 중 안내(…중)와 구분해 확인 표시를 붙인다.
@@ -380,9 +393,9 @@ function scPrimaryOf(st) { return st?.worktrees?.find((entry) => entry.root)?.ro
 function scSelectionKey(space, primary) { return `${space}\0${primary}`; }
 // 워크트리 폴더의 이름을 표시한다. 여러 저장소를 같은 작업 폴더에 두면 그 작업 이름을 쓴다.
 export function scWorktreeName(root, primary) {
-  if (root === primary) return "기본 워크트리";
-  const task = /\/\.working\/([^/]+)\/worktrees\/[^/]+\/?$/.exec(root || "");
-  return task ? task[1].replace(/^\d{8}-\d{4}-/, "") : String(root || "").split("/").filter(Boolean).pop() || root;
+  if (samePath(root, primary)) return "기본 워크트리";
+  const task = /\/\.working\/([^/]+)\/worktrees\/[^/]+\/?$/.exec(isHostWindows() ? String(root || "").replace(/\\/g, "/") : root || "");
+  return task ? task[1].replace(/^\d{8}-\d{4}-/, "") : (isHostWindows() ? pathBasename(root) : String(root || "").split("/").filter(Boolean).pop()) || root;
 }
 
 
@@ -546,8 +559,8 @@ function scOnStatus(m) {
   else { scRootOf.set(dir, m.root); scRepos.set(m.root, m); }
   // 그 폴더가 전에 다른 레포로 풀려 있었다면, 후보가 남지 않은 이전 레포는 화면에서 뺀다.
   if (was && was !== m.root && ![...scRootOf.values()].includes(was)) { scRepos.delete(was); scBranch.delete(was); }
-  // status 가 다시 온 때가 곧 그 레포가 바뀌었을 수 있는 때다(저장·커밋·새로고침). Base 보기도 함께 갱신한다.
-  if (m.isRepo !== false) scAskBranch(m.root);
+  // status 가 다시 온 때가 곧 그 레포가 바뀌었을 수 있는 때다(저장·커밋·새로고침). Base 보기·열린 diff 탭도 함께 갱신한다.
+  if (m.isRepo !== false) { scAskBranch(m.root); refreshDiffTabs(m); }
   scVer++;
   renderSc();
 }
@@ -661,7 +674,8 @@ function renderSc() {
       ? `<button class="sc-act" data-act="unstage" title="언스테이지" aria-label="언스테이지">${icon("minus", 13)}</button>`
       : `<button class="sc-act" data-act="stage" title="스테이지" aria-label="스테이지">${icon("plus", 13)}</button>`
         + `<button class="sc-act" data-act="discard" title="변경 취소" aria-label="변경 취소">${icon("undo", 13)}</button>`;
-    return `<div class="sc-file ${esc(f.code)}" style="--d:${depth}" title="${esc(rel)}" data-abs="${esc(f.abs)}" data-rel="${esc(rel)}" data-staged="${staged ? 1 : 0}" data-untracked="${f.untracked ? 1 : 0}">`
+    const tip = f.oldRel ? `${f.oldRel} → ${rel}` : rel;
+    return `<div class="sc-file ${esc(f.code)}" style="--d:${depth}" title="${esc(tip)}" data-abs="${esc(f.abs)}" data-rel="${esc(rel)}" data-staged="${staged ? 1 : 0}" data-untracked="${f.untracked ? 1 : 0}" data-old="${esc(f.oldRel || "")}">`
       + `<span class="sc-code ${esc(f.code)}">${esc(f.code)}</span>`
       + `<span class="sc-name">${esc(nameOf(rel))}</span>`
       + `<span class="sc-actions">${acts}</span></div>`;
@@ -699,9 +713,9 @@ function renderSc() {
     // 입력란이 사라지면 작성 중이던 글도 사라진 것으로 보인다.
     else if (n || (scMsg.get(r.root) || "").trim()) {
       inner += `<div class="sc-commit">`
-        + `<textarea class="sc-msg" data-root="${esc(r.root)}" rows="3" placeholder="${esc(name)}에 커밋 (⌘Enter)"></textarea>`
+        + `<textarea class="sc-msg" data-root="${esc(r.root)}" rows="3" placeholder="${esc(name)}에 커밋 (${shortcutLabel("⌘Enter")})"></textarea>`
         + `<div class="sc-commit-row"><button class="sc-btn" data-ract="stageAll" title="모든 변경을 스테이지">${icon("plus", 13)}모두 스테이지</button>`
-        + `<span class="sc-hint">⌘Enter</span>`
+        + `<span class="sc-hint">${shortcutLabel("⌘Enter")}</span>`
         + `<button class="sc-btn sc-btn-pri" data-ract="commit" title="스테이지된 변경을 커밋">${icon("check", 13)}커밋`
         + (staged.length ? `<span class="sc-commit-n">${staged.length}</span>` : "") + `</button></div></div>`;
       if (staged.length) {
@@ -791,6 +805,7 @@ export function initCapability(ctx) {
     getSpaces: ctx.getSpaces,
     getLastAgents: ctx.getLastAgents,
     openDiff: openDiffTab,
+    askConfirm: ctx.askConfirm,
   });
   const on = handleSourceControlMessage;
   return {

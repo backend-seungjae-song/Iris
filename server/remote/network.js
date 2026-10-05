@@ -2,11 +2,16 @@ import { execFile as execFileCallback } from "node:child_process";
 import fs from "node:fs/promises";
 import { isIP } from "node:net";
 import os from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 
-const TAILSCALE_EXECUTABLES = Object.freeze([
+const TAILSCALE_EXECUTABLES = Object.freeze(process.platform === "win32" ? [
+  path.win32.join(process.env.ProgramFiles || "C:\\Program Files", "Tailscale", "tailscale.exe"),
+  ...(process.env.PATH || "").split(";").filter(Boolean)
+    .map((dir) => path.win32.join(dir.replace(/^"|"$/g, ""), "tailscale.exe")),
+] : [
   "/opt/homebrew/bin/tailscale",
   "/usr/local/bin/tailscale",
   "/Applications/Tailscale.app/Contents/MacOS/Tailscale",

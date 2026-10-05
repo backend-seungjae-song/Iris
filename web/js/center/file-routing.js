@@ -1,3 +1,4 @@
+import { isHostWindows, samePath, isAbsolutePath, normalizePath, joinPath, pathBasename, pathWithin, toFileUrl, fromFileUrl } from "../core/host-path.js";
 // 파일 라우팅. 파일·문서·브라우저·터미널 링크를 알맞은 center 표면으로 보낸다.
 //
 // 소유 범위
@@ -30,6 +31,7 @@ import {
   addTab, ensureTabSpace, getCenterSpace, getTabs, setActiveTab, setCenterSpace,
 } from "./tab-store.js";
 import { boundSpace, bsMutate, getBrowserState } from "../browser/state.js";
+import { spaceRootFor } from "./file-palette.js";
 
 let $, showToast, acHost, terminalBarePathToken, agentByPane;
 let BROWSER_MODE, makeFileTab, requestFileContent, trackFileWatch;
@@ -55,7 +57,7 @@ export function openFile(path) {
   if (fileKindOf(path)) { openDocInSpaceBrowser(path); return; }
   if (BINARY_RE.test(path)) {
     try { acHost && acHost.revealInFinder && acHost.revealInFinder(path); } catch (e) {}
-    showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다", { level: "warn" });
+    showToast(`뷰어로 열 수 없는 형식입니다. ${isHostWindows() ? "탐색기" : "Finder"}에서 보여줍니다`, { level: "warn" });
     return;
   }
   openFileLocal(path);
@@ -65,8 +67,10 @@ export function openFileLocal(path) {
   const sp = getCenterSpace() || getSelectedSpaceId();
   if (!sp) { showToast("파일을 열 스페이스가 없습니다. 왼쪽에서 스페이스를 고르세요", { level: "warn" }); return; }
   ensureTabSpace(sp);
-  const id = "file:" + path;
-  if (!getTabs(sp).find((t) => t.id === id)) {
+  if (isHostWindows()) path = normalizePath(path);
+  const existing = getTabs(sp).find((t) => t.path && samePath(t.path, path));
+  const id = existing?.id || "file:" + path;
+  if (!existing) {
     const tab = addTab(sp, makeFileTab(path)); requestFileContent(path); trackFileWatch(sp, tab);
   }
   setCenterSpace(sp); setActiveTab(sp, id); renderTabs(); showActiveTab(); persistFileTabs(); syncWatchDirs();
@@ -84,6 +88,7 @@ export function openDocInSpaceBrowser(path) {
   if (!sp) { showToast("문서를 열 스페이스가 없습니다. 왼쪽에서 스페이스를 고르세요", { level: "warn" }); return; }
   bsMutate({ op: "space.active", space: sp });
   if (!BROWSER_MODE && !state.docked) { try { acHost && acHost.openBrowser && acHost.openBrowser(); } catch (e) {} }
+  if (isHostWindows()) path = normalizePath(path);
   const id = "file:" + path;
   // 여기로 오는 것은 등록표가 맡는 파일뿐이다(openFile 이 그렇게 거른다). 그래도 외부에서
   // 호출할 수 있는 이름이라 한 번 더 확인한다. 등록이 없을 때 "sheet" 로 넘기면 앱 셸이 뷰어의
@@ -91,21 +96,35 @@ export function openDocInSpaceBrowser(path) {
   const spec = fileKindOf(path);
   if (!spec) { openFileLocal(path); return; }
   const kind = spec.id;
-  const existing = ((state.tabsBySpace && state.tabsBySpace[sp]) || []).find((t) => t.id === id);
-  if (existing) { bsMutate({ op: "tab.switch", space: sp, id }); return; }
-  bsMutate({ op: "tab.open", space: sp, id, kind, path, title: path.split("/").pop() });
+  const existing = ((state.tabsBySpace && state.tabsBySpace[sp]) || []).find((t) => t.id === id || (t.path && samePath(t.path, path)));
+  if (existing) { bsMutate({ op: "tab.switch", space: sp, id: existing.id }); return; }
+  bsMutate({ op: "tab.open", space: sp, id, kind, path, title: pathBasename(path) });
 }
 
-function fileUrlOf(absPath) { return "file://" + absPath.split("/").map(encodeURIComponent).join("/"); }
+function fileUrlOf(absPath) { return toFileUrl(absPath); }
 
 function resolveTerminalPath(raw) {
   let p = terminalBarePathToken(raw).replace(/:\d+.*$/, "");
+  if (isHostWindows()) {
+    const home = getHostHome();
+    if (p === "~" || /^~[\\/]/.test(p)) { if (!home) return null; p = joinPath(home, p.slice(1)); }
+    else if (p.startsWith("~")) return null;
+    if (!isAbsolutePath(p)) {
+      if (/^[A-Za-z]:/.test(p) || /^[\\/]/.test(p)) return null;
+      const pane = getCurTarget(), agent = pane ? agentByPane(pane) : null;
+      const base = agent?.cwd || spaceRootFor(getSelectedSpaceId());
+      if (!base) return null;
+      p = joinPath(base, p);
+    }
+    return normalizePath(p);
+  }
   const hostHome = getHostHome();
   if (p === "~" || p.startsWith("~/")) { if (!hostHome) return null; p = hostHome.replace(/\/$/, "") + p.slice(1); }
   else if (p.startsWith("~")) return null;
   if (!p.startsWith("/")) {
     const curTarget = getCurTarget();
-    const a = curTarget ? agentByPane(curTarget) : null, base = a && a.cwd; if (!base) return null;
+    // 에이전트가 아닌 셸에는 cwd 를 받지 않아 터미널이 보여 주는 스페이스의 폴더를 기준으로 함
+    const a = curTarget ? agentByPane(curTarget) : null, base = (a && a.cwd) || spaceRootFor(getSelectedSpaceId()); if (!base) return null;
     p = base.replace(/\/$/, "") + "/" + p.replace(/^\.\//, "");
   }
   const parts = []; for (const seg of p.split("/")) { if (seg === "..") parts.pop(); else if (seg !== "." && seg !== "") parts.push(seg); }
@@ -121,10 +140,17 @@ export function openTerminalPath(raw) {
   const p = resolveTerminalPath(raw);
   const hostHome = getHostHome();
   if (!p) { showToast(hostHome ? "경로를 해석할 수 없습니다: " + raw : "서버에서 홈 경로를 아직 못 받았습니다", { level: "warn" }); return; }
+  const rooted = /^[/~]/.test(String(raw || "").trim()) || isAbsolutePath(String(raw || "").trim());
+  if (isHostWindows() && !rooted) {
+    const windowsRoots = [...getLastAgents().map((a) => a.cwd), spaceRootFor(getSelectedSpaceId())].filter(Boolean);
+    if (!windowsRoots.some((r) => pathWithin(r, p))) {
+      showToast("작업 폴더 밖이라 열지 않았습니다. 전체 경로면 엽니다", { level: "warn" });
+      return;
+    }
+  }
   if (WEB_DOC_RE.test(p)) { openInSpaceBrowser(fileUrlOf(p)); return; }
   if (fileKindOf(p)) { openFile(p); return; }
-  if (BINARY_RE.test(p)) { revealTerminalPath(raw); showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다", { level: "warn" }); return; }
-  const rooted = /^[/~]/.test(String(raw || "").trim());
+  if (BINARY_RE.test(p)) { revealTerminalPath(raw); showToast(`뷰어로 열 수 없는 형식입니다. ${isHostWindows() ? "탐색기" : "Finder"}에서 보여줍니다`, { level: "warn" }); return; }
   if (!rooted) {
     // 조용히 반환하지 않는다. 눌렀는데 아무 일도 일어나지 않으면 기능이 고장 난 것으로 보이고,
     // 무엇이 막았는지 알아야 다음 동작을 고를 수 있다.
@@ -132,8 +158,8 @@ export function openTerminalPath(raw) {
       showToast("파일 이름으로 안 보여 열지 않았습니다. 전체 경로면 엽니다: " + raw, { level: "warn" });
       return;
     }
-    const roots = [...new Set(getLastAgents().map((a) => a.cwd).filter(Boolean).map((c) => c.replace(/\/$/, "")))];
-    if (!roots.some((r) => p === r || p.startsWith(r + "/"))) {
+    const roots = [...new Set([...getLastAgents().map((a) => a.cwd), spaceRootFor(getSelectedSpaceId())].filter(Boolean).map((c) => c.replace(/\/$/, "")))];
+    if (!roots.some((r) => isHostWindows() ? pathWithin(r, p) : p === r || p.startsWith(r + "/"))) {
       showToast("작업 폴더 밖이라 열지 않았습니다. 전체 경로면 엽니다", { level: "warn" });
       return;
     }
@@ -184,12 +210,10 @@ export function openBrowser() {
   setCenterSpace(sp);
   const state = getBrowserState();
   bsMutate({ op: "space.active", space: sp });
-  if (!state.docked) {
-    if (acHost && acHost.openBrowser) acHost.openBrowser();
-  } else {
-    const existing = (state.tabsBySpace && state.tabsBySpace[sp]) || [];
-    if (existing.length === 0) newBrowserTab();
-  }
+  if (!state.docked && acHost && acHost.openBrowser) acHost.openBrowser();
+  // 분리 창도 탭이 없으면 하나 만든다. 빈 창의 주소창에 입력하면 "브라우저 탭을 먼저 열어주세요"만 뜬다
+  const existing = (state.tabsBySpace && state.tabsBySpace[sp]) || [];
+  if (existing.length === 0) newBrowserTab();
   if (window.innerWidth <= 820) { $("#center").classList.add("mobile-show"); $("#sidebar").classList.remove("mobile-open"); }
 }
 
@@ -212,8 +236,8 @@ export function openInSpaceBrowser(url) {
 export const wantsReveal = (ev) => !!(ev && ev.shiftKey && (ev.metaKey || ev.ctrlKey));
 
 function pathOfTarget(s) {
-  if (/^file:\/\//i.test(s)) { try { return decodeURIComponent(s.replace(/^file:\/\//i, "").replace(/[?#].*$/, "")); } catch (e) { return null; } }
-  if (s.startsWith("/") || s.startsWith("~")) return s;
+  if (/^file:\/\//i.test(s)) return fromFileUrl(s);
+  if (isAbsolutePath(s) || s.startsWith("~")) return s;
   return null; // http(s)는 파일이 아니다
 }
 
@@ -221,7 +245,7 @@ export function openTerminalTarget(target, ev) {
   const s = String(target || "").trim();
   if (wantsReveal(ev)) { const fp = pathOfTarget(s); if (fp) { revealTerminalPath(fp); return; } }
   if (/^(https?|file):\/\//i.test(s)) { openTerminalLink(s); return; }
-  if (s.startsWith("/") || s.startsWith("~")) { openTerminalPath(s); return; }
+  if (isAbsolutePath(s) || s.startsWith("~")) { openTerminalPath(s); return; }
 }
 
 export function openTerminalLink(uri, ev) {
@@ -229,8 +253,8 @@ export function openTerminalLink(uri, ev) {
   if (wantsReveal(ev)) { const fp = pathOfTarget(u); if (fp) { revealTerminalPath(fp); return; } }
   if (/^https?:\/\//i.test(u)) { openInSpaceBrowser(u); return; }
   if (/^file:\/\//i.test(u)) {
-    let p; try { p = decodeURIComponent(u.replace(/^file:\/\//i, "").replace(/[?#].*$/, "")); } catch (e) { p = ""; }
-    if (!p.startsWith("/")) return;
+    const p = fromFileUrl(u);
+    if (!p || !isAbsolutePath(p)) return;
     if (WEB_DOC_RE.test(p)) { openInSpaceBrowser(fileUrlOf(p)); return; }
     openTerminalPath(p);
   }

@@ -1,3 +1,4 @@
+import { discoverWindowsMdns } from "./windows-mdns.js";
 // 앱 요소 선택. 시뮬레이터·에뮬레이터에서 사용자가 가리킨 요소를 이 세션으로 가져온다.
 //
 // 브라우저에서는 페이지에 스크립트를 주입해 클릭을 가로챈다. 앱 화면에는 주입할 수 없다.
@@ -119,6 +120,7 @@ function dnssd(args, ms = DNSSD_MS) {
 }
 
 async function discoverMdns() {
+  if (process.platform === "win32") return discoverWindowsMdns(DNSSD_MS);
   const browse = await dnssd(["-B", "_dartVmService._tcp", "local."]);
   const names = new Set();
   for (const line of browse.split("\n")) {

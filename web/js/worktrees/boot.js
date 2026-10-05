@@ -1,3 +1,5 @@
+import { shortcutLabel } from "../core/keymap.js";
+import { isHostWindows, samePath as sameHostPath, pathWithin, pathBasename, normalizePath } from "../core/host-path.js";
 // Git Worktree 기능의 목록, 생성 대화상자, 관리 메뉴와 서버 응답을 연결한다.
 //
 // 소유 범위
@@ -41,7 +43,7 @@ function request(op, data) {
     else {
       // 서버가 이미 Git 작업을 마쳤을 수 있어 같은 쓰기를 다시 보내지 않는다.
       uncertainRepos.add([...byFolder.values()].find((entry) => entry?.repo === data.repo)?.primary || data.repo);
-      app.showToast("worktree 작업 결과를 받지 못했습니다. ⌘⇧R로 새로고침하세요", { level: "err", id: pending.toastId });
+      app.showToast(shortcutLabel("worktree 작업 결과를 받지 못했습니다. ⌘⇧R로 새로고침하세요"), { level: "err", id: pending.toastId });
       if (op === "create") pendingCreates.delete([...byFolder.values()].find((entry) => entry?.repo === data.repo)?.primary || data.repo);
     }
     renderSpaces();
@@ -55,7 +57,7 @@ function progressFor(requestId, title) {
   const pending = requests.get(requestId);
   if (pending) pending.toastId = app.showToast(title, { level: "progress", ttl: Date.now() + REQUEST_TIMEOUT_MS + 10000 });
 }
-function samePath(a, b) { return a && b && a.replace(/\/$/, "") === b.replace(/\/$/, ""); }
+function samePath(a, b) { return a && b && (isHostWindows() ? sameHostPath(a, b) : a.replace(/\/$/, "") === b.replace(/\/$/, "")); }
 function esc(s) { return app.esc(String(s ?? "")); }
 // Claude Code 가 하위 에이전트마다 만드는 임시 worktree 다. 열린 스페이스가 아니면 목록에 세지 않는다.
 const SUBAGENT_WORKTREE = /\/\.claude\/worktrees\/agent-[^/]+\/?$/;
@@ -70,10 +72,10 @@ const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 function entryOf(space) {
   return byFolder.get(space.folder)?.entries?.find((entry) => samePath(entry.path, space.folder));
 }
-function folderName(path) { return path.replace(/\/$/, "").split("/").pop(); }
+function folderName(path) { return isHostWindows() ? pathBasename(path) : path.replace(/\/$/, "").split("/").pop(); }
 // 이 worktree 를 쓰는 세션. 서버 목록(TTL 30초)에 지금 에이전트 상태를 겹치고,
 // 목록 뒤에 들어온 에이전트는 cwd 로 더한다. 서버가 모른다고 한 경우(null)는 그대로 null 이다.
-function under(root, dir) { return !!dir && (samePath(dir, root) || dir.startsWith(root.replace(/\/$/, "") + "/")); }
+function under(root, dir) { return isHostWindows() ? pathWithin(root, dir) : !!dir && (samePath(dir, root) || dir.startsWith(root.replace(/\/$/, "") + "/")); }
 function liveAgents() { return new Map(getLastAgents().filter((a) => a.paneId).map((a) => [a.paneId, a])); }
 function asAgent(a) { return { kind: "agent", workspaceId: a.workspaceId, paneId: a.paneId, agent: a.agent, status: a.status, question: a.question, label: nameOf(a) }; }
 function usersOf(item) {
@@ -103,10 +105,13 @@ function runningOf(item) {
 function includesPane(users, paneId) {
   return Array.isArray(users) && users.some((user) => user.paneId === paneId);
 }
-function taskIncludesPane(item, paneId) {
+function sessionIn(users, paneId) {
   const agent = getLastAgents().find((candidate) => candidate.paneId === paneId);
-  return !!agent?.sessionUuid && (item.taskUsers || []).some((user) => user.paneId === paneId && user.sessionUuid === agent.sessionUuid);
+  return !!agent?.sessionUuid && (users || []).some((user) => user.paneId === paneId && user.sessionUuid === agent.sessionUuid);
 }
+function taskIncludesPane(item, paneId) { return sessionIn(item.taskUsers, paneId); }
+// 같은 대화가 마지막으로 실행한 worktree. 대기 중에도 그 묶음에 둠
+function lastIncludesPane(item, paneId) { return sessionIn(item.lastUsers, paneId); }
 // 폴더가 지워진 스페이스(지운 worktree 로 연 스페이스 등). 닫기는 사용자 몫
 function markMissing(rowHtml) {
   const nameAt = rowHtml.indexOf('<span class="space-name">');
@@ -123,11 +128,23 @@ function busyReason(item) {
   const count = busyOf(item);
   return count ? `세션 ${count}개가 쓰는 중이라 삭제할 수 없습니다` : "";
 }
+// 쓰는 세션·실행 중 프로세스·살아 있는 생성 세션이 모두 없으면 안 쓰는 worktree.
+// 작업 기록·마지막 실행 기록으로만 이어진 세션은 제외. 한 곳에만 이어지면 그 묶음에 행으로 보이고, 여러 곳이면 기본 묶음에 보여서 이 묶음은 빈 채로 남음
+function inUse(item) {
+  return busyOf(item) > 0 || item.creator?.session?.alive === true;
+}
 function usageKnown(item) { return Array.isArray(item.users) && Array.isArray(item.running); }
 function deleteReason(item) {
   if (item.change?.uncommitted > 0) return "커밋하지 않은 변경이 있어 삭제할 수 없습니다";
   if (!usageKnown(item)) return "사용 여부 모름";
   return busyReason(item);
+}
+// 삭제를 막는 이유. 비활성 항목만 보이면 왜 못 지우는지 알 수 없음
+function deleteLabel(item) {
+  const why = item.primary ? "기본 worktree" : !item.managed ? "Iris 에서 만든 것만"
+    : item.change?.uncommitted > 0 ? "커밋하지 않은 변경 있음" : !usageKnown(item) ? "사용 여부 모름"
+    : busyOf(item) ? "쓰는 세션을 닫은 뒤" : "";
+  return why ? `worktree 삭제 (${why})` : "worktree 삭제";
 }
 function defaultBase(data) {
   if (data.repositories) return "";
@@ -201,16 +218,18 @@ function renderGrouped(spaces, renderSpace) {
   return html;
 }
 const closedGroups = new Set();
+// 안 쓰는 worktree 묶음을 펼친 스페이스. 기본은 접힘
+const openIdle = new Set();
 const renderedGroups = new Map();
 function taskFolder(target) {
-  return /^(.*\/\.working\/[^/]+)\/(?:worktrees\/)?[^/]+\/?$/.exec(target || "")?.[1] || null;
+  return /^(.*\/\.working\/[^/]+)\/(?:worktrees\/)?[^/]+\/?$/.exec(isHostWindows() ? String(target || "").replace(/\\/g, "/") : target || "")?.[1] || null;
 }
 function groupsFor(space, cached) {
   const repos = cached.repositories || [cached];
   const seenPaths = new Set();
   const items = repos.flatMap((data) => (data.entries || []).filter((item) => {
-    const key = item.path?.replace(/\/$/, "");
-    if (!key || item.prunable || SUBAGENT_WORKTREE.test(item.path) || seenPaths.has(key)) return false;
+    const key = isHostWindows() ? normalizePath(item.path).toLowerCase() : item.path?.replace(/\/$/, "");
+    if (!key || item.prunable || SUBAGENT_WORKTREE.test(isHostWindows() ? String(item.path).replace(/\\/g, "/") : item.path) || seenPaths.has(key)) return false;
     seenPaths.add(key); return true;
   }).map((item) => ({ data, item })));
   const baseItems = cached.repositories ? items.filter(({ item }) => item.primary)
@@ -246,7 +265,9 @@ function groupForAgent(groups, agent) {
     || (item.creator?.session?.alive && item.creator.session.paneId === agent.paneId)
     || includesPane(usersOf(item), agent.paneId)));
   // 서로 다른 작업 묶음을 쓰는 세션은 한 곳을 임의로 고르지 않고 기본 작업 폴더에 둔다.
-  return assigned.length === 1 ? assigned[0] : groups[0];
+  if (assigned.length) return assigned.length === 1 ? assigned[0] : groups[0];
+  const recent = nonbase.filter((group) => group.members.some(({ item }) => lastIncludesPane(item, agent.paneId)));
+  return recent.length === 1 ? recent[0] : groups[0];
 }
 function groupTitle(group) {
   const label = group.members.length > 1
@@ -306,10 +327,16 @@ function groupAgents({ spaceId, open, rows, count }) {
     ? composeHtml(cached.primary || cached.repo, cached) : "";
   const notes = repositories.map((data) => pendingCreates.has(data.primary)
     ? `<div class="wt-meta" role="status">${esc(pendingCreates.get(data.primary))} 생성 중…</div>`
-    : uncertainRepos.has(data.primary) ? `<div class="wt-meta" role="status">작업 결과를 받지 못했습니다. ⌘⇧R로 새로고침하세요.</div>` : "").join("");
+    : uncertainRepos.has(data.primary) ? `<div class="wt-meta" role="status">${shortcutLabel("작업 결과를 받지 못했습니다. ⌘⇧R로 새로고침하세요.")}</div>` : "").join("");
 
+  const idle = groups.filter((group) => !group.primary && !group.rows.length && !group.terminals.length
+    && !group.members.some(({ item }) => inUse(item)));
+  const idleOpen = openIdle.has(spaceId);
+  const idleHtml = idle.length ? `<button type="button" class="wt-more" data-worktree-action="idle-toggle" data-wt-space="${esc(spaceId)}" aria-expanded="${idleOpen}">`
+    + `<span class="wt-caret${idleOpen ? " open" : ""}">${ICON.caret}</span>안 쓰는 worktree ${idle.length}</button>`
+    + (idleOpen ? idle.map(groupHtml).join("") : "") : "";
   return { count: count + groups.reduce((sum, group) => sum + group.terminals.length, 0), open, hasChildren: groups.length > 0,
-    html: open ? `<div class="wt-space-groups">${groups.map(groupHtml).join("")}${notes}${app.getIsLocal() ? creation : ""}</div>` : "" };
+    html: open ? `<div class="wt-space-groups">${groups.filter((group) => !idle.includes(group)).map(groupHtml).join("")}${idleHtml}${notes}${app.getIsLocal() ? creation : ""}</div>` : "" };
 }
 function sessionItems(spaceId, cwd) {
   return [["", "새 터미널"], ["codex", "새 Codex 세션"], ["claude", "새 Claude 세션"]].map(([launch, label]) => ({
@@ -494,7 +521,7 @@ function menuFor(spaceId, path, x, y) {
     { label: "새로고침", act: () => refreshRepo(found.space.id) },
     { label: "새 worktree", disabled: !app.getIsLocal(), act: () => createDialog(found.space.id) },
     { sep: true },
-    { label: busyReason(item) ? "worktree 삭제 (쓰는 세션을 닫은 뒤)" : "worktree 삭제", danger: true,
+    { label: deleteLabel(item), danger: true,
       disabled: !app.getIsLocal() || !item.managed || item.primary || !!reason, act: () => removeWorktree(found.space.id, item, found.data) },
   ]);
 }
@@ -580,10 +607,15 @@ function attachEvents() {
         { label: "표시 이름 바꾸기", disabled: !app.getIsLocal(), act: () => renameGroup(group) },
         { label: "경로 보기", act: () => askInfo(groupTitle(group), group.path) },
         { label: "새로고침", act: () => refreshRepo(group.space.id) },
-        ...(!group.primary && group.members.length === 1 ? [{ label: "worktree 삭제", danger: true,
+        ...(!group.primary && group.members.length === 1 ? [{ label: deleteLabel(group.members[0].item), danger: true,
           disabled: !app.getIsLocal() || !group.members[0].item.managed || !!deleteReason(group.members[0].item),
           act: () => removeWorktree(group.space.id, group.members[0].item, group.members[0].data) }] : []));
       showWorktreeMenu(button, items); return;
+    }
+    if (action === "idle-toggle") {
+      const spaceId = button.dataset.wtSpace;
+      if (openIdle.has(spaceId)) openIdle.delete(spaceId); else openIdle.add(spaceId);
+      renderSpaces(); return;
     }
     if (action === "sessions") {
       showWorktreeMenu(button, sessionItems(button.dataset.wtSpace, button.dataset.wtPath)); return;

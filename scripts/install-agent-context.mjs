@@ -33,6 +33,7 @@ const REQUIRED_RUNTIME_FILES = [
 ];
 
 function installedRoot(appPath) {
+  if (process.platform === "win32") return path.join(appPath, "resources", "app.asar.unpacked");
   return path.join(appPath, "Contents", "Resources", "app.asar.unpacked");
 }
 
@@ -51,7 +52,7 @@ function preflightRuntime(appPath) {
   try { pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")); }
   catch { throw new Error("installed Iris agent context package.json is unreadable"); }
   if (pkg.type !== "module") throw new Error("installed Iris agent context package must declare type=module");
-  const nodePath = path.join(appPath, "Contents", "MacOS", path.basename(appPath, ".app"));
+  const nodePath = process.platform === "win32" ? path.join(appPath, "Iris.exe") : path.join(appPath, "Contents", "MacOS", path.basename(appPath, ".app"));
   try { fs.accessSync(nodePath, fs.constants.X_OK); }
   catch { throw new Error(`installed Iris node runtime is unavailable: ${nodePath}`); }
   return { root, nodePath, launcherPath: path.join(root, "bin", "agent-context.mjs"), runnerPath: path.join(root, "bin", "agent-run.mjs") };
@@ -96,11 +97,14 @@ function hookEntry(command) {
 }
 
 function containsHookMarker(item) {
-  return Array.isArray(item?.hooks) && item.hooks.some((hook) => typeof hook?.command === "string" && hook.command.includes(HOOK_MARKER));
+  return Array.isArray(item?.hooks) && item.hooks.some(isManagedHook);
 }
 
 function isManagedHook(hook) {
-  return typeof hook?.command === "string" && hook.command.includes(HOOK_MARKER);
+  if (typeof hook?.command !== "string") return false;
+  if (hook.command.includes(HOOK_MARKER)) return true;
+  const encoded = hook.command.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)\s*$/i)?.[1];
+  return !!encoded && Buffer.from(encoded, "base64").toString("utf16le").includes(HOOK_MARKER);
 }
 
 function hookTargetInfo(file, runtime, command, nested, add) {
@@ -183,7 +187,8 @@ function installHookTargets(targets) {
 }
 
 export function installAgentContext(options = {}) {
-  const appPath = path.resolve(options.appPath || "/Applications/Iris.app");
+  const suppliedPath = options.appPath || (process.platform === "win32" ? path.join(process.env.LOCALAPPDATA || os.homedir(), "Programs", "Iris") : "/Applications/Iris.app");
+  const appPath = path.resolve(process.platform === "win32" && /\.exe$/i.test(suppliedPath) ? path.dirname(suppliedPath) : suppliedPath);
   const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   const claudeHome = options.claudeHome || process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(os.homedir(), ".claude");
   const { nodePath, launcherPath, runnerPath } = preflightRuntime(appPath);
@@ -193,9 +198,12 @@ export function installAgentContext(options = {}) {
   if (!template.includes(MANAGED_MARKER) || !template.includes("{{LAUNCHER}}") || !template.includes("{{RUNNER}}")) {
     throw new Error("Iris agent context skill template is invalid");
   }
-  const content = template
-    .replace("{{LAUNCHER}}", shellQuote(launcherPath))
-    .replace("{{RUNNER}}", shellQuote(runnerPath));
+  const windows = process.platform === "win32";
+  const quote = windows ? (value) => `'${String(value).replaceAll("'", "''")}'` : shellQuote;
+  let content = template
+    .replace("{{LAUNCHER}}", quote(launcherPath))
+    .replace("{{RUNNER}}", quote(runnerPath));
+  if (windows) content = content.replaceAll("```sh", "```powershell").replaceAll("Cmd+W", "Ctrl+Shift+W");
 
   // 두 대상을 모두 검사한 뒤에만 쓰기 시작한다. 한쪽의 사용자 소유 skill 때문에 다른 쪽만
   // 바뀌는 부분 설치를 만들지 않는다.
@@ -207,7 +215,9 @@ export function installAgentContext(options = {}) {
     [claudeHome, "Claude", "claude"],
     [codexHome, "Codex", "codex"],
   ].map(([home, label, runtime]) => {
-    const command = `/usr/bin/env -u IRIS_STATE_DIR -u IRIS_PORT ${HOOK_MARKER} IRIS_AGENT_CONTEXT_RUNTIME=${runtime} ELECTRON_RUN_AS_NODE=1 ${shellQuote(nodePath)} ${shellQuote(launcherPath)} prompt-targets --runtime ${runtime}`;
+    const command = windows
+      ? `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(`$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules'); Remove-Item Env:IRIS_STATE_DIR,Env:IRIS_PORT -ErrorAction SilentlyContinue; $env:IRIS_AGENT_CONTEXT_PROMPT_TARGETS='1'; $env:IRIS_AGENT_CONTEXT_RUNTIME='${runtime}'; $env:ELECTRON_RUN_AS_NODE='1'; & ${quote(nodePath)} ${quote(launcherPath)} prompt-targets --runtime ${runtime}; exit $LASTEXITCODE # ${HOOK_MARKER}`, "utf16le").toString("base64")}`
+      : `/usr/bin/env -u IRIS_STATE_DIR -u IRIS_PORT ${HOOK_MARKER} IRIS_AGENT_CONTEXT_RUNTIME=${runtime} ELECTRON_RUN_AS_NODE=1 ${shellQuote(nodePath)} ${shellQuote(launcherPath)} prompt-targets --runtime ${runtime}`;
     return hookTargetInfo(path.join(home, label === "Claude" ? "settings.json" : "hooks.json"), label, command, true, !!options.addHooks);
   });
   if (!options.check) {
@@ -255,6 +265,7 @@ function main() {
   }
   console.log(`Agent context guidance ready: ${result.changed.length} updated, ${result.installed.length} present`);
   for (const item of result.hooks) console.log(`  ${item.runtime} hook: ${item.skipped || (item.missing ? "not installed (run with --hooks)" : item.created ? "created" : item.changed ? "updated" : "present")}`);
+  if (process.platform === "win32" && result.hooks.some((item) => item.skipped && item.changed)) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

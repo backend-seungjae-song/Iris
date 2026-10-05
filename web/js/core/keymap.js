@@ -1,3 +1,4 @@
+import { isHostWindows } from "./host-path.js";
 // 단축키 표. 무엇이 어디에 등록되어 있고 무엇을 바꿀 수 있는지를 담는다.
 //
 // 소유 범위
@@ -47,18 +48,18 @@ export const KEYMAP = [
   { id: "md-list", label: "마크다운 목록", where: ON_EDITOR, def: { mod: true, shift: true, key: "u" } },
   { id: "md-check", label: "마크다운 체크 목록", where: ON_EDITOR, def: { mod: true, alt: true, key: "k" } },
   { id: "md-quote", label: "마크다운 인용", where: ON_EDITOR, def: { mod: true, alt: true, key: "q" } },
-  { id: "screen-toggle", label: "다음 창 (고른 창이 없으면 메인 화면 ↔ 스페이스 브라우저)", where: ANYWHERE, def: { alt: true, code: "Tab" } },
-  { id: "screen-toggle-back", label: "이전 창", where: ANYWHERE, def: { alt: true, shift: true, code: "Tab" } },
+  { id: "screen-toggle", label: "다음 창 (고른 창이 없으면 메인 화면 ↔ 스페이스 브라우저)", where: ANYWHERE, def: isHostWindows() ? { mod: true, code: "Backquote" } : { alt: true, code: "Tab" } },
+  { id: "screen-toggle-back", label: "이전 창", where: ANYWHERE, def: isHostWindows() ? { mod: true, shift: true, code: "Backquote" } : { alt: true, shift: true, code: "Tab" } },
   { id: "screen-main", label: "메인 화면으로", where: ANYWHERE, def: { alt: true, code: "Digit1" } },
   { id: "screen-browser", label: "스페이스 브라우저로", where: ANYWHERE, def: { alt: true, code: "Digit2" } },
-  { id: "tab-prev", label: "가운데 탭 이전", where: ANYWHERE, def: { alt: true, key: "ArrowLeft" } },
-  { id: "tab-next", label: "가운데 탭 다음", where: ANYWHERE, def: { alt: true, key: "ArrowRight" } },
+  { id: "tab-prev", label: "터미널 탭 이전 (분리 브라우저 창에서는 브라우저 탭)", where: ANYWHERE, def: { alt: true, key: "ArrowLeft" } },
+  { id: "tab-next", label: "터미널 탭 다음 (분리 브라우저 창에서는 브라우저 탭)", where: ANYWHERE, def: { alt: true, key: "ArrowRight" } },
   { id: "agent-prev", label: "에이전트 이전", where: ANYWHERE, def: { alt: true, key: "ArrowUp" } },
   { id: "agent-next", label: "에이전트 다음", where: ANYWHERE, def: { alt: true, key: "ArrowDown" } },
   { id: "space-prev", label: "스페이스 이전", where: ANYWHERE, def: { alt: true, shift: true, key: "ArrowUp" } },
   { id: "space-next", label: "스페이스 다음", where: ANYWHERE, def: { alt: true, shift: true, key: "ArrowDown" } },
-  { id: "rail-prev", label: "왼쪽 도구 페이지 이전", where: ANYWHERE, def: { mod: true, alt: true, key: "ArrowUp" } },
-  { id: "rail-next", label: "왼쪽 도구 페이지 다음", where: ANYWHERE, def: { mod: true, alt: true, key: "ArrowDown" } },
+  { id: "rail-prev", label: "왼쪽 도구 페이지 이전", where: ANYWHERE, def: isHostWindows() ? { mod: true, shift: true, key: "ArrowLeft" } : { mod: true, alt: true, key: "ArrowUp" } },
+  { id: "rail-next", label: "왼쪽 도구 페이지 다음", where: ANYWHERE, def: isHostWindows() ? { mod: true, shift: true, key: "ArrowRight" } : { mod: true, alt: true, key: "ArrowDown" } },
   { id: "pick-toggle", label: "요소 지목 모드", where: ANYWHERE, def: { mod: true, shift: true, key: "e" } },
   { id: "sketch", label: "화면 스케치", where: ANYWHERE, def: { mod: true, shift: true, key: "d" } },
   { id: "detach", label: "브라우저 분리 / 도킹", where: ANYWHERE, def: { mod: true, shift: true, key: "o" } },
@@ -82,15 +83,22 @@ export const KEYMAP = [
   // 아래는 잠긴 항목이다. 목록에는 보이되 바꿀 수 없다. 같은 키가 포커스에 따라 다른 동작을
   // 하도록 구현돼 있어 키만 교체하면 그 분기가 어긋난다. 이유는 화면에 그대로 표시한다.
   { id: "reload-tab", label: "페이지 새로고침", where: ON_BROWSER, def: { mod: true, key: "r" },
-    lock: "같은 ⌘R 이 터미널 포커스에선 이름 변경이고, 메인 창에선 도킹된 브라우저 탭일 때만 새로고침입니다." },
-  { id: "force-reload-tab", label: "강제 새로고침", where: ON_BROWSER, def: { mod: true, shift: true, key: "r" },
-    lock: "메인 창에서 같은 ⌘⇧R 이 앱 전체 재로딩입니다. 창에 따라 뜻이 갈립니다." },
-  { id: "rename", label: "이름 변경", where: MAIN_WINDOW, def: { mod: true, shift: true, key: "r" },
-    lock: "⌃⇧R 은 브라우저 하드리로드를 가로챈 자리라 조합이 고정입니다." },
-  { id: "close-tab", label: "탭 닫기", where: ANYWHERE, def: { mod: true, key: "w" },
-    lock: "⌃W 와 ⌘W 가 서로 다른 탭을 닫고, 터미널 포커스에선 셸의 단어 삭제라 양보합니다." },
+    lock: isHostWindows() ? "Ctrl+R 또는 F5로 현재 페이지를 다시 읽습니다." : "같은 ⌘R 이 터미널 포커스에선 이름 변경이고, 메인 창에선 도킹된 브라우저 탭일 때만 새로고침입니다." },
+  ...(isHostWindows() ? [
+    { id: "app-reload", label: "앱 새로고침", where: ANYWHERE, def: { mod: true, shift: true, key: "r" }, lock: "앱의 모든 창을 다시 읽습니다." },
+    { id: "reload-tab-f5", label: "페이지 새로고침(F5)", where: ON_BROWSER, def: { key: "F5" }, lock: "현재 페이지를 다시 읽습니다." },
+    { id: "terminal-copy", label: "터미널 복사", where: "터미널", def: { mod: true, shift: true, key: "c" }, lock: "선택한 내용을 복사합니다. 선택 중 Ctrl+C도 복사합니다. 선택이 없으면 Ctrl+C는 셸의 중단 신호입니다." },
+    { id: "terminal-paste", label: "터미널 붙여넣기", where: "터미널", def: { mod: true, shift: true, key: "v" }, lock: "Ctrl+V도 클립보드 내용을 붙여넣습니다." },
+  ] : [
+    { id: "force-reload-tab", label: "강제 새로고침", where: ON_BROWSER, def: { mod: true, shift: true, key: "r" },
+      lock: "메인 창에서 같은 ⌘⇧R 이 앱 전체 재로딩입니다. 창에 따라 뜻이 갈립니다." },
+  ]),
+  { id: "rename", label: "이름 변경", where: MAIN_WINDOW, def: isHostWindows() ? { key: "F2" } : { mod: true, shift: true, key: "r" },
+    lock: isHostWindows() ? "F2로 선택한 터미널 이름을 바꿉니다." : "⌃⇧R 은 브라우저 하드리로드를 가로챈 자리라 조합이 고정입니다." },
+  { id: "close-tab", label: isHostWindows() ? "pane 닫기" : "탭 닫기", where: isHostWindows() ? MAIN_WINDOW : ANYWHERE, def: isHostWindows() ? { mod: true, shift: true, key: "w" } : { mod: true, key: "w" },
+    lock: isHostWindows() ? "Ctrl+Shift+W로 선택한 pane을 닫습니다. Ctrl+W는 터미널에서 셸로 전달됩니다." : "⌃W 와 ⌘W 가 서로 다른 탭을 닫고, 터미널 포커스에선 셸의 단어 삭제라 양보합니다." },
   { id: "save-file", label: "파일 저장", where: ON_EDITOR, def: { mod: true, key: "s" },
-    lock: "⌘⇧S(메모 보관)와 한 글자 차이라, 바꾸면 둘 중 하나가 조용히 먹힙니다." },
+    lock: isHostWindows() ? "Ctrl+S는 편집기에서 파일을 저장하고 터미널에서는 셸로 전달됩니다." : "⌘⇧S(메모 보관)와 한 글자 차이라, 바꾸면 둘 중 하나가 조용히 먹힙니다." },
   { id: "zoom-in", label: "확대", where: ON_BROWSER, def: { mod: true, key: "=" },
     lock: "확대·축소·원복은 셋이 한 벌이고 네이티브 zoom 단계와 묶여 있습니다." },
   { id: "zoom-out", label: "축소", where: ON_BROWSER, def: { mod: true, key: "-" }, lock: "확대와 한 벌입니다." },
@@ -157,6 +165,7 @@ export function resolvedKeymap() {
 
 export function matchBinding(ev, b) {
   if (!ev || !b) return false;
+  if (isHostWindows() && ev.getModifierState?.("AltGraph")) return false;
   // ⌘ 와 ⌃ 는 한 필드로 다룬다(위 유지 조건).
   if (!!(ev.metaKey || ev.ctrlKey) !== !!b.mod) return false;
   if (!!ev.altKey !== !!b.alt) return false;
@@ -199,12 +208,20 @@ export function bindingKey(b) {
 }
 
 const ARROW_GLYPH = { ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" };
-const CODE_GLYPH = { Tab: "Tab", Digit0: "0", Digit1: "1", Digit2: "2", Digit3: "3", Digit4: "4",
+const CODE_GLYPH = { Backquote: "`", Tab: "Tab", Digit0: "0", Digit1: "1", Digit2: "2", Digit3: "3", Digit4: "4",
   Digit5: "5", Digit6: "6", Digit7: "7", Digit8: "8", Digit9: "9" };
 
 export function formatBinding(b) {
   if (!b) return "";
   let out = "";
+  if (isHostWindows()) {
+    const parts = [];
+    if (b.mod) parts.push("Ctrl");
+    if (b.alt) parts.push("Alt");
+    if (b.shift) parts.push("Shift");
+    const key = b.code ? CODE_GLYPH[b.code] || (/^Key[A-Z]$/.test(b.code) ? b.code.slice(3) : b.code) : ARROW_GLYPH[b.key] || (String(b.key || "").length === 1 ? b.key.toUpperCase() : b.key);
+    return [...parts, key].join("+");
+  }
   if (b.mod) out += "⌘";
   if (b.alt) out += "⌥";
   if (b.shift) out += "⇧";
@@ -233,4 +250,11 @@ export function findConflicts(list) {
     out.push({ key: k, keys: formatBinding(items[0].binding), ids: items.map((x) => x.id), overlaps });
   }
   return out;
+}
+
+export function shortcutLabel(value) {
+  const text = String(value || "");
+  if (!isHostWindows()) return text;
+  const names = { "⌘": "Ctrl", "⌃": "Ctrl", "⌥": "Alt", "⇧": "Shift" };
+  return text.replace(/[⌘⌃⌥⇧]+/g, (mods) => [...mods].map((m) => names[m]).join("+") + "+");
 }

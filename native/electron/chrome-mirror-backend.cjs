@@ -33,7 +33,9 @@ const PROFILE_DIR_NAME = "chrome-mirror-profile";
 // 미러가 띄우는 것은 설치된 실제 Chrome 뿐이다. 이 경로는 이 기능이 자기 것으로 소유한다.
 // chrome-auth(앱 셸 모듈)를 가져오면 기능 경계가 깨진다(bin/smoke tool-screens). 다른 브라우저는
 // 미러 대상이 아니다.
-const CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME_BIN = process.platform === "win32"
+  ? require("../../server/win-native.cjs").browserPath("chrome")
+  : "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 function defaultBrowserForEntry(entry) {
   if (entry && entry.browser && entry.browser.id === "chrome") return { bin: CHROME_BIN };
   return undefined;
@@ -419,7 +421,9 @@ class ChromeMirrorBackend {
     }
     let child;
     try {
-      child = this.spawnFn("open", args, { stdio: "ignore" });
+      child = process.platform === "win32"
+        ? this.spawnFn(this.resolveChrome(), chromeArgs, { stdio: "ignore", windowsHide: true })
+        : this.spawnFn("open", args, { stdio: "ignore" });
     } catch (error) {
       throw new Error("Google Chrome 프로세스를 시작하지 못했습니다: " + errorText(error));
     }
@@ -477,6 +481,12 @@ class ChromeMirrorBackend {
   async findChromePids(profileDir = this.profileDir, port = null) {
     if (!profileDir) return [];
     const marker = port ? `--remote-debugging-port=${port}` : `--user-data-dir=${profileDir}`;
+    if (process.platform === "win32") {
+      const r = await require("../../server/win-native.cjs").request({ op: "processes" });
+      if (!r.ok) throw new Error("Chrome 프로세스 조회 실패: " + r.error);
+      return r.processes.filter((p) => /^(chrome|chrome.exe)$/i.test(p.name) &&
+        (p.command.includes(`"${marker}"`) || p.command.includes(marker + " ") || p.command.endsWith(marker))).map((p) => p.pid);
+    }
     return pgrepPids(marker, this.execFileFn);
   }
 
@@ -497,7 +507,7 @@ class ChromeMirrorBackend {
   killChromeSync() {
     let found = [];
     try {
-      if (this.profileDir) found = pgrepPidsSync(`--user-data-dir=${this.profileDir}`, this.execFileSyncFn);
+      if (this.profileDir && process.platform !== "win32") found = pgrepPidsSync(`--user-data-dir=${this.profileDir}`, this.execFileSyncFn);
     } catch {}
     this.killPids([...this.ownedPids, ...found]);
   }

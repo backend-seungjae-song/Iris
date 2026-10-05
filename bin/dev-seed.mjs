@@ -31,13 +31,16 @@ import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require_ = createRequire(import.meta.url);
 const { stateHome, DIR_NAME } = require_("../server/state-home.cjs");
 const { userDataHomeFor } = require_("../native/electron/user-data-home.cjs");
 
 const INSTALLED_STATE = path.join(os.homedir(), DIR_NAME);
-const APP_SUPPORT = path.join(os.homedir(), "Library", "Application Support");
+const APP_SUPPORT = process.platform === "win32"
+  ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"))
+  : path.join(os.homedir(), "Library", "Application Support");
 
 // 실행 중인 서버의 흔적과 Chromium 의 잠금 파일. 베끼면 새 인스턴스가 이미 실행 중으로 판단한다.
 const SKIP = [
@@ -67,7 +70,10 @@ export function holderOf(stateDir, { readPid, isServerPid } = {}) {
   const lock = path.join(stateDir, "server.lock");
   const read = readPid || (() => { try { return Number(String(readFileSync(lock, "utf8")).trim()); } catch { return 0; } });
   const alive = isServerPid || ((pid) => {
-    try { return execFileSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).includes("server/index.js"); }
+    try {
+      if (process.platform === "win32") return execFileSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV"], { encoding: "utf8" }).includes(String(pid));
+      return execFileSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).includes("server/index.js");
+    }
     catch { return false; }
   });
   const pid = read();
@@ -85,11 +91,12 @@ function isInside(child, parent) {
 
 // 되돌릴 수 없는 실수를 먼저 막는다. 통과하면 빈 배열.
 export function guardPlan(plan, { installedState = INSTALLED_STATE } = {}) {
+  const canonical = (value) => process.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
   const problems = [];
   for (const step of plan) {
-    const from = path.resolve(step.from), to = path.resolve(step.to);
+    const from = canonical(step.from), to = canonical(step.to);
     if (to === from) problems.push(`${step.what}: 원본과 대상이 같습니다 — ${to}`);
-    else if (to === path.resolve(installedState)) problems.push(`${step.what}: 대상이 설치본 상태 폴더입니다 — ${to}`);
+    else if (to === canonical(installedState)) problems.push(`${step.what}: 대상이 설치본 상태 폴더입니다 — ${to}`);
     else if (isInside(to, from)) problems.push(`${step.what}: 대상이 원본 안입니다 — ${to}`);
     else if (isInside(from, to)) problems.push(`${step.what}: 원본이 대상 안입니다 — ${to}`);
   }
@@ -137,10 +144,9 @@ function main(argv) {
   }
   console.log("실제 상태를 개발 갈래로 베낍니다.");
   console.log("  자격증명 금고와 쿠키가 함께 복제됩니다 — 비밀이 한 벌 더 생깁니다.");
-  console.log(`  지울 때: rm -rf ${plan.map((s) => s.to).join(" ")}`);
   for (const step of plan) console.log("  " + copyOne(step, { force }));
   console.log("끝났습니다. 개발 앱: pnpm dev:app");
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exit(main(process.argv.slice(2)));
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) process.exit(main(process.argv.slice(2)));

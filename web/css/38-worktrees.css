@@ -64,7 +64,10 @@
 .wt-terminal-spacer { width:23px; flex:none; }
 .wt-terminal-sign { color:var(--faint); }
 .wt-terminal-sign .i { width:12px; height:12px; }
-.wt-group-toggle:focus-visible, .wt-action:focus-visible, .wt-terminal-session:focus-visible { outline:1px solid var(--focus); outline-offset:1px; }
+.wt-more { display:flex; align-items:center; gap:5px; width:100%; min-height:24px; margin:4px 0; padding:3px 0; border:0; border-radius:var(--r-s);
+  background:none; color:var(--muted); font:var(--fs-s)/18px var(--sans); text-align:left; cursor:pointer; }
+.wt-more:hover { background:var(--hover); color:var(--fg); }
+.wt-more:focus-visible, .wt-group-toggle:focus-visible, .wt-action:focus-visible, .wt-terminal-session:focus-visible { outline:1px solid var(--focus); outline-offset:1px; }
 
 .wt-new { display:flex; align-items:center; gap:6px; width:100%; min-height:var(--row); padding:0 4px; border:0; border-radius:var(--r-s);
   background:none; color:var(--faint); font:var(--fs)/1 var(--sans); text-align:left; cursor:pointer; }

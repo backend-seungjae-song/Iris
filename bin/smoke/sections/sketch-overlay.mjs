@@ -78,4 +78,14 @@ export default async function run() {
     if (!/height:\s*30px/.test(block[1])) throw new Error("창의 드래그 스트립(30px)과 높이가 다르다");
     return true;
   });
+
+  // 분리 창은 콘솔에 넘기기만 하고 세션이 없으면 콘솔이 거절한다. 분리 창에서 "전달됨" 이라 적으면 거짓 성공이 된다.
+  check("분리 창의 스케치 알림은 콘솔로 보낸 것까지만 적는다", () => {
+    const src = read("web/js/browser/sketch.js");
+    const at = src.indexOf('wsSend({ type: "sketch-relay"');
+    const branch = src.slice(at, src.indexOf("return;", at));
+    if (at < 0) throw new Error("분리 창 전달 분기를 못 찾았다");
+    if (/전달됨/.test(branch)) throw new Error("분리 창이 터미널 전달을 확정해 적는다");
+    return /deliverLocal = \(s\) => \{\s*if \(!getCurTarget\(\)\)/.test(src);
+  });
 }

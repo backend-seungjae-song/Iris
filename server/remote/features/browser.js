@@ -3,6 +3,7 @@ import { randomBytes as nodeRandomBytes, randomUUID, createHash } from "node:cry
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import { mutate as mutateBrowserState, wire as browserStateWire } from "../../browser-state-owner.js";
 import {
@@ -21,7 +22,7 @@ import { noteBrowserPick } from "../../browser-commands.js";
 import { issuePromptTarget } from "../../prompt-targets.js";
 import { snapshot } from "../../runtime-state.js";
 import { stateHome } from "../../state-home.cjs";
-import { buildPageTranslateScript } from "../../../web/js/browser/page-translate.js";
+import { windowsPowerShellEnv } from "../../windows-powershell.cjs";
 import { resolvePickSource as resolveBrowserPickSource } from "../../pick-source.js";
 import { MAX_BROWSER_FRAME_JPEG_BYTES } from "../contract/ipc.js";
 import { resolveMedia } from "../media-links.js";
@@ -346,11 +347,11 @@ export function createBrowserFeature(options) {
     return { ok: true, tab };
   }
 
-  async function command(tabRef, cmd, args = {}) {
+  async function command(tabRef, cmd, args = {}, timeoutMs = 30_000) {
     const ready = await readyTab(tabRef);
     if (!ready.ok) return ready;
     try {
-      const result = await runCdp(cmd, args, ready.tab.meta.wc, 30_000);
+      const result = await runCdp(cmd, args, ready.tab.meta.wc, timeoutMs);
       return result?.ok === false ? { ok: false, code: "browser-command-unavailable" }
         : { ok: true, data: result?.data || result || {} };
     } catch { return { ok: false, code: "browser-command-unavailable" }; }
@@ -456,6 +457,16 @@ export function createBrowserFeature(options) {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const destination = path.join(directory, `${record.connId}-${record.seq + 1}.jpg`);
     try {
+      if ((options.platform || process.platform) === "win32") {
+        await runner("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+          fileURLToPath(new URL("../windows-frame.ps1", import.meta.url)), "-SourcePath", source,
+          "-DestinationPath", destination, "-Width", String(desktop ? Math.max(width, 720) : width),
+          "-MaximumBytes", String(MAX_BROWSER_FRAME_JPEG_BYTES)], { timeout: 10_000, maxBuffer: 64 * 1024, windowsHide: true, env: windowsPowerShellEnv() });
+        const bytes = fs.readFileSync(destination);
+        const dimensions = jpegDimensions(bytes);
+        return dimensions && bytes.length <= MAX_BROWSER_FRAME_JPEG_BYTES
+          ? { ok: true, bytes, ...dimensions } : { ok: false, code: "browser-frame-unavailable" };
+      }
       for (const scale of [1, 0.85, 0.7, 0.55]) {
         const target = Math.max(240, Math.round((desktop ? Math.max(width, 720) : width) * scale));
         for (const quality of [78, 68, 58, 48]) {
@@ -713,7 +724,7 @@ export function createBrowserFeature(options) {
     async desktop(request) { return command(request.tab, "viewport", request.enabled
       ? { width: 1280, height: 800, dpr: 1 } : { clear: true }); },
     async translate(request) {
-      const result = await command(request.tab, "eval", { expression: buildPageTranslateScript() });
+      const result = await command(request.tab, "contextaction", { name: "pagetranslate.page" }, 36_000);
       const value = result.data?.value || result.data;
       return result.ok && value?.ok === true ? { ok: true } : { ok: false, code: "unavailable" };
     },

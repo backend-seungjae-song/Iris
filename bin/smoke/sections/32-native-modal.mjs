@@ -602,7 +602,7 @@ check("메모도 안 저장된 편집을 동그라미로 알린다", () => {
 check("그룹 우클릭에서 그 그룹에 새 탭을 만든다", () =>
   /label: "이 그룹에 새 탭"/.test(browserTabs)
   && /newBrowserTab\(null, \{ group: gid, space: sp \}\)/.test(browserTabs)
-  && /if \(opts && opts\.group\) mut\.group = opts\.group;\s*bsMutate\(mut\)/.test(mainJs)
+  && /if \(opts && opts\.group\) mut\.group = opts\.group;(?:\s*\/\/[^\n]*|\s*const claim = [^\n]*|\s*if \(claim\) \{[^\n]*bsMutate\(mut\)[^\n]*)*\s*(?:else )?bsMutate\(mut\)/.test(mainJs)
   && /const sp = \(opts && opts\.space\) \|\|/.test(mainJs));   // 그룹이 사는 스페이스에 만든다
 // 스페이스가 바뀌면 에이전트 섹션도 함께 바뀌고, 선택한 줄은 목록 끝에 붙지 않아야 한다.
 // 위아래로 한 줄씩 보여야 현재 위치를 알 수 있다.
@@ -782,6 +782,12 @@ check("기다리는 알림은 다른 알림에 밀려나지 않는다", () => {
   return /const waits = items\.filter/.test(ui)
     && /for \(const item of waits\) noticeList\.append\(card\(item\)\)/.test(ui)
     && /rest\.slice\(0, 1\)/.test(ui);
+});
+// 알림 영역은 anchorNotices 로 알림 없이 먼저 만들어진다. 그때 more 버튼이 보이면 메모 창 머리 줄 버튼을 덮는다.
+check("알림 영역을 처음 만들 때 펼치기 버튼은 숨겨져 있다", () => {
+  const ui = read("web/js/core/notice-center.js");
+  const host = sliceBetween(ui, "function ensureHost()", "\n}", "알림 영역 생성");
+  return /more = addButton\([^\n]*\);\s*more\.hidden = true;/.test(host);
 });
 // 호출이 끊긴 사이에 사람이 누른 답도 잃지 않는다. 그러지 않으면 알림을 두 번 띄우게 된다.
 check("끊긴 사이의 답과 부름을 이어받는다", () => {

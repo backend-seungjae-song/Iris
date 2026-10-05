@@ -11,8 +11,9 @@
 // jszip.min.js는 node_modules/jszip/dist의 것과 같다. 그래서 이 스크립트는 새 버전을 들이지 않는다.
 //
 // 실행: pnpm build:vendor   (pnpm install 뒤 prepare로도 자동 실행)
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import { copyTreeSync } from "../server/copy-tree.cjs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
@@ -53,7 +54,7 @@ for (const [pkg, from, to] of DIRS) {
   if (!existsSync(src)) throw new Error(`원본이 없습니다: ${pkg}/${from} — pnpm install 먼저`);
   const dst = path.join(VENDOR, to);
   rmSync(dst, { recursive: true, force: true });
-  cpSync(src, dst, { recursive: true });
+  copyTreeSync(src, dst, { recursive: true });
   copied++;
   console.log(`  ${to.padEnd(18)} ← ${pkg}/${from} (폴더)`);
 }

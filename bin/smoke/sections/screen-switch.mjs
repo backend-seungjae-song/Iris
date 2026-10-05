@@ -7,6 +7,7 @@
 // 영향 범위: web/js/core/{screen-switch,keynav}.js · web/js/browser/dock.js ·
 //   native/electron/main-window.cjs 의 중계.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs bin/smoke/sections/screen-switch.mjs
+import { runInNewContext } from "node:vm";
 import {
   cannotMeasure, check, checkAsync, read as readSrc,
 } from "../core.mjs";
@@ -96,26 +97,85 @@ check("⌥숫자는 글자가 아니라 자리로 읽는다", () => {
     && !/e\.key\s*===\s*"[12]"/.test(KEYNAV);
 });
 
-check("⌥1·⌥2는 수식키가 더 붙으면 아니다", () =>
-  /if \(!e\.altKey \|\| e\.metaKey \|\| e\.ctrlKey\) return;/.test(KEYNAV)
-  && /\["screen-main", "screen-browser", "screen-toggle", "screen-toggle-back"\]/.test(KEYNAV)
-  && /matchBinding\(e, bindingOf\(id\)\)/.test(KEYNAV));
+const platforms = ["darwin", "win32"];
+const keymapFor = (platform) => runInNewContext(
+  readSrc("web/js/core/keymap.js").replace(/^import[^\n]*;$/gm, "").replace(/\bexport /g, "")
+    + "\n({ bindingOf, matchBinding });",
+  { isHostWindows: () => platform === "win32" },
+);
+const keynavFor = (platform, km) => {
+  const listeners = [], actions = [];
+  const ctx = { isHostWindows: () => platform === "win32", ...km,
+    document: { addEventListener: (_name, fn) => listeners.push(fn) },
+    isAgentRenaming: () => false, currentSwitcherState: () => ({}),
+    gotoMainScreen: () => actions.push("main"), gotoSpaceBrowser: () => actions.push("browser"),
+    runSwitcherKey: (dir) => { actions.push(dir); return "step"; },
+  };
+  runInNewContext(keynav.replace(/^import[\s\S]*?from "[^"\n]+";$/gm, "").replace(/\bexport /g, "")
+    + "\ninitKeynav({ MEMO_MODE: false });", ctx);
+  if (listeners.length < 2) cannotMeasure("화면 이동 키 리스너를 찾지 못했다");
+  return (event) => {
+    actions.length = 0;
+    listeners[1]({ preventDefault() {}, stopPropagation() {}, ...event });
+    return [...actions];
+  };
+};
 
-check("⌥Tab에 Shift가 붙으면 이전 창이다", () => {
-  const km = readSrc("web/js/core/keymap.js");
-  return /id: "screen-toggle-back"[\s\S]{0,120}?def: \{ alt: true, shift: true, code: "Tab" \}/.test(km)
-    && /const dir = hit === "screen-toggle-back" \? -1 : 1;/.test(KEYNAV);
+check("⌥1·⌥2는 수식키가 더 붙으면 아니다", () => {
+  for (const platform of platforms) {
+    const km = keymapFor(platform), press = keynavFor(platform, km);
+    for (const [code, key, target] of [["Digit1", "¡", "main"], ["Digit2", "™", "browser"]]) {
+      const event = { code, key, altKey: true };
+      if (press(event).join() !== target) throw new Error(`${platform} ${code}: 이동하지 않았다`);
+      for (const modifier of ["metaKey", "ctrlKey", "shiftKey"])
+        if (press({ ...event, [modifier]: true }).length) throw new Error(`${platform} ${code}+${modifier}: 이동했다`);
+    }
+  }
+  return true;
 });
 
-// 분리 브라우저 창은 대개 webview 에 포커스가 있다. 중계가 없으면 그 창에서만 키가 동작하지 않아
-// 이동한 뒤 돌아올 경로가 사라진다.
+check("⌥Tab에 Shift가 붙으면 이전 창이다", () => {
+  for (const platform of platforms) {
+    const km = keymapFor(platform), press = keynavFor(platform, km);
+    const event = platform === "win32" ? { code: "Backquote", key: "`", ctrlKey: true }
+      : { code: "Tab", key: "Tab", altKey: true };
+    if (!km.matchBinding(event, km.bindingOf("screen-toggle")) || press(event).join() !== "1")
+      throw new Error(`${platform}: 다음 창 키가 틀렸다`);
+    if (!km.matchBinding({ ...event, shiftKey: true }, km.bindingOf("screen-toggle-back"))
+      || press({ ...event, shiftKey: true }).join() !== "-1") throw new Error(`${platform}: 이전 창 키가 틀렸다`);
+    const other = platform === "win32" ? { code: "Tab", altKey: true } : { code: "Backquote", ctrlKey: true };
+    if (press(other).length) throw new Error(`${platform}: 다른 플랫폼의 창 이동 키를 소비했다`);
+  }
+  return true;
+});
+
 check("webview 포커스에서도 네 키가 중계된다", () => {
-  // 중계 표에 네 이름이 code 로 적혀 있어야 하고, 그 표를 읽는 판정도 code 를 봐야 한다.
-  return /"screen-toggle": \{ alt: true, code: "Tab" \}/.test(MAIN_WINDOW)
-    && /"screen-toggle-back": \{ alt: true, shift: true, code: "Tab" \}/.test(MAIN_WINDOW)
-    && /"screen-main": \{ alt: true, code: "Digit1" \}/.test(MAIN_WINDOW)
-    && /"screen-browser": \{ alt: true, code: "Digit2" \}/.test(MAIN_WINDOW)
-    && /if \(b\.code\) \{ if \(String\(input\.code \|\| ""\) === b\.code\) return id; continue; \}/.test(MAIN_WINDOW);
+  for (const platform of platforms) {
+    const module = { exports: {} }, handlers = new Map(), guestHandlers = new Map(), sent = [];
+    runInNewContext(mainWindowSource, { module, process: { platform } });
+    const owner = { isDestroyed: () => false, webContents: { send: (channel, name) => sent.push([channel, name]) } };
+    module.exports.createMainWindow({ app: { on: (name, fn) => handlers.set(name, fn) },
+      BrowserWindow: { fromWebContents: () => owner } });
+    handlers.get("web-contents-created")({}, { getType: () => "webview", on: (name, fn) => guestHandlers.set(name, fn) });
+    const listener = guestHandlers.get("before-input-event");
+    if (!listener) throw new Error(`${platform}: webview 중계가 연결되지 않았다`);
+    const toggle = platform === "win32" ? { control: true, code: "Backquote", key: "`" } : { alt: true, code: "Tab", key: "Tab" };
+    for (const [id, input] of [["screen-toggle", toggle], ["screen-toggle-back", { ...toggle, shift: true }],
+      ["screen-main", { alt: true, code: "Digit1", key: "¡" }], ["screen-browser", { alt: true, code: "Digit2", key: "™" }]]) {
+      sent.length = 0;
+      let prevented = 0;
+      listener({ preventDefault: () => prevented++ }, { type: "keyDown", ...input });
+      if (sent.length !== 1 || sent[0][0] !== "ac-shortcut" || sent[0][1] !== id || prevented !== 1)
+        throw new Error(`${platform} ${id}: 소유 창으로 한 번 중계하지 않았다`);
+      for (const bad of [{ ...input, code: "WrongCode" }, { ...input, alt: !input.alt },
+        { ...input, shift: !input.shift }, { ...input, control: true, alt: true }]) {
+        sent.length = 0;
+        listener({ preventDefault() {} }, { type: "keyDown", ...bad });
+        if (sent.some(([, name]) => name === id)) throw new Error(`${platform} ${id}: 다른 조합도 중계했다`);
+      }
+    }
+  }
+  return true;
 });
 
 check("중계로 보내는 이름은 모두 받는 표에 있다", () => {

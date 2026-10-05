@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../core/keymap.js";
 // 브라우저 재현(녹화). 게스트 기록기, 녹화 대상 탭, 타임라인 변환과 결과 전달을 맡는다.
 //
 // 소유 범위
@@ -83,7 +84,7 @@ const REC_INJECT = `(() => {
     if (!el || el.nodeType !== 1) return null;
     var r = el.getBoundingClientRect();
     return { tag: el.tagName.toLowerCase(), sel: sel(el), id: el.id || null,
-      text: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60) || null,
+      text: (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 60) || null,
       box: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } };
   };
   var emit = function (o) {
@@ -99,7 +100,7 @@ const REC_INJECT = `(() => {
     window[name] = function (msg) {
       if (!window.__acRecOn) return orig.apply(window, arguments);
       var t0 = Math.round(performance.now());
-      var m = (msg === undefined || msg === null) ? null : String(msg).replace(/\s+/g, ' ').slice(0, 300);
+      var m = (msg === undefined || msg === null) ? null : String(msg).replace(/\\s+/g, ' ').slice(0, 300);
       var r, ans = 'ok';
       try { r = orig.apply(window, arguments); }
       finally {
@@ -115,7 +116,7 @@ const REC_INJECT = `(() => {
   var onBeforeUnload = function (ev) {
     var rv = ev.returnValue;
     if (!ev.defaultPrevented && (rv === undefined || rv === null || rv === '')) return;
-    emit({ k: 'dialog', kind: 'beforeunload', msg: typeof rv === 'string' ? rv.replace(/\s+/g, ' ').slice(0, 300) : null, answer: null, dur: 0 });
+    emit({ k: 'dialog', kind: 'beforeunload', msg: typeof rv === 'string' ? rv.replace(/\\s+/g, ' ').slice(0, 300) : null, answer: null, dur: 0 });
   };
   var down = null, moved = 0;
   var H = {
@@ -237,7 +238,7 @@ export function setRecording(on) {
     recRootTabs = new Set(root ? [root] : []);
     for (const id of recRootTabs) { const rec = getWebview(id); if (rec) setRecInject(rec.el, true); }
     recNote(root
-      ? "● 녹화 중: 이 탭의 조작만 기록합니다(여기서 열리는 탭은 함께). ⌘⇧A로 종료."
+      ? shortcutLabel("● 녹화 중: 이 탭의 조작만 기록합니다(여기서 열리는 탭은 함께). ⌘⇧A로 종료.")
       : "● 녹화 중: 이 창에 브라우저 탭이 없어 기록할 것이 없습니다.");
   } else {
     for (const id of recRootTabs) { const rec = getWebview(id); if (rec) setRecInject(rec.el, false); }

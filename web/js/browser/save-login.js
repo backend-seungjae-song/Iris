@@ -81,6 +81,8 @@ function askBar(text, okLabel, onOk, onNo) {
 // 누를 때까지다. 누르면 main으로 넘기고 여기서는 해제한다.
 export async function offerSaveLogin(cap, tabId, partition) {
   if (!cap || !host || !host.saveCred) return "ignore";
+  // 로그인 편의 기능 꺼짐(기본값): main 이 저장을 거절하므로 묻지 않음
+  try { if (!(await host.loginConvenience?.())?.on) return "off"; } catch { return "off"; }
   const blocked = !!(autofillBlocked && autofillBlocked(tabId));
   let known = null;
   if (!blocked) {

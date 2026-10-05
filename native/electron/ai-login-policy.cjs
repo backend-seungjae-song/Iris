@@ -121,7 +121,7 @@ function createAiLoginPolicy({
     // 비밀번호는 여기서도 게스트 preload로만 가고 호출자에게는 secret 자리로만 돌아간다(cdp가 가린다).
     if (!allowed.length) {
       let dev = null;
-      try { dev = localLoginFor(origin); } catch {}
+      try { dev = await localLoginFor(origin); } catch {}
       const want0 = opts && opts.username;
       if (dev && (!want0 || want0 === dev.username)) {
         try { wc.send("ac-ai-login", { origin, username: dev.username, password: dev.password }); }

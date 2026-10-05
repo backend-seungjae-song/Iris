@@ -54,3 +54,18 @@ test('user navigation requested during restore wins over fallback',async()=>{
   await f.emit('dom-ready');await Promise.resolve();
   assert.deepEqual(f.loads,['https://example.test/user']);
 });
+test('SPA address change is saved to the tab so a restart reopens it',async()=>{
+  const f=fixture({reopened:false});
+  await f.emit('did-navigate',{url:'https://example.test/app',isMainFrame:true});
+  await f.emit('did-navigate-in-page',{url:'https://example.test/app/inbox',isMainFrame:true});
+  await f.emit('did-navigate-in-page',{url:'https://pay.example.test/frame#step2',isMainFrame:false});
+  const urls=f.changes.filter(m=>m.op==='tab.navigate'&&m.url).map(m=>m.url);
+  assert.deepEqual(urls,['https://example.test/app','https://example.test/app/inbox']);
+});
+test('browser tab label keeps the whole page title',async()=>{
+  const f=fixture({reopened:false});const tab={id:'tab',label:''};
+  f.context.curTabs=()=>[tab];f.context.renderTabs=()=>{};
+  const title='아주 긴 페이지 제목이 탭 이름에서 잘리지 않고 끝까지 보여야 한다 — 끝';
+  await f.emit('page-title-updated',{title});
+  assert.equal(tab.label,title);
+});

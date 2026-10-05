@@ -6,6 +6,7 @@ function subscribe(channel, cb) {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 contextBridge.exposeInMainWorld("acHost", {
+  ...(process.platform === "win32" ? { platform: "win32", terminalShell: (paneId) => ipcRenderer.invoke("ac-terminal-shell", paneId) } : {}),
   // 클립보드 텍스트 읽기. 터미널 Cmd+V가 kitty 인코딩에 막히는 문제를 우회한다(직접 붙여넣기).
   // preload가 sandbox라 clipboard 모듈이 없으므로, 메인 프로세스에 동기 IPC로 요청한다.
   readClipboard: () => ipcRenderer.sendSync("ac-clipboard-read"),
@@ -59,6 +60,7 @@ contextBridge.exposeInMainWorld("acHost", {
   },
   extensionTabCreated: (result) => ipcRenderer.send("ac-extension-tab-created", result),
   searchSuggestions: (query) => ipcRenderer.invoke("ac-search-suggestions", query),
+  pageTranslate: (payload) => ipcRenderer.invoke("ac-page-translate", payload),
   // 실제 Chrome 미러. frame/meta payload는 화면에 전달할 뿐 로그로 남기지 않는다.
   browserHistoryExport: (wcId) => ipcRenderer.invoke("ac-browser-history-export", wcId),
   // restore는 webview의 최초 src load 전에 main에 맡겨야 한다. 동기 stage는 marker만 받고,
@@ -140,6 +142,8 @@ contextBridge.exposeInMainWorld("acHost", {
   // 창을 닫아 탭을 잃는 경로를 만들지 않으려고 닫기를 되돌리기로 정의했다.
   detachTab: (arg) => ipcRenderer.invoke("ac-detach-tab", arg || {}),
   reattachTab: (tabId) => ipcRenderer.invoke("ac-reattach-tab", { tabId }),
+  // 분리 창에 탭을 넣는다(그 창에서 만든 새 탭). 같은 스페이스의 탭만 받는다.
+  claimDetachedTab: (arg) => ipcRenderer.invoke("ac-claim-detached-tab", arg || {}),
   detachedTabs: () => ipcRenderer.invoke("ac-detached-tabs"),
   onDetachedTabs: (fn) => {
     const h = (_e, payload) => { try { fn(payload && payload.tabs || []); } catch {} };
@@ -167,7 +171,7 @@ contextBridge.exposeInMainWorld("acHost", {
   aiLoginSources: (sources) => ipcRenderer.invoke("ac-ai-login-sources", { sources }),
   aiLoginSet: (origin, username, allowed) => ipcRenderer.invoke("ac-ai-login-set", { origin, username, allowed }),
   // 요소 선택 모드: 포커스 없는 창도 커서를 따라가야 하므로 OS 커서 좌표를 메인에서 받는다.
-  openSharedBrowser: () => ipcRenderer.send("ac-open-shared-browser"),
+  openSharedBrowser: (opts) => ipcRenderer.send("ac-open-shared-browser", opts || null),
   setPickMode: (on) => ipcRenderer.send("ac-pick-mode", !!on),
   // 선택 오버레이·기록기를 그 탭의 iframe 안까지 주입한다. executeJavaScript 는 최상위 프레임만 대상으로 한다.
   framesInject: (wc, key, src, on) => ipcRenderer.send("ac-frames-inject", { wc, key, src, on: !!on }),

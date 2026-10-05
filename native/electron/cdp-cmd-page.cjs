@@ -17,13 +17,34 @@
 //   공급자는 cdp-control.cjs의 handler 조립과 cdp-device-emulation의 apply 행동이다. 양방향 소비자는
 //   cdp-control.cjs dispatcher·default 안내, CLI/MCP의 page 명령과 viewport UI 상태다.
 
-function createPageCommands({ applyViewport }) {
+// 이동 시작 직후의 getURL 은 이동 전 주소. 메인 프레임 이동이 확정되거나 실패할 때까지 대기(상한 timeout)
+function navigationSettled(wc, timeout = 10000) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      wc.removeListener("did-navigate", done);
+      wc.removeListener("did-navigate-in-page", inPage);
+      wc.removeListener("did-fail-load", failed);
+      resolve();
+    };
+    const inPage = (_e, _url, isMainFrame) => { if (isMainFrame !== false) done(); };
+    const failed = (_e, _code, _desc, _url, isMainFrame) => { if (isMainFrame !== false) done(); };
+    const timer = setTimeout(done, timeout);
+    wc.on("did-navigate", done);
+    wc.on("did-navigate-in-page", inPage);
+    wc.on("did-fail-load", failed);
+  });
+}
+
+function createPageCommands({ applyViewport, navigationTimeout = 10000 }) {
   // 히스토리 이동. Electron 43 navigationHistory 우선, 구 API fallback.
   async function moveHistory(wc, cmd) {
     const nh = wc.navigationHistory;
     const can = cmd === "back" ? (nh?.canGoBack?.() ?? wc.canGoBack?.()) : (nh?.canGoForward?.() ?? wc.canGoForward?.());
     if (!can) return { ok: false, error: (cmd === "back" ? "뒤로" : "앞으로") + " 갈 기록이 없습니다." };
+    const settled = navigationSettled(wc, navigationTimeout);
     if (cmd === "back") { nh?.goBack ? nh.goBack() : wc.goBack(); } else { nh?.goForward ? nh.goForward() : wc.goForward(); }
+    await settled;
     return { ok: true, url: wc.getURL() };
   }
 
@@ -56,7 +77,8 @@ function createPageCommands({ applyViewport }) {
       return await moveHistory(wc, "forward");
     },
     async reload(_send, wc) {
-      wc.reload(); return { ok: true, url: wc.getURL() };
+      const settled = navigationSettled(wc, navigationTimeout);
+      wc.reload(); await settled; return { ok: true, url: wc.getURL() };
     },
     // 탭 화면 크기 지정. 주소줄의 크기 버튼과 같은 동작이다(반응형 확인).
     async viewport(_send, wc, args) {

@@ -1,3 +1,4 @@
+import { pathBasename } from "../core/host-path.js";
 // 소유 범위: Monaco 일반 파일 편집기 상태·모델·뷰 상태, 일반 파일 렌더·dirty 표시·저장, fileview 클릭 이벤트.
 // 제공 API: initTextEditor, 일반 파일 렌더·저장·dirty 함수와 Monaco 로드·상태 접근자.
 // 의존 대상: core/markdown, sheet 편집·렌더·액션, center/file-routing과 tab-close를 같은 영역 import로 사용한다.
@@ -158,7 +159,7 @@ export function monacoTheme() {
 // 확장자 → 언어. 엔진이 아는 목록을 그대로 쓴다(우리가 표를 다시 만들지 않는다).
 export function monacoLangFor(filePath) {
   const ext = "." + extOf(filePath);
-  const base = filePath.split("/").pop();
+  const base = pathBasename(filePath);
   for (const l of monaco.languages.getLanguages()) {
     if ((l.extensions || []).some((e) => e.toLowerCase() === ext)) return l.id;
     if ((l.filenames || []).some((f) => f === base)) return l.id;

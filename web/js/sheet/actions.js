@@ -1,3 +1,4 @@
+import { pathBasename, pathDirname } from "../core/host-path.js";
 // 시트 액션: 메뉴·도구 모음 명령과 클립보드·시트 메타 작업을 맡는다.
 //
 // 소유 범위
@@ -90,7 +91,9 @@ export function svMenuAt(anchor, html, onPick) {
   if (anchor.hasAttribute("aria-expanded")) anchor.setAttribute("aria-expanded", "true");
   const r = anchor.getBoundingClientRect();
   box.style.left = Math.min(r.left, innerWidth - box.offsetWidth - 8) + "px";
-  box.style.top = (r.bottom + 2) + "px";
+  // 아래 공간이 모자라면 기준 위로(창 아래쪽 시트 탭 메뉴)
+  const below = r.bottom + 2 + box.offsetHeight <= innerHeight - 8;
+  box.style.top = (below ? r.bottom + 2 : Math.max(8, r.top - 2 - box.offsetHeight)) + "px";
   box.addEventListener("mousedown", (e) => {
     const b = e.target.closest("[data-pick]");
     if (!b || b.disabled || b.getAttribute("aria-disabled") === "true") return;
@@ -420,7 +423,7 @@ export function svMenuAct(t, menu, item) {
   if (n === "데이터 추출") { showToast("데이터 추출은 정렬·필터·중복 삭제로 이미 다루는 것과 겹쳐 이 스코프에서는 보류합니다.", { level: "info" }); return; }
   if (n === "열기") { openFilePalette(); return; }
   if (n === "새 문서") {
-    const dir = t.path.slice(0, t.path.lastIndexOf("/"));
+    const dir = pathDirname(t.path);
     askText("새 스프레드시트", "제목 없는 스프레드시트", "파일 이름").then((name) => {
       if (!name || !name.trim()) return;
       wsSend({ type: "fs.op", op: "create-sheet", destDir: dir, name: name.trim().replace(/\.xlsx$/i, "") + ".xlsx" });
@@ -428,8 +431,8 @@ export function svMenuAct(t, menu, item) {
     return;
   }
   if (n === "사본 만들기") {
-    const base = t.path.slice(t.path.lastIndexOf("/") + 1).replace(/\.xlsx$/i, "");
-    const dir = t.path.slice(0, t.path.lastIndexOf("/"));
+    const base = pathBasename(t.path).replace(/\.xlsx$/i, "");
+    const dir = pathDirname(t.path);
     askText("사본 만들기", `${base} 사본`, "파일 이름").then((name) => {
       if (!name || !name.trim()) return;
       wsSend({ type: "fs.op", op: "copy", src: t.path, destDir: dir, name: name.trim().replace(/\.xlsx$/i, "") + ".xlsx", open: true });
@@ -437,7 +440,7 @@ export function svMenuAct(t, menu, item) {
     return;
   }
   if (n === "이름 바꾸기") {
-    const base = t.path.slice(t.path.lastIndexOf("/") + 1);
+    const base = pathBasename(t.path);
     askText("이름 바꾸기", base, "파일 이름").then((name) => {
       if (!name || !name.trim() || name.trim() === base) return;
       wsSend({ type: "fs.op", op: "rename", path: t.path, name: name.trim() });
@@ -445,7 +448,7 @@ export function svMenuAct(t, menu, item) {
     return;
   }
   if (n === "이동" && menu === "file") {
-    const dir = t.path.slice(0, t.path.lastIndexOf("/"));
+    const dir = pathDirname(t.path);
     askText("이동", dir, "대상 폴더 경로").then((destDir) => {
       if (!destDir || !destDir.trim() || destDir.trim() === dir) return;
       wsSend({ type: "fs.op", op: "move", src: t.path, destDir: destDir.trim() });
@@ -455,7 +458,7 @@ export function svMenuAct(t, menu, item) {
   if (n === "휴지통으로 이동") {
     if (!window.acHost || !acHost.trashItem) { showToast("이 실행 환경에서는 휴지통 이동을 지원하지 않습니다.", { level: "err" }); return; }
     if (isSheetTabDirty(t)) { showToast("저장하지 않은 편집이 있습니다. 먼저 저장하거나 되돌린 뒤 다시 시도하세요", { level: "warn" }); return; }
-    const base = t.path.slice(t.path.lastIndexOf("/") + 1);
+    const base = pathBasename(t.path);
     askText("휴지통으로 이동", "", `"${base}"을(를) 휴지통으로 이동하려면 그대로 다시 입력: ${base}`).then(async (v) => {
       if (v !== base) { showToast("취소했습니다.", { level: "warn" }); return; }
       const res = await acHost.trashItem(t.path);

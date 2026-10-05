@@ -31,6 +31,8 @@ const watchIntervalMs = () => Math.max(500, Number(process.env.IRIS_SERVER_WATCH
 // 실행하면 새 자식이 잠금을 얻지 못해 기동에 실패하거나, 얻을 때까지 대기하며 화면이 멈춘다.
 const LOCK_RELEASE_TIMEOUT_MS = 5000;
 const LOCK_POLL_MS = 50;
+// Windows 원격 상태 ACL 최대 30초와 나머지 종료 처리 여유
+const WINDOWS_STOP_TIMEOUT_MS = 45000;
 
 // 서버 소스가 있는 곳. 개발(저장소에서 바로 실행)과 설치본(앱 번들 안)이 다르다.
 // 번들에서는 asar 안의 파일을 자식 프로세스가 열 수 없으므로 app.asar.unpacked를 쓴다
@@ -70,6 +72,16 @@ function resolveRuntime(app) {
 // 같은 곳이다. 다르다고 잘못 판정하면 앱은 자기 서버에 안 붙고, 같다고 잘못 판정하면
 // 남의 상태를 자기 것으로 여긴다. 실제 경로를 물어보고, 물어볼 수 없으면(아직 없는 폴더 등)
 // 문자열 정규화로 내려간다.
+// 서버 자식 종료 요청
+// Windows: kill("SIGTERM") 이 곧 강제 종료라 서버의 밀린 저장·잠금 해제가 실행되지 않음. IPC 로 요청
+// macOS: IPC 채널 없음, 기존 SIGTERM 그대로
+function requestStop(child) {
+  if (process.platform === "win32" && child.connected) {
+    try { child.send({ type: "iris:shutdown" }); return; } catch {}
+  }
+  child.kill("SIGTERM");
+}
+
 function samePath(a, b) {
   const norm = (v) => {
     const p = path.resolve(String(v || ""));
@@ -143,10 +155,17 @@ class ServerHost {
     this.sourceWatch = null; // 개발 환경에서만 실행된다
   }
 
-  log(line) {
-    const text = `[server-host] ${line}`;
+  log(line, sync = false) {
+    const win = process.platform === "win32";
+    const text = `[server-host] ${win ? `${new Date().toISOString()} app pid ${process.pid} ` : ""}${line}`;
     console.log(text);
     this.onLog(text);
+    if (win) {
+      try {
+        if (sync) fs.appendFileSync(path.join(this.stateDir, "server.log"), `${text}\n`);
+        else this.openLog()?.write(`${text}\n`);
+      } catch {}
+    }
   }
 
   openLog() {
@@ -154,6 +173,7 @@ class ServerHost {
     try {
       fs.mkdirSync(this.stateDir, { recursive: true });
       this.logStream = fs.createWriteStream(path.join(this.stateDir, "server.log"), { flags: "a" });
+      if (process.platform === "win32") this.logStream.on("error", () => {});
     } catch { this.logStream = null; }
     return this.logStream;
   }
@@ -168,6 +188,7 @@ class ServerHost {
 
   // 앱이 켜질 때 한 번. 이미 있으면 붙고, 없으면 띄운다.
   async start() {
+    if (process.platform === "win32") this.log(`서버 준비 확인 시작 — 포트 ${this.port}, 상태 ${this.stateDir}`);
     const existing = await probe(this.port);
     if (existing && this.matches(existing)) {
       this.log(`이미 떠 있는 서버에 붙습니다 — pid ${existing.pid}, ${existing.stateDir}`);
@@ -192,14 +213,14 @@ class ServerHost {
     const health = await waitUntilUp(this.port, Date.now() + READY_TIMEOUT_MS);
     if (!health || !this.matches(health)) {
       // 기동하지 못한 자식을 그대로 두면 잠금만 점유한 채 남는다. 종료한 뒤 사용자에게 알린다.
-      this.log(`서버가 ${READY_TIMEOUT_MS / 1000}초 안에 응답하지 않았습니다 — 그 자식을 내리고 ${path.join(this.stateDir, "server.log")}를 남깁니다.`);
+      this.log(`서버가 ${READY_TIMEOUT_MS / 1000}초 안에 응답하지 않았습니다 — 그 자식을 내리고 ${path.join(this.stateDir, "server.log")}를 남깁니다.${process.platform === "win32" ? ` 자식 pid ${this.child?.pid ?? "?"}` : ""}`);
       const dead = this.child;
       this.child = null;
       // 소유 해제 후 종료. 종료 처리의 자동 재기동 차단(검증 안 된 서버 재실행 방지)
       // 준비 대기 중 예약된 backoff 재기동도 중단
       this.halted = true;
       this.owned = false;
-      try { dead && dead.kill("SIGTERM"); } catch {}
+      try { dead && requestStop(dead); } catch {}
       return { attached: false, health: null, policyMismatch: policyMismatch(health) };
     }
     this.log(`서버를 띄웠습니다 — pid ${health.pid}, ${health.stateDir}`);
@@ -258,7 +279,7 @@ class ServerHost {
     if (!child) return false;
     this.reloading = true;
     this.log(`server/${rel ? " " + rel : ""} 가 바뀌었습니다 — 서버 자식만 다시 띄웁니다.`);
-    try { child.kill("SIGTERM"); } catch {}
+    try { requestStop(child); } catch {}
     await this.awaitLockRelease();
     this.reloading = false;
     if (this.stopping) return false;
@@ -301,7 +322,11 @@ class ServerHost {
     if (runtime.asNode) env.ELECTRON_RUN_AS_NODE = "1";
     else delete env.ELECTRON_RUN_AS_NODE;
 
-    const child = spawn(runtime.bin, [entry], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
+    // Windows: 종료 요청용 IPC 채널, 콘솔 창 숨김, 설치 파일에 동봉한 herdr 위치
+    const win = process.platform === "win32";
+    if (win && this.app.isPackaged) env.IRIS_BUNDLED_HERDR = path.join(process.resourcesPath, "herdr", "herdr.exe");
+    const stdio = win ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"];
+    const child = spawn(runtime.bin, [entry], { cwd: root, env, stdio, windowsHide: true });
     this.child = child;
     this.owned = true;
     const out = this.openLog();
@@ -313,14 +338,15 @@ class ServerHost {
     // spawn이 ENOENT 등으로 실패하면 error만 오고 exit는 오지 않는 경우가 있다. 그때 아무것도
     // 기록하지 않으면 재시도 예산이 동작하지 않아, 앱이 서버 없이 대기 상태로 남는다.
     child.on("error", (e) => {
-      this.log(`서버를 띄우지 못했습니다: ${e && e.message}`);
-      if (this.child === child) this.onChildExit(null, "spawn-error");
+      this.log(`서버를 띄우지 못했습니다: ${e && e.message}${win ? `, 자식 pid ${child.pid ?? "?"}` : ""}`);
+      if (this.child === child) this.onChildExit(null, "spawn-error", child.pid);
     });
-    child.on("exit", (code, signal) => this.onChildExit(code, signal));
-    this.log(`${runtime.asNode ? "Electron(node 모드)" : runtime.bin}로 ${entry} 기동 — 포트 ${this.port}`);
+    child.on("exit", (code, signal) => this.onChildExit(code, signal, child.pid));
+    this.log(`${runtime.asNode ? "Electron(node 모드)" : runtime.bin}로 ${entry} 기동 — 포트 ${this.port}${win ? `, 자식 pid ${child.pid ?? "?"}` : ""}`);
   }
 
-  onChildExit(code, signal) {
+  onChildExit(code, signal, pid = this.child?.pid) {
+    if (process.platform === "win32") this.log(`서버 자식 종료 — pid ${pid ?? "?"}, code ${code}, signal ${signal || "-"}`, this.stopping);
     this.child = null;
     if (this.stopping || !this.owned) return;
     // 이 앱이 요청해서 종료된 경우다. reload() 가 잠금 해제를 기다린 뒤 직접 다시 실행한다.
@@ -354,12 +380,12 @@ class ServerHost {
       if (policyMismatch(health)) { this.failPolicy(health); return; }
       if (health && this.matches(health)) return;
       // 응답 없음·잘못된 응답 = 첫 기동과 같은 실패 처리. 소유 해제·감시 중단 후 자식 종료, 재기동 없음
-      this.log(`서버가 ${READY_TIMEOUT_MS / 1000}초 안에 올바르게 응답하지 않았습니다 — 그 자식을 내리고 다시 띄우지 않습니다.`);
+      this.log(`서버가 ${READY_TIMEOUT_MS / 1000}초 안에 올바르게 응답하지 않았습니다 — 그 자식을 내리고 다시 띄우지 않습니다.${process.platform === "win32" ? ` 자식 pid ${child.pid ?? "?"}` : ""}`);
       this.halted = true;
       if (this.watchTimer) { clearInterval(this.watchTimer); this.watchTimer = null; }
       this.owned = false;
       this.child = null;
-      try { child.kill("SIGTERM"); } catch {}
+      try { requestStop(child); } catch {}
     })();
   }
 
@@ -374,21 +400,58 @@ class ServerHost {
     if (this.sourceWatch) { this.sourceWatch.stop(); this.sourceWatch = null; }
     const child = this.child;
     this.child = null;
-    try { child && child.kill("SIGTERM"); } catch {}
+    try { child && requestStop(child); } catch {}
     try { this.onPolicyMismatch(health); } catch (e) { this.log(`정책 불일치 통지 실패: ${e && e.message}`); }
   }
 
   // 앱 종료 시. 이 앱이 실행한 서버만 종료한다. 붙기만 한 서버는 다른 소유자의 것이다.
   stop() {
+    if (process.platform === "win32" && this.stopPromise) return this.stopPromise;
     this.stopping = true;
     if (this.watchTimer) { clearInterval(this.watchTimer); this.watchTimer = null; }
     if (this.sourceWatch) { this.sourceWatch.stop(); this.sourceWatch = null; }
     const child = this.child;
     this.child = null;
     if (!child || !this.owned) return;
+    if (process.platform === "win32") {
+      this.stopPromise = new Promise((resolve) => {
+        let timer;
+        const finish = () => {
+          clearTimeout(timer);
+          child.removeListener("exit", finish);
+          this.log(`서버 종료 대기 완료 — pid ${child.pid ?? "?"}, server.lock ${fs.existsSync(path.join(this.stateDir, "server.lock")) ? "남음" : "없음"}`, true);
+          resolve();
+        };
+        child.once("exit", finish);
+        timer = setTimeout(() => {
+          this.log(`서버 종료 ${WINDOWS_STOP_TIMEOUT_MS}ms 초과 — pid ${child.pid ?? "?"}, 강제 종료`, true);
+          timer = setTimeout(() => {
+            this.log(`강제 종료 후 5000ms 동안 서버 종료 확인 실패 — pid ${child.pid ?? "?"}`, true);
+            finish();
+          }, 5000);
+          try { child.kill("SIGKILL"); } catch (error) { this.log(`서버 강제 종료 실패 — ${error.message}`, true); }
+        }, WINDOWS_STOP_TIMEOUT_MS);
+        this.log(`서버 자식 종료 요청 — pid ${child.pid ?? "?"}`, true);
+        try { requestStop(child); } catch (error) { this.log(`서버 종료 요청 실패 — ${error.message}`, true); }
+      });
+      return this.stopPromise;
+    }
     // 먼저 SIGTERM 을 보낸다. 서버의 핸들러가 잠금을 해제하고 종료한다.
-    try { child.kill("SIGTERM"); } catch {}
+    try { requestStop(child); } catch {}
     setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 3000).unref?.();
+  }
+
+  // Windows 부모 종료 전 서버 저장·잠금 해제 대기
+  handleWindowsQuit(event) {
+    if (this.quitReady) return;
+    event.preventDefault();
+    if (this.quitPending) return;
+    this.quitPending = true;
+    Promise.resolve(this.stop()).finally(() => {
+      this.quitReady = true;
+      this.log("서버 종료 대기 후 앱 종료", true);
+      this.app.quit();
+    });
   }
 }
 

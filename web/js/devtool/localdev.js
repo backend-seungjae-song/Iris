@@ -217,14 +217,16 @@ let errKind = "";
 function renderFailure() {
   const err = dom("#ld-err");
   const remote = failed === "remote";
-  const kind = remote ? "remote" : "unreachable";
+  const kind = remote ? "remote" : failed === "missing" ? "missing" : "unreachable";
   if (errKind !== kind || !err.firstChild) {
     errKind = kind;
+    const retry = `<button class="ld-btn" id="ld-retry">${icon("reload")}<span class="ld-retry-t">다시 연결</span></button>`;
     err.innerHTML = `<div class="ld-em-ic">${icon("warn")}</div>`
       + (remote
-        ? '<h2>이 창에서는 로컬 데브를 볼 수 없습니다</h2><p>localdev 상태는 이 Mac 에서 연 Iris 창에서만 조회합니다.</p>'
-        : '<h2>localdev 라우터에 연결하지 못했습니다</h2><p>터미널에서 <code>localdev status</code> 로 상태를 보고, 필요하면 <code>sudo localdev setup</code> 을 실행하세요.</p>'
-          + `<button class="ld-btn" id="ld-retry">${icon("reload")}<span class="ld-retry-t">다시 연결</span></button>`);
+        ? '<h2>이 창에서는 로컬 데브를 볼 수 없습니다</h2><p>localdev 상태는 이 컴퓨터에서 연 Iris 창에서만 조회합니다.</p>'
+        : kind === "missing"
+          ? '<h2>이 Mac 에 localdev 가 설정되어 있지 않습니다</h2><p>이 화면은 Iris 에 포함되지 않은 별도 도구 localdev 가 만든 <code>*.test</code> 로컬 서버 주소를 보여 줍니다. localdev 를 쓰지 않으면 설정 → 편의 기능에서 「서버」를 끌 수 있습니다.</p>' + retry
+          : '<h2>localdev 라우터에 연결하지 못했습니다</h2><p>터미널에서 <code>localdev status</code> 로 상태를 보고, 필요하면 <code>sudo localdev setup</code> 을 실행하세요.</p>' + retry);
   }
   const btn = dom("#ld-retry"); if (!btn) return;
   const wait = retrying();

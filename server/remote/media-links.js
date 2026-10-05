@@ -8,7 +8,9 @@ import { redactMacPaths } from "./public-text.js";
 
 const links = new Map();
 const MEDIA = /\.(?:pdf|html?|png|jpe?g|gif|webp|svg)$/i;
-const inside = (root, file) => file.startsWith(root + path.sep);
+const inside = (root, file) => process.platform === "win32"
+  ? file.toLowerCase().startsWith(root.replace(/[\\/]+$/, "").toLowerCase() + path.sep)
+  : file.startsWith(root + path.sep);
 
 export function safeMediaUrl(value, { home = os.homedir(), stateDir = stateHome(), cwd } = {}) {
   if (typeof value !== "string" || value.length > 2048 || /[\x00-\x1f\x7f]/.test(value)) return null;
@@ -49,10 +51,21 @@ export function mediaText(text, agent) {
       const ref = register(value); return ref ? `[Mac 파일](${ref})` : match;
     });
   out = out.replace(/(^|[\s`"':=])((?:file:\/\/|\/|\.\.?\/)[^\s`"'<>\])},;]+\.(?:pdf|html?|png|jpe?g|gif|webp|svg))(?=$|[\s`"',;])/gim,
-    (match, prefix, value) => {
+    (match, prefix, value, offset, source) => {
+      if (process.platform === "win32" && /[a-z][a-z0-9+.-]*:$/i.test(source.slice(0, offset + prefix.length))) return match;
       const ref = register(value);
       return ref ? `${prefix}[Mac 파일](${ref})` : match;
     });
+  if (process.platform === "win32") {
+    out = out.replace(/`((?:[a-z]:[\\/]|\\\\)[^`\n]+\.(?:pdf|html?|png|jpe?g|gif|webp|svg))`/gi,
+      (match, value) => {
+        const ref = register(value); return ref ? `[PC 파일](${ref})` : match;
+      });
+    out = out.replace(/(^|[\s"'=])((?:[a-z]:[\\/]|\\\\)[^\s`"'<>\])},;]+\.(?:pdf|html?|png|jpe?g|gif|webp|svg))(?=$|[\s"',;])/gim,
+      (match, prefix, value) => {
+        const ref = register(value); return ref ? `${prefix}[PC 파일](${ref})` : match;
+      });
+  }
   const refs = [];
   out = out.replace(/iris-media:[0-9a-f]{32}/g, (value) => {
     refs.push(value); return `REMOTE_MEDIA_LINK_${refs.length - 1}`;

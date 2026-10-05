@@ -114,6 +114,7 @@ function htmlFiles() {
 //). 여는 따옴표와 닫는 따옴표를 각각 문자 하나로 받는다. 짝이 맞지 않는 형태는
 // 애초에 파싱되지 않는 코드라 여기서 가려낼 것이 없다.
 const IMPORT_PATTERNS = [
+  /\bimport\s+["'](\.[^"']+)["']/g,                         // ESM 부수 효과
   /from\s+["'](\.[^"']+)["']/g,                                    // ESM 정적
   /\bimport\(\s*["'](\.[^"']+)["']\s*\)/g,                         // ESM 동적
   /\brequire\(\s*["'](\.[^"']+)["']\s*\)/g,                        // CJS
@@ -212,6 +213,7 @@ export function entryPoints(known) {
 
   // 1) package.json 이 직접 실행하는 것. 앱·서버 진입도 여기서 나오며 직접 적지 않는다.
   const pkg = JSON.parse(read("package.json"));
+  if (typeof pkg.main === "string") add(norm(pkg.main.replace(/^\.\//, "")), "package.json main");
   if (typeof pkg.build?.afterPack === "string") {
     add(norm(pkg.build.afterPack.replace(/^\.\//, "")), "package.json build.afterPack");
   }

@@ -1,3 +1,4 @@
+import { isHostWindows, pathWithin } from "../core/host-path.js";
 // 설정의 「부산물」 분류 렌더: 자료를 받아 HTML 문자열 하나를 돌려준다.
 //
 // 소유 범위
@@ -165,7 +166,7 @@ function entryRows(m, kind, day, canTrash) {
 // 지금 보는 것이 이 줄이거나 이 줄(폴더) 안에 있는가.
 function under(preview, dirPath) {
   if (!preview || !preview.path || !dirPath) return false;
-  return preview.path === dirPath || preview.path.startsWith(`${dirPath}/`);
+  return isHostWindows() ? pathWithin(dirPath, preview.path) : preview.path === dirPath || preview.path.startsWith(`${dirPath}/`);
 }
 
 function previewBlock(p) {

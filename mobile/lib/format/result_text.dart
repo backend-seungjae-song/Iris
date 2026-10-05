@@ -1,6 +1,6 @@
 String requestAnswerResultText(String result) => switch (result) {
   'delivered' => '전달함',
-  'already-answered' => '이미 답함(Mac 또는 터미널)',
+  'already-answered' => '이미 답함(컴퓨터 또는 터미널)',
   'expired' => '만료됨',
   'failed' => '실패',
   _ => '알 수 없는 결과',

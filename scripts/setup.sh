@@ -69,6 +69,12 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 if [ "$(uname -m)" != "arm64" ]; then
+  # Rosetta 로 연 터미널은 Apple Silicon 에서도 x86_64 로 보임
+  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+    bad "이 터미널은 Rosetta(인텔 호환 모드)로 열려 있습니다."
+    echo "     Finder 에서 터미널 앱을 선택하고 ⌘I → 「Rosetta를 사용하여 열기」를 끈 뒤 새 창에서 다시 실행하세요."
+    exit 1
+  fi
   bad "Apple Silicon(M1 이상) 맥이 필요합니다. (이 컴퓨터: $(uname -m))"
   exit 1
 fi
@@ -118,6 +124,8 @@ elif [ "$NODE_OK" = "1" ]; then
   info "pnpm이 없어 Node에 딸린 corepack으로 켭니다."
   run corepack enable pnpm || true
   command -v pnpm >/dev/null 2>&1 && ok "pnpm $(pnpm -v)" || { bad "pnpm을 켜지 못했습니다 — 'npm i -g pnpm'을 해 보세요"; note_fail; }
+else
+  warn "pnpm이 없습니다 — Node.js 22를 깐 뒤 다시 실행하면 함께 켭니다"
 fi
 
 # ── 3. herdr ────────────────────────────────────────────────────────────────
