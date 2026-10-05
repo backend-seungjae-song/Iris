@@ -70,6 +70,7 @@ test("서버는 종료 신호에서 여섯 축을 모두 민다", () => {
   for (const owned of ["flushHandlesNow()", "flushGrantsNow()"]) {
     assert.ok(runtimeFlush.includes(owned), `browser-runtime flush port가 ${owned}를 부르지 않는다`);
   }
-  assert.ok(/process\.on\(sig, \(\) => \{\s*flushPendingState\(\);/.test(src),
+  // Windows 종료 기록 호출 한 줄만 flush 앞에 허용
+  assert.ok(/process\.on\(sig, \(\) => \{\s*(?:logWindowsShutdown\([^;]*\);\s*)?flushPendingState\(\);/.test(src),
     "flush가 자물쇠 해제·exit보다 먼저 와야 한다 — 뒤에 두면 exit(0)이 먼저 끝낸다");
 });
