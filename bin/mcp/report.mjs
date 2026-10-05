@@ -27,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { artifactDir } from "../../server/artifacts-home.cjs";
+import qaExpiry from "../../server/qa-expiry-guard.cjs";
 import { renderPlain } from "./report-plain.mjs";
 
 // 개발 인스턴스와 설치된 앱이 같은 폴더를 쓰면 회차 장부가 섞인다. 어디인지는 한 곳이 정한다.
@@ -45,9 +46,12 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const markSidecar = (shot) => String(shot) + ".marks.json";
 function writeMarks(shot, marks, frame) {
   if (!marks || !marks.length || !frame || !frame.width) return;
+  const use = qaExpiry.acquirePaths([shot], "report-marks");
+  try {
   const rel = marks.map((m) => ({ label: m.label || "", color: m.color || "#85E8F6",
     x: m.x / frame.width, y: m.y / frame.height, w: m.w / frame.width, h: m.h / frame.height }));
   try { fs.writeFileSync(markSidecar(shot), JSON.stringify({ marks: rel })); } catch {}
+  } finally { use.release(); }
 }
 function readMarks(shot) {
   try { return JSON.parse(fs.readFileSync(markSidecar(shot), "utf8")).marks || []; } catch { return []; }
@@ -88,6 +92,8 @@ function runStore(runId) {
   return dir;
 }
 function keepShot(dir, src, name) {
+  const use = qaExpiry.acquirePaths([dir, src], "report-copy");
+  try {
   if (!src || !fs.existsSync(src)) return null;
   const dest = path.join(dir, "shots", name + path.extname(src || ".png"));
   try {
@@ -98,6 +104,7 @@ function keepShot(dir, src, name) {
     }
     return dest;
   } catch { return src; }
+  } finally { use.release(); }
 }
 // 장면의 실제 픽셀 크기. 세로로 긴 폰 화면과 가로로 넓은 웹 화면은 보고서에서 배치 방식이 달라야 한다.
 function pngSize(p2) {
@@ -131,10 +138,13 @@ function forEmbed(p) {
   return out;
 }
 const dataUri = (p) => {
+  const use = qaExpiry.acquirePaths([p], "report-embed");
+  try {
   try {
     if (!p || !fs.existsSync(p)) return null;
     return `data:image/png;base64,${fs.readFileSync(forEmbed(p)).toString("base64")}`;
   } catch { return null; }
+  } finally { use.release(); }
 };
 // 한 장면 안의 표시(요소 테두리·설명)는 이미지에 합성하지 않고 겹쳐 그린다. 확대해도 깨지지 않는다.
 function boxesOf(c) {
@@ -763,7 +773,19 @@ function ledgerCard(dir, r, i) {
 // 94개에서 무너졌다(문서 95000px). 그 사이 어디를 경계로 둘지는 취향이 아니라 규모의 문제다.
 const DENSE_FROM = 40;
 
-function buildReport({ title, summary, steps, out, kind, runId, target, setup, run, resume, overview }) {
+function buildReport(options) {
+  const rid = options.runId || "run-" + Date.now();
+  const primary = qaExpiry.acquireRun(rid, "mcp-report");
+  let other;
+  try {
+    const values = [options.out, ...receiptsOfRun([rid, options.resume?.from]).map((r) => r.shot)];
+    if (options.resume?.from) values.push(path.join(artifactDir("qa"), String(options.resume.from)));
+    for (const step of options.steps || []) values.push(step.before, step.after, step.shot, step.diff, ...(Array.isArray(step.via) ? step.via : [step.via]));
+    other = qaExpiry.acquirePaths(values, "mcp-report-source-output");
+    return buildReportHeld({ ...options, runId: rid });
+  } finally { try { if (other) other.release(); } finally { primary.release(); } }
+}
+function buildReportHeld({ title, summary, steps, out, kind, runId, target, setup, run, resume, overview }) {
   const handoff = kind === "handoff";
   const rid = runId || "run-" + Date.now();
   const dir = runStore(rid);
