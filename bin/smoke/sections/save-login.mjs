@@ -81,6 +81,23 @@ check("묻기 전에는 저장하지 않는다", () => {
   return call > ask;                       // 저장은 막대를 세운 뒤의 콜백 안에서만 일어난다
 });
 
+// 로그인 편의 기능은 기본값이 꺼짐이고, 꺼져 있으면 main 이 저장을 거절한다. 그때 막대를 띄우면 새로
+// 설치한 사용자는 로그인할 때마다 "저장할까요?" 를 보고, 저장을 누르면 매번 "저장하지 못했습니다" 를 본다.
+await checkAsync("로그인 편의 기능이 꺼져 있으면 묻지 않는다", async () => {
+  const mod = await import(new URL("../../../web/js/browser/save-login.js", import.meta.url).href);
+  const made = [];
+  const prev = globalThis.document;
+  globalThis.document = { createElement: (t) => { const el = { tag: t, className: "", children: [], setAttribute() {}, appendChild(c) { this.children.push(c); }, remove() {} }; made.push(el); return el; },
+    body: { appendChild() {} } };
+  try {
+    const host = { saveCred: async () => ({ ok: false }), getCreds: async () => [], loginConvenience: async () => ({ on: false }) };
+    mod.initSaveLogin({ acHost: host, showToast: () => {}, autofillBlocked: () => false });
+    const got = await mod.offerSaveLogin({ origin: "http://127.0.0.1:1", username: "u", password: "p" }, "t1", "persist:p");
+    if (made.some((el) => el.className === "slog-bar")) throw new Error(`꺼져 있는데 막대를 세움 (${got})`);
+    return true;
+  } finally { globalThis.document = prev; }
+});
+
 // Chrome 쪽 저장소는 수정하지 않는다. 이 경로의 저장 대상은 자체 금고뿐이다.
 check("이 길은 Chrome 저장소를 건드리지 않는다", () =>
   !/Login Data|chrome-password|chromeProfile/.test(bare(saveLogin) + bare(credIpc)));

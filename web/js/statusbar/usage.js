@@ -30,6 +30,7 @@ import {
   initUsagePage, openUsagePage, panelHtml as pagePanelHtml,
   setHistory, setPrefsFlags, setProviders,
 } from "../usagestats/page.js";
+import { askConfirm } from "../explorer/context-menu.js";
 
 // 영역(패널 마크업)은 화면 모듈이 갖는다. 부팅은 이 이름만 본다.
 export const panelHtml = pagePanelHtml;
@@ -395,7 +396,7 @@ function creditRow(provider) {
   button.type = "button";
   button.dataset.provider = provider.provider;
   button.disabled = state.busy;
-  button.addEventListener("click", (event) => {
+  button.addEventListener("click", async (event) => {
     event.stopPropagation();
     if (state.busy) return;
     const hadFocus = document.activeElement === button;
@@ -410,7 +411,8 @@ function creditRow(provider) {
       refocusCredit(provider.provider, hadFocus);
       return;
     }
-    if (!confirm(spec.ask(have))) {
+    const [askTitle, ...askNote] = spec.ask(have).split("\n");
+    if (!(await askConfirm(askTitle, askNote.join(" "))) || state.busy) {
       state.armed = false;
       draw();
       refocusCredit(provider.provider, hadFocus);

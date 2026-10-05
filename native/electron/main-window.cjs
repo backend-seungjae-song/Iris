@@ -30,8 +30,8 @@
 // 중계가 동작해야 하기 때문이다. 두 벌이 갈라지면 표시된 단축키와 실제 동작이 달라지므로,
 // bin/smoke 가 두 벌이 같은지 대조한다. 한쪽만 고치면 검사가 실패한다.
 const DEFAULT_RELAY = {
-  "screen-toggle": { alt: true, code: "Tab" },
-  "screen-toggle-back": { alt: true, shift: true, code: "Tab" },
+  "screen-toggle": process.platform === "win32" ? { mod: true, code: "Backquote" } : { alt: true, code: "Tab" },
+  "screen-toggle-back": process.platform === "win32" ? { mod: true, shift: true, code: "Backquote" } : { alt: true, shift: true, code: "Tab" },
   "screen-main": { alt: true, code: "Digit1" },
   "screen-browser": { alt: true, code: "Digit2" },
   "tab-prev": { alt: true, key: "ArrowLeft" },
@@ -57,6 +57,10 @@ const DEFAULT_RELAY = {
   "nav-forward": { mod: true, key: "]" },
   "print-page": { mod: true, key: "p" },
   "devtools": { key: "F12" },
+  ...(process.platform === "win32" ? {
+    "rail-prev": { mod: true, shift: true, key: "ArrowLeft" },
+    "rail-next": { mod: true, shift: true, key: "ArrowRight" },
+  } : {}),
 };
 // 창이 보내온 표. 잠긴 항목은 창이 이미 걸러 내므로, 여기서는 중계 대상 이름만 받아 덮어쓴다.
 let relayKeymap = { ...DEFAULT_RELAY };
@@ -74,6 +78,7 @@ function setRelayKeymap(map) {
 }
 // Electron 의 input 은 metaKey 가 아니라 meta 다. ⌘ 와 ⌃ 는 같은 자리로 취급하며, 표와 같은 규칙이다.
 function matchRelay(input) {
+  if (process.platform === "win32" && input.control && input.alt) return null;
   const mod = !!(input.meta || input.control);
   for (const [id, b] of Object.entries(relayKeymap)) {
     if (mod !== !!b.mod) continue;
@@ -88,7 +93,7 @@ function matchRelay(input) {
 }
 
 function createMainWindow({
-  app, BrowserWindow, shell, webContents, windowLayout, guardWebviewPartition,
+  app, BrowserWindow, dialog, shell, webContents, windowLayout, guardWebviewPartition,
   pinHiddenViewportById, preloadPath, webviewPreloadPath, appUrl: APP_URL,
   audioDiagEnabled: AUDIO_DIAG_ENABLED, noThrottleOpt: NO_THROTTLE_OPT,
   markAppAlive, console,
@@ -110,7 +115,9 @@ function createMainWindow({
       minWidth: 720,
       minHeight: 480,
       backgroundColor: "#0A1620",
-      titleBarStyle: "hiddenInset", // 트래픽 라이트를 콘텐츠 위에(웹 .titlebar 드래그 영역과 맞물림)
+      // 트래픽 라이트를 콘텐츠 위에(웹 .titlebar 드래그 영역과 맞물림)
+      // Windows: hiddenInset 이면 최소화·최대화·닫기 버튼이 없어 기본 창 테두리 사용
+      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       title: "Iris — 콘솔",
       acceptFirstMouse: true, // 다른 창에서 돌아온 첫 클릭도 에이전트 선택까지 전달한다.
       webPreferences: {
@@ -136,6 +143,15 @@ function createMainWindow({
     if (saved && !windowLayout.boundsVisible(saved)) windowLayout.restoreWhenDisplayReturns(win, saved, () => windowLayout.placeSavedBounds(win, saved));
     windowLayout.trackWindowBounds(win, "mainBounds");
     win.on("closed", cancelLoadRetry);   // 닫힌 창에 로드를 거는 재시도가 남지 않게
+    // 렌더러가 미저장 편집으로 beforeunload 를 막으면 묻지 않고 닫기·종료·새로고침이 취소됨. 크롬처럼 물음
+    const w = win;
+    w.webContents.on("will-prevent-unload", (ev) => {
+      try {
+        const r = dialog.showMessageBoxSync(w, { type: "warning", buttons: ["닫기", "취소"], defaultId: 1, cancelId: 1,
+          message: "저장하지 않은 편집이 있습니다", detail: "닫으면 저장하지 않은 편집이 사라집니다." });
+        if (r === 0) ev.preventDefault();
+      } catch {}
+    });
     loadWithRetry();
 
     // 외부 링크는 기본 브라우저로(콘솔 창을 벗어나는 내비게이션 방지). webview 내부는 영향 없음.
@@ -167,6 +183,9 @@ function createMainWindow({
       // 기본은 Chromium 스로틀을 허용하고 보호 탭만 창 단위 참조로 해제한다.
       // IRIS_NO_THROTTLE_OPT=1은 예전 전역 해제 동작을 그대로 복원한다.
       webPreferences.backgroundThrottling = !NO_THROTTLE_OPT;
+      // 투명이면 다크 색 구성을 쓰는 페이지(다크 모드의 text/plain 등)가 글자만 흰색이 되고 배경은 비어
+      // 아래의 흰 바탕 위에 흰 글자가 된다. 불투명이면 Chromium 이 크롬과 같이 그 페이지 바탕을 어둡게 칠한다.
+      webPreferences.transparent = false;
     });
     // 화면 크기는 여기서 전달한다. 게스트가 화면에 붙은 뒤라야 그릴 표면이 있다. 탭이 만들어지는
     // 순간에 호출하면 Electron 이 종료된다. 보이지 않는 탭은 폭이 0이라 페이지가 모바일로 판정한다.
@@ -215,11 +234,18 @@ function createMainWindow({
         if (hit) return send(hit);
         // 아래는 표에서 잠근 항목이다. 포커스에 따라 동작이 달라지거나 여기서 직접 처리해야 하므로
         // 이름으로 중계하지 않는다.
-        if (!(input.meta || input.control)) return; // 이하 cmd/ctrl 계열만
+        const ow = BrowserWindow.fromWebContents(contents.hostWebContents) || win;
+        const isWin = process.platform === "win32";
+        if (isWin && k === "F5" && !input.control && !input.meta && !input.alt && !input.shift) return send("reload-tab");
+        if (isWin && k === "F2" && !input.control && !input.meta && !input.alt && !input.shift && ow === win) return send("rename-pane");
+        if (!(input.meta || input.control) || input.alt) return;
         const kl = (k || "").toLowerCase();
-        if (kl === "w" && !input.shift && input.control && !input.meta) return send("close-tab"); // 탭 닫기=ctrl+w(cmd+w 아님)
-        // 브라우저 리로드(webview 포커스 시): ⌘R=리로드, ⌘⇧R=강제 리로드. ⌘⌃R(전체 새로고침)·⌥ 계열은 제외.
-        if (kl === "r" && !input.control && !input.alt) { return send(input.shift ? "force-reload-tab" : "reload-tab"); }
+        if (isWin && input.control && !input.meta && kl === "w" && input.shift && ow === win) {
+          if (!input.isAutoRepeat) send("close-pane"); else ev.preventDefault();
+          return;
+        }
+        if (kl === "w" && input.control && !input.meta && !input.shift) return send("close-tab");
+        if (kl === "r" && (!input.control || isWin)) return send(isWin && input.shift ? "app-refresh" : input.shift ? "force-reload-tab" : "reload-tab");
         if (k === "=" || k === "+") { contents.setZoomLevel(contents.getZoomLevel() + 0.5); ev.preventDefault(); }
         else if (k === "-" || k === "_") { contents.setZoomLevel(contents.getZoomLevel() - 0.5); ev.preventDefault(); }
         else if (k === "0") { contents.setZoomLevel(0); ev.preventDefault(); }

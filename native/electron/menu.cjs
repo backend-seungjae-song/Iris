@@ -53,7 +53,7 @@ function createMenu({
       if (profs.length > 1) {
         const pick = await dialog.showMessageBox(win, {
           type: "question", message: "어느 프로필에서 쿠키를 가져올까요?",
-          detail: "Keychain 접근 프롬프트가 뜰 수 있습니다.",
+          detail: platform === "win32" ? "Windows의 브라우저 암호화로 쿠키를 가져오지 못할 수 있습니다." : "Keychain 접근 프롬프트가 뜰 수 있습니다.",
           buttons: [...profs.map((p) => p.label), "취소"], cancelId: profs.length,
         });
         if (pick.response >= profs.length) return;
@@ -66,6 +66,7 @@ function createMenu({
   }
   function build() {
     const isMac = platform === "darwin";
+    const modifier = platform === "win32" ? "CmdOrCtrl" : "Cmd";
     const template = [
       ...(isMac ? [{
         label: "Iris",
@@ -109,10 +110,16 @@ function createMenu({
           // 화면 코드는 서버가 내려준다. 서버만 수정하고 앱을 그대로 두면 창이 이전 페이지를 계속
           // 유지하는데, 새로고침 항목이 없으면 앱 재시작 외에는 되돌릴 방법이 없다.
           // 서버 코드를 수정한 뒤 반영하는 정상 경로다.
-          { role: "reload", label: "새로고침", accelerator: "Cmd+R" },
-          { role: "forceReload", label: "강제 새로고침", accelerator: "Cmd+Shift+R" },
+          ...(platform === "win32" ? [
+            { label: "페이지 새로고침", click: () => BrowserWindow.getFocusedWindow()?.webContents.send("ac-shortcut", "reload-tab") },
+            { label: "페이지 강제 새로고침", click: () => BrowserWindow.getFocusedWindow()?.webContents.send("ac-shortcut", "force-reload-tab") },
+            { label: "앱 새로고침", click: () => BrowserWindow.getFocusedWindow()?.webContents.send("ac-shortcut", "app-refresh") },
+          ] : [
+            { role: "reload", label: "새로고침", accelerator: `${modifier}+R` },
+            { role: "forceReload", label: "강제 새로고침", accelerator: `${modifier}+Shift+R` },
+          ]),
           { type: "separator" },
-          { role: "toggleDevTools", label: "개발자 도구", accelerator: "Cmd+Alt+I" },
+          { role: "toggleDevTools", label: "개발자 도구", accelerator: `${modifier}+Alt+I` },
           { type: "separator" },
           { role: "togglefullscreen", label: "전체 화면" },
         ],

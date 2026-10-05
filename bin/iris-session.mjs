@@ -1,13 +1,14 @@
 // CLI와 MCP는 호출마다 현재 pane 소유 관계를 확인한다.
 import net from "node:net";
+import path from "node:path";
 import childProcess from "node:child_process";
-import { herdrSession } from "../server/herdr-session.cjs";
+import { herdrSession, herdrEndpoint } from "../server/herdr-session.cjs";
 
 const HERDR_SOCK = herdrSession().socket;
 
 function herdrCall(method, params = {}) {
   return new Promise((resolve, reject) => {
-    const socket = net.connect(HERDR_SOCK, () => {
+    const socket = net.connect(herdrEndpoint(HERDR_SOCK), () => {
       socket.write(JSON.stringify({ id: "iris-mcp", method, params }) + "\n");
     });
     let buf = "", done = false;
@@ -33,7 +34,19 @@ function herdrCall(method, params = {}) {
   });
 }
 
-export function processAncestry() {
+export async function processAncestry() {
+  if (process.platform === "win32") {
+    const { request } = await import("../server/win-native.cjs");
+    const result = await request({ op: "processes" });
+    if (!result.ok) return [];
+    const parents = new Map(result.processes.map((row) => [row.pid, row.ppid]));
+    const out = [], seen = new Set();
+    let pid = process.pid;
+    while (pid > 1 && !seen.has(pid) && out.length < 32) {
+      out.push(pid); seen.add(pid); pid = parents.get(pid) || 0;
+    }
+    return out;
+  }
   return new Promise((resolve) => {
     childProcess.execFile("/bin/ps", ["-axo", "pid=,ppid="], { timeout: 2000, maxBuffer: 4 << 20 }, (err, stdout) => {
       if (err && !stdout) { resolve([]); return; }
@@ -83,7 +96,7 @@ export function chooseCodexResumePane(agents, processInfos, thread) {
     const info = processInfos[i]?.process_info || processInfos[i] || {};
     const matches = (info.foreground_processes || []).filter((p) => {
       const argv = p.argv || [];
-      if (String(argv[0] || "").split("/").at(-1) !== "codex") return false;
+      if ((process.platform === "win32" ? path.win32.basename(String(argv[0] || "")).replace(/\.(exe|cmd)$/i, "").toLowerCase() : String(argv[0] || "").split("/").at(-1)) !== "codex") return false;
       const command = argv[1] === "--no-daemon" ? 2 : 1;
       return argv[command] === "resume" && argv[command + 1] === thread;
     });

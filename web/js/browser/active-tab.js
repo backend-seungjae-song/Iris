@@ -1,7 +1,7 @@
 // 이 창의 활성 탭 판정 하나만 소유한다.
 //
 // 소유 범위
-//   창이 한 탭에 묶였을 때와 아닐 때의 활성 탭 결정, 그리고 공유 활성 탭을 써도 되는지의 판정.
+//   분리 창(boundTab = 그 창이 고른 탭)과 그 밖의 창의 활성 탭 결정, 그리고 공유 활성 탭을 써도 되는지의 판정.
 //
 // 제공 API
 //   activeIdFor({ boundTab, spaceActive }) · mayWriteSharedActive(boundTab)

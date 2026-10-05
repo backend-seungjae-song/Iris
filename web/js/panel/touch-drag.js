@@ -23,6 +23,7 @@
 //   현재 목록 확인: node bin/importers.mjs web/js/panel/touch-drag.js
 
 import { callHook } from "../core/hooks.js";
+import { bindingOf, matchBinding } from "../core/keymap.js";
 import { getWebview } from "../browser/webview-store.js";
 import { activeBrowserId, activeWv } from "../browser/webview.js";
 import { askText, showCtx } from "../explorer/context-menu.js";
@@ -44,23 +45,23 @@ export function initTouchDrag(deps) {
   // 어디에 포커스가 있어도 중간에서 삼켜지지 않게 하기 위함이다(터미널 포커스 시 안 먹던 문제).
   // 게이팅은 활성 webview 존재로만 한다. 메인 창·분리 브라우저 창 양쪽에서 동일하게 동작한다.
   document.addEventListener("keydown", (e) => {
-    if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
-    const k = (e.key || "").toLowerCase();
+    // 조합은 키맵 표 기준(설정 화면에서 바꾼 값)
+    const k = ["rec-toggle", "sketch", "detach", "pick-toggle"].find((id) => matchBinding(e, bindingOf(id)));
+    if (!k) return;
     // 문서 탭(docx/sheet)이 활성이면 webview가 없다. BROWSER_MODE라고 무조건 로컬 토글하면
     // "녹화 중" 표시만 켜지고 아무것도 기록되지 않는다.
     // 게이팅은 위 주석대로 활성 webview 존재로만 한다.
-    if (k === "a") { e.preventDefault(); e.stopPropagation(); if (activeWv()) callHook("record.set", !callHook("record.on")); else if (!BROWSER_MODE) wsSend({ type: "rec-toggle-relay" }); return; }
+    if (k === "rec-toggle") { e.preventDefault(); e.stopPropagation(); if (activeWv()) callHook("record.set", !callHook("record.on")); else if (!BROWSER_MODE) wsSend({ type: "rec-toggle-relay" }); return; }
     // ⌘⇧D 스케치: 지금 포커스가 있는 창의 활성 탭을 찍는다. 이 창에 webview 가 없으면(브라우저를
     // 분리해 뒀을 때) 분리 창에서 열도록 넘긴다. 녹화 토글과 같은 되돌림 경로다.
-    if (k === "d") {
+    if (k === "sketch") {
       e.preventDefault(); e.stopPropagation();
       if (activeWv()) callHook("sketch.open"); else if (!BROWSER_MODE) wsSend({ type: "sketch-open-relay" });
       return;
     }
-    if (k !== "e" && k !== "o") return;
     // 브라우저가 분리돼 나가면 메인 창엔 webview가 없다. 그때 ⌘⇧E는 분리 창의 선택 모드를 켠다.
     // 사용자는 메인 창 터미널에서 명령을 치다가 그대로 요소를 고르기 때문이다(요소는 pick-relay로 되돌아온다).
-    if (k === "o") { e.preventDefault(); e.stopPropagation(); toggleDock(); return; } // 분리/도킹은 webview 유무와 무관
+    if (k === "detach") { e.preventDefault(); e.stopPropagation(); toggleDock(); return; } // 분리/도킹은 webview 유무와 무관
     // 어느 창에서 눌러도 결과는 하나다. 서버가 값을 뒤집고 모든 창에 같은 값을 돌려준다. webview 유무로
     // 갈라 relay 하면 두 창의 상태가 반대가 된다.
     e.preventDefault(); e.stopPropagation();
@@ -71,8 +72,10 @@ export function initTouchDrag(deps) {
 // 이것만은 탭에 갇히지 않는다. <webview>는 OS 마우스가 감싸는 창의 위젯을 거쳐 들어와서, 켜 두면
 // 앱 헤더와 다른 탭 커서까지 터치가 된다. 그래서 포인터가 그 화면 안에 있는
 // 동안만 켜고, 나가거나 탭을 옮기거나 창이 포커스를 잃으면 반드시 끈다.
+// 켜는 요청에는 보이는 페이지 영역을 함께 보낸다. 켜진 동안에는 마우스 이동이 이 창에 오지 않아서,
+// 실제 켜고 끄기는 메인 프로세스가 커서 위치를 이 영역과 비교해 정한다. 같은 탭이어도 영역이 바뀌었을 수
+// 있어 다시 보낸다.
 async function setTouchDrag(tabId, on) {
-  if (on && touchDragTab === tabId) return;
   if (!on && touchDragTab !== tabId) return;
   const rec = tabId ? getWebview(tabId) : null;
   if (!rec || !rec.el) { touchDragTab = null; return; }
@@ -80,14 +83,20 @@ async function setTouchDrag(tabId, on) {
   try { wcId = rec.el.getWebContentsId(); } catch {}
   if (!wcId) return;
   touchDragTab = on ? tabId : null;
-  try { await acHost?.setViewport({ wcId, touchDrag: !!on }); } catch {}
+  let rect;
+  if (on) {
+    const a = rec.el.getBoundingClientRect(), w = $("#wv-stack").getBoundingClientRect();
+    const x = Math.max(a.left, w.left), y = Math.max(a.top, w.top);
+    rect = { x, y, w: Math.min(a.right, w.right) - x, h: Math.min(a.bottom, w.bottom) - y };
+  }
+  try { await acHost?.setViewport({ wcId, touchDrag: !!on, rect }); } catch {}
 }
 
-// 현재 상태에 맞게 정리한다. 켤 조건이 아니면(지정 없음·데스크톱 크기·다른 탭) 끈다.
+// 현재 상태에 맞게 정리한다. 켤 조건이 아니면(지정 없음·데스크톱 크기·다른 탭·손잡이로 끄는 중) 끈다.
 export function syncTouchDrag(hovering) {
   const id = activeBrowserId();
   const vp = id ? viewportByTab[id] : null;
-  const want = !!(hovering && vp && deviceClassOf(vp.w) !== "데스크톱");
+  const want = !!(hovering && vp && deviceClassOf(vp.w) !== "데스크톱" && !sizeDrag);
   if (touchDragTab && touchDragTab !== id) setTouchDrag(touchDragTab, false);
   if (want) setTouchDrag(id, true);
   else if (touchDragTab) setTouchDrag(touchDragTab, false);
@@ -104,6 +113,7 @@ export function startSizeDrag(e, axis) {
   mask.style.cursor = axis === "r" ? "ew-resize" : axis === "b" ? "ns-resize" : "nwse-resize";
   wrap.appendChild(mask);
   sizeDrag = { id, axis, x: e.clientX, y: e.clientY, mask, pending: 0 };
+  syncTouchDrag(false);   // 끄는 중 커서가 페이지 영역을 지나도 터치로 바뀌지 않게 한다
   document.addEventListener("mousemove", onSizeDrag, true);
   document.addEventListener("mouseup", endSizeDrag, true);
 }
@@ -129,6 +139,7 @@ function endSizeDrag() {
   document.removeEventListener("mousemove", onSizeDrag, true);
   document.removeEventListener("mouseup", endSizeDrag, true);
   applyViewport(d.id, viewportByTab[d.id]);   // 손을 놓을 때 한 번: 기기가 바뀌었으면 여기서 새로고침
+  syncTouchDrag(true);    // 바뀐 페이지 영역으로 다시 켠다. 커서가 영역 밖이면 메인 프로세스가 켜지 않는다
 }
 
 export function isSizeDragging() { return !!sizeDrag; }

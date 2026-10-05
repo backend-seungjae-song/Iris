@@ -998,7 +998,7 @@ function viewGroup(b, stage) {
           },
         }, '×'));
       }
-      const node = slotNode(b, g.k, null, { hint: '조각을 골라 여기에' });
+      const node = slotNode(b, g.k, null, { hint: '조각을 끌어다 놓기' });
       node.prepend(cap);
       return node;
     }),
@@ -1594,7 +1594,7 @@ function viewMeet(b, stage) {
   }
 
   stage.append(el('div', { class: 'meet board-h' },
-    MEET_MAIN.map(([k, label]) => slotNode(b, k, label, { hint: '조각을 골라 여기에' }))));
+    MEET_MAIN.map(([k, label]) => slotNode(b, k, label, { hint: '조각을 끌어다 놓기' }))));
 
   MEET_MORE.forEach(([k, label, hint]) => {
     const open = meetOpen[k];

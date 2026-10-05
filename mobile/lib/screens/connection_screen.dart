@@ -199,7 +199,7 @@ class _ConnectionScreenState extends State<ConnectionScreen>
       if (mounted) {
         setState(() {
           _connection = null;
-          _status = connection.disconnectReason?.message ?? 'Mac과 연결이 끊겼습니다.';
+          _status = connection.disconnectReason?.message ?? '컴퓨터과 연결이 끊겼습니다.';
         });
       }
     });
@@ -296,11 +296,11 @@ class DisconnectedView extends StatelessWidget {
                 children: [
                   IrisConnectionPanel(
                     key: const Key('connection-panel'),
-                    title: busy ? '연결 준비 중' : 'Mac과 연결 안 됨',
+                    title: busy ? '연결 준비 중' : '컴퓨터과 연결 안 됨',
                     message: status,
                     actionLabel: retrySeconds > 0
                         ? '$retrySeconds초 후 다시 시도'
-                        : 'Mac에 연결',
+                        : '컴퓨터에 연결',
                     icon: busy ? 'lock-simple' : 'wifi-slash',
                     busy: busy,
                     onAction: retrySeconds > 0 ? null : onConnect,
@@ -423,7 +423,7 @@ class _ConnectPinSheetState extends State<ConnectPinSheet> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Mac에서 정한 PIN을 입력하면 연결합니다. 이 폰에는 저장하지 않습니다.',
+          '컴퓨터에서 정한 PIN을 입력하면 연결합니다. 이 폰에는 저장하지 않습니다.',
           style: TextStyle(
             color: context.iris.muted,
             fontSize: 14,
@@ -465,7 +465,7 @@ class _ConnectPinSheetState extends State<ConnectPinSheet> {
         ],
         const SizedBox(height: 8),
         Text(
-          'Mac의 Iris 원격 화면 → 접속 PIN에서 정하고 바꿉니다.',
+          '컴퓨터의 Iris 원격 화면 → 접속 PIN에서 정하고 바꿉니다.',
           style: TextStyle(
             color: context.iris.faint,
             fontSize: 13,

@@ -181,7 +181,7 @@ check("HTML·SVG·PDF는 에디터가 아니라 브라우저로", () => {
 });
 check("file: 링크도 문서면 브라우저·아니면 에디터", () => {
   const seg = sliceFrom(fileRouting, "function openTerminalLink", fileRouting.length, "file: 링크도 문서면 브라우저·아니면 에디터");
-  return /file:/.test(seg) && /openTerminalPath\(p\)/.test(seg) && /if \(!p\.startsWith\("\/"\)\) return/.test(seg);
+  return /file:/.test(seg) && /openTerminalPath\(p\)/.test(seg) && /const p = fromFileUrl\(u\)/.test(seg) && /if \(!p \|\| !isAbsolutePath\(p\)\) return/.test(seg);
 });
 
 }

@@ -1,3 +1,4 @@
+import { isHostWindows } from "../core/host-path.js";
 // 소유 범위: Mac 원격 관리 화면
 // 제공 API: panelHtml, initCapability(ctx)
 // 의존 대상: capability context의 wsSend와 remote.* 서버 메시지
@@ -9,7 +10,7 @@ export const panelHtml = `
     <header class="remote-head">
       <div>
         <h2>휴대폰 원격 제어</h2>
-        <p>이 Mac의 원격 제어 사용 여부와 등록 기기를 관리합니다.</p>
+        <p>이 컴퓨터의 원격 제어 사용 여부와 등록 기기를 관리합니다.</p>
       </div>
     </header>
     <section class="remote-guide" id="remote-guide" aria-live="polite" hidden>
@@ -420,14 +421,14 @@ function tailscaleView(value) {
     "not-installed": value.canInstall
       ? { tone: "off", title: "Tailscale 없음", detail: "원격 연결에 Tailscale이 필요합니다. Homebrew로 설치합니다.", action: "install", label: "설치" }
       : { tone: "off", title: "Tailscale 없음", detail: "tailscale.com에서 Tailscale을 설치하세요." },
-    "daemon-off": { tone: "off", title: "Tailscale 꺼짐", detail: "켜면 macOS 관리자 암호를 한 번 묻습니다.", action: "start", label: "켜기" },
+    "daemon-off": { tone: "off", title: "Tailscale 꺼짐", detail: isHostWindows() ? "켜면 Windows 관리자 권한을 요청합니다." : "켜면 macOS 관리자 암호를 한 번 묻습니다.", action: "start", label: "켜기" },
     "needs-login": value.authUrl && openedLoginUrl === value.authUrl
       ? { tone: "wait", title: "로그인 대기", detail: "Iris 탭에서 Tailscale 로그인을 마치세요.", action: "reopen", label: "로그인 화면 다시 열기" }
       : value.loginPending
       ? { tone: "wait", title: "로그인 준비 중", detail: "Tailscale에서 로그인 주소를 받는 중입니다. 받으면 Iris 탭으로 열립니다." }
       : { tone: "off", title: "로그인 필요", detail: "Iris 탭에서 Tailscale 계정으로 로그인합니다.", action: "connect", label: "로그인" },
     stopped: { tone: "off", title: "Tailscale 연결 꺼짐", detail: "로그인은 되어 있습니다.", action: "connect", label: "연결" },
-    "needs-approval": { tone: "warn", title: "기기 승인 대기", detail: "Tailscale 관리 화면에서 이 Mac을 승인하세요." },
+    "needs-approval": { tone: "warn", title: "기기 승인 대기", detail: "Tailscale 관리 화면에서 이 컴퓨터를 승인하세요." },
     starting: { tone: "wait", title: "Tailscale 시작 중", detail: "잠시 기다려 주세요." },
     running: { tone: "on", title: "Tailscale 연결됨",
       detail: [value.tailnet, value.address].filter(Boolean).join(" · ") || "연결되어 있습니다." },
@@ -456,7 +457,7 @@ function guideSteps() {
       pinForm: true,
     },
     {
-      title: "Mac Tailscale 연결",
+      title: isHostWindows() ? "Windows Tailscale 연결" : "Mac Tailscale 연결",
       done: tailscale?.phase === "running",
       summary: mac.detail,
       detail: mac.detail,
@@ -469,14 +470,14 @@ function guideSteps() {
       summary: online.map((phone) => phone.name).filter(Boolean).join(", ") || "연결됨",
       detail: phones.length
         ? "휴대폰 Tailscale 앱에서 연결을 켜세요."
-        : `휴대폰에 Tailscale을 설치하고 Mac과 같은 계정${tailnet ? `(${tailnet})` : ""}으로 로그인하세요. 아래 QR을 휴대폰 카메라로 찍으면 설치 화면이 열립니다. 로그인하면 이 단계가 자동으로 완료됩니다.`,
+        : `휴대폰에 Tailscale을 설치하고 이 컴퓨터와 같은 계정${tailnet ? `(${tailnet})` : ""}으로 로그인하세요. 아래 QR을 휴대폰 카메라로 찍으면 설치 화면이 열립니다. 로그인하면 이 단계가 자동으로 완료됩니다.`,
       qr: phones.length ? null : tailscale?.phoneInstallQr,
     },
     {
       title: "원격 제어 켜기",
       done: current?.status === "on",
       summary: current?.listener?.address ? `${current.listener.address}:${current.listener.port}` : "켜짐",
-      detail: failed && current.error?.message ? current.error.message : "이 Mac이 Tailscale 주소로만 휴대폰 연결을 받습니다.",
+      detail: failed && current.error?.message ? current.error.message : "이 컴퓨터가 Tailscale 주소로만 휴대폰 연결을 받습니다.",
       tone: failed ? "error" : undefined,
       action: {
         kind: current?.error?.action === "stop" ? "retry-stop" : "enable",

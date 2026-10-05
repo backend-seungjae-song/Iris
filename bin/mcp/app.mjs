@@ -8,7 +8,7 @@
 //   createAppSurface(deps) 하나. 도구 배열과 기기 목록 해석을 함께 돌려준다.
 //
 // 의존 대상
-//   idb 실행 파일(IRIS_IDB 로 바꿀 수 있다), adb(server/adb-path.js 가 찾는다), state-home.cjs 가 정한 상태 폴더와
+//   idb(idb-path.mjs 가 찾는다), adb(server/adb-path.js 가 찾는다), state-home.cjs 가 정한 상태 폴더와
 //   artifacts-home.cjs 가 정한 그 안의 부산물 위치,
 //   그리고 조립부가 넘겨주는 currentSession·journal·addReceipt·call(서버 호출, 탭 목록과 탭 열기에만 쓴다).
 //
@@ -27,11 +27,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import childProcess from "node:child_process";
 import { stateHome } from "../../server/state-home.cjs";
 import { artifactDir } from "../../server/artifacts-home.cjs";
 import { adbPath } from "../../server/adb-path.js";
+import { idbPath, IDB_MISSING } from "./idb-path.mjs";
 import { MAX_APP_TARGETS, appDeviceTargetId, resolveAppDeviceTarget } from "../../server/app-targets.js";
 import { writeMarks } from "./report.mjs";
 
@@ -44,10 +44,11 @@ export const MAX_DEVICES = MAX_APP_TARGETS;
 // 브라우저와 같은 방식을 앱에도 쓴다. idb가 접근성 트리를 주므로
 // 요소를 이름으로 찾아 값을 읽을 수 있고, 그러면 판정이 인상이 아니라 사실이 된다.
 // 조작은 서버(4271)를 거치지 않고 idb 를 직접 부른다. 대상 기기를 정할 때만 Iris 에 묻는다.
-const IDB = process.env.IRIS_IDB || path.join(os.homedir(), ".local", "bin", "idb");
 function idb(args, opts = {}) {
   return new Promise((resolve) => {
-    const cp = childProcess.execFile(IDB, args, { maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 90000 },
+    const bin = idbPath();
+    if (!bin) { resolve({ ok: false, out: "", err: IDB_MISSING }); return; }
+    const cp = childProcess.execFile(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 90000 },
       (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || ""), err: String((stderr || "") + (err ? String(err.message || err) : "")) }));
     if (opts.stdin != null) { cp.stdin.write(opts.stdin); cp.stdin.end(); }
   });

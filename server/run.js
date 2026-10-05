@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { stateHome } from "./state-home.cjs";
+import { windowsPowerShellEnv } from "./windows-powershell.cjs";
 
 // 출력에서 dev 서버 주소 감지. localhost/127/0.0.0.0 우선, 포트 포함 http(s) URL.
 const URL_RE = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[a-z0-9.-]+)(?::\d{2,5})?(?:\/[^\s'"]*)?)/i;
@@ -19,9 +20,16 @@ export function isLocalUrl(u) {
 
 // launchd 서버 PATH 에는 ~/Library/pnpm(전역 pnpm)이 없어서 spawn 이 ENOENT 로 실패한다. PATH 를 보강한다.
 function runEnv() {
-  const extra = [path.join(os.homedir(), "Library", "pnpm"), "/opt/homebrew/bin", "/usr/local/bin"];
-  const PATH = [...extra, process.env.PATH || ""].filter(Boolean).join(":");
-  return { ...process.env, PATH, FORCE_COLOR: "0", NO_COLOR: "1", npm_config_color: "false", BROWSER: "none" };
+  const windows = process.platform === "win32";
+  const extra = windows
+    ? [process.env.PNPM_HOME, path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "pnpm")].filter(Boolean)
+    : [path.join(os.homedir(), "Library", "pnpm"), "/opt/homebrew/bin", "/usr/local/bin"];
+  const pathKey = windows ? Object.keys(process.env).find((key) => key.toLowerCase() === "path") || "PATH" : "PATH";
+  const PATH = [...extra, process.env[pathKey] || ""].filter(Boolean).join(windows ? path.delimiter : ":");
+  const env = { ...process.env, [pathKey]: PATH, FORCE_COLOR: "0", NO_COLOR: "1", npm_config_color: "false", BROWSER: "none" };
+  // 서버 전용 값(server/pty.js SERVER_ONLY_ENV). 남기면 사용자 스크립트가 띄운 Electron 이 node 로 뜬다
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
 }
 
 function detectPkgMgr(cwd) {
@@ -55,12 +63,28 @@ const PIDS_FILE = path.join(DATA_DIR, "run-pids.json");
 // 기록해 둔 그 프로세스인지 시작 시각으로 확인하고, 확인할 수 없으면 종료하지 않는다.
 function startedAtOf(pid) {
   try {
+    if (process.platform === "win32") {
+      if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+      const query = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { ([DateTimeOffset] $p.CreationDate).ToUnixTimeMilliseconds() }`;
+      const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", query], { encoding: "utf8", timeout: 10000, windowsHide: true, env: windowsPowerShellEnv() }).trim();
+      const value = out ? Number(out) : NaN;
+      return Number.isFinite(value) ? value : null;
+    }
     const out = execFileSync("/bin/ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8" }).trim();
     const t = out ? Date.parse(out) : NaN;
     return Number.isFinite(t) ? t : null;
   } catch { return null; }
 }
 const REAP_START_TOLERANCE_MS = 5000;   // 우리가 적은 시각과 실제 시작 시각의 허용 오차
+
+function stopWindowsTree(pid, startedAt) {
+  const actual = startedAtOf(pid);
+  if (!Number.isFinite(startedAt) || actual === null || actual !== startedAt) return false;
+  try {
+    execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { timeout: 10000, windowsHide: true, stdio: "ignore" });
+    return true;
+  } catch { return false; }
+}
 
 function reapOrphans() {
   let list = [];
@@ -73,6 +97,7 @@ function reapOrphans() {
     const actual = startedAtOf(pid);
     if (actual === null) continue;                   // 물어볼 수 없으면 손대지 않는다
     if (Math.abs(actual - recorded) > REAP_START_TOLERANCE_MS) continue;  // 번호만 같은 남의 것
+    if (process.platform === "win32") { stopWindowsTree(pid, e.startedAt); continue; }
     try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch {} }
   }
   try { fs.mkdirSync(path.dirname(PIDS_FILE), { recursive: true }); fs.writeFileSync(PIDS_FILE, "[]"); } catch {}
@@ -98,13 +123,20 @@ export class RunManager {
     const cur = this.runs.get(cwd);
     if (cur && cur.running) return { ok: false, error: "이미 실행 중: " + cur.script, running: cur.script };
     if (typeof script !== "string" || !script) return { ok: false, error: "스크립트 이름 필요" };
+    const windows = process.platform === "win32";
+    if (windows && /^[\\/]{2}/.test(cwd)) return { ok: false, error: "Windows 실행 패널은 UNC·확장 경로를 지원하지 않습니다. 드라이브 경로의 프로젝트를 선택하세요." };
     const info = listScripts(cwd);
     if (!info.ok) return { ok: false, error: info.error };
     if (!Object.hasOwn(info.scripts, script)) return { ok: false, error: "스크립트 없음: " + script };
+    if (windows && /[\x00-\x1f"&|<>^%!]/.test(script)) return { ok: false, error: "Windows에서 실행할 수 없는 스크립트 이름입니다." };
     let proc;
-    try { proc = spawn(info.pkgmgr, ["run", script], { cwd, detached: true, env: runEnv(), stdio: ["ignore", "pipe", "pipe"] }); }
+    try {
+      const file = windows ? process.env.ComSpec || "cmd.exe" : info.pkgmgr;
+      const args = windows ? [`/d /v:off /s /c "${info.pkgmgr} run "${script}""`] : ["run", script];
+      proc = spawn(file, args, { cwd, detached: true, env: runEnv(), stdio: ["ignore", "pipe", "pipe"], ...(windows ? { windowsHide: true, windowsVerbatimArguments: true } : {}) });
+    }
     catch (e) { return { ok: false, error: "실행 실패: " + (e.message || e) }; }
-    const state = { proc, pid: proc.pid, script, pkgmgr: info.pkgmgr, buffer: [], url: null, running: true, startedAt: Date.now(), exitCode: null, carry: "" };
+    const state = { proc, pid: proc.pid, script, pkgmgr: info.pkgmgr, buffer: [], url: null, running: true, startedAt: windows ? startedAtOf(proc.pid) : Date.now(), exitCode: null, carry: "" };
     this.runs.set(cwd, state);
     this.persistPids();
     const emit = this.onEvent;
@@ -127,8 +159,8 @@ export class RunManager {
     };
     proc.stdout && proc.stdout.on("data", (d) => handle(d, "stdout"));
     proc.stderr && proc.stderr.on("data", (d) => handle(d, "stderr"));
-    proc.on("error", (e) => { const m = "[실행 오류] " + (e.message || e); state.buffer.push(m); state.running = false; this.persistPids(); emit({ type: "run-output", cwd, data: m + "\n", stream: "stderr" }); emit({ type: "run-exit", cwd, code: null, signal: null, error: String(e.message || e), script }); });
-    proc.on("exit", (code, signal) => { state.running = false; state.exitCode = code; this.persistPids(); emit({ type: "run-exit", cwd, code, signal, script }); });
+    proc.on("error", (e) => { const m = "[실행 오류] " + (e.message || e); state.buffer.push(m); state.running = false; state.url = null; this.persistPids(); emit({ type: "run-output", cwd, data: m + "\n", stream: "stderr" }); emit({ type: "run-exit", cwd, code: null, signal: null, error: String(e.message || e), script }); });
+    proc.on("exit", (code, signal) => { state.running = false; state.exitCode = code; state.url = null; this.persistPids(); emit({ type: "run-exit", cwd, code, signal, script }); });
     emit({ type: "run-started", cwd, script, pkgmgr: info.pkgmgr, pid: proc.pid });
     return { ok: true, pid: proc.pid, script, pkgmgr: info.pkgmgr };
   }
@@ -136,6 +168,9 @@ export class RunManager {
     const r = this.runs.get(cwd);
     if (!r || !r.running) return { ok: false, error: "실행 중 아님" };
     const pid = r.pid;
+    if (process.platform === "win32") {
+      return stopWindowsTree(pid, r.startedAt) ? { ok: true } : { ok: false, error: "실행 프로세스의 시작 시각 또는 종료 결과를 확인하지 못했습니다." };
+    }
     try { process.kill(-pid, "SIGTERM"); } catch { try { r.proc.kill("SIGTERM"); } catch {} }
     // 그룹이 여전히 살아있으면(자식이 TERM 무시) 강제 종료한다. 리더 exit 상태가 아니라 그룹 존재로 판정한다.
     setTimeout(() => { try { process.kill(-pid, 0); process.kill(-pid, "SIGKILL"); } catch {} this.persistPids(); }, 4000);

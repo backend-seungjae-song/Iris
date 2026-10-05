@@ -1,3 +1,4 @@
+import { isHostWindows, pathBasename } from "./host-path.js";
 // 경로에서 레포 이름을 추출한다.
 //
 // 소유 범위
@@ -14,5 +15,5 @@
 //   devtool/source-control.js · devtool/diff.js.
 
 export function repoNameOf(root) {
-  return String(root || "").split("/").filter(Boolean).pop() || root;
+  return isHostWindows() ? pathBasename(root) || root : String(root || "").split("/").filter(Boolean).pop() || root;
 }

@@ -25,6 +25,7 @@
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/emulator/emulator-host.cjs
 const fs = require("fs");
 const path = require("path");
+const { execFile } = require("child_process");
 
 const guard = require("./electron-guard.cjs");
 const { cleanupPriorHelpers } = require("./stale-helper-cleanup.cjs");
@@ -40,6 +41,16 @@ const RENDERER_METHODS = new Set([
 const BUTTON_NAMES = new Set(["back", "home", "recents", "volume_down", "volume_up", "lock"]);
 const SETTINGS_FILE = "emulator-settings.json";
 const SETTING_KEYS = ["mobileEmulatorDefaultDeviceUdid", "androidSdkPath"];
+const IOS_UDID_RE = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+// 시뮬레이터 안 통화 서비스. 낮은 우선순위로 Mac 출력 장치를 계속 열어 두어 처리 기한을 놓치고,
+// 같은 장치를 쓰는 Mac 전체 소리(유튜브 포함)가 지지직거림.
+// bootout 만 효과 있음(disable·kill 은 launchd 가 다시 실행). 기기를 재부팅하면 다시 로드되므로 연결 때마다 실행.
+// 이미 내린 기기에 다시 연결하면 실패하므로 결과는 무시
+const SIM_CALL_SERVICE = "user/501/com.apple.telephonyutilities.callservicesd";
+
+function stopSimCallService(udid) {
+  execFile("xcrun", ["simctl", "spawn", udid, "launchctl", "bootout", SIM_CALL_SERVICE], { timeout: 15000 }, () => {});
+}
 
 function initCapability(ctx) {
   const { ipcMain, isTrustedSender, BrowserWindow, app, stateDir, shell, preloadPath, getAppUrl, loadUrlWithRetry } = ctx;
@@ -124,6 +135,9 @@ function initCapability(ctx) {
         }).then((pids) => {
           if (pids.length) console.info(`[emulator] stopped unused helpers from a prior Iris run: ${pids.join(", ")}`);
         }).catch((err) => console.warn("[emulator] prior helper check failed:", err));
+      }
+      if (arg.method === "emulator.attach" && result?.attached && IOS_UDID_RE.test(result.info?.deviceUdid || "")) {
+        stopSimCallService(result.info.deviceUdid);
       }
       return { ok: true, result };
     } catch (err) {

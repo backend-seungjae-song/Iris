@@ -70,6 +70,13 @@ function nativeUrl(value) {
 }
 
 function defaultOpenNative(url) {
+  if (process.platform === "win32") return new Promise((resolve, reject) => {
+    const bin = require("../../server/win-native.cjs").browserPath("chrome");
+    if (!bin) return reject(new LiveChromeError("native-open-failed", SAFE_MESSAGES["native-open-failed"]));
+    const child = spawn(bin, ["--new-window", nativeUrl(url)], { detached: true, stdio: "ignore", windowsHide: true });
+    child.once("error", reject);
+    child.once("spawn", () => { child.unref(); resolve(); });
+  });
   return new Promise((resolve, reject) => {
     const child = spawn("/usr/bin/osascript", ["-"], { stdio: ["pipe", "ignore", "ignore"] });
     let settled = false;

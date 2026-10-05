@@ -1105,7 +1105,7 @@ function materializeServeSimRuntime(options) {
     pruneStaleServeSimRuntimes(targetRootDir, version);
     (0, import_node_fs3.rmSync)(stagingDir, { recursive: true, force: true });
     (0, import_node_fs3.rmSync)(targetDir, { recursive: true, force: true });
-    (0, import_node_fs3.cpSync)(bundledPackageDir, stagingDir, { recursive: true });
+    require("../../../server/copy-tree.cjs").copyTreeSync(bundledPackageDir, stagingDir, { recursive: true });
     for (const relativePath of EXECUTABLE_RELATIVE_PATHS) {
       const executablePath = (0, import_node_path3.join)(stagingDir, relativePath);
       if ((0, import_node_fs3.existsSync)(executablePath)) {

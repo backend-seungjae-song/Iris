@@ -29,3 +29,12 @@ assert.equal(rows.find((row) => row.id === "/beta/src/b.js").spaceId, "beta");
 assert.equal(filterResults(rows, "파일", "src/b").length, 1);
 assert.equal(filterResults(rows, "에이전트", "검토")[0].spaceId, "beta");
 assert.equal(filterResults(rows, "전체", "example.org")[0].id, "browser-2");
+
+// 이름이 검색어와 같은 파일이 다른 스페이스의 부분 일치보다 앞(Enter 로 열리는 첫 줄)
+const ranked = filterResults([
+  { kind: "파일", id: "/home/x/cbda.jsonl", title: "cbda.jsonl", detail: "~ · x/cbda.jsonl" },
+  { kind: "파일", id: "/home/x/a.json", title: "a.json", detail: "~ · x/a.json" },
+  { kind: "파일", id: "/s/src/a.js", title: "a.js", detail: "sample · src/a.js" },
+  { kind: "파일", id: "/s/a.js.map", title: "a.js.map", detail: "sample · a.js.map" },
+], "전체", "a.js");
+assert.deepEqual(ranked.map((row) => row.id), ["/s/src/a.js", "/home/x/a.json", "/s/a.js.map", "/home/x/cbda.jsonl"]);

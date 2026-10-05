@@ -80,7 +80,7 @@ function createMemoWindowManager({
     markAppAlive();
     const opts = {
       width: 520, height: 420, minWidth: 340, minHeight: 240,
-      backgroundColor: "#0A1620", titleBarStyle: "hiddenInset", acceptFirstMouse: true,
+      backgroundColor: "#0A1620", titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default", acceptFirstMouse: true,
       alwaysOnTop: record.alwaysOnTop,
       title: kind === "shared" ? "Iris — 공유 메모" : "Iris — 메모",
       webPreferences: { spellcheck: false, preload: preloadPath, nodeIntegration: false, contextIsolation: true },

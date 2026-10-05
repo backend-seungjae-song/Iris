@@ -76,6 +76,7 @@ function createWindowMedia({ desktopCapturer, systemPreferences, nativeImage, lo
   let active = null;
 
   function permission() {
+    if (process.platform === "win32") return "granted";
     try {
       const value = String(systemPreferences.getMediaAccessStatus("screen") || "unknown");
       return PERMISSIONS.has(value) ? value : "unknown";

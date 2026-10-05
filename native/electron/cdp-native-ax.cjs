@@ -34,6 +34,12 @@ function osa(script, timeoutMs = 8000) {
 }
 // 창과 시트를 훑어 이름·버튼·문구를 낸다. 시트가 있으면 그것이 현재 사용자 조작을 막고 있다.
 async function axDescribe() {
+  if (process.platform === "win32") {
+    const r = await require("../../server/win-native.cjs").request({ op: "describe", pid: process.pid });
+    if (!r.ok) return r;
+    const blocking = r.windows.filter((w) => w.kind === "sheet");
+    return { ...r, blocking, note: blocking.length ? "확인 대화상자가 열려 있습니다." : "열린 네이티브 확인 대화상자가 없습니다." };
+  }
   const script = `set AXSEP to (ASCII character 31)
 set AXROW to (ASCII character 30)
 set outp to ""
@@ -115,6 +121,7 @@ function holdNativeInput(reason) {
 
 async function axClick(button) {
   if (heldReasons.length) return { ok: false, error: `${heldReasons[heldReasons.length - 1]} 확인 창은 사람이 답합니다.` };
+  if (process.platform === "win32") return require("../../server/win-native.cjs").request({ op: "click", pid: process.pid, button: String(button) });
   // 이름을 그대로 AppleScript 문자열에 넣으므로 따옴표·역슬래시를 막는다.
   const safe = button.replace(/[\\"]/g, "");
   const script = `tell application "System Events"
@@ -149,6 +156,7 @@ async function axKey(key) {
   const which = String(key || "escape").toLowerCase();
   const code = which === "enter" || which === "return" ? 36 : which === "escape" || which === "esc" ? 53 : null;
   if (code == null) return { error: "escape 또는 enter만 보낼 수 있습니다." };
+  if (process.platform === "win32") return require("../../server/win-native.cjs").request({ op: "key", pid: process.pid, key: code === 36 ? "enter" : "escape" });
   const r = await osa(`tell application "System Events" to tell process "${AX_APP}" to key code ${code}`);
   return r.ok ? { ok: true, key: which } : { ok: false, error: r.error };
 }

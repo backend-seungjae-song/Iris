@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { edgesOf } from "../bin/graph.mjs";
+import { edgesOf, entryPoints } from "../bin/graph.mjs";
 
 // 간선을 못 읽으면 그 파일이 부르는 것들이 "아무도 안 부름"으로 잡힌다. 그래서 이 파서의
 // 구멍은 정상 모듈을 고아로 잘못 판정한다. 확인 결과: 큰따옴표만 보던
@@ -47,4 +47,17 @@ test("주석 안의 import 는 간선이 아니다", () => {
 
 test("모르는 파일을 가리키는 import 는 간선이 아니다", () => {
   assert.deepEqual(edges(`import x from './not-in-the-repo.js';`), []);
+});
+
+
+test("부수 효과 import와 주석 처리한 import 구분", () => {
+  const known = new Set(["server/index.js", "server/win-console.cjs"]);
+  assert.deepEqual(edgesOf("server/index.js", known, 'import "./win-console.cjs";'), ["server/win-console.cjs"]);
+  assert.deepEqual(edgesOf("server/index.js", known, '// import "./win-console.cjs";'), []);
+});
+
+
+test("Electron 패키지 main은 실행 래퍼와 무관하게 진입점이다", () => {
+  assert.equal(entryPoints(new Set(["native/electron/main.cjs"])).get("native/electron/main.cjs"), "package.json main");
+  assert.equal(entryPoints(new Set()).has("native/electron/main.cjs"), false);
 });

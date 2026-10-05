@@ -32,7 +32,7 @@ import {
 import { getDiscardedWebview, getWebview } from "./webview-store.js";
 import {
   authoritativeAiProtection, isLiveSpaceKey, scheduleWebviewThrottling,
-  sleepDeadSpaceWebviews, wakeWebview,
+  discardWebview, sleepDeadSpaceWebviews, wakeWebview,
 } from "./webview.js";
 import { addTab, ensureTabSpace, getTabs, getTabSpaces } from "../center/tab-store.js";
 import { callHook } from "../core/hooks.js";
@@ -40,14 +40,17 @@ import { callHook } from "../core/hooks.js";
 let BROWSER_MODE = false;
 let BOUND_SPACE = null;
 let createWebview, renderTabs, reconcileBrowserMode, reconcileDocTabs, reconcileConsoleDock;
-let reportActiveBrowserWc;
+let reportActiveBrowserWc, reportTabWc;
 
-const aiTabAsked = new Set(); // 분리 창을 띄워 달라고 이미 요청한 에이전트 탭
+const aiTabAsked = new Set();
+// 이보다 오래 첫 로드를 마치지 못한 webview 는 멈춘 것으로 보고 다시 만든다. 서버 대기(12초)보다 짧아야
+// 다음 명령의 깨우기에서 복구된다.
+const STUCK_WEBVIEW_MS = 10000; // 분리 창을 띄워 달라고 이미 요청한 에이전트 탭
 
 export function initAiTabs(deps) {
   ({
     BROWSER_MODE, BOUND_SPACE, createWebview, renderTabs, reconcileBrowserMode,
-    reconcileDocTabs, reconcileConsoleDock, reportActiveBrowserWc,
+    reconcileDocTabs, reconcileConsoleDock, reportActiveBrowserWc, reportTabWc,
   } = deps);
 }
 
@@ -103,11 +106,26 @@ export function wakeTabHere(tabId) {
   for (const sp of Object.keys(m)) {
     const t = (m[sp] || []).find((x) => x && x.id === tabId);
     if (!t) continue;
-    if (!wakeOwnedHere({
-      boundSpace: BOUND_SPACE, browserMode: BROWSER_MODE,
-      docked: !!getBrowserState().docked, sp, liveSpace: isLiveSpaceKey(sp),
-    })) return false;
-    if (getWebview(tabId)) return true;   // 이미 떠 있다. 서버의 대기는 wc 보고로 풀린다
+    const docked = !!getBrowserState().docked, liveSpace = isLiveSpaceKey(sp);
+    if (!wakeOwnedHere({ boundSpace: BOUND_SPACE, browserMode: BROWSER_MODE, docked, sp, liveSpace })) {
+      // 탭을 띄울 창이 닫힌 경우의 대비. 창이 이미 있으면 무시됨
+      // 새 창의 탭 생성은 서버의 깨우기 알림 재전송(server/index.js initialState)
+      if (!BROWSER_MODE && !BOUND_SPACE) {
+        try {
+          if (sp === "__shared__") window.acHost && acHost.openSharedBrowser && acHost.openSharedBrowser({ background: true });
+          else if (!docked && liveSpace) window.acHost && acHost.openBrowser && acHost.openBrowser({ background: true });
+        } catch (e) {}
+      }
+      return false;
+    }
+    // 서버가 깨우기를 보냈다는 것은 그 탭의 wc 가 서버에 없다는 뜻이다. 떠 있는 webview 를 그대로 두면
+    // 대기가 풀리지 않는다: 로드를 마친 것은 wc 를 다시 보고하고, 오래 로드를 못 마친 것은 새로 만든다.
+    const live = getWebview(tabId);
+    if (live) {
+      if (live.ready) { reportTabWc(live, tabId); return true; }
+      if (Date.now() - (live.createdAt || 0) < STUCK_WEBVIEW_MS) return true;
+      discardWebview(tabId, Date.now());
+    }
     if (getDiscardedWebview(tabId)) wakeWebview(tabId);
     else {
       const wantProfile = t.profile == null ? spaceDefaultProfile(sp) : profileIdForStored(t.profile);

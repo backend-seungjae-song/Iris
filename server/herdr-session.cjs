@@ -18,7 +18,14 @@ const os = require("node:os");
 const path = require("node:path");
 const { stateHome, DIR_NAME } = require("./state-home.cjs");
 
-const CONFIG_DIR = path.join(os.homedir(), ".config", "herdr");
+// herdr 설정 폴더
+// Windows: XDG_CONFIG_HOME, 없으면 %APPDATA% 아래(herdr src/config/io.rs 와 같은 순서)
+function herdrConfigDir() {
+  if (process.platform !== "win32") return path.join(os.homedir(), ".config", "herdr");
+  if (process.env.XDG_CONFIG_HOME) return path.join(process.env.XDG_CONFIG_HOME, "herdr");
+  return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "herdr");
+}
+const CONFIG_DIR = herdrConfigDir();
 const DEFAULT_SESSION = "default";
 
 // herdr 세션 이름은 그대로 폴더 이름이 된다. 사용할 수 없는 문자를 제거하고, 앞뒤의 점과 하이픈도
@@ -59,6 +66,12 @@ function socketFor(name) {
     : path.join(CONFIG_DIR, "sessions", name, "herdr.sock");
 }
 
+// net.connect 에 넘길 주소
+// Windows: 소켓 파일 대신 `\\.\pipe\<소켓 파일 경로>` 네임드 파이프(herdr src/ipc.rs connect_local_stream)
+function herdrEndpoint(socket) {
+  return process.platform === "win32" ? `\\\\.\\pipe\\${socket}` : socket;
+}
+
 // 사용자가 직접 지정할 때만 쓰는 값. 비어 있으면 상태 폴더가 정한다.
 // 명시적으로 `default` 를 지정한 것은 의도가 분명하므로 그대로 따른다. 상태 폴더 연동은 실수를 막기
 // 위한 것이지 의도적인 지정을 막는 것이 아니다.
@@ -72,4 +85,4 @@ function herdrSession() {
   return { name, socket: socketFor(name), isDefault: name === DEFAULT_SESSION };
 }
 
-module.exports = { herdrSession, sessionNameFor, socketFor, sanitize, DEFAULT_SESSION };
+module.exports = { herdrSession, herdrEndpoint, sessionNameFor, socketFor, sanitize, DEFAULT_SESSION, CONFIG_DIR };

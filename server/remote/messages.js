@@ -17,6 +17,7 @@ const MESSAGES = Object.freeze({
   "gateway-restart-limit": "원격 게이트웨이가 반복해서 종료되었습니다.",
   "gateway-stop-failed": "원격 게이트웨이 프로세스를 종료하지 못했습니다.",
   "gateway-start-failed": "외부 수신을 시작하지 못했습니다.",
+  "tailscale-winget-not-found": "Windows 앱 설치 관리자(winget)를 설치한 뒤 다시 시도하세요.",
   "agent-socket-failed": "에이전트 응답 연결을 시작하지 못했습니다.",
   "initializing": "원격 설정을 확인하고 있습니다.",
   "feature-hidden": "원격 제어 기능이 숨겨져 있습니다.",

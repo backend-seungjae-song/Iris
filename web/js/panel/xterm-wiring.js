@@ -1,3 +1,4 @@
+import { isHostWindows } from "../core/host-path.js";
 // 우측 터미널의 xterm 을 만들고 입출력을 연결한다.
 //
 // 소유 범위
@@ -196,7 +197,7 @@ export function terminalBarePathToken(raw) {
 export function terminalLinkSpans(cellsAt, y, opts = {}) {
   const EDGE_SLACK = opts.edgeSlack == null ? 3 : opts.edgeSlack;
   const softWrapped = opts.softWrapped || (() => false);
-  const pathCh = /[\p{L}\p{N}\p{M}_./@+%~-]/u;
+  const pathCh = isHostWindows() ? /[\p{L}\p{N}\p{M}_.\\/:@+%~-]/u : /[\p{L}\p{N}\p{M}_./@+%~-]/u;
   const trimEnd = (c) => { let e = c.length; while (e > 0 && /[\s│▕┃▏▐⎸⎹|]/.test(c[e - 1].ch)) e--; return e; };
   const cellsOf = (ry) => { const c = cellsAt(ry); return c == null ? null : c.slice(0, trimEnd(c)); };
   // 테두리·패딩 몇 칸은 허용한다. herdr 는 content 오른쪽에 테두리와 패딩을 그린다.
@@ -209,7 +210,7 @@ export function terminalLinkSpans(cellsAt, y, opts = {}) {
   // 그 토큰의 나머지다. 오른쪽 끝을 채웠는지만 보면 이 경우를 놓친다. 코덱스 TUI 는 줄을 끝까지
   // 채우지 않고 토큰을 하이픈에서 자른다(확인 결과: 폭 110칸 화면에서 그 줄은 104칸에서
   // 끝나고 `information-` 로 잘렸다. 다음 줄이 `preservation-verification.md)` 였다).
-  const JOINER = /[-_/.+%@]/;
+  const JOINER = isHostWindows() ? /[-_\\/.+%@]/ : /[-_/.+%@]/;
   // 다음 줄이 새 항목이면 이어진 줄이 아니다. `- `·`* `·`1. ` 같은 표시가 그 증거다.
   // 이 문이 없으면 디렉터리 목록(`- /a/b/` 처럼 `/` 로 끝나는 줄)이 위 규칙에 걸려 한 덩이가 된다.
   const newItemAt = (n, i) => {
@@ -251,7 +252,7 @@ export function terminalLinkSpans(cellsAt, y, opts = {}) {
     links.push({ range: { start: { x: a.x, y: a.y }, end: { x: b.endX, y: b.y } }, text: label, kind });
   };
   // 1) 마크다운 링크 `[라벨](대상)`. 라벨부터 닫는 괄호까지 통째로 누를 수 있어야 한다.
-  const MD = /\[[^\]\n]{1,200}\]\((file:\/\/[^)\s]+|https?:\/\/[^)\s]+|~?\/[^)\s]+)\)/g;
+  const MD = isHostWindows() ? /\[[^\]\n]{1,200}\]\((file:\/\/[^)\s]+|https?:\/\/[^)\s]+|[A-Za-z]:[\\/][^)\s]+|\\\\[^)\s]+|~?\/[^)\s]+)\)/g : /\[[^\]\n]{1,200}\]\((file:\/\/[^)\s]+|https?:\/\/[^)\s]+|~?\/[^)\s]+)\)/g;
   let mm;
   while ((mm = MD.exec(text))) add(mm.index, mm[0].length, mm[1], "md");
   // 2) 맨 URL
@@ -260,8 +261,9 @@ export function terminalLinkSpans(cellsAt, y, opts = {}) {
   // 3) 맨 경로. 오인 방지는 수식키가 아니라 대상 자체로 건다(루트가 명시됐거나 작업 폴더 안으로
   //    풀리는 토큰만 openTerminalPath 의 경계 검사를 통과해 실제로 열린다).
   const PATHRE = /(?:~|\.{0,2})?(?:\/[\p{L}\p{N}\p{M}_.@+%-]+)+(?::\d+)?|(?:[\p{L}\p{N}\p{M}_.@+%-]+\/)+[\p{L}\p{N}\p{M}_.@+%-]+(?::\d+)?/gu;
-  while ((mm = PATHRE.exec(text))) {
-    const raw = terminalBarePathToken(mm[0]); if (!raw.includes("/")) continue;
+  const pathRe = isHostWindows() ? /(?:[A-Za-z]:[\\/]|\\\\|~[\\/]|\.\.?[\\/])(?:[\p{L}\p{N}\p{M}_.@+%-]+[\\/])*[\p{L}\p{N}\p{M}_.@+%-]+(?::\d+)?|(?:[\p{L}\p{N}\p{M}_.@+%-]+[\\/])+[\p{L}\p{N}\p{M}_.@+%-]+(?::\d+)?/gu : PATHRE;
+  while ((mm = pathRe.exec(text))) {
+    const raw = terminalBarePathToken(mm[0]); if (!raw.includes("/") && !(isHostWindows() && raw.includes("\\"))) continue;
     add(mm.index, raw.length, raw, "path");
   }
   return links;
@@ -378,13 +380,21 @@ export function initXterm() {
     const point = mouseReportCell({ clientX, clientY });
     return { col: point.col + 1, row: point.row + 1 };
   }
+  // 휠 이동량 누적 후 30px마다 한 줄. 트랙패드는 한 번 쓸 때 작은 이동량의 이벤트를 수십 개 보내므로
+  // 이벤트마다 한 줄 이상 보내면 지나치게 빠르고 macOS 스크롤 속도 설정도 반영 안 됨
+  let wheelRest = 0;
   terminalInner.addEventListener("wheel", (e) => {
     const ws = getWs();
     if (!getAppMouseOn() || !ws || ws.readyState !== 1) return; // 앱이 마우스 안 씀 → xterm 기본 처리
     e.preventDefault(); e.stopPropagation();
+    if (Math.sign(wheelRest) === -Math.sign(e.deltaY)) wheelRest = 0; // 방향 전환 시 남은 양 버림
+    wheelRest += e.deltaY;
+    const whole = Math.trunc(Math.abs(wheelRest) / 30);
+    if (!whole) return;
+    const dir = wheelRest < 0 ? -1 : 1;
+    wheelRest -= dir * whole * 30;
+    const n = Math.min(6, whole);
     const { col, row } = cellAt(e.clientX, e.clientY);
-    const dir = e.deltaY < 0 ? -1 : 1;
-    const n = Math.max(1, Math.min(6, Math.round(Math.abs(e.deltaY) / 40)));
     // 화면 밖 드래그가 동작 중이면 그 기능이 이 휠 이벤트를 가져간다. 로드되지 않았으면 아무도 가져가지 않는다.
     if (callHook("chatcopy.wheel", { dir, lines: n, reportCol: col, reportRow: row, event: e })) return;
     const btn = dir < 0 ? 64 : 65; // 위 : 아래
@@ -461,6 +471,22 @@ export function initXterm() {
   xterm.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;
     const k = (e.key || "").toLowerCase();
+    // Windows 콘솔 복사·붙여넣기. 선택이 있을 때 Ctrl+C는 복사하고, 없으면 셸의 중단 신호를 보낸다.
+    if (isHostWindows() && e.ctrlKey && !e.metaKey && !e.altKey && k === "c") {
+      if (e.shiftKey || xterm.hasSelection()) {
+        e.preventDefault();
+        try { const text = xterm.getSelection(); if (text && window.acHost?.writeClipboard) void window.acHost.writeClipboard(text); } catch {}
+        return false;
+      }
+    }
+    if (isHostWindows() && e.ctrlKey && !e.metaKey && !e.altKey && k === "v" && window.acHost?.readClipboard) {
+      e.preventDefault();
+      try { const txt = window.acHost.readClipboard(); if (txt) xterm.paste(txt); } catch {}
+      return false;
+    }
+    if (isHostWindows() && !e.altKey && !e.metaKey && (
+      (e.ctrlKey && ((e.shiftKey && k === "w") || e.code === "Backquote" || (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight"))))
+      || (!e.ctrlKey && !e.shiftKey && e.key === "F2"))) return false;
     // Shift+Enter = 줄바꿈(전송 아님). xterm 기본은 \r(전송)이라 가로채 줄바꿈 시퀀스를 보낸다.
     // herdr/에이전트가 kitty 키보드 프로토콜(\x1b[>7u)을 켜므로 Shift+Enter는 CSI-u \x1b[13;2u.
     if (e.key === "Enter" && e.shiftKey && !e.metaKey && !e.ctrlKey) {

@@ -50,7 +50,7 @@ class ActiveRemoteSession {
   }
 
   factory ActiveRemoteSession.attach({
-    String macName = 'Mac',
+    String macName = '컴퓨터',
     required List<String> capabilities,
     required RemoteConnection connection,
     Duration responseTimeout = const Duration(seconds: 10),
@@ -158,7 +158,7 @@ class ActiveRemoteSession {
         (rid) => transcriptPageRequest(rid: rid, agent: agent, before: before),
         timeout: transcriptTimeout,
         timeoutMessage:
-            'Mac이 대화 기록을 30초 안에 보내지 못했습니다. Mac에서 Iris가 응답하는지 확인한 뒤 다시 열어 주세요.',
+            '컴퓨터가 대화 기록을 30초 안에 보내지 못했습니다. 컴퓨터에서 Iris가 응답하는지 확인한 뒤 다시 열어 주세요.',
       );
 
   Future<AgentStopResult> stopAgent(String agent) => _request<AgentStopResult>(
@@ -299,7 +299,7 @@ class ActiveRemoteSession {
         desktop: desktop,
       ),
       timeout: browserFrameTimeout,
-      timeoutMessage: 'Mac이 브라우저 화면을 준비하지 못했습니다. Iris에서 해당 탭을 연 뒤 다시 시도하세요.',
+      timeoutMessage: '컴퓨터가 브라우저 화면을 준비하지 못했습니다. Iris에서 해당 탭을 연 뒤 다시 시도하세요.',
     );
   }
 
@@ -321,7 +321,7 @@ class ActiveRemoteSession {
       action: action,
     ),
     timeout: browserActionTimeout,
-    timeoutMessage: 'Mac이 브라우저 조작을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+    timeoutMessage: '컴퓨터가 브라우저 조작을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
   );
 
   Future<RemoteActionResult?> browserMouse(
@@ -350,7 +350,7 @@ class ActiveRemoteSession {
           dy: dy,
         ),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 마우스 조작을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+        timeoutMessage: '컴퓨터가 마우스 조작을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       ),
       replaceable: const {'move', 'drag', 'wheel'}.contains(action),
     );
@@ -360,7 +360,7 @@ class ActiveRemoteSession {
       _request<RemoteActionResult>(
         (rid) => browserTypeRequest(rid: rid, tab: tab, text: text),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 브라우저 입력을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+        timeoutMessage: '컴퓨터가 브라우저 입력을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       );
 
   Future<RemoteActionResult> browserKey(
@@ -371,28 +371,28 @@ class ActiveRemoteSession {
     (rid) =>
         browserKeyRequest(rid: rid, tab: tab, key: key, modifiers: modifiers),
     timeout: browserActionTimeout,
-    timeoutMessage: 'Mac이 브라우저 키 입력을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+    timeoutMessage: '컴퓨터가 브라우저 키 입력을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
   );
 
   Future<RemoteActionResult> browserScroll(String tab, int dy) =>
       _request<RemoteActionResult>(
         (rid) => browserScrollRequest(rid: rid, tab: tab, dy: dy),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 브라우저 스크롤을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+        timeoutMessage: '컴퓨터가 브라우저 스크롤을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       );
 
   Future<RemoteActionResult> browserHistory(String tab, String action) =>
       _request<RemoteActionResult>(
         (rid) => browserHistoryRequest(rid: rid, tab: tab, action: action),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 브라우저 이동을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+        timeoutMessage: '컴퓨터가 브라우저 이동을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       );
 
   Future<RemoteActionResult> browserNavigate(String tab, String url) =>
       _request<RemoteActionResult>(
         (rid) => browserNavigateRequest(rid: rid, tab: tab, url: url),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 주소 이동을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+        timeoutMessage: '컴퓨터가 주소 이동을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       );
 
   Future<RemoteActionResult> browserNewTab(
@@ -430,7 +430,7 @@ class ActiveRemoteSession {
       height: height,
     ),
     timeout: browserActionTimeout,
-    timeoutMessage: 'Mac이 페이지 요소를 찾지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+    timeoutMessage: '컴퓨터가 페이지 요소를 찾지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
   );
 
   Future<BrowserElementHoverResult?> hoverBrowserElement(
@@ -455,7 +455,7 @@ class ActiveRemoteSession {
           height: height,
         ),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 가리킨 요소를 찾지 못했습니다.',
+        timeoutMessage: '컴퓨터가 가리킨 요소를 찾지 못했습니다.',
       ),
       replaceable: true,
     );
@@ -479,14 +479,14 @@ class ActiveRemoteSession {
       height: height,
     ),
     timeout: browserActionTimeout,
-    timeoutMessage: 'Mac이 선택한 요소를 준비하지 못했습니다.',
+    timeoutMessage: '컴퓨터가 선택한 요소를 준비하지 못했습니다.',
   );
 
   Future<BrowserFocusResult> browserFocus(String tab) =>
       _request<BrowserFocusResult>(
         (rid) => browserFocusRequest(rid: rid, tab: tab),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 페이지 입력 상태를 확인하지 못했습니다.',
+        timeoutMessage: '컴퓨터가 페이지 입력 상태를 확인하지 못했습니다.',
       );
 
   Future<BrowserDialogResult> browserDialog(
@@ -497,7 +497,7 @@ class ActiveRemoteSession {
     (rid) =>
         browserDialogRequest(rid: rid, tab: tab, action: action, text: text),
     timeout: browserActionTimeout,
-    timeoutMessage: 'Mac이 페이지 대화상자를 처리하지 못했습니다.',
+    timeoutMessage: '컴퓨터가 페이지 대화상자를 처리하지 못했습니다.',
   );
 
   Future<BrowserDraftResult> sendBrowserElement(
@@ -520,7 +520,7 @@ class ActiveRemoteSession {
       text: text,
     ),
     timeout: browserActionTimeout,
-    timeoutMessage: 'Mac이 선택한 요소를 보내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+    timeoutMessage: '컴퓨터가 선택한 요소를 보내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
   );
 
   Future<BrowserRecordResult> startBrowserRecord(String tab) =>
@@ -572,14 +572,14 @@ class ActiveRemoteSession {
       _request<RemoteActionResult>(
         (rid) => browserDesktopRequest(rid: rid, tab: tab, enabled: enabled),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 브라우저 화면 크기를 바꾸지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+        timeoutMessage: '컴퓨터가 브라우저 화면 크기를 바꾸지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       );
 
   Future<RemoteActionResult> translateBrowser(String tab) =>
       _request<RemoteActionResult>(
         (rid) => browserTranslateRequest(rid: rid, tab: tab),
         timeout: browserActionTimeout,
-        timeoutMessage: 'Mac이 페이지 번역을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+        timeoutMessage: '컴퓨터가 페이지 번역을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       );
 
   Future<BrowserBookmarksResult> browserBookmarks(String space) =>
@@ -773,17 +773,17 @@ class ActiveRemoteSession {
   }
 
   void _send(Map<String, Object> message) {
-    if (_ending) throw const RemoteFailure('Mac과 연결이 끊겼습니다.');
+    if (_ending) throw const RemoteFailure('컴퓨터과 연결이 끊겼습니다.');
     final connection = _connection;
     if (connection == null) {
       if (_foreground) unawaited(recoverNow());
-      throw const RemoteFailure('Mac과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+      throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
     }
     try {
       connection.sendJson(message);
     } catch (error) {
       unawaited(_connectionLost(connection, error));
-      throw const RemoteFailure('Mac과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+      throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
     }
   }
 
@@ -796,7 +796,7 @@ class ActiveRemoteSession {
     final epoch = _connectionEpoch;
     final next = _paceTail.then((_) async {
       if (epoch != _connectionEpoch) {
-        throw const RemoteFailure('Mac과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+        throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
       }
       while (true) {
         final now = DateTime.now();
@@ -810,7 +810,7 @@ class ActiveRemoteSession {
               const Duration(milliseconds: 5),
         );
         if (epoch != _connectionEpoch) {
-          throw const RemoteFailure('Mac과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+          throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
         }
       }
       _recentSends.add(DateTime.now());
@@ -835,11 +835,11 @@ class ActiveRemoteSession {
         timeout ?? responseTimeout,
       );
       if (response is! T) {
-        throw const RemoteFailure('Mac이 요청과 다른 응답을 보냈습니다.');
+        throw const RemoteFailure('컴퓨터가 요청과 다른 응답을 보냈습니다.');
       }
       return response;
     } on TimeoutException {
-      throw RemoteFailure(timeoutMessage ?? 'Mac이 요청에 응답하지 않았습니다.');
+      throw RemoteFailure(timeoutMessage ?? '컴퓨터가 요청에 응답하지 않았습니다.');
     } finally {
       _pending.remove(rid);
     }
@@ -885,7 +885,7 @@ class ActiveRemoteSession {
             'PIN 기한이 지나 다시 확인이 필요합니다. 접속 PIN을 입력하세요.',
             requiresPin: true,
           )
-        : const RemoteFailure('Mac과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+        : const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
     if (!error.requiresPin) {
       _setConnectionStatus(RemoteConnectionStatus.reconnecting);
     }
@@ -1002,7 +1002,7 @@ class ActiveRemoteSession {
       _disconnectReason = failure;
     }
     _pingTimer.cancel();
-    final error = failure ?? const RemoteFailure('Mac과 연결이 끊겼습니다.');
+    final error = failure ?? const RemoteFailure('컴퓨터과 연결이 끊겼습니다.');
     for (final completer in _pending.values) {
       if (!completer.isCompleted) completer.completeError(error);
     }
@@ -1137,7 +1137,7 @@ class RemoteSession {
       );
       if (response is RemoteError) throw _remoteError(response.code);
       if (response is! PairPending) {
-        throw const RemoteFailure('Mac이 페어링 코드를 보내지 않았습니다.');
+        throw const RemoteFailure('컴퓨터가 페어링 코드를 보내지 않았습니다.');
       }
       return PendingPairing(
         settings: PairingSettings(
@@ -1224,7 +1224,7 @@ class RemoteSession {
         }
       }
       if (authenticated is! AuthOk) {
-        throw const RemoteFailure('Mac이 접속 PIN을 확인하지 못했습니다.');
+        throw const RemoteFailure('컴퓨터가 접속 PIN을 확인하지 못했습니다.');
       }
       await onAuthenticated?.call();
       connection.sendJson(capsGet());
@@ -1235,7 +1235,7 @@ class RemoteSession {
         throw _remoteError(capabilities.code);
       }
       if (capabilities is! Capabilities) {
-        throw const RemoteFailure('Mac이 허용한 요청 목록을 보내지 않았습니다.');
+        throw const RemoteFailure('컴퓨터가 허용한 요청 목록을 보내지 않았습니다.');
       }
       final resumed = ResumedRemoteConnection(
         connection: connection,
@@ -1260,7 +1260,7 @@ class RemoteSession {
     try {
       decoded = jsonDecode(text);
     } on FormatException {
-      throw const ProtocolException('Mac이 올바른 연결 정보를 보내지 않았습니다.');
+      throw const ProtocolException('컴퓨터가 올바른 연결 정보를 보내지 않았습니다.');
     }
     if (decoded is Map<String, dynamic> &&
         decoded['type'] == 'service.status') {
@@ -1268,12 +1268,12 @@ class RemoteSession {
       if (status is ServiceStatus) {
         throw switch (status.reason) {
           'pin-required' => const RemoteFailure(
-            'Mac의 Iris 원격 화면에서 접속 PIN을 정하세요. 저장하면 원격 제어가 다시 켜집니다.',
+            '컴퓨터의 Iris 원격 화면에서 접속 PIN을 정하세요. 저장하면 원격 제어가 다시 켜집니다.',
           ),
           'sharing-disabled' => const RemoteFailure(
-            'Mac에서 휴대폰 원격 제어가 꺼져 있습니다. Iris 원격 화면에서 켜세요.',
+            '컴퓨터에서 휴대폰 원격 제어가 꺼져 있습니다. Iris 원격 화면에서 켜세요.',
           ),
-          _ => const RemoteFailure('Mac에서 원격 연결을 사용할 수 없습니다.'),
+          _ => const RemoteFailure('컴퓨터에서 원격 연결을 사용할 수 없습니다.'),
         };
       }
     }
@@ -1296,7 +1296,7 @@ RemoteFailure _pinError(PinError error) {
   return switch (error.reason) {
     'incorrect' => RemoteFailure('PIN이 올바르지 않습니다.', retryAfter: retryAfter),
     'retry-later' => RemoteFailure('PIN 확인 대기 중', retryAfter: retryAfter),
-    _ => const RemoteFailure('Mac에서 접속 PIN을 확인하지 못했습니다.'),
+    _ => const RemoteFailure('컴퓨터에서 접속 PIN을 확인하지 못했습니다.'),
   };
 }
 
@@ -1304,29 +1304,29 @@ RemoteFailure _remoteError(String code) {
   return switch (code) {
     'expired' => const RemoteFailure('연결 확인 시간이 지났습니다. 다시 시도하세요.'),
     'forbidden' => const RemoteFailure(
-      'Mac에서 이 항목을 더 이상 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 선택하세요.',
+      '컴퓨터에서 이 항목을 더 이상 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 선택하세요.',
     ),
-    'busy' => const RemoteFailure('Mac이 다른 요청을 처리하고 있습니다. 잠시 기다린 뒤 다시 시도하세요.'),
+    'busy' => const RemoteFailure('컴퓨터가 다른 요청을 처리하고 있습니다. 잠시 기다린 뒤 다시 시도하세요.'),
     'limit-exceeded' => const RemoteFailure(
-      'Mac의 원격 요청 한도에 도달했습니다. 진행 중인 요청이 끝난 뒤 다시 시도하세요.',
+      '컴퓨터의 원격 요청 한도에 도달했습니다. 진행 중인 요청이 끝난 뒤 다시 시도하세요.',
     ),
     'unsupported-request' => const RemoteFailure(
-      'Mac의 Iris가 이 요청을 지원하지 않습니다. Mac과 폰 앱의 버전을 확인하세요.',
+      '컴퓨터의 Iris가 이 요청을 지원하지 않습니다. 컴퓨터과 폰 앱의 버전을 확인하세요.',
     ),
     'invalid-request' => const RemoteFailure(
-      'Mac이 요청 형식을 이해하지 못했습니다. Mac과 폰 앱을 다시 연결하세요.',
+      '컴퓨터가 요청 형식을 이해하지 못했습니다. 컴퓨터과 폰 앱을 다시 연결하세요.',
     ),
     'browser-controller-unavailable' => const RemoteFailure(
-      'Mac의 Iris 브라우저 제어기가 연결되지 않았습니다. Iris 앱에서 브라우저를 연 뒤 다시 시도하세요.',
+      '컴퓨터의 Iris 브라우저 제어기가 연결되지 않았습니다. Iris 앱에서 브라우저를 연 뒤 다시 시도하세요.',
     ),
     'browser-tab-unavailable' => const RemoteFailure(
-      'Mac이 잠든 브라우저 탭을 열지 못했습니다. Iris에서 해당 스페이스의 브라우저 창을 연 뒤 다시 시도하세요.',
+      '컴퓨터가 잠든 브라우저 탭을 열지 못했습니다. Iris에서 해당 스페이스의 브라우저 창을 연 뒤 다시 시도하세요.',
     ),
     'browser-frame-unavailable' => const RemoteFailure(
-      'Mac이 브라우저 화면을 만들지 못했습니다. 해당 탭을 Mac에서 연 뒤 다시 시도하세요.',
+      '컴퓨터가 브라우저 화면을 만들지 못했습니다. 해당 탭을 컴퓨터에서 연 뒤 다시 시도하세요.',
     ),
     'browser-command-unavailable' => const RemoteFailure(
-      'Mac이 브라우저 조작을 끝내지 못했습니다. 페이지 로딩 상태를 확인한 뒤 다시 시도하세요.',
+      '컴퓨터가 브라우저 조작을 끝내지 못했습니다. 페이지 로딩 상태를 확인한 뒤 다시 시도하세요.',
     ),
     'terminal-stale-screen' => const RemoteFailure(
       '화면이 바뀌었습니다. 새 화면에서 다시 누르세요.',
@@ -1344,12 +1344,12 @@ RemoteFailure _remoteError(String code) {
       '터미널 화면 크기를 확인할 수 없습니다. 다시 연결하세요.',
     ),
     'terminal-read-unavailable' => const RemoteFailure(
-      '터미널 화면을 읽지 못했습니다. Mac에서 pane 상태를 확인하세요.',
+      '터미널 화면을 읽지 못했습니다. 컴퓨터에서 pane 상태를 확인하세요.',
     ),
     'unavailable' => const RemoteFailure(
-      'Mac에서 요청한 기능을 지금 사용할 수 없습니다. Iris에서 해당 기능 상태를 확인한 뒤 다시 시도하세요.',
+      '컴퓨터에서 요청한 기능을 지금 사용할 수 없습니다. Iris에서 해당 기능 상태를 확인한 뒤 다시 시도하세요.',
     ),
-    _ => const RemoteFailure('Mac이 알 수 없는 오류를 보냈습니다. Mac과 폰 앱의 버전을 확인하세요.'),
+    _ => const RemoteFailure('컴퓨터가 알 수 없는 오류를 보냈습니다. 컴퓨터과 폰 앱의 버전을 확인하세요.'),
   };
 }
 
@@ -1366,12 +1366,12 @@ RemoteFailure _friendlyFailure(Object error) {
   }
   if (error is PinnedClientException) {
     if (error.kind == 'certificate-mismatch') {
-      return const RemoteFailure('Mac의 인증서가 등록한 것과 다릅니다.');
+      return const RemoteFailure('컴퓨터의 인증서가 등록한 것과 다릅니다.');
     }
-    return const RemoteFailure('Mac에 연결하지 못했습니다. Tailscale 연결을 확인하세요.');
+    return const RemoteFailure('컴퓨터에 연결하지 못했습니다. Tailscale 연결을 확인하세요.');
   }
   if (error is TimeoutException) {
-    return const RemoteFailure('Mac에 연결하지 못했습니다. Tailscale 연결을 확인하세요.');
+    return const RemoteFailure('컴퓨터에 연결하지 못했습니다. Tailscale 연결을 확인하세요.');
   }
-  return const RemoteFailure('Mac에 연결하지 못했습니다. 다시 시도하세요.');
+  return const RemoteFailure('컴퓨터에 연결하지 못했습니다. 다시 시도하세요.');
 }

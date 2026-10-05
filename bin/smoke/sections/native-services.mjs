@@ -106,16 +106,16 @@ export default async function run() {
           { fingerprint: "AA:BB" }, () => { callbackCalled = true; });
         if (prevented || callbackCalled || result !== null) throw new Error(`범위 밖 인증서를 가로챈다: ${url} ${error}`);
       };
-      rejected("https://example.com/", "ERR_CERT_AUTHORITY_INVALID");
-      rejected("http://localhost:4443/", "ERR_CERT_AUTHORITY_INVALID");
-      rejected("https://localhost:4443/", "ERR_CERT_DATE_INVALID");
+      rejected("https://example.com/", "net::ERR_CERT_AUTHORITY_INVALID");
+      rejected("http://localhost:4443/", "net::ERR_CERT_AUTHORITY_INVALID");
+      rejected("https://localhost:4443/", "net::ERR_CERT_DATE_INVALID");
       if (prompts.length) throw new Error("로컬 자체서명 범위 밖에서 사람에게 묻는다");
 
       let prevented = 0;
       const event = { preventDefault: () => { prevented++; } };
-      const first = handle(event, { id: 17 }, "https://dev.localhost:4443/", "ERR_CERT_AUTHORITY_INVALID",
+      const first = handle(event, { id: 17 }, "https://dev.localhost:4443/", "net::ERR_CERT_AUTHORITY_INVALID",
         { fingerprint: "AA:BB" }, () => {});
-      const second = handle(event, { id: 18 }, "https://dev.localhost:4443/", "ERR_CERT_AUTHORITY_INVALID",
+      const second = handle(event, { id: 18 }, "https://dev.localhost:4443/", "net::ERR_CERT_AUTHORITY_INVALID",
         { fingerprint: "AA:BB" }, () => {});
       if (!first || first !== second) throw new Error("같은 host와 지문의 질문 Promise를 함께 쓰지 않는다");
       if (prevented !== 2) throw new Error("허용 후보 certificate-error를 기본 거절에서 인계받지 않는다");
@@ -223,4 +223,40 @@ export default async function run() {
         && !/const AX_APP = "(Electron|Iris)"/.test(readAll("native"));
     });
   }
+  // 콘솔 창만 닫으면 브라우저 창이 남아 앱이 계속 뜬다. 창이 하나라도 있으면 만들지 않는 조건이나
+  // 파괴된 창에 focus 만 거는 처리로는 ⌥1·Dock 으로 콘솔을 다시 열 수 없다.
+  check("콘솔 창을 닫은 뒤 ⌥1·Dock 이 콘솔을 다시 만든다", () => {
+    const main = read("native/electron/main.cjs");
+    const show = sliceBetween(main, "function showConsoleWindow()", "\n}", "콘솔 다시 열기");
+    return /mainWindow\.createWindow\(\)/.test(show)
+      && /ipcMain\.on\("ac-refocus-console", \(\) => \{ try \{ showConsoleWindow\(\); \}/.test(main)
+      && /app\.on\("activate", \(\) => \{ const win = getMainWindow\(\); if \(!win \|\| win\.isDestroyed\(\)\) mainWindow\.createWindow\(\); \}\)/.test(main);
+  });
+  // 렌더러가 beforeunload 를 막고 메인이 will-prevent-unload 를 처리하지 않으면 Electron 은 묻지 않고 닫기를 취소한다.
+  // 그래서 신호를 보내는 창(콘솔)과 묻는 창이 같아야 한다.
+  check("콘솔 창은 미저장 편집이 있으면 닫기·종료 전에 묻는다", () => {
+    const mw = read("native/electron/main-window.cjs");
+    const app = read("web/js/main.js");
+    return /webContents\.on\("will-prevent-unload"[\s\S]{0,400}showMessageBoxSync[\s\S]{0,300}if \(r === 0\) ev\.preventDefault\(\)/.test(mw)
+      && /if \(!AUX_MODE\) addEventListener\("beforeunload"[\s\S]{0,200}isTabDirty\(t\)[\s\S]{0,80}e\.preventDefault\(\)/.test(app);
+  });
+  // 설정 화면에서 바꾼 조합이 실제 동작과 같아야 한다. 옛 조합이 계속 동작하면 다른 앱의 같은 조합도 빼앗는다.
+  check("요소 지목 전역 단축키는 키맵에서 바꾼 조합으로 다시 등록된다", () => {
+    const { createPickMode } = require_(path.join(ROOT, "native/electron/pick-mode.cjs"));
+    const { acceleratorFor } = require_(path.join(ROOT, "native/electron/switcher-host.cjs"));
+    const log = [];
+    const noop = () => {};
+    const pm = createPickMode({
+      app: { on: noop }, screen: {}, BrowserWindow: { getAllWindows: () => [] }, ipcMain: { on: noop, handle: noop },
+      globalShortcut: { register: (a) => { log.push("+" + a); return true; }, unregister: (a) => log.push("-" + a), unregisterAll: noop },
+      execFile: noop, browserWindowManager: { firstBrowserModeWindow: () => null }, getMainWindow: () => null,
+      isTrustedSender: () => true, injectOverlayAllFrames: noop, hoverAtPoint: noop, diagSince: noop, runCdp: noop,
+    });
+    pm.registerGlobalShortcut();
+    pm.registerGlobalShortcut(acceleratorFor({ mod: true, shift: true, key: "k" }));
+    const main = read("native/electron/main.cjs");
+    const onKeymap = sliceBetween(main, 'ipcMain.on("ac-keymap"', "\n});", "키맵 수신");
+    return log.join(" ") === "+CommandOrControl+Shift+E -CommandOrControl+Shift+E +CommandOrControl+Shift+K"
+      && /pickMode\.registerGlobalShortcut\(acceleratorFor\(map\["pick-toggle"\] \|\| DEFAULT_RELAY\["pick-toggle"\]\)\)/.test(onKeymap);
+  });
 }

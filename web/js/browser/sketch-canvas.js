@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../core/keymap.js";
 // 스케치 오버레이. 캡처한 이미지를 깔고 그 위에 직접 그린다.
 //
 // 소유 범위
@@ -192,11 +193,11 @@ export function openSketchCanvas({ png, width, height, onDeliver, onCancel, init
   // 확대·축소. 배율은 화면 px / 원래 px 이고, 폭 맞춤과 전체 보기는 창 크기가 바뀌면 다시 맞춘다.
   const zoomWrap = document.createElement("div");
   zoomWrap.className = "sk-zoom";
-  const zoomOut = button("sk-zbtn", "−", "축소(⌘-)");
+  const zoomOut = button("sk-zbtn", "−", shortcutLabel("축소(⌘-)"));
   const zoomLabel = document.createElement("span");
   zoomLabel.className = "sk-zlabel";
-  const zoomIn = button("sk-zbtn", "+", "확대(⌘=)");
-  const fitW = button("sk-zbtn sk-zfit", "폭 맞춤", "폭에 맞춤(⌘0)");
+  const zoomIn = button("sk-zbtn", "+", shortcutLabel("확대(⌘=)"));
+  const fitW = button("sk-zbtn sk-zfit", "폭 맞춤", shortcutLabel("폭에 맞춤(⌘0)"));
   const fitA = button("sk-zbtn sk-zfit", "전체", "전체가 보이게");
   zoomWrap.append(zoomOut, zoomLabel, zoomIn, fitW, fitA);
   bar.appendChild(zoomWrap);

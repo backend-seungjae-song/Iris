@@ -254,7 +254,8 @@ export function handleBrowserMessage(ws, msg) {
   }
   else if (msg.type === "cdp-executor-register") {
     if (!ws._local) { /* 원격은 실행기가 될 수 없다 */ }
-    else registerCdpExecutor(ws, msg);
+    // 실행기 소켓만 다시 붙으면 창 소켓은 그대로라 탭 보고가 다시 오지 않는다. 끊길 때 비운 탭 목록을 창에 다시 요청.
+    else if (registerCdpExecutor(ws, msg)) broadcastLocal({ type: "browser-tabs-resync" });
   }
   else if (msg.type === "cdp-result") { resolveCdpResult(ws, msg); } // 실행기 소켓(로컬 등록)만 결과를 발급해 원격 WS의 위조 결과를 차단한다
   // 렌더러가 (스페이스, 활성 브라우저 탭)을 보고한다. 받는 즉시 정체성으로 변환한다. 활성 표시는

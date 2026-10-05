@@ -147,6 +147,8 @@ console.log("\n[10k] 안 보이는 탭도 조작 대상");
     && !/args\.wc != null \? tabIdOfRef/.test(allServer));
   // did-navigate가 안 오는 이동(about:blank 등)에도 목록이 실제를 따라가야 한다.
   check("로드가 끝나면 주소·제목을 다시 보고", () => /reportTabWc\(rec, tabId\)/.test(sliceBetween(webviewFactory, 'el.addEventListener("did-stop-loading", () => {\n    if (historyToken', '\n  });', "로드가 끝나면 주소·제목을 다시 보고")));
+  // <title> 없는 문서는 page-title-updated 가 오지 않는다. 로드 끝에서 탭 이름까지 바꾸지 않으면 이전 페이지 제목이 남는다.
+  check("제목 없는 문서로 가면 로드가 끝날 때 탭 이름을 바꾼다", () => /if \(title && title !== rec\.title\) applyTitle\(title\)/.test(sliceBetween(webviewFactory, 'el.addEventListener("did-stop-loading", () => {\n    if (historyToken', '\n  });', "제목 없는 문서")));
   check("탭 목록이 보이는 탭을 알려준다", () => /showing: tabIsShowing\(m\.space, tabId\)/.test(browserRuntime)
     && /function tabIsShowing/.test(browserRuntime) && /activeTabBySpace\.get\(w\.id\) === tabId/.test(browserRuntime)
     && /spaceKey\.sameStorageSpace\(space, w\.id\)/.test(browserRuntime));

@@ -145,7 +145,7 @@ Future<void> _showLink(BuildContext context, String href) async {
                     .showSnackBar(SnackBar(content: Text(message)));
               }
             },
-            child: const Text('Mac 브라우저에서 열기'),
+            child: const Text('컴퓨터 브라우저에서 열기'),
           ),
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(),

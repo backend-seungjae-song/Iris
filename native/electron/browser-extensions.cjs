@@ -108,10 +108,32 @@ function createBrowserExtensions(deps) {
     return extension;
   }
 
+  // 확장 로드와 겹쳐 출발한 첫 이동은 webRequest 리스너가 있는 확장(예: Unhook)이 끼면 끝나지 않음
+  // 이번 실행에서 확장 로드가 끝나기 전의 webview 는 첫 주소를 미뤘다가 로드 뒤에 연다
+  const restored = new Set();
+  const restoreWaiters = new Map();
+  function markRestored(partition) {
+    restored.add(partition);
+    for (const resolve of restoreWaiters.get(partition) || []) resolve();
+    restoreWaiters.delete(partition);
+  }
+  function needsExtensionWait(partition) {
+    return !restored.has(partition) && (records[partition] || []).some((record) => record.enabled);
+  }
+  function whenRestored(partition, ms = 5000) {
+    if (!needsExtensionWait(partition)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      const list = restoreWaiters.get(partition) || [];
+      list.push(() => { clearTimeout(timer); resolve(); });
+      restoreWaiters.set(partition, list);
+    });
+  }
+
   function restore(partition, session) {
     if (!isProfilePartition(partition)) return Promise.resolve();
     sessions.set(partition, session || sessionFromPartition(partition));
-    return serial(async () => {
+    const result = serial(async () => {
       await app.whenReady();
       for (const record of records[partition] || []) {
         if (!record.enabled) continue;
@@ -122,6 +144,42 @@ function createBrowserExtensions(deps) {
           deps.notice?.({ text: `${record.name || "확장"} 복원 실패`, detail: errorText(error) });
         }
       }
+    });
+    result.then(() => markRestored(partition), () => markRestored(partition));
+    return result;
+  }
+
+  // 첫 주소 보류 대상: 확장 로드 전 프로필의 http(s) 주소. 닫은 탭 복원 표식 주소는 그 모듈이 따로 연다
+  const heldByHost = new Map();
+  const heldByGuest = new Map();
+  function observeHost(host) {
+    if (!host || typeof host.on !== "function") return;
+    host.on("will-attach-webview", (_event, webPreferences, params) => {
+      const partition = String((webPreferences && webPreferences.partition) || "");
+      const src = String((params && params.src) || "");
+      if (!/^https?:/i.test(src) || !needsExtensionWait(partition)) return;
+      params.src = "";
+      heldByHost.set(host, { src, partition });
+      queueMicrotask(() => { if (heldByHost.get(host)?.src === src) heldByHost.delete(host); });
+    });
+    host.on("did-attach-webview", (_event, guest) => {
+      const held = heldByGuest.get(guest);
+      if (!held) return;
+      heldByGuest.delete(guest);
+      whenRestored(held.partition).then(() => {
+        try { if (!guest.isDestroyed() && !guest.getURL()) guest.loadURL(held.src).catch(() => {}); } catch {}
+      });
+    });
+  }
+  if (typeof app.on === "function") {
+    app.on("web-contents-created", (_event, contents) => {
+      if (!contents || typeof contents.getType !== "function") return;
+      if (contents.getType() !== "webview") { observeHost(contents); return; }
+      const host = contents.hostWebContents;
+      const held = host && heldByHost.get(host);
+      if (!held) return;
+      heldByHost.delete(host);
+      heldByGuest.set(contents, held);
     });
   }
 

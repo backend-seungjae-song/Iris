@@ -43,10 +43,12 @@ const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const BANNER = ["배치 잡", "입력 불가", "완료 시 자동 닫힘"];
 
 function executable(name, env) {
-  for (const dir of [...String(env.PATH || "").split(path.delimiter), path.join(os.homedir(), ".local", "bin")]) {
+  for (const dir of [...String(env[process.platform === "win32" ? Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH" : "PATH"] || "").split(path.delimiter), path.join(os.homedir(), ".local", "bin")]) {
     if (!dir) continue;
-    const candidate = path.join(dir, name);
-    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch {}
+    for (const suffix of process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]) {
+      const candidate = path.join(process.platform === "win32" ? dir.replace(/^"|"$/g, "") : dir, name + suffix);
+      try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch {}
+    }
   }
   return null;
 }
@@ -58,6 +60,8 @@ function quote(value) {
 
 function herdrJson(bin, argv) {
   return run(bin, argv, { timeout: 15_000, maxBuffer: 1 << 20 }).then(({ stdout }) => {
+    // pane run처럼 성공하면 아무것도 출력하지 않는 명령이 있다. 실패는 종료 코드로 run이 던진다.
+    if (!stdout.trim()) return null;
     const response = JSON.parse(stdout);
     if (response.error) throw new Error(`herdr rejected ${argv[0]} ${argv[1]}: ${response.error.code || "unknown"}`);
     return response.result;
@@ -74,9 +78,24 @@ function readStdin() {
   });
 }
 
+// Windows npm shim 실행
+function windowsInvocation(argv, env = process.env) {
+  const raw = argv[0];
+  let command = raw;
+  if (!path.win32.extname(raw)) command = executable(raw, env) || raw;
+  const args = argv.slice(1);
+  if (!/\.(cmd|bat)$/i.test(command)) return { command, args, options: {} };
+  const quote = (value) => {
+    if (/[\r\n\0"%!]/.test(value)) throw new Error("cmd에서 안전하게 전달할 수 없는 인자입니다");
+    return `"${value}"`;
+  };
+  return { command: env.ComSpec || "cmd.exe", args: [`/d /v:off /s /c "${[command, ...args].map(quote).join(" ")}"`], options: { windowsVerbatimArguments: true } };
+}
+
 // 래퍼가 아무것도 못 할 때의 경로. 명령을 그대로 이 프로세스에서 돌린다.
 function passthrough(argv) {
-  const child = spawn(argv[0], argv.slice(1), { stdio: "inherit" });
+  const invocation = process.platform === "win32" ? windowsInvocation(argv) : { command: argv[0], args: argv.slice(1), options: {} };
+  const child = spawn(invocation.command, invocation.args, { stdio: "inherit", ...invocation.options });
   child.on("error", (error) => {
     process.stderr.write(`${argv[0]}: ${error.message}\n`);
     process.exit(127);
@@ -88,7 +107,7 @@ function passthrough(argv) {
 }
 
 function runtimeOf(argv0) {
-  const base = path.basename(String(argv0 || ""));
+  const base = process.platform === "win32" ? path.win32.basename(String(argv0 || "")).replace(/\.(exe|cmd)$/i, "").toLowerCase() : path.basename(String(argv0 || ""));
   return RUNTIMES.has(base) ? base : null;
 }
 
@@ -130,6 +149,16 @@ function paneScript(dir, argv, cwd) {
     `mv ${quote(path.join(dir, "status.txt"))}.tmp ${quote(path.join(dir, "status.txt"))}`,
     "",
   ].join("\n");
+}
+
+// 자식 탭과 함께 생긴 셸에 보낼 명령. exec로 셸을 스크립트로 바꿔야 스크립트가 끝날 때 팬도 닫힌다.
+function paneCommand(script) {
+  if (process.platform === "win32") {
+    const quoted = (s) => `'${s.replaceAll("'", "''")}'`;
+    const source = `$env:ELECTRON_RUN_AS_NODE='1'; & ${quoted(process.execPath)} ${quoted(fileURLToPath(import.meta.url))} --worker ${quoted(script)}; exit $LASTEXITCODE`;
+    return `powershell.exe -NoProfile -EncodedCommand ${Buffer.from(source, "utf16le").toString("base64")}`;
+  }
+  return `exec /bin/bash ${quote(script)}`;
 }
 
 // 파일이 자라는 만큼만 읽어 그대로 흘린다. 호출자에게는 직접 실행과 같은 스트림으로 보인다.
@@ -191,9 +220,12 @@ async function launch(options, argv) {
   const dir = path.join(artifactDir("agent-run"), sha(socketPath), `${Date.now().toString(36)}-${crypto.randomBytes(5).toString("hex")}`);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(dir, "in.txt"), await readStdin(), { mode: 0o600 });
-  fs.writeFileSync(path.join(dir, "env.sh"), envFile(env), { mode: 0o600 });
-  const script = path.join(dir, "run.sh");
-  fs.writeFileSync(script, paneScript(dir, argv, cwd), { mode: 0o700 });
+  if (process.platform !== "win32") fs.writeFileSync(path.join(dir, "env.sh"), envFile(env), { mode: 0o600 });
+  const script = path.join(dir, process.platform === "win32" ? "run.json" : "run.sh");
+  if (process.platform === "win32") {
+    const childEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !ENV_DENY.has(key)));
+    fs.writeFileSync(script, JSON.stringify({ dir, argv, cwd, env: childEnv }), { mode: 0o600 });
+  } else fs.writeFileSync(script, paneScript(dir, argv, cwd), { mode: 0o700 });
   fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify({
     version: 1, label, reason, runtime, cwd, argv,
     parent: { paneId: parent.pane_id, terminalId: parent.terminal_id },
@@ -204,25 +236,15 @@ async function launch(options, argv) {
   const created = await herdrJson(herdrBin, ["tab", "create", "--workspace", parent.workspace_id, "--cwd", cwd, "--label", label, "--no-focus"]);
   const tabId = created?.tab?.tab_id;
   if (!tabId) throw new Error("herdr did not return a tab id");
-  let base = null;
+  // herdr 0.9의 agent start는 지원 목록에 있는 대화형 에이전트만 띄우므로 스크립트를 실행할 수 없다.
+  // 탭과 함께 생긴 셸 팬에서 스크립트를 실행한다.
+  const child = created?.root_pane;
   try {
-    const panes = await herdrJson(herdrBin, ["pane", "list", "--workspace", parent.workspace_id]);
-    base = (panes?.panes || []).find((p) => p.tab_id === tabId)?.pane_id || null;
-  } catch {}
-
-  let child;
-  try {
-    const started = await herdrJson(herdrBin, ["agent", "start", label, "--workspace", parent.workspace_id,
-      "--tab", tabId, "--cwd", cwd, "--no-focus", "--", "/bin/bash", script]);
-    child = started?.agent;
-    if (!child?.pane_id || !child.terminal_id) throw new Error("herdr did not return a child pane");
+    if (!child?.pane_id || !child.terminal_id) throw new Error("herdr did not return the tab's pane");
+    await herdrJson(herdrBin, ["pane", "run", child.pane_id, paneCommand(script)]);
   } catch (error) {
     try { await herdrJson(herdrBin, ["tab", "close", tabId]); } catch {}
     throw error;
-  }
-  // 새 탭을 열면 함께 생성되는 빈 셸을 닫는다. 남기면 탭마다 쓰지 않는 팬이 하나씩 붙는다.
-  if (base && base !== child.pane_id) {
-    try { await herdrJson(herdrBin, ["pane", "close", base]); } catch {}
   }
 
   // 팬 안의 foreground는 bash이므로 herdr는 런타임을 스스로 알아내지 못한다(확인 결과: agent=null).
@@ -248,7 +270,7 @@ async function launch(options, argv) {
     process.stderr.write(`iris-agent-run: lineage 등록 실패 — ${error.message}\n`);
   }
 
-  return { herdrBin, dir, child, tabId, lineageFile };
+  return { herdrBin, dir, child, tabId, lineageFile, runtime };
 }
 
 async function waitForExit(session) {
@@ -285,22 +307,52 @@ async function waitForExit(session) {
   }
 }
 
-async function finish(session, keep) {
+// herdr 는 표식을 단 런타임 이름이 같아야 해제한다. 다르면 성공으로 응답하고 "working" 을 그대로 남긴다(확인).
+async function finish(session, keep, herdr = herdrJson) {
   try {
-    await herdrJson(session.herdrBin, ["pane", "release-agent", session.child.pane_id,
-      "--source", "iris-agent-run", "--agent", "codex"]);
+    await herdr(session.herdrBin, ["pane", "release-agent", session.child.pane_id,
+      "--source", "iris-agent-run", "--agent", session.runtime]);
   } catch {}
   // 자식 터미널이 종료되면 이 receipt는 아무 관계도 만들지 않는다. 지우지 않으면 잡 하나에
   // 파일 하나씩 계속 쌓인다. 사람이 만드는 자식과 달리 이 경로는 하루에도 수십 번 실행된다.
   if (session.lineageFile) {
     try { fs.rmSync(session.lineageFile, { force: true }); } catch {}
   }
+  if (process.platform === "win32" && !keep) {
+    try { await herdr(session.herdrBin, ["tab", "close", session.tabId]); } catch {}
+  }
   if (keep) return;
   // 로그는 진단에 쓰이므로 성공한 회차만 지운다. 남기는 경로는 --keep이 소유한다.
   try { fs.rmSync(session.dir, { recursive: true, force: true }); } catch {}
 }
 
+// Windows 배치 입출력 바이트 보존
+async function windowsWorker(file) {
+  const { dir, argv, cwd, env } = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!Array.isArray(argv) || !argv.length || !argv.every((arg) => typeof arg === "string")) throw new Error("invalid worker argv");
+  const childEnv = { ...process.env, ...env, IRIS_AGENT_RUN_ACTIVE: "1" };
+  for (const key of ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_SESSION"]) {
+    if (process.env[key]) childEnv[key] = process.env[key];
+  }
+  for (const line of BANNER) process.stdout.write(line + "\n");
+  const invocation = windowsInvocation(argv, childEnv);
+  const out = fs.openSync(path.join(dir, "out.log"), "w"), err = fs.openSync(path.join(dir, "err.log"), "w");
+  const child = spawn(invocation.command, invocation.args, { cwd, env: childEnv, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, ...invocation.options });
+  child.stdout.on("data", (bytes) => { fs.writeSync(out, bytes); process.stdout.write(bytes); });
+  child.stderr.on("data", (bytes) => { fs.writeSync(err, bytes); process.stderr.write(bytes); });
+  child.stdin.on("error", () => {});
+  fs.createReadStream(path.join(dir, "in.txt")).pipe(child.stdin);
+  let failed = false;
+  child.on("error", (error) => { failed = true; fs.writeSync(err, String(error.message)); });
+  const code = await new Promise((resolve) => child.once("close", (status) => resolve(failed ? 127 : status ?? 1)));
+  fs.closeSync(out); fs.closeSync(err);
+  const status = path.join(dir, "status.txt");
+  fs.writeFileSync(status + ".tmp", String(code)); fs.renameSync(status + ".tmp", status);
+  process.exitCode = code;
+}
+
 async function main() {
+  if (process.platform === "win32" && process.argv[2] === "--worker") return windowsWorker(process.argv[3]);
   const separator = process.argv.indexOf("--");
   const argv = separator >= 0 ? process.argv.slice(separator + 1) : [];
   const own = separator >= 0 ? process.argv.slice(2, separator) : process.argv.slice(2);
@@ -332,4 +384,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   main().catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
 }
 
-export { paneScript, quote, envFile, runtimeOf, ENV_DENY, BANNER };
+export { paneScript, paneCommand, quote, envFile, runtimeOf, finish, ENV_DENY, BANNER };

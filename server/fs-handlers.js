@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { copyTreeSync } from "./copy-tree.cjs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { createBlankWorkbook, isSheetPath } from "./sheet.js";
 import { enqueuePathIo } from "./path-io.js";
 import {
+  clearGitStatusCache,
   getGitStatusCache,
   isPathAllowed as fsPathAllowed,
   noteOpened,
@@ -75,11 +77,15 @@ function gitStatusFor(dir) {
     if (!root) return {};
     const cached = getGitStatusCache(root);
     if (!cached || Date.now() - cached.at > 2500) {
-      const out = execFileSync("git", ["-C", root, "status", "--porcelain", "-uall"], { encoding: "utf8", timeout: 2500, maxBuffer: 4 * 1024 * 1024 });
+      // -z: 비ASCII 경로를 따옴표·8진수로 감싸지 않음. 이름 바뀜은 새 경로 뒤에 옛 경로가 따로 옴
+      const out = execFileSync("git", ["-C", root, "status", "--porcelain", "-z", "-uall"], { encoding: "utf8", timeout: 2500, maxBuffer: 4 * 1024 * 1024 });
       const map = {};
-      for (const line of out.split("\n")) {
+      const fields = out.split("\0");
+      for (let i = 0; i < fields.length; i++) {
+        const line = fields[i];
         if (line.length < 4) continue;
-        const xy = line.slice(0, 2), rel = line.slice(3).replace(/^"(.*)"$/, "$1").split(" -> ").pop();
+        const xy = line.slice(0, 2), rel = line.slice(3);
+        if (/[RC]/.test(xy)) i++;
         const abs = path.join(root, rel);
         let s = "M";
         if (xy === "??") s = "U"; else if (/A/.test(xy)) s = "A"; else if (/D/.test(xy)) s = "D"; else if (/M|R|C/.test(xy)) s = "M"; else continue;
@@ -113,15 +119,18 @@ export function fileRevision(p) {
 // 임시 파일을 쓰고 rename 하는 방식으로 하는데, 그러면 파일 watcher는 대상이 사라져 동작을 멈춘다(그 뒤로는
 // 아무 변화도 안 온다). 폴더 watcher는 그 rename까지 이벤트로 본다. 폴더를 보므로 생성·삭제도 같이 온다.
 const dirWatchers = new Map(); // dir → { w, clients:Set<ws>, timer, names:Set }
+// 허용 기준은 fs.read 와 같다. 로컬 창은 워크스페이스 밖 파일도 열 수 있으므로 그 폴더도 감시한다.
+// 허용 루트만 보면 서버가 막 떠 루트가 아직 비어 있을 때 온 요청이 버려지고, 화면은 같은 목록을 다시
+// 보내지 않아 그 뒤로 외부 변경이 반영되지 않는다.
 function watchDirFor(ws, dir) {
-  if (!fsPathAllowed(dir)) return;
+  if (!ws._local && !fsPathAllowed(dir)) return;
   let ent = dirWatchers.get(dir);
   if (!ent) {
     let w;
     try { w = fs.watch(dir, { persistent: false }); } catch { return; }
     ent = { w, clients: new Set(), timer: null, names: new Set() };
-    w.on("error", () => { try { w.close(); } catch {} dirWatchers.delete(dir); });
-    w.on("change", (_type, name) => {
+    w.on("error", () => { closeDirWatch(ent); dirWatchers.delete(dir); });
+    const changed = (name) => {
       if (name) ent.names.add(String(name));
       if (ent.timer) return;
       // 한 번의 저장이 이벤트를 여러 개 낸다(rename+change 등). 묶어서 한 번만 알린다.
@@ -130,15 +139,36 @@ function watchDirFor(ws, dir) {
         const payload = JSON.stringify({ type: "dir-changed", dir, names });
         for (const c of ent.clients) { try { if (c.readyState === 1) c.send(payload); } catch {} }
       }, 120);
-    });
+    };
+    w.on("change", (_type, name) => changed(name));
+    // 커밋·stage 는 작업 파일을 안 바꿔 위 감시에 안 잡힘 → 탐색기 M·U 표시가 남음.
+    // 저장소 루트면 .git 의 index·HEAD 변경 때 git 상태 캐시를 비우고 루트 목록을 다시 받게 함
+    try {
+      if (fs.statSync(path.join(dir, ".git")).isDirectory()) {
+        ent.gitW = fs.watch(path.join(dir, ".git"), { persistent: false });
+        ent.gitW.on("error", () => { try { ent.gitW.close(); } catch {} ent.gitW = null; });
+        ent.gitW.on("change", (_type, name) => {
+          if (!GIT_STATE_FILES.has(String(name || ""))) return;
+          clearGitStatusCache(dir);
+          try { clearGitStatusCache(fs.realpathSync(dir)); } catch {}
+          changed(".git");
+        });
+      }
+    } catch {}
     dirWatchers.set(dir, ent);
   }
   ent.clients.add(ws);
 }
+const GIT_STATE_FILES = new Set(["index", "HEAD"]);
+function closeDirWatch(ent) {
+  try { ent.w.close(); } catch {}
+  try { ent.gitW?.close(); } catch {}
+  if (ent.timer) clearTimeout(ent.timer);
+}
 function unwatchAll(ws) {
   for (const [dir, ent] of [...dirWatchers]) {
     ent.clients.delete(ws);
-    if (!ent.clients.size) { try { ent.w.close(); } catch {} if (ent.timer) clearTimeout(ent.timer); dirWatchers.delete(dir); }
+    if (!ent.clients.size) { closeDirWatch(ent); dirWatchers.delete(dir); }
   }
 }
 // 클라이언트가 현재 보고 있는 폴더 목록을 전체로 보내고, 서버는 그 집합만 유지한다.
@@ -298,7 +328,7 @@ export async function handleFsOp(ws, msg) {
         });
       }
       if (exists(dest)) return reply({ ok: false, error: "같은 이름이 이미 있습니다" });
-      fs.cpSync(absSrc, dest, { recursive: true, force: false, errorOnExist: true }); // force:false라야 errorOnExist 유효(덮어쓰기 방지)
+      copyTreeSync(absSrc, dest, { recursive: true, force: false, errorOnExist: true });
       recompute();
       return reply({ ok: true, refresh: [absDestDir], from: absSrc, newPath: dest, moved: false, open: !!msg.open });
     }

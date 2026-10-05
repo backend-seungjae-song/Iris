@@ -6,7 +6,7 @@
 // 영향 범위: 러너가 동적 import 로 이 run 을 부른다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs bin/smoke/sections/tab-wake.mjs
 import { check, checkAsync } from "../core.mjs";
-import { aiTabs, browserCommands, browserRuntime, mainJs } from "../sources.mjs";
+import { aiTabs, browserCommands, browserRuntime, browserExtensionsSource, installAppScript, main as electronMainSource, mainJs, preloadSource, serverIndexSource, webviewLifecycleSource } from "../sources.mjs";
 
 export default async function run() {
 console.log("[2h3] 잠든 탭 깨우기");
@@ -53,6 +53,54 @@ check("창이 그 방송을 받아 실제로 만든다", () =>
   && /export function wakeTabHere/.test(aiTabs)
   && /if \(getDiscardedWebview\(tabId\)\) wakeWebview\(tabId\);/.test(aiTabs)
   && /createWebview\(tabId, wantProfile/.test(aiTabs));
+
+// 분리 모드에서 분리 창을 닫으면 docked 는 false 로 남는다. 콘솔은 소유자가 아니라 건너뛰고
+// 분리 창은 없어서, 아무도 깨우지 않아 12초 뒤 실패하고 에이전트가 사용자에게 창을 열어 달라고 한다.
+// 공유 탭도 같다. 공유 창이 닫혀 있으면 아무도 깨우지 않는다.
+check("깨울 창이 없으면 콘솔이 그 탭의 창을 뒤에 띄운다", () => {
+  const body = /if \(!wakeOwnedHere\([^\n]*\)\) \{[\s\S]*?return false;\n    \}/.exec(aiTabs);
+  if (!body) throw new Error("wakeTabHere 의 소유자 아님 분기를 못 찾음");
+  return /if \(!BROWSER_MODE && !BOUND_SPACE\)/.test(body[0])
+    && /sp === "__shared__"\) [^\n]*acHost\.openSharedBrowser\(\{ background: true \}\)/.test(body[0])
+    && /else if \(!docked && liveSpace\) [^\n]*acHost\.openBrowser\(\{ background: true \}\)/.test(body[0])
+    && /openSharedBrowser: \(opts\) => ipcRenderer\.send\("ac-open-shared-browser", opts \|\| null\)/.test(preloadSource)
+    && /ipcMain\.on\("ac-open-shared-browser", \(_e, opts\) => \{[^\n]*createBrowserModeWindow\(true, opts\)/.test(electronMainSource);
+});
+
+// 창을 닫으면 그 안의 렌더러가 함께 사라져 탭이 사라졌다고 서버에 알리지 못한다. 서버는 죽은 wc 로
+// 명령을 보내 "탭을 찾을 수 없음"으로 실패하고, 깨우기 경로에 들어가지 못한다.
+// wc 번호만 보낸다. 탭 id 로 해제하면 다른 창에서 새 wc 로 먼저 등록된 탭까지 지운다.
+check("webview 가 사라지면 메인이 그 wc 를 서버에 알린다", () =>
+  /const goneWc = wc\.id;\s*wc\.once\("destroyed", \(\) => \{ try \{ ctlSend\(\{ type: "browser-tab-gone", wc: goneWc \}\); \} catch \{\} \}\);/
+    .test(webviewLifecycleSource)
+  && /if \(prev && prev\.wc != null && prev\.wc !== meta\.wc\) tabIdByWc\.delete\(prev\.wc\);/.test(browserRuntime));
+
+// 확장 로드와 겹쳐 출발한 첫 이동은 webRequest 리스너가 있는 확장(Unhook)이 끼면 끝나지 않는다. 그 탭은
+// dom-ready 가 오지 않아 서버에 보고되지 않고, 깨우기가 12초 뒤 실패한다(확인 결과: Play 프로필 Cloud 탭).
+check("확장 로드 전 프로필의 webview 는 첫 주소를 미뤘다가 로드 뒤에 연다", () =>
+  /if \(!\/\^https\?:\/i\.test\(src\) \|\| !needsExtensionWait\(partition\)\) return;\s*params\.src = "";/.test(browserExtensionsSource)
+  && /whenRestored\(held\.partition\)\.then\(\(\) => \{[^\n]*\n[^\n]*guest\.loadURL\(held\.src\)/.test(browserExtensionsSource)
+  && /result\.then\(\(\) => markRestored\(partition\), \(\) => markRestored\(partition\)\);/.test(browserExtensionsSource));
+
+// 서버의 깨우기는 그 탭의 wc 가 서버에 없다는 뜻이다. 떠 있는 webview 를 그대로 두면 멈춘 탭이 앱을 다시
+// 켤 때까지 계속 실패한다(확인 결과: 응답 없는 요청에 걸린 탭이 이후 정상 응답에도 매번 12초 뒤 실패).
+check("깨우기는 떠 있는 webview 의 wc 를 다시 보고하거나, 멈춘 것은 새로 만든다", () => {
+  const body = /export function wakeTabHere[\s\S]*?\n\}/.exec(aiTabs);
+  if (!body) throw new Error("wakeTabHere 를 못 찾음");
+  return /if \(live\.ready\) \{ reportTabWc\(live, tabId\); return true; \}/.test(body[0])
+    && /if \(Date\.now\(\) - \(live\.createdAt \|\| 0\) < STUCK_WEBVIEW_MS\) return true;\s*discardWebview\(tabId, Date\.now\(\)\);/.test(body[0])
+    && /const STUCK_WEBVIEW_MS = (\d+);/.test(aiTabs) && Number(/const STUCK_WEBVIEW_MS = (\d+);/.exec(aiTabs)[1]) < 12000;
+});
+
+// 종료 대기가 끝난 직후에 앱이 꺼지면 교체도 재실행도 하지 않은 채 앱이 없는 상태로 남는다.
+check("설치 중 교체를 포기하면 꺼진 앱을 다시 연다", () =>
+  /앱이 종료되지 않아 교체하지 않습니다[^\n]*\n[\s\S]{0,200}?running \|\| installed_env open -a "\$APP"/.test(installAppScript));
+
+// 뒤늦게 뜬 분리 창은 앞서 보낸 알림을 받지 못했다. 탭 목록보다 먼저 받으면 대상 탭을 찾지 못한다.
+check("새로 연결된 창에 대기 중인 깨우기를 탭 목록 뒤에 다시 보낸다", () =>
+  /type: "browser-state", state: bsWire\(\) \}\)\);[\s\S]{0,200}?for \(const tabId of pendingWakeTabIds\(\)\) ws\.send\(JSON\.stringify\(\{ type: "wake-tab", tabId \}\)\)/
+    .test(serverIndexSource)
+  && /function pendingWakeTabIds\(\) \{\s*return \[\.\.\.tabWcWaiters\.keys\(\)\];/.test(browserRuntime));
 
 // 활성 탭만 집계하면 에이전트에게는 자기 탭이 사라진 것으로 보여, 쓰던 탭을 두고 새로 만든다.
 check("잠든 탭도 목록에 남는다", () =>

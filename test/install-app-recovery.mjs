@@ -18,7 +18,7 @@ function executable(file, body) {
 //   copy: "fail" 이면 ditto 가 반쪽 번들을 남기고 실패한다.
 //   server: 새 앱 서버 준비 확인(wait-installed-server.cjs)의 결과.
 function harness(t, {
-  codesign = "pass", open = "pass", quit = "pass", launch = "stays", copy = "pass", server = "ready",
+  codesign = "pass", open = "pass", quit = "pass", launch = "stays", copy = "pass", server = "ready", channel = false,
 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-install-recovery-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -40,7 +40,7 @@ function harness(t, {
   const original = source;
   source = source.replace('cd "$(dirname "$0")/.."', 'cd "$IRIS_TEST_ROOT"');
   source = source.replace("APP=/Applications/Iris.app", 'APP="$IRIS_TEST_APP"');
-  source = source.replace("/usr/bin/codesign --verify", "codesign --verify");
+  source = source.replaceAll("/usr/bin/codesign ", "codesign ");
   assert.notEqual(source, original);
   assert.match(source, /APP="\$IRIS_TEST_APP"/);
   assert.match(source, /codesign --verify --deep --strict/);
@@ -57,8 +57,13 @@ if [ "\${1:-}" = "scripts/wait-installed-server.cjs" ]; then
 fi
 echo "node $*" >> "$MOCK_LOG"`);
   executable(path.join(mocks, "npx"), 'echo "npx $*" >> "$MOCK_LOG"');
-  executable(path.join(mocks, "codesign"), `echo "codesign $*" >> "$MOCK_LOG"\n${codesign === "pass" ? "exit 0" : "exit 41"}`);
-  executable(path.join(mocks, "osascript"), `echo "quit" >> "$MOCK_LOG"\n${quit === "pass" ? '/bin/rm -f "$MOCK_STATE/running"' : ":"}`);
+  // "unsigned": 인증서 없는 Mac 의 빌드처럼 ad-hoc 서명(--sign -)을 붙이기 전까지 검증이 실패한다
+  executable(path.join(mocks, "codesign"), `echo "codesign $*" >> "$MOCK_LOG"
+${codesign === "pass" ? "exit 0" : codesign === "unsigned"
+    ? 'case "$*" in *"--sign -"*) touch "$MOCK_STATE/adhoc"; exit 0 ;; esac\n[ -f "$MOCK_STATE/adhoc" ] || exit 41'
+    : "exit 41"}`);
+  executable(path.join(mocks, "osascript"), `case "$*" in *activate*) echo "activate" >> "$MOCK_LOG"; exit 0 ;; esac
+echo "quit" >> "$MOCK_LOG"\n${quit === "pass" ? '/bin/rm -f "$MOCK_STATE/running"' : ":"}`);
   executable(path.join(mocks, "sleep"), quit === "delayed" ? `
 count=0
 [ ! -f "$MOCK_STATE/waits" ] || count=$(cat "$MOCK_STATE/waits")
@@ -78,7 +83,12 @@ echo "$count" > "$MOCK_STATE/open-count"
 ${open === "fail-first" ? '[ "$count" -ne 1 ] || exit 42' : ":"}
 ${launch === "stays" ? 'touch "$MOCK_STATE/running"' : ":"}
 `);
-  executable(path.join(mocks, "pgrep"), '[ -f "$MOCK_STATE/running" ]');
+  // 다른 세션의 채널 MCP 서버는 앱 종료와 관계없이 남는다
+  executable(path.join(mocks, "pgrep"), `
+found=1
+${channel ? 'echo "456 $IRIS_TEST_APP/Contents/MacOS/Iris $IRIS_TEST_APP/Contents/Resources/app.asar.unpacked/server/remote/channel/iris-channel.mjs"; found=0' : ":"}
+if [ -f "$MOCK_STATE/running" ]; then echo "123 $IRIS_TEST_APP/Contents/MacOS/Iris"; found=0; fi
+exit $found`);
 
   const result = spawnSync("/bin/bash", [script], {
     cwd: fixtureRoot,
@@ -165,6 +175,7 @@ test("새 앱과 서버가 준비된 뒤에만 백업을 지운다", (t) => {
   assert.equal(count(h.events, "open"), 1);
   const ready = h.events.indexOf("ready-check backups=1");
   assert.ok(ready > h.events.indexOf("open"), "서버 준비 확인은 실행 뒤, 백업이 남아 있을 때 한다");
+  assert.ok(h.events.indexOf("activate") > ready, "서버 준비 뒤 앱을 앞으로 가져온다");
   assert.ok(h.events.findIndex((event) => event.startsWith("node scripts/install-agent-context.mjs")) > ready);
   assert.equal(h.running, true);
 });
@@ -180,6 +191,16 @@ test("서명 검증 실패는 실행 중인 앱을 종료하거나 교체하지 
   assert.equal(h.events.includes("open"), false);
 });
 
+test("서명 인증서 없이 빌드한 앱은 ad-hoc 서명을 붙인 뒤 검증해 설치한다", (t) => {
+  const h = harness(t, { codesign: "unsigned" });
+  assert.equal(h.result.status, 0, h.result.stdout + h.result.stderr);
+  assert.equal(installedVersion(h.app), "new");
+  const sign = h.events.findIndex((event) => /^codesign --force --deep --sign - /.test(event));
+  assert.ok(sign > 0, "ad-hoc 서명을 붙여야 한다");
+  assert.ok(h.events.slice(sign + 1).some((event) => event.startsWith("codesign --verify --deep --strict")), "서명 뒤 다시 검증해야 한다");
+  assert.ok(sign < h.events.indexOf("quit"), "앱을 끄기 전에 서명한다");
+});
+
 test("source-root marker는 서명 전 afterPack만 소유한다", () => {
   const installer = fs.readFileSync(installerPath, "utf8");
   const afterPack = fs.readFileSync(path.join(root, "scripts", "after-pack.cjs"), "utf8");
@@ -189,6 +210,14 @@ test("source-root marker는 서명 전 afterPack만 소유한다", () => {
   assert.equal(pkg.build.afterPack, "scripts/after-pack.cjs");
 });
 
+
+test("다른 세션의 채널 MCP 서버가 남아 있어도 앱이 종료되면 교체를 완료한다", (t) => {
+  const h = harness(t, { channel: true });
+  assert.equal(h.result.status, 0, h.result.stdout + h.result.stderr);
+  assert.equal(installedVersion(h.app), "new");
+  assert.equal(count(h.events, "open"), 1);
+  assert.equal(h.running, true);
+});
 
 test("에뮬레이터 정리 20초 뒤 종료되는 앱도 교체를 완료한다", (t) => {
   const h = harness(t, { quit: "delayed" });

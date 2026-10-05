@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { paneScript, quote, envFile, runtimeOf, ENV_DENY, BANNER } from "../bin/agent-run.mjs";
+import { paneScript, paneCommand, quote, envFile, runtimeOf, finish, ENV_DENY, BANNER } from "../bin/agent-run.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -77,6 +77,12 @@ test("팬 스크립트가 재래핑을 막는 표식을 세운다", () => {
   assert.ok(ENV_DENY.has("IRIS_AGENT_RUN_ACTIVE"), "표식을 부모 env로 덮으면 자식이 또 감싼다");
 });
 
+test("자식 팬에 보내는 명령이 셸을 스크립트로 바꾼다", () => {
+  // exec가 빠지면 스크립트가 끝나도 셸이 남아 팬이 닫히지 않고, 래퍼는 팬 종료로 중단을 판정하지 못한다.
+  assert.equal(paneCommand("/state/job/run.sh"), "exec /bin/bash '/state/job/run.sh'");
+  assert.equal(paneCommand("/a b/it's.sh"), `exec /bin/bash '/a b/it'\\''s.sh'`);
+});
+
 test("런타임은 명령 이름에서 읽고 모르는 것은 감싸지 않는다", () => {
   assert.equal(runtimeOf("/usr/local/bin/codex"), "codex");
   assert.equal(runtimeOf("claude"), "claude");
@@ -92,4 +98,17 @@ test("래퍼가 설치 앱에 실릴 자리마다 등록돼 있다", () => {
   assert.ok(pkg.build.asarUnpack.includes("bin/agent-run.mjs"), "asarUnpack");
   const installer = fs.readFileSync(path.join(ROOT, "scripts", "install-agent-context.mjs"), "utf8");
   assert.ok(installer.includes('"bin/agent-run.mjs"'), "install preflight");
+});
+
+test("끝낼 때 표식을 단 런타임 이름으로 해제한다", async () => {
+  // herdr 는 이름이 다르면 성공으로 응답하고 "working" 을 남겨, Claude 자식이 끝나도 작업 중으로 보인다.
+  for (const runtime of ["claude", "codex"]) {
+    const calls = [];
+    const dir = fs.mkdtempSync(path.join(ROOT, ".agent-run-finish-"));
+    try {
+      await finish({ herdrBin: "herdr", dir, child: { pane_id: "w1:p2" }, runtime, lineageFile: null }, true,
+        async (_bin, argv) => { calls.push(argv); return null; });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    assert.deepEqual(calls[0], ["pane", "release-agent", "w1:p2", "--source", "iris-agent-run", "--agent", runtime]);
+  }
 });

@@ -14,6 +14,12 @@
   box-shadow:var(--menu-shadow); opacity:.75; transition:opacity var(--t) var(--ease); }
 .editor-float:hover, .editor-float:focus-within { opacity:1; }
 .editor-float .editor-controls { flex:none; }
+/* 좁은 열(1180 창의 메모 열 220px)에서 상자가 오른쪽 기준으로 넘쳐 왼쪽 손잡이가 열 밖으로 잘림. 열 안으로 묶고 넘치는 손잡이는 다음 줄로.
+ 묶음 상자를 풀어 손잡이 하나씩 넘김. 묶음 사이 간격(5px)은 표시 옵션의 왼쪽 여백으로 유지*/
+.editor-float { max-width:calc(100% - 32px); flex-wrap:wrap; gap:1px; }
+.editor-float .editor-controls, .editor-float [data-mdformat-bar] { display:contents; }
+.editor-float .editor-view-opts { margin-left:4px; }
+.editor-float .editor-controls:empty + .editor-view-opts { margin-left:0; }
 /* 서식과 표시 옵션 사이 얇은 구분선. 성격이 다른 두 그룹이다.*/
 .editor-float .editor-view-opts { position:relative; padding-left:6px; }
 .editor-float .editor-view-opts::before { content:""; position:absolute; left:0; top:50%; transform:translateY(-50%);

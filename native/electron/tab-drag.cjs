@@ -36,8 +36,8 @@ const VERTICAL_DETACH_MAGNETISM = 15;
 
 const RECT_CHANNEL = "ac-tabstrip-rect";
 
-function createTabDrag({ BrowserWindow, ipcMain, screen, isTrustedSender, openDetachedTab, closeDetachedTab, detachedWindowFor, log }) {
-  // wcId → { left, top, w, h, space, tab }. 창 안의 상대 좌표이며 화면 좌표는 쓸 때 계산한다.
+function createTabDrag({ BrowserWindow, ipcMain, screen, isTrustedSender, openDetachedTab, closeDetachedTab, moveDetachedTab, detachedWindowFor, log }) {
+  // wcId → { left, top, w, h, space, win }. win 은 분리 창이면 그 창 id. 창 안의 상대 좌표이며 화면 좌표는 쓸 때 계산한다.
   // 렌더러가 화면 좌표로 보내면 창을 옮기는 순간 값이 낡는데, 옮긴 창은 다시 그리지 않아 갱신되지
   // 않는다. 창의 위치는 이 모듈이 항상 알고 있다.
   const strips = new Map();
@@ -126,11 +126,16 @@ function createTabDrag({ BrowserWindow, ipcMain, screen, isTrustedSender, openDe
     } catch {}
   }
 
-  // 크롬 Attach(target) 와 같다. 그 창의 띠에 붙이고 끌던 분리 창은 닫는다(닫기 = 되돌리기).
+  // 크롬 Attach(target) 와 같다. 같은 스페이스의 분리 창 띠면 그 창으로 옮기고, 그 밖의 띠면 원래 띠로
+  // 돌려보낸다. 끌던 창은 탭이 빠져 비면 닫힌다.
   function attachTo(target) {
-    if (drag.state === "window" && drag.win && !drag.win.isDestroyed()) {
-      try { closeDetachedTab(drag.tabId); } catch {}
+    const rel = strips.get(target.wcId);
+    const toWin = rel && rel.win;
+    let moved = false;
+    if (toWin && typeof moveDetachedTab === "function") {
+      try { moved = !!moveDetachedTab(drag.tabId, toWin, drag.space); } catch {}
     }
+    if (!moved) { try { closeDetachedTab(drag.tabId); } catch {} }
     drag.state = "tabs";
     drag.win = null;
     drag.attachedWc = target.wcId;
@@ -165,7 +170,7 @@ function createTabDrag({ BrowserWindow, ipcMain, screen, isTrustedSender, openDe
       if (!arg || typeof arg !== "object") { strips.delete(wcId); return; }
       const left = Number(arg.left), top = Number(arg.top), w = Number(arg.w), h = Number(arg.h);
       if (![left, top, w, h].every(Number.isFinite) || w <= 0 || h <= 0) { strips.delete(wcId); return; }
-      strips.set(wcId, { left, top, w, h, space: String(arg.space || ""), tab: String(arg.tab || "") || null });
+      strips.set(wcId, { left, top, w, h, space: String(arg.space || ""), win: String(arg.win || "") || null });
       e.sender.once("destroyed", () => forgetWindow(wcId));
     });
 

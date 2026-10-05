@@ -58,7 +58,8 @@ export function initCapability(ctx) {
     const s = { path: saved.path, url: meta.url, title: meta.title };
     if (BROWSER_MODE) {
       wsSend({ type: "sketch-relay", sketch: s });
-      showToast("스케치 전달됨 → 콘솔 터미널.", { level: "ok" });
+      // 터미널에 넣었는지는 콘솔 창이 정한다(세션이 없으면 거기서 안내). 여기서는 보낸 것만 알린다
+      showToast("스케치를 콘솔 창으로 보냈습니다.", { level: "info" });
       try { acHost.refocusConsole && acHost.refocusConsole(); } catch (e) {}
       return;
     }

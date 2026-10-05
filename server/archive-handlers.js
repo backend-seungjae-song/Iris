@@ -1,3 +1,4 @@
+import { commandForPane } from "./windows-shell.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -221,7 +222,7 @@ async function reviveTerminal(wsId, spareRef, tab) {
   const slot = await takeTab(wsId, spareRef, tab.label);
   // 이전 보관 기록에는 cwd가 없다. 새 기록만 원래 작업 폴더로 이동한다.
   if (tab.cwd != null && !sameDir(tab.cwd, slot.cwd)) {
-    await herdr.paneSendText(slot.paneId, shellCommand(["cd", "--", tab.cwd]) + "\r");
+    await herdr.paneSendText(slot.paneId, (process.platform === "win32" ? await commandForPane(herdr, slot.paneId, null, tab.cwd) : shellCommand(["cd", "--", tab.cwd])) + "\r");
   }
 }
 
@@ -233,7 +234,7 @@ async function reviveAgent(wsId, spareRef, e) {
   const slot = await takeTab(wsId, spareRef, e.name);
   // 탭은 스페이스 폴더에서 시작한다. 세션이 그 아래 다른 폴더에 있었으면 먼저 옮긴다.
   // 실행 파일까지 인용(셸 별칭 미적용, 기존 복원 동작 유지)
-  const cmd = (sameDir(e.cwd, slot.cwd) || !e.cwd ? "" : `cd ${shq(e.cwd)} && `) + argv.map(shq).join(" ");
+  const cmd = process.platform === "win32" ? await commandForPane(herdr, slot.paneId, argv, sameDir(e.cwd, slot.cwd) ? null : e.cwd) : (sameDir(e.cwd, slot.cwd) || !e.cwd ? "" : `cd ${shq(e.cwd)} && `) + argv.map(shq).join(" ");
   await herdr.paneSendText(slot.paneId, cmd + "\r");
   archive.remove(e.id);
   return slot.tabId;

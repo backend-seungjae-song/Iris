@@ -212,6 +212,25 @@ function attach(host, event) {
   for (const format of FORMATS.filter((item) => item.key)) {
     next.disposables.push(bindKeymapAction(host.editor, format.key, () => formatEditor(next.host, format.name)));
   }
+  fitEditorTop(host.editor, host.barEl.closest(".editor-float"), next.disposables);
+}
+
+// 좁은 열에서 떠 있는 도구 상자가 여러 줄로 넘어가면 그 줄들이 편집기 첫 줄을 가림. 늘어난 줄 높이만큼 위쪽 여백 추가
+function fitEditorTop(editor, float, disposables) {
+  const base = editor.getRawOptions?.()?.padding?.top;
+  if (!float || typeof base !== "number" || typeof ResizeObserver !== "function") return;
+  const setTop = (top) => {
+    const padding = editor.getRawOptions().padding || {};
+    if (padding.top !== top) editor.updateOptions({ padding: { ...padding, top } });
+  };
+  const observer = new ResizeObserver(() => {
+    const buttons = float.querySelectorAll("button");
+    if (!buttons.length) return;
+    const extra = buttons[buttons.length - 1].getBoundingClientRect().top - buttons[0].getBoundingClientRect().top;
+    setTop(base + Math.max(0, Math.round(extra)));
+  });
+  observer.observe(float);
+  disposables.push(() => { observer.disconnect(); try { setTop(base); } catch {} });
 }
 
 export function initCapability() {

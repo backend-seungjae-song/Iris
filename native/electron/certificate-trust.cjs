@@ -46,7 +46,8 @@ function createCertificateTrust({ appUrl, fetchImpl = fetch }) {
   function handleCertificateError(event, wc, url, error, certificate, callback) {
     let host = "", proto = "";
     try { const u = new URL(url); host = u.hostname; proto = u.protocol; } catch {}
-    if (proto !== "https:" || !isLocalCertHost(host) || String(error) !== "ERR_CERT_AUTHORITY_INVALID") return null;
+    // Electron 은 "net::ERR_CERT_AUTHORITY_INVALID" 형식으로 넘긴다(43.7.0 실측)
+    if (proto !== "https:" || !isLocalCertHost(host) || String(error).replace(/^net::/, "") !== "ERR_CERT_AUTHORITY_INVALID") return null;
     const fp = String((certificate && certificate.fingerprint) || "");
     if (!fp) return null;
     const key = host + "|" + fp;

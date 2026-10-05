@@ -123,7 +123,7 @@ check("⌘⇧+클릭은 열지 않고 Finder에서 보여줌", () => {
 });
 check("Finder 표시는 파일에만(웹 링크 제외)", () => {
   const seg = sliceBetween(fileRouting, "function pathOfTarget", "function openTerminalTarget", "Finder 표시는 파일에만(웹 링크 제외)");
-  return /return null; \/\/ http\(s\)는 파일이 아니다/.test(seg) && /decodeURIComponent/.test(seg);
+  return /return null; \/\/ http\(s\)는 파일이 아니다/.test(seg) && /return fromFileUrl\(s\)/.test(seg) && /isAbsolutePath\(s\)/.test(seg);
 });
 check("열기·Finder가 같은 경로 해석을 씀", () => {
   // 두 동작이 각자 해석하면 한쪽만 동작하는 경로가 생긴다.

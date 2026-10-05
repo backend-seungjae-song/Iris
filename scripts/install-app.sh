@@ -28,19 +28,34 @@ npx electron-builder --mac --arm64 >/dev/null
 # 사본이 없어도 다른 이유로 빠질 수 있다. 결과물 자체를 보고, 다르면 앱을 끄기 전에 멈춘다.
 echo "2/6  결과물 대조"
 node scripts/check-shipped.mjs post
+# 서명 인증서가 없는 Mac 에서는 electron-builder 가 서명을 건너뛰어 번들 서명이 깨진 채 나온다. 그대로면 아래
+# 검증에 실패해 설치하지 못하므로 그때만 ad-hoc 서명을 붙인다. 인증서로 서명된 결과물은 그대로 둔다.
+if ! /usr/bin/codesign --verify --deep --strict "$BUILT" 2>/dev/null; then
+  echo "     서명 인증서가 없어 ad-hoc 서명을 붙입니다"
+  /usr/bin/codesign --force --deep --sign - "$BUILT"
+fi
 /usr/bin/codesign --verify --deep --strict "$BUILT"
 
 # 설치된 앱은 개발 환경 변수를 물려받지 않는다. 이 스크립트는 pnpm 안에서 돌고 `open`은 지금 셸의
 # 환경을 앱에 그대로 물려준다. 개발용으로 띄웠던 셸에서 실행해 흘러든 REMOTE=1 로 설치된 앱이
 # 127.0.0.1 이 아니라 0.0.0.0 에 붙은 적이 있다. 서버 준비 확인도 같은 환경에서 해야 설치 앱의
 # 포트·상태 폴더를 본다.
-installed_env() { env -u IRIS_PORT -u IRIS_STATE_DIR -u PORT -u REMOTE -u HOST "$@"; }
-running() { pgrep -f "$APP/Contents/MacOS/Iris" >/dev/null; }
+# Iris 터미널 등 Electron 이 node 모드로 띄운 셸은 ELECTRON_RUN_AS_NODE=1 을 물려준다. 그대로 열면 앱이 node 로
+# 실행되자마자 끝나, 새 앱도 되돌린 옛 앱도 뜨지 않고 앱이 꺼진 채 남는다.
+installed_env() { env -u IRIS_PORT -u IRIS_STATE_DIR -u PORT -u REMOTE -u HOST -u ELECTRON_RUN_AS_NODE "$@"; }
+# iris-channel.mjs 는 다른 Claude 세션이 Iris 실행 파일로 띄운 MCP 서버라 앱이 꺼져도 남는다. 앱으로 세면
+# 종료를 끝내 확인하지 못하고 앱이 꺼진 채로 멈춘다.
+running() {
+  local procs
+  procs=$(pgrep -fl "$APP/Contents/MacOS/Iris" || true)
+  [ -n "$(printf '%s\n' "$procs" | grep -v "/server/remote/channel/iris-channel.mjs" || true)" ]
+}
 # 앱에 종료를 요청하고 프로세스가 사라질 때까지 기다린다. 사라졌으면 0 을 돌려준다.
 quit_app() {
   osascript -e 'tell application "Iris" to quit' 2>/dev/null || true
   # 에뮬레이터 종료 정리는 최대 20초를 기다린다. 그 뒤 앱 종료까지 여유를 둔다.
-  for _ in $(seq 1 30); do running || return 0; sleep 1; done
+  # 30초로는 짧았다: 종료가 그 뒤에 끝나 앱은 꺼졌는데 교체도 재실행도 하지 않은 채 멈춘 사례가 있다.
+  for _ in $(seq 1 90); do running || return 0; sleep 1; done
   ! running
 }
 
@@ -49,6 +64,9 @@ echo "3/6  앱 종료"
 # 그 앱은 사라진 파일을 읽게 되고, 새 앱을 열면 두 앱이 함께 뜬다.
 if ! quit_app; then
   echo "앱이 종료되지 않아 교체하지 않습니다. 앱을 종료한 뒤 다시 실행하세요."
+  # 기다림이 끝난 직후에 종료가 끝나면 앱이 꺼진 채로 남는다. 그때는 기존 앱을 다시 연다.
+  for _ in $(seq 1 30); do running || break; sleep 1; done
+  running || installed_env open -a "$APP" || echo "이전 앱을 다시 열지 못했습니다 — $APP 를 직접 여세요."
   exit 1
 fi
 
@@ -81,6 +99,9 @@ for _ in $(seq 1 10); do running && break; sleep 1; done
 running || rollback "새 앱이 유지되지 않음"
 installed_env node scripts/wait-installed-server.cjs || rollback "새 앱의 서버가 준비되지 않음"
 running || rollback "새 앱이 서버 준비 중에 종료됨"
+# 터미널이 앞에 없을 때(에이전트가 백그라운드로 실행) open 은 앱을 앞으로 가져오지 않는다.
+# 창은 떠 있어도 다른 앱 뒤에 가려져 사용자는 앱이 안 켜진 것으로 본다.
+osascript -e 'tell application "Iris" to activate' 2>/dev/null || true
 
 echo "6/6  에이전트 컨텍스트 안내 설치"
 # 앱은 이미 바뀌어 돌고 있다. 스킬 파일 하나 때문에 여기서 실패하면 옛 앱 사본이 남고 설치가

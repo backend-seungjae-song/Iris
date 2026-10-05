@@ -36,7 +36,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     setState(() {
       if (opened) {
         _error = null;
-        _notice = 'Play 스토어에서 Tailscale을 설치하고 Mac과 같은 계정으로 로그인하세요. 그다음 Mac에서 기기 추가를 눌러 나온 QR을 찍으세요.';
+        _notice = 'Play 스토어에서 Tailscale을 설치하고 컴퓨터과 같은 계정으로 로그인하세요. 그다음 컴퓨터에서 기기 추가를 눌러 나온 QR을 찍으세요.';
       } else {
         _error = 'Play 스토어를 열지 못했습니다. Tailscale 앱을 직접 설치하세요.';
       }
@@ -138,7 +138,7 @@ class QrScannerView extends StatelessWidget {
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
                       color: context.iris.background.withValues(alpha: 0.92),
                       child: Text(
-                        error ?? notice ?? 'Mac의 Iris 원격 화면에 표시된 QR 코드를 비추세요.',
+                        error ?? notice ?? '컴퓨터의 Iris 원격 화면에 표시된 QR 코드를 비추세요.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: error == null

@@ -1,3 +1,4 @@
+import { request as winRequest } from "./win-native.cjs";
 // 현재 스페이스의 Git 저장소에서 Worktree 목록·생성·삭제를 처리한다.
 //
 // 소유 범위
@@ -212,14 +213,67 @@ function writeCreator(record) {
 }
 function removeCreator(target) { try { fs.unlinkSync(creatorFile(target)); } catch {} }
 
+// 세션이 마지막으로 프로세스를 실행한 worktree. pane → { sessionUuid, path }
+// 에이전트 본 프로세스는 스페이스 폴더에서 돌아 대기 중에는 실행 중 판정이 사라짐. 같은 대화에만 적용
+const LAST_SESSIONS_KEEP = 200;
+let lastSessions = null;
+function lastSessionsFile() { return path.join(stateHome(), "worktree-last-sessions.json"); }
+function readLastSessions() {
+  const file = lastSessionsFile();
+  if (lastSessions?.file === file) return lastSessions.map;
+  let map = new Map();
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (value?.version === 1 && value.panes && typeof value.panes === "object") map = new Map(Object.entries(value.panes)
+      .filter(([paneId, saved]) => text(paneId, 80) && text(saved?.sessionUuid, 80) && text(saved?.path, 4096)));
+  } catch {}
+  lastSessions = { file, map };
+  return map;
+}
+function rememberLastSession(paneId, sessionUuid, real) {
+  const map = readLastSessions();
+  const saved = map.get(paneId);
+  if (saved?.sessionUuid === sessionUuid && saved.path === real) return;
+  map.delete(paneId);
+  map.set(paneId, { sessionUuid, path: real });
+  while (map.size > LAST_SESSIONS_KEEP) map.delete(map.keys().next().value);
+  const file = lastSessionsFile(), temp = `${file}.${randomUUID()}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(temp, JSON.stringify({ version: 1, panes: Object.fromEntries(map) }) + "\n", { mode: 0o600, flag: "wx" });
+    fs.renameSync(temp, file);
+  } catch { try { fs.unlinkSync(temp); } catch {} }
+}
+function lastUsersOf(real, agents) {
+  if (!real) return [];
+  const map = readLastSessions();
+  return agents.filter((agent) => {
+    const saved = agent.paneId && agent.sessionUuid ? map.get(agent.paneId) : null;
+    return saved?.path === real && saved.sessionUuid === agent.sessionUuid.toLowerCase();
+  }).map((agent) => ({ kind: "agent", workspaceId: agent.workspaceId, paneId: agent.paneId, agent: agent.agent, status: agent.status,
+    sessionUuid: agent.sessionUuid, label: agent.tabLabel || agent.agent }));
+}
+
 // 실행 중 판정의 재료: pane 셸의 자손 프로세스와 각 프로세스의 cwd. macOS 기본 ps·lsof 사용
 const systemProcesses = {
   async list() {
+    if (process.platform === "win32") {
+      const result = await winRequest({ op: "processes" });
+      if (!result.ok) throw new Error(result.error);
+      return result.processes;
+    }
     const { stdout } = await runFile("/bin/ps", ["-Ao", "pid=,ppid="], PROCESS_OPTIONS);
     return stdout.trim().split("\n").map((line) => line.trim().split(/\s+/).map(Number))
       .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid)).map(([pid, ppid]) => ({ pid, ppid }));
   },
   async cwds(pids) {
+    if (process.platform === "win32") {
+      const result = await winRequest({ op: "processes", pids });
+      if (!result.ok) throw new Error(result.error);
+      const rows = result.processes.filter((row) => pids.includes(row.pid));
+      if (rows.some((row) => !row.cwd)) throw new Error("프로세스 작업 폴더를 확인하지 못했습니다");
+      return new Map(rows.map((row) => [row.pid, row.cwd]));
+    }
     let stdout;
     // 조사 사이에 끝난 프로세스가 있으면 lsof 는 1 로 끝나고 나머지는 그대로 출력
     try { ({ stdout } = await runFile("/usr/sbin/lsof", ["-a", "-d", "cwd", "-w", "-Fpn", "-p", pids.join(",")], PROCESS_OPTIONS)); }
@@ -338,10 +392,14 @@ async function usersReader({ fresh = false } = {}) {
   const useOf = (target) => {
     const creator = creatorOf(target);
     const taskUsers = taskUsersOf(target, snap.state);
-    if (!known) return { users: null, running: null, creator, taskUsers };
     const real = realExisting(target);
-    if (!real) return { users: [], running: [], creator, taskUsers };
+    if (!known) return { users: null, running: null, creator, taskUsers, lastUsers: lastUsersOf(real, snap.state) };
+    if (!real) return { users: [], running: [], creator, taskUsers, lastUsers: [] };
     const running = runningPanes(scan, real);
+    for (const pane of running || []) {
+      const agent = agentOf.get(pane.pane_id);
+      if (agent?.sessionUuid) rememberLastSession(pane.pane_id, agent.sessionUuid.toLowerCase(), real);
+    }
     const under = (dir) => !!dir && within(real, realExisting(dir));
     const users = [];
     for (const space of snap.workspaces) if (under(space.folder)) users.push({ kind: "space", workspaceId: space.id, label: space.label || space.id });
@@ -357,7 +415,7 @@ async function usersReader({ fresh = false } = {}) {
     for (const pane of panes) if (insidePanes.has(pane.pane_id) && !listed.has(pane.pane_id) && !agentByPane.has(pane.pane_id)) {
       users.push({ kind: "pane", workspaceId: pane.workspace_id, paneId: pane.pane_id });
     }
-    return { users, running: running && running.map(sessionOf), creator, taskUsers };
+    return { users, running: running && running.map(sessionOf), creator, taskUsers, lastUsers: lastUsersOf(real, snap.state) };
   };
   useOf.panes = known ? panes.map((pane) => ({ paneId: pane.pane_id, workspaceId: pane.workspace_id,
     tabId: pane.tab_id, cwd: pane.cwd, ...(typeof pane.label === "string" ? { label: pane.label } : {}) })) : null;

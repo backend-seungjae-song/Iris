@@ -1,0 +1,8 @@
+# 소스 파싱·셸 실행·패치 해시의 줄바꿈 보존
+*.js text eol=lf
+*.cjs text eol=lf
+*.mjs text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+*.patch text eol=lf
+/setup text eol=lf

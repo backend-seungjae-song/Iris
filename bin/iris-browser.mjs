@@ -54,6 +54,8 @@
 // 현재 대화 ID나 호출 프로세스로 pane을 확인한다. 공유 서버에서 물려받은 HERDR_PANE_ID만으로
 // 선택하지 않는다. 고정이 없으면 자기 그룹 안에서 마지막에 쓴 탭을 이어 쓴다.
 import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createSessionResolver } from "./iris-session.mjs";
 import { port as acPort } from "../server/env.cjs";
 
@@ -100,7 +102,8 @@ if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") { console.log(HE
 // 맞지 않는다. 같은 이름으로 부르되 실행은 러너에 넘긴다.
 if (cmd === "plan") {
   const { spawnSync } = await import("node:child_process");
-  const runner = new URL("./qa-plan.mjs", import.meta.url).pathname;
+  const runnerUrl = new URL("./qa-plan.mjs", import.meta.url);
+  const runner = process.platform === "win32" ? fileURLToPath(runnerUrl) : runnerUrl.pathname;
   process.exit(spawnSync(process.execPath, [runner, ...rest], { stdio: "inherit" }).status ?? 1);
 }
 
@@ -140,7 +143,7 @@ switch (cmd) {
     }
     break;
   }
-  case "upload": { const a2 = rest[0] || ""; if (a2.startsWith("@")) { args.ref = a2; args.paths = rest.slice(1); } else if (a2 && !a2.startsWith("/") && !a2.startsWith("~")) { args.sel = a2; args.paths = rest.slice(1); } else args.paths = rest; break; }
+  case "upload": { const a2 = rest[0] || ""; if (a2.startsWith("@")) { args.ref = a2; args.paths = rest.slice(1); } else if (a2 && !a2.startsWith("/") && !a2.startsWith("~") && !(process.platform === "win32" && path.isAbsolute(a2))) { args.sel = a2; args.paths = rest.slice(1); } else args.paths = rest; break; }
   case "download": args.dir = rest[0] || "off"; if (rest[1] === "once") args.once = true; break;
   case "nativeclick": args.button = rest.join(" "); break;
   case "nativekey": args["key"] = rest[0] || "escape"; break;

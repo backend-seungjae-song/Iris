@@ -195,6 +195,22 @@ function createWindowIcons({ execFile, log }) {
 
   function icons(input = {}) {
     const appKeys = appKeysFrom(input);
+    if (process.platform === "win32") return (async () => {
+      const { app } = require("electron");
+      const { processes = [] } = await require("../../server/win-native.cjs").request({ op: "processes" });
+      const icons = {}, missing = []; let bytes = 0;
+      for (const appKey of appKeys) {
+        const exe = appKey.startsWith("pid:") ? processes.find((p) => p.pid === Number(appKey.slice(4)))?.exe : appKey;
+        try {
+          if (!exe) throw new Error("not-found");
+          const icon = (await app.getFileIcon(exe, { size: "normal" })).toDataURL();
+          const size = Buffer.byteLength(icon);
+          if (size > MAX_ICON_BYTES || bytes + size > MAX_RESPONSE_BYTES) throw new Error("too-large");
+          icons[appKey] = icon; bytes += size;
+        } catch (e) { missing.push({ appKey, reason: e.message === "too-large" ? "too-large" : "not-found" }); }
+      }
+      return { icons, missing };
+    })();
     if (active) return Promise.resolve(allMissing(appKeys, "busy"));
     if (!appKeys.length) return Promise.resolve({ icons: {}, missing: [] });
 

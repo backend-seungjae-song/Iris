@@ -80,7 +80,7 @@ SOFTWARE.
 
 | 프로그램 | 관계 | 비고 |
 | --- | --- | --- |
-| [herdr](https://herdr.dev) | 터미널·에이전트 세션의 원천. 별도 프로세스로 실행하고 유닉스 소켓으로 대화한다 | Apache-2.0 (homebrew-core `Formula/h/herdr.rb`). 이 저장소는 herdr 바이너리를 담지 않고 `scripts/setup.sh`가 각자 컴퓨터에 설치한다. 링크가 아니라 프로세스 간 통신이므로 herdr의 라이선스가 이 코드로 전파되지 않는다 |
+| [herdr](https://herdr.dev) | 별도 프로세스로 실행하는 터미널·에이전트 세션 프로그램. macOS는 유닉스 소켓, Windows는 네임드 파이프로 통신한다 | Apache-2.0 (homebrew-core `Formula/h/herdr.rb`). macOS에서는 `scripts/setup.sh`로 설치한다. Windows 빌드에는 `scripts/fetch-herdr-win.mjs`가 버전·SHA-256을 확인한 0.9.3 공식 ZIP의 herdr·ConPTY 파일을 `resources/herdr`에 함께 넣는다 |
 
 ## 런타임 의존성
 
@@ -89,12 +89,17 @@ esbuild 등 만드는 도구라 나가지 않는다). 그 트리는 전부 허�
 
 | 라이선스 | 패키지 수 | 비고 |
 | --- | --- | --- |
-| MIT | 100 | |
-| ISC | 13 | |
+| MIT | 109 | |
+| ISC | 14 | |
 | Apache-2.0 | 9 | `@docx-editor.dev/core`, `@docx-editor.dev/i18n`, `@puppeteer/browsers`, `chromium-bidi`, `crc-32`, `emf-converter`, `puppeteer-core`, `readdir-glob`, `webdriver-bidi-protocol` |
-| BSD-3-Clause | 3 | `devtools-protocol`, `duplexer2`, `ieee754` |
+| BSD-3-Clause | 6 | `asn1js`, `bytestreamjs`, `devtools-protocol`, `duplexer2`, `ieee754`, `pkijs` |
+| 0BSD | 1 | `tslib` |
 | MIT 또는 GPL-3.0-or-later 중 선택 | 1 | `jszip`. 이 프로젝트는 MIT를 택한다 |
 | MIT AND Zlib | 1 | `pako` |
+
+Windows 인증서 생성에 쓰는 `pkijs` 3.4.0과 `asn1js` 3.0.10은 BSD-3-Clause다.
+원 저작권 고지·조건·면책 전문은 각 패키지의 `LICENSE`에 있으며 앱의
+`resources/app.asar.unpacked/node_modules/`에도 함께 포함한다.
 
 앱에는 `dependencies` 밖에서 하나를 더 싣는다. [serve-sim](https://github.com/EvanBacon/serve-sim) 0.1.40
 (Apache-2.0, Evan Bacon)은 `devDependencies` 에 두고, 빌드가 `package.json`·`dist/`·`bin/` 만
@@ -109,7 +114,8 @@ peer 인 `typescript` 는 실행 중에 불리지 않아 싣지 않는다. 패�
 전체 목록과 각 라이선스는 언제든 다시 낼 수 있다: `pnpm licenses list --prod`(배포분),
 `pnpm licenses list`(도구 포함).
 
-측정: pnpm 9.12.2. 이때의 직접 의존성은 이것들이었다:
-`@docx-editor.dev/core`, `@xterm/addon-fit`, `@xterm/xterm`, `exceljs`, `jszip`,
-`monaco-editor`, `node-pty`, `puppeteer-core`, `tldts`, `uqr`, `ws`, `zod`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
+측정: 2026-10-06 설치된 런타임 의존성의 `package.json`을 재귀 조회해 이름·버전별 141개를 집계했고
+모든 버전이 `pnpm-lock.yaml`에 있음을 확인했다. 이때의 직접 의존성은 이것들이었다:
+`@docx-editor.dev/core`, `@xterm/addon-fit`, `@xterm/xterm`, `asn1js`, `exceljs`, `jszip`,
+`monaco-editor`, `node-pty`, `pkijs`, `puppeteer-core`, `tldts`, `uqr`, `ws`, `zod`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
 smoke가 막는다(다시 재고 이 절과 목록을 함께 고칠 것).

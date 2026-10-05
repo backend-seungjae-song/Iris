@@ -49,7 +49,7 @@ export function reportStripRect(strip, meta) {
   h.tabStripRect({
     left: Math.round(r.left), top: Math.round(r.top),
     w: Math.round(r.width), h: Math.round(r.height),
-    space: (meta && meta.space) || "", tab: (meta && meta.tab) || "",
+    space: (meta && meta.space) || "", win: (meta && meta.win) || "",
   });
   // 창 크기가 바뀌면 띠 너비도 바뀐다. 한 번만 걸어 둔다.
   if (!strip.__rectWatch) {

@@ -1,8 +1,7 @@
 // 소유 범위: 개발·설치 갈래의 포트·상태 폴더·스크립트·문서, 그리고 앱을 만드는 순서.
 // 제공 API: 러너가 한 번 부르는 비동기 기본 run.
 // 의존 대상: core 의 공유 검사·파일 도구, sources 의 공유 소스, Node 파일·경로·프로세스 API.
-// 유지 조건: 검사 이름과 본문. 이 파일들은 50-two-flows.mjs 를 기능별로 분리한 것이고,
-//   분리하면서 검사 본문을 바꾸지 않았고, 인구조사 해시로 이를 강제한다.
+// 유지 조건: 개발 명령의 실제 환경값을 검사하고 문서의 개발·설치 칸을 각각 대조한다.
 // 영향 범위: 러너가 동적 import 로 이 run 을 부르며 sources 의 공유 상수 계약도 함께 본다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs bin/smoke/sections/two-flows.mjs
 import {
@@ -21,16 +20,47 @@ import {
   memoWindowManagerSource, nativeAx, pick, record, web, webview,
 } from "../sources.mjs";
 import { sliceBetween } from "../../slice-anchor.mjs";
+import { devCommand } from "../../../scripts/run-dev.mjs";
 
 const pathJoinTmp = () => path.join(tmpdir(), "iris-server-host-probe");
+
+export function developmentCommands(scripts, { command = devCommand, home = homedir() } = {}) {
+  const modes = { dev: "server", "dev:app": "app", app: "app", "dev:seed": "seed" };
+  const commands = [];
+  for (const platform of ["darwin", "win32"]) for (const [name, mode] of Object.entries(modes)) {
+    const declared = /^node\s+scripts\/run-dev\.mjs\s+(server|app|seed)$/.exec(scripts[name] || "");
+    if (declared?.[1] !== mode) throw new Error(`${name}: 개발 실행기 연결이 다릅니다`);
+    const env = command(mode, { platform, home, electronPath: path.join(home, "electron"),
+      env: { IRIS_PORT: "4271", PORT: "4271", IRIS_STATE_DIR: path.join(home, ".iris"), ELECTRON_RUN_AS_NODE: "1" } }).env;
+    if (env.IRIS_STATE_DIR !== path.join(home, ".iris-dev")) throw new Error(`${platform} ${name}: 개발 상태 폴더가 다릅니다`);
+    const expectedPort = mode === "seed" && platform === "darwin" ? "4271" : "4291";
+    if (env.IRIS_PORT !== expectedPort) throw new Error(`${platform} ${name}: 개발 포트가 다릅니다`);
+    if (mode === "server" && env.PORT !== "4291") throw new Error(`${platform} ${name}: 서버 포트가 다릅니다`);
+    if (mode === "app" && (platform === "win32" ? env.ELECTRON_RUN_AS_NODE !== undefined : env.ELECTRON_RUN_AS_NODE !== "1")) {
+      throw new Error(`${platform} ${name}: 앱 실행 환경이 다릅니다`);
+    }
+    commands.push({ platform, name, mode, env });
+  }
+  return commands;
+}
+
+export function documentMatchesEnvironment(doc, { devPort, devState, appPort, appState }) {
+  const cells = (label) => {
+    const row = doc.split("\n").find((line) => line.startsWith(`| ${label} `));
+    if (!row) cannotMeasure(`문서에서 ${label} 표 행을 찾지 못했습니다`);
+    return row.split("|").slice(2, 4).map((cell) => cell.trim().replaceAll("`", ""));
+  };
+  const ports = cells("포트"), states = cells("상태·증거");
+  if (ports[0] !== String(devPort) || ports[1] !== String(appPort)) throw new Error("문서의 개발·설치 포트가 코드와 다릅니다");
+  if (states[0] !== `~/${devState}/` || states[1] !== `~/${appState}/`) throw new Error("문서의 개발·설치 상태 폴더가 코드와 다릅니다");
+  return true;
+}
 
 export default async function run() {
   console.log("[두 갈래 — 개발과 설치본은 서로를 건드리지 않는다]");
   {
     const pkg = JSON.parse(read("package.json"));
-    check("개발 스크립트가 설치된 앱의 포트·폴더에 닿지 않는다", () =>
-      ["dev", "dev:app", "app"].every((k) => /IRIS_PORT=4291/.test(pkg.scripts[k] || "")
-        && /IRIS_STATE_DIR=\$HOME\/\.iris-dev/.test(pkg.scripts[k] || "")));
+    check("개발 스크립트가 설치된 앱의 포트·폴더에 닿지 않는다", () => developmentCommands(pkg.scripts).length === 8);
     check("소스를 앱으로 만드는 길이 한 줄로 있다", () =>
       /install:app/.test(JSON.stringify(pkg.scripts))
       && existsSync(path.join(ROOT, "scripts/install-app.sh")));
@@ -48,20 +78,12 @@ export default async function run() {
         if (!m) cannotMeasure(`${what} 를 코드에서 못 떼었다 — 세는 방식이 깨졌다`);
         return m[1];
       };
-      const devPort = one(/IRIS_PORT=(\d+)/, pkg.scripts.dev || "", "개발 포트");
-      const devState = one(/IRIS_STATE_DIR=\$HOME\/([\w.-]+)/, pkg.scripts.dev || "", "개발 상태 폴더");
+      const dev = developmentCommands(pkg.scripts).find((item) => item.name === "dev");
+      const devPort = dev.env.IRIS_PORT;
+      const devState = path.basename(dev.env.IRIS_STATE_DIR);
       const appPort = one(/const DEFAULT_PORT = (\d+);/, read("server/env.cjs"), "기본 포트");
       const appState = one(/const DIR_NAME = "([^"]+)";/, read("server/state-home.cjs"), "기본 상태 폴더");
-      const row = (label) => doc.split("\n").find((l) => l.startsWith(`| ${label} `)) || "";
-      const bad = [];
-      const ports = row("포트");
-      for (const v of [devPort, appPort]) if (!ports.includes(v)) bad.push(`포트 ${v}`);
-      const states = row("상태·증거");
-      // 뒤에 `/` 를 붙여 비교한다. 그러지 않으면 `~/.iris` 가 `~/.iris-dev` 에 포함돼
-      // 설치본 칸이 비어 있어도 통과한다.
-      for (const v of [devState, appState]) if (!states.includes(`~/${v}/`)) bad.push(`상태 ~/${v}/`);
-      if (bad.length) throw new Error(`문서에 없다: ${bad.join(" · ")}`);
-      return true;
+      return documentMatchesEnvironment(doc, { devPort, devState, appPort, appState });
     });
 
     // 문서가 "이렇게 찍힌다"고 보여주는 줄은 실제로 찍히는 줄이어야 한다. 사람은 그 문구로
@@ -108,7 +130,7 @@ export default async function run() {
       && !/rm -rf "\$APP"\n\s*ditto/.test(inst));
     check("뜨는 것은 고정 시간이 아니라 조건으로 기다린다", () =>
       !/^\s*sleep 5\s*$/m.test(inst)
-      && /^running\(\) \{ pgrep -f "\$APP\/Contents\/MacOS\/Iris" >\/dev\/null; \}$/m.test(inst)
+      && /^running\(\) \{\n(?:.*\n)*?\s*procs=\$\(pgrep -fl "\$APP\/Contents\/MacOS\/Iris" \|\| true\)\n(?:.*\n)*?.*grep -v "\/server\/remote\/channel\/iris-channel\.mjs"(?:.*\n)*?\}$/m.test(inst)
       && /for _ in \$\(seq 1 10\); do running && break; sleep 1; done/.test(inst));
 
     // 상태 폴더의 소유자는 하나다. 포트가 겹쳐도 바인딩이 항상 충돌하지는 않아(0.0.0.0 vs 127.0.0.1)

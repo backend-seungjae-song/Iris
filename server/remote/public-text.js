@@ -1,9 +1,17 @@
 const ABSOLUTE_PATH = /(^|[\s('"`=:\[])\/(?!\/)[^\s'"`<>\])},;]+/gm;
+const WINDOWS_QUOTED_PATH = /(['"`])((?:[A-Za-z]:[\\/]|\\\\|\/\/)[^\r\n]*?)\1/g;
+// 공백 포함 경로의 끝 구분 불가. 다음 구분자·HTTP 주소까지 가림.
+const WINDOWS_PATH = /(^|[\s('"`=:\[])(?:[A-Za-z]:[\\/]|\\\\|(?<!:)\/\/)(?:(?![ \t]+https?:\/\/)[^\r\n'"`<>\])},;])+/gm;
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
 const LONG_HEX = /\b[0-9a-f]{32,64}\b/gi;
 
-export function redactMacPaths(value, format = (label) => label) {
-  return String(value ?? "").replace(ABSOLUTE_PATH, (match, prefix) => `${prefix}${format("[Mac 경로]", match.slice(prefix.length))}`)
+export function redactMacPaths(value, format = (label) => label, platform = process.platform) {
+  let text = String(value ?? "");
+  if (platform === "win32") {
+    text = text.replace(WINDOWS_QUOTED_PATH, (_match, quote, pathname) => `${quote}${format("[Windows 경로]", pathname)}${quote}`)
+      .replace(WINDOWS_PATH, (match, prefix) => `${prefix}${format("[Windows 경로]", match.slice(prefix.length))}`);
+  }
+  return text.replace(ABSOLUTE_PATH, (match, prefix) => `${prefix}${format("[Mac 경로]", match.slice(prefix.length))}`)
     .replace(UUID, (match) => format("[내부 식별자]", match)).replace(LONG_HEX, (match) => format("[내부 식별자]", match));
 }
 

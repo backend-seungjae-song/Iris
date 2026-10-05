@@ -66,7 +66,7 @@ function createBrowserWindowManager({
     for (const w of wins) { if (!w.isDestroyed()) { if (!background) { raiseWindow(w); w.focus(); } return w; } }
     markAppAlive(); // 창을 새로 여는 중 = 앱은 살아있음(취소된 quit로 굳은 플래그 해제)
     const bwOpts = {
-      width: 1100, height: 820, backgroundColor: "#0A1620", titleBarStyle: "hiddenInset",
+      width: 1100, height: 820, backgroundColor: "#0A1620", titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       title: shared ? "Iris — 공유 브라우저" : "Iris — 브라우저",
       // macOS 기본은 비활성 창의 첫 클릭을 창 활성화로만 소비해 요소 선택에 두 번 눌러야 한다.
       // 활성화 클릭도 콘텐츠에 그대로 전달한다(아래 setFocusable과 함께 한 번에 선택되게 한다).
@@ -106,6 +106,7 @@ function createBrowserWindowManager({
       // 기본은 Chromium 스로틀을 허용한다. 활성/AI/미디어/녹화 탭은 렌더러의 사유별 보고가
       // attach 뒤 즉시 해제하며, IRIS_NO_THROTTLE_OPT=1이면 예전 전역 해제 정책으로 롤백한다.
       webPreferences.backgroundThrottling = !noThrottleOpt;
+      webPreferences.transparent = false;   // 메인 창과 같은 이유(main-window.cjs)
     });
     bw.webContents.on("did-attach-webview", (_ev, guest) => {
       // 방금 붙은 게스트에는 브라우저 탭이 아닌 것도 온다(rail 화면이 담는 webview). 그것은

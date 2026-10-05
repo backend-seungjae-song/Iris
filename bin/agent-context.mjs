@@ -28,9 +28,11 @@ const REASONS = new Set(["independent-work", "independent-review", "separate-evi
 const EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 
 function executable(name, env) {
-  for (const dir of [...String(env.PATH || "").split(path.delimiter), path.join(os.homedir(), ".local", "bin")]) {
-    const candidate = path.join(dir, name);
-    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch {}
+  for (const dir of [...String(env[process.platform === "win32" ? Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH" : "PATH"] || "").split(path.delimiter), path.join(os.homedir(), ".local", "bin")]) {
+    for (const suffix of process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]) {
+      const candidate = path.join(process.platform === "win32" ? dir.replace(/^"|"$/g, "") : dir, name + suffix);
+      try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch {}
+    }
   }
   throw new Error(`Executable not found: ${name}`);
 }
@@ -82,8 +84,8 @@ export async function launchContext(options, deps = {}) {
   const parent = await client.paneGet(env.HERDR_PANE_ID);
   if (!parent?.terminal_id || !parent.workspace_id || !["codex", "claude"].includes(parent.agent)) throw new Error("Caller pane is not a live Codex or Claude terminal");
   const info = await client.call("pane.process_info", { pane_id: parent.pane_id });
-  const ancestors = deps.ancestors || ancestorPids();
-  if (!(info?.process_info?.foreground_processes || []).some((p) => ancestors.has(p.pid) && [p.name, path.basename(p.argv0 || "")].includes(parent.agent))) {
+  const ancestors = deps.ancestors || (process.platform === "win32" ? new Set(await processAncestry()) : ancestorPids());
+  if (!(info?.process_info?.foreground_processes || []).some((p) => ancestors.has(p.pid) && [p.name, path.basename(p.argv0 || "")].some((name) => (process.platform === "win32" ? path.win32.basename(name || "").replace(/\.(exe|cmd)$/i, "").toLowerCase() : name) === parent.agent))) {
     throw new Error("Caller process does not belong to the parent runtime pane");
   }
   if (parent.agent === "codex" && env.CODEX_SESSION_ID && env.CODEX_THREAD_ID !== env.CODEX_SESSION_ID) {
@@ -168,7 +170,7 @@ async function callerSession(env, deps) {
   try {
     const pane = await client.paneGet(env.HERDR_PANE_ID);
     const info = await client.call("pane.process_info", { pane_id: pane?.pane_id });
-    const ancestors = deps.ancestors || ancestorPids();
+    const ancestors = deps.ancestors || (process.platform === "win32" ? new Set(await processAncestry()) : ancestorPids());
     if (!pane?.terminal_id || !pane.workspace_id || !ancestors.has(info?.process_info?.shell_pid)) {
       return { session: null, note: "This process does not belong to the pane named by HERDR_PANE_ID; the creating session was not recorded." };
     }
@@ -267,7 +269,7 @@ async function processInPane(pane, deps = {}) {
       client.call("pane.process_info", { pane_id: pane }),
       new Promise((_, reject) => setTimeout(() => reject(new Error("pane lookup timeout")), 250)),
     ]);
-    return ancestorPids().has(info?.process_info?.shell_pid);
+    return (process.platform === "win32" ? new Set(await processAncestry()) : ancestorPids()).has(info?.process_info?.shell_pid);
   } catch { return false; }
 }
 

@@ -801,7 +801,7 @@ test("실제 기능 투영은 pane·탭·스페이스 ID와 절대 경로를 내
     runtimeSnapshot: () => ({ workspaces: [{ id: "space-internal", label: "작업" }] }),
     tabMeta: () => ({ wc: 7, title: "문서", url: "file:///Users/you/secret.html" }),
     controlSnapshot: () => [{ tabId: "tab-internal", labels: [paneId] }], cdpReady: () => true,
-    requestCdp: async (cmd, args) => { translated = cmd === "eval" && args.expression.includes("__irisPageTranslateV1");
+    requestCdp: async (cmd, args, wc) => { translated = cmd === "contextaction" && args.name === "pagetranslate.page" && wc === 7;
       return { ok: true, data: { value: { ok: true } } }; }, agents: {}, messages: {}, send() {},
   });
   const catalog = browser.catalog();
@@ -812,7 +812,7 @@ test("실제 기능 투영은 pane·탭·스페이스 ID와 절대 경로를 내
   assert.equal(catalog.tabs[0].url, "");
   assert.deepEqual(catalog.tabs[0].controlling, ["에이전트"]);
   assert.equal((await browser.translate({ tab: catalog.tabs[0].ref })).ok, true);
-  assert.equal(translated, true, "기존 페이지 번역 스크립트를 실행한다");
+  assert.equal(translated, true, "해당 탭의 화면 번역 hook을 호출한다");
   browser.close();
 });
 

@@ -1,3 +1,4 @@
+import { isHostWindows, pathWithin } from "../../../web/js/core/host-path.js";
 // 소유 범위: [3b] 스페이스 생성·닫기부터 [10b] 보관함·기기 에뮬레이션까지의 앱 셸 계약.
 // 제공 API: 원래 [3b] 자리에서 한 번 호출하는 비동기 기본 run.
 // 의존 대상: core의 공유 검사·파일 도구, sources의 앱 셸·서버·네이티브 소스, slice-anchor와 Node API.
@@ -23,6 +24,15 @@ console.log("[3b] 스페이스 생성/닫기");
 const herdrSrc = read("server/herdr.js");
 check("herdr workspace.create 배선", () => /workspaceCreate\([\s\S]{0,300}"workspace\.create"/.test(herdrSrc));
 check("herdr workspace.close 배선", () => /workspaceClose\([\s\S]{0,200}"workspace\.close"/.test(herdrSrc));
+// 닫힌 스페이스의 가운데 탭은 다시 열 곳이 없다. 묻지 않고 닫으면 미저장 편집이 사라진다.
+check("스페이스 닫기는 미저장 탭을 묻고, 그 스페이스의 탭을 내린 뒤 닫는다", () => {
+  const menu = read("web/js/explorer/context-menu.js");
+  const seg = sliceBetween(menu, 'label: "이 스페이스 닫기"', 'wsSend({ type: "space.close"', "스페이스 닫기 메뉴");
+  const ask = seg.indexOf("chooseDirtyAction(");
+  const dirty = seg.search(/getTabs\(id\)\.filter\(\(tabRef\) => isTabDirty\(tabRef\)\)/);
+  const remove = seg.search(/removeTabsNow\(getTabs\(id\)/);
+  return dirty >= 0 && ask > dirty && /choice === "cancel"/.test(seg) && /saveTabForClose\(/.test(seg) && remove > ask;
+});
 // cwd를 넘기지 않으면 herdr가 서버의 cwd를 그대로 써서 어느 폴더에도 속하지 않는 스페이스가 생긴다.
 check("스페이스 생성은 절대경로 폴더를 요구", () => /path\.isAbsolute\(cwd\)/.test(workspaceHandlers) && /space\.create/.test(workspaceHandlers));
 check("이름 생략 시 폴더 이름을 쓴다", () => /path\.basename\(cwd\)/.test(workspaceHandlers));
@@ -88,7 +98,7 @@ check("~ 경로를 푼다", () => /os\.homedir\(\)/.test(workspaceHandlers) && /
 check("스페이스 추가 버튼(로컬 전용)", () =>
   /id="space-add"/.test(web) && /addBtn\.hidden = !getIsLocal\(\)/.test(tree));
 check("스페이스 닫기는 확인을 거친다", () =>
-  /if \(!await askConfirm\(`스페이스 "\$\{name\}"을\(를\) 닫을까요\?`[^\n]*\) return;\s*wsSend\(\{ type: "space\.close"/.test(contextMenu));
+  /if \(!await askConfirm\(`스페이스 "\$\{name\}"을\(를\) 닫을까요\?`[^\n]*\) return;[\s\S]{0,900}?wsSend\(\{ type: "space\.close"/.test(contextMenu));
 // window.prompt는 이 런타임에 없어서 호출하면 예외가 나고 그 기능 전체가 동작하지 않는다.
 check("web에 window.prompt 호출이 없다", () => !/[=(,]\s*prompt\(/.test(web));
 check("이름 입력은 askText로", () => /function askText\(/.test(contextMenu));
@@ -125,6 +135,22 @@ check("생성 성공은 부모를 갱신하고 새 파일만 연다", () => {
   return /m\.op\s*===\s*"create-file"[\s\S]{0,180}openFile\(m\.newPath\)/.test(branch)
     && /collapsed\.dirs\.delete\(m\.parent\)/.test(branch)
     && /Array\.isArray\(m\.refresh\)/.test(branch);
+});
+// 복사 응답에도 from·newPath 가 온다. 그것으로 열린 탭을 옮기면 원본 탭이 사본을 가리켜 이후 저장이 사본에 들어간다.
+check("복사 응답은 열린 탭을 사본으로 옮기지 않는다", () => {
+  const branch = fnBody(mainJs, "handleFsOpMessage");
+  const line = (branch.match(/^.*retargetFileTabs\(m\.from, m\.newPath\).*$/m) || [""])[0];
+  return /m\.op\s*!==\s*"copy"/.test(line.split("retargetFileTabs")[0]);
+});
+check("탐색기 변경 표시는 다시 받은 폴더 목록에 없는 경로를 지운다", () => {
+  const run = new Function("isHostWindows", "pathWithin", `const gitStatus = { "/r/a.txt": "M", "/r/sub/b.txt": "U", "/rx/c.txt": "M" };
+    ${fnBody(tree, "mergeGitStatus")}
+    mergeGitStatus({ "/r/sub/b.txt": "M" }, "/r");
+    return gitStatus;`);
+  const got = run(isHostWindows, pathWithin);
+  const callers = [fnBody(mainJs, "handleFsMessage"), fnBody(tree, "handlePendingRevealFs")];
+  return JSON.stringify(Object.entries(got).sort()) === JSON.stringify([["/r/sub/b.txt", "M"], ["/rx/c.txt", "M"]])
+    && callers.every((src) => /mergeGitStatus\(m\.git, m\.path\)/.test(src));
 });
 check("생성 응답은 파일·폴더 모두 새 행 포커스를 예약함", () => {
   const branch = fnBody(mainJs, "handleFsOpMessage");

@@ -76,8 +76,18 @@ function createPickMode({
   ].join("");
   const Z_TTL_MS = 600;
   let zList = null, zAt = 0, zBusy = false;
-  // 이 조회가 실패해도 커서 추적은 계속 돌아야 한다. 여기서 던진 예외가 매 틱마다 펌프를
-  // 중단시키면 하이라이트가 마지막 위치에 멈춘 채로 남는다.
+  // 창 조회 실패 시 커서 추적 유지
+  let winPoint = null, winPointBusy = false;
+  async function refreshWinPoint(pt) {
+    if (winPointBusy) return;
+    winPointBusy = true;
+    try {
+      const physical = screen.dipToScreenPoint(pt);
+      const r = await require("../../server/win-native.cjs").request({ op: "point", x: physical.x, y: physical.y });
+      winPoint = r.ok ? { x: pt.x, y: pt.y, pid: r.pid, at: Date.now() } : null;
+    } catch { winPoint = null; }
+    finally { winPointBusy = false; }
+  }
   function refreshZOrder() {
     if (zBusy || Date.now() - zAt < Z_TTL_MS) return;
     zBusy = true;
@@ -95,6 +105,10 @@ function createPickMode({
   // 커서 아래 맨 앞 창이 앱의 창인지 판정한다. 아직 목록이 없으면 보류하지 않고 통과시킨다.
   // 첫 조회가 돌아오기 전 잠시 이전 동작을 유지하는 편이, 하이라이트가 전혀 뜨지 않는 것보다 낫다.
   function topmostIsOurs(pt) {
+    if (process.platform === "win32") {
+      refreshWinPoint(pt);
+      return !!(winPoint && winPoint.x === pt.x && winPoint.y === pt.y && Date.now() - winPoint.at < 200 && winPoint.pid === process.pid);
+    }
     try {
       refreshZOrder();
       if (!zList) return true;
@@ -150,8 +164,14 @@ function createPickMode({
   // 등록은 아래 ready 훅 한 곳에서 한다. 여기서 따로 등록하면 ready 전에 적용할 항목의 기준이
   // 둘로 갈린다.
   // 시뮬레이터·에뮬레이터에 포커스가 있어도 요소 선택을 켜고 끌 수 있게(앱 안 단축키는 그때 안 온다).
-  function registerGlobalShortcut() {
-    try { globalShortcut.register("CommandOrControl+Shift+E", togglePickModeGlobal); } catch {}
+  // 조합은 키맵의 요소 지목 모드 값. 바뀌면 옛 조합을 풀고 새 조합으로 다시 등록
+  let globalAccel = null;
+  function registerGlobalShortcut(accelerator = "CommandOrControl+Shift+E") {
+    if (accelerator === globalAccel) return;
+    try { if (globalAccel) globalShortcut.unregister(globalAccel); } catch {}
+    globalAccel = null;
+    if (!accelerator) return;
+    try { if (globalShortcut.register(accelerator, togglePickModeGlobal)) globalAccel = accelerator; } catch {}
   }
   app.on("will-quit", () => { try { globalShortcut.unregisterAll(); } catch {} });
 
