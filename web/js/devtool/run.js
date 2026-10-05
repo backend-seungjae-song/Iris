@@ -128,7 +128,7 @@ export function handleRunMessage(m) {
     const r = runRec(m.cwd); r.url = m.url; if (!r.autoOpened && m.local) { r.autoOpened = true; runAutoOpenUrl(m.url); } // 로컬호스트 URL만 자동오픈(스크립트 출력의 외부 URL로 유도 차단, M7). 외부는 칩만 표시
     if (m.cwd === curRunPath()) renderRun();
   } else if (m.type === "run-exit") {
-    const r = runRec(m.cwd); r.running = false; r.tail.push(`[종료: code ${m.code == null ? "-" : m.code}${m.signal ? " " + m.signal : ""}]`);
+    const r = runRec(m.cwd); r.running = false; r.url = null; r.tail.push(`[종료: code ${m.code == null ? "-" : m.code}${m.signal ? " " + m.signal : ""}]`);
     if (m.cwd === curRunPath()) renderRun();
   } else if (m.type === "run-error") {
     const r = runRec(m.path || ""); if (m.error) r.tail.push("[오류] " + m.error);

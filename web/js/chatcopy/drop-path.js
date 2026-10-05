@@ -12,12 +12,13 @@
 // 유지 조건
 //   표시를 켜 두는 사건은 dragover 하나뿐이다. 다른 사건으로도 켜면 그 사건이 안 오는 경로
 //   (터미널 위를 지나 다른 곳에 놓기)에서 표시가 켜진 채로 남는다.
-//   경로는 따옴표 없이 그대로 넣는다.
+//   Windows는 선택한 pane의 실제 셸에 맞춰 인용한다. 셸을 알 수 없으면 입력하지 않는다.
 //
 // 영향 범위
 //   panel/xterm-wiring 이 부르는 훅 이름(chatcopy.dragHint·chatcopy.dropFiles)과
 //   web/css/21-chat-copy.css 의 .drag-hot 표시.
 //   현재 목록 확인: node bin/importers.mjs web/js/chatcopy/drop-path.js
+import { isHostWindows } from "../core/host-path.js";
 import { getTerminal, getXterm } from "../panel/terminal.js";
 
 // 파일 드래그 표시를 켤지 끌지. 순수 판정이라 DOM 없이 부를 수 있고 검사가 그대로 부른다.
@@ -37,13 +38,34 @@ export function setDragHot(on) {
   if (dragHotTimer) { clearTimeout(dragHotTimer); dragHotTimer = null; }
   if (on) dragHotTimer = setTimeout(() => terminal.classList.remove("drag-hot"), DRAG_HOT_IDLE_MS);
 }
-export function insertDroppedPaths(files, { acHost, showToast }) {
+export function quoteDroppedPath(path, shell) {
+  if (/[\0\r\n]/.test(path)) throw new Error("경로에 제어 문자가 있습니다");
+  if (shell === "powershell") return "'" + path.replace(/'/g, "''") + "'";
+  if (shell === "posix") return "'" + path.replace(/'/g, "'\"'\"'") + "'";
+  if (shell === "cmd") {
+    // cmd는 따옴표 안에서도 환경변수·지연 확장을 하므로 해당 경로는 입력할 수 없다.
+    if (/[%!"]/.test(path)) throw new Error("cmd에 %, ! 또는 따옴표가 있는 경로를 넣을 수 없습니다. PowerShell을 사용하세요");
+    return '"' + path.replace(/\\+$/, (tail) => tail + tail) + '"';
+  }
+  throw new Error("터미널 셸을 확인하지 못했습니다");
+}
+export async function insertDroppedPaths(files, { acHost, showToast, getCurTarget }) {
   const paths = [];
   for (const f of files) {
     const p = (acHost && acHost.getDroppedPath) ? acHost.getDroppedPath(f) : "";
-    if (p) paths.push(p); // 따옴표 없이 절대경로 그대로
+    if (p) paths.push(p);
   }
   if (!paths.length) { showToast("드롭한 파일 경로를 읽지 못했습니다", { level: "err" }); return; }
   const xterm = getXterm();
-  if (xterm) { xterm.paste(paths.join(" ") + " "); xterm.focus(); }
+  if (!xterm) return;
+  let inserted = paths;
+  if (isHostWindows()) {
+    const pane = getCurTarget?.();
+    try {
+      const shell = pane && await acHost?.terminalShell?.(pane);
+      if (getCurTarget?.() !== pane || getXterm() !== xterm) throw new Error("선택한 터미널이 바뀌었습니다. 다시 놓아 주세요");
+      inserted = paths.map((p) => quoteDroppedPath(p, shell));
+    } catch (error) { showToast(String(error.message || error), { level: "err" }); return; }
+  }
+  xterm.paste(inserted.join(" ") + " "); xterm.focus();
 }

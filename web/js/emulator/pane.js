@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../core/keymap.js";
 // 모바일 에뮬레이터 화면. Orca EmulatorPane.tsx 와 그 훅들을 일반 DOM 코드로 옮긴 것이다.
 //
 // 소유 범위
@@ -255,7 +256,7 @@ function buildPane(container, opts, vendor) {
   phoneBar.append(tbSep(), volBox);
   syncVolume();
   if (opts.onSketch) {
-    const tbSketch = tbButton("스케치", "sketch", "지금 앱 화면을 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다");
+    const tbSketch = tbButton("스케치", "sketch", shortcutLabel("지금 앱 화면을 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다"));
     tbSketch.addEventListener("click", () => { opts.onSketch(); });
     toolbar.append(tbSketch);
   }

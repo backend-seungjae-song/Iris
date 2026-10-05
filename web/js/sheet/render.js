@@ -1,3 +1,5 @@
+import { isHostWindows } from "../core/host-path.js";
+import { shortcutLabel } from "../core/keymap.js";
 // 시트 렌더: workbook을 네 pane 격자와 메뉴·도구·선택 overlay로 그린다.
 //
 // 소유 범위
@@ -186,7 +188,7 @@ export function renderSheetViewBody(t) {
   if (t.sheetError) {
     fileview.innerHTML = `<div class="fv-bar"><span class="fv-name">${name}</span>${pathBar}</div>`
       + `<div class="sv-msg">이 파일을 표로 열지 못했습니다.<div class="sv-why">${esc(t.sheetError)}</div>
-      <button data-sv="finder">Finder에서 열기</button></div>`;
+      <button data-sv="finder">${isHostWindows() ? "탐색기" : "Finder"}에서 열기</button></div>`;
     return;
   }
   if (!t.sheet) { fileview.innerHTML = `<div class="fv-bar"><span class="fv-name">${name}</span>${pathBar}</div><div class="fv-loading">불러오는 중…</div>`; return; }
@@ -241,10 +243,10 @@ export function renderSheetViewBody(t) {
     return `<button data-sv="${k}" class="${cls}${on ? " on" : ""}" title="${esc(label)}"${dis ? " disabled" : ""}>${glyph}</button>`;
   }).join("")
     + `<span class="gs-sep"></span>`
-    + `<button data-sv="zoom-out" title="작게 (⌘-)">−</button>`
-    + `<button data-sv="zoom-reset" id="sv-zoom" title="원래 크기로 (⌘0)">${Math.round(z * 100)}%</button>`
-    + `<button data-sv="zoom-in" title="크게 (⌘+)">＋</button>`
-    + `<button data-sv="find" title="찾기 (⌘F)">찾기</button></div>`;
+    + `<button data-sv="zoom-out" title="작게 (${shortcutLabel("⌘-")})">−</button>`
+    + `<button data-sv="zoom-reset" id="sv-zoom" title="원래 크기로 (${shortcutLabel("⌘0")})">${Math.round(z * 100)}%</button>`
+    + `<button data-sv="zoom-in" title="크게 (${shortcutLabel("⌘+")})">＋</button>`
+    + `<button data-sv="find" title="찾기 (${shortcutLabel("⌘F")})">찾기</button></div>`;
 
   const fx = `<div class="gs-fx">`
     + `<input class="gs-name" id="sv-name" spellcheck="false" autocomplete="off">`
@@ -254,11 +256,11 @@ export function renderSheetViewBody(t) {
   const findBar = `<div class="sv-findbar" id="sv-find" hidden>`
     + `<input id="sv-fq" type="text" placeholder="표에서 찾기" spellcheck="false" autocomplete="off">`
     + `<span class="sv-fstat" id="sv-fstat"></span>`
-    + `<button data-sv="find-prev" title="이전 (⇧Enter)">↑</button>`
+    + `<button data-sv="find-prev" title="이전 (${shortcutLabel("⇧Enter")})">↑</button>`
     + `<button data-sv="find-next" title="다음 (Enter)">↓</button>`
     + `<button data-sv="find-close" title="닫기 (Esc)">✕</button></div>`;
 
-  const cutNote = sh.cut ? `<div class="sv-cut">파일이 커서 일부만 보여줍니다. 전부 보려면 Finder에서 여세요.</div>` : "";
+  const cutNote = sh.cut ? `<div class="sv-cut">파일이 커서 일부만 보여줍니다. 전부 보려면 ${isHostWindows() ? "탐색기" : "Finder"}에서 여세요.</div>` : "";
   const N = svRenderCols(sh);
   // 스크롤 채움 막대의 크기 = 전체 내용 크기(구글 시트가 그렇게 싣는다). sh.col은 실데이터
   // 열까지만 채워져 있다. slice(0,N)은 배열 길이를 넘지 못해 꼬리 열(svRenderCols)의 기본 폭이

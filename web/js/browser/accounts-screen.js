@@ -37,6 +37,7 @@ import { createDropdown } from "../core/dropdown.js";
 import { bsMutate, getBrowserState, isBrowserStateLoaded } from "./state.js";
 import { getWebview, removeWebview } from "./webview-store.js";
 import { activeBrowserId } from "./webview.js";
+import { askConfirm } from "../explorer/context-menu.js";
 
 // 이 기능의 마크업 위치. index.html 에 두면 기능을 꺼도 바깥 요소가 파싱되므로 여기서 만든다.
 // 바깥 요소(aside 의 id·class)는 rail 표가 정본이고 여기는 안쪽만 담는다.
@@ -253,7 +254,7 @@ function wireAccounts() {
       return;
     }
     const del = e.target.closest("[data-del-prof]");
-    if (del) { const id = del.dataset.delProf, name = profileName(id); if (confirm(`"${name}" 프로필을 삭제할까요?\n저장된 로그인(자격증명)도 함께 삭제되고, 이 프로필을 쓰던 탭은 기본 프로필로 되돌아갑니다.`)) { await deleteProfile(id); } return; }
+    if (del) { const id = del.dataset.delProf, name = profileName(id); if (await askConfirm(`"${name}" 프로필을 삭제할까요?`, "저장된 로그인(자격증명)도 함께 삭제되고, 이 프로필을 쓰던 탭은 기본 프로필로 되돌아갑니다.")) { await deleteProfile(id); } return; }
     const add = e.target.closest("#acct-new-add");
     if (add) { const inp = $("#acct-new-name"); const v = (inp.value || "").trim(); if (v) { if (!addProfile(v)) showToast("이미 있는 프로필 이름입니다", { level: "info" }); else inp.value = ""; acctRefresh(); } return; }
     const imp = e.target.closest("[data-imp-cid]");

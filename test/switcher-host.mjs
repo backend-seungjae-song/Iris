@@ -304,6 +304,18 @@ test("T14 사용자 재지정은 다음·이전 가속기에 같은 기본 modif
   assert.equal(shortcuts.registered.includes("Alt+Tab"), false);
 });
 
+test("Windows Backquote 창 전환은 정방향과 역방향 전역 키를 등록한다", () => {
+  const fs = memoryFs({
+    [STATE]: JSON.stringify(stored()),
+    [KEYMAP]: JSON.stringify({ "screen-toggle": { mod: true, code: "Backquote" } }),
+  });
+  const { host, shortcuts } = setup({ fs });
+  host.start();
+  assert.equal(shortcuts.isRegistered("CommandOrControl+`"), true);
+  assert.equal(shortcuts.isRegistered("CommandOrControl+Shift+`"), true);
+  host.stop();
+});
+
 test("R4a 화살표·스페이스와 Electron이 허용한 키를 전역 가속기로 바꾼다", () => {
   const cases = [
     [" ", "Space"], ["Escape", "Escape"], ["Enter", "Return"],

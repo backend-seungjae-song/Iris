@@ -177,7 +177,7 @@ class _AgentScreenState extends State<AgentScreen> {
                   if (media == null &&
                       (uri == null ||
                           !{'http', 'https'}.contains(uri.scheme))) {
-                    return '이 주소는 Mac 브라우저에서 열 수 없습니다.';
+                    return '이 주소는 컴퓨터 브라우저에서 열 수 없습니다.';
                   }
                   try {
                     final result = await widget.state.session.browserNewTab(
@@ -190,7 +190,7 @@ class _AgentScreenState extends State<AgentScreen> {
                     final tabRef = result.tab;
                     if (tabRef != null && context.mounted) {
                       if (widget.state.browserTab(tabRef) == null) {
-                        return 'Mac에서 탭을 열었지만 목록을 확인하지 못했습니다. 목록을 새로 고치세요.';
+                        return '컴퓨터에서 탭을 열었지만 목록을 확인하지 못했습니다. 목록을 새로 고치세요.';
                       }
                       unawaited(
                         Navigator.of(context).push<void>(
@@ -204,15 +204,15 @@ class _AgentScreenState extends State<AgentScreen> {
                         ),
                       );
                     }
-                    return 'Mac 브라우저에서 열었습니다';
+                    return '컴퓨터 브라우저에서 열었습니다';
                   } on RemoteFailure catch (error) {
                     return media == null
                         ? error.message
-                        : '파일이 없거나 허용된 Mac 폴더 밖에 있습니다.';
+                        : '파일이 없거나 허용된 컴퓨터 폴더 밖에 있습니다.';
                   } on ProtocolException catch (error) {
                     return error.message;
                   } catch (_) {
-                    return 'Mac에서 탭을 열지 못했습니다. 다시 시도하세요.';
+                    return '컴퓨터에서 탭을 열지 못했습니다. 다시 시도하세요.';
                   }
                 }
               : null,

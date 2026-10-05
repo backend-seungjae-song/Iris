@@ -43,6 +43,7 @@ function disabled(reason) { return { enabled: false, reason }; }
 
 function configurePlatformWebAuthn(app, options = {}) {
   const platform = options.platform || process.platform;
+  if (platform === "win32") return { enabled: true, reason: "chromium-windows-hello" };
   if (platform !== "darwin") return disabled("unsupported-platform");
   if (!app || typeof app.configureWebAuthn !== "function") return disabled("api-unavailable");
   if (typeof app.isReady === "function" && !app.isReady()) return disabled("app-not-ready");

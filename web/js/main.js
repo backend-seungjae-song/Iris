@@ -1,3 +1,5 @@
+import { applyHostUi } from "./core/host-ui.js";
+import { isHostWindows, pathDirname, pathBasename, samePath } from "./core/host-path.js";
 // 분리한 모듈. main 은 연결만 하고 그 안의 상태는 각 모듈이 소유한다.
 import {
   initRail, cycleRail, railScreens, setRailScreen, registerPanel, registerScreen, applyRailVisibility,
@@ -71,7 +73,7 @@ import {
 } from "./herdr/state.js";
 import { initAgents, renderAgents, revealAgentRow, setChangedInfo } from "./herdr/agents.js";
 import { initHerdrSync, markHerdrUserSelect, scheduleHerdrSync } from "./herdr/sync.js";
-import { initTabClose, removeTabsNow, closeTabs, retargetFileTabs } from "./center/tab-close.js";
+import { initTabClose, removeTabsNow, closeTabs, retargetFileTabs, isTabDirty } from "./center/tab-close.js";
 import {
   closedTabsForView, initClosedTabs, queueReopenedBrowserHistory, reopenClosedTab, setClosedBrowserTabs,
 } from "./center/closed-tabs.js";
@@ -101,6 +103,7 @@ window.addEventListener("error", (e) => {
     console.log("[browser] uncaught:", e.message, "@" + (e.lineno || "?") + ":" + (e.colno || "?"), st);
   } catch (x) {}
 });
+applyHostUi();
 initMotion();   // 다른 초기화보다 먼저: 켜져 있던 전환·애니메이션이 첫 프레임부터 멈춰 있어야 한다
 const $ = (s) => document.querySelector(s);
 const esc = (s) => (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -121,11 +124,15 @@ function bindAgentKeys(ed) {
     const M = monaco.KeyMod, C = monaco.KeyCode;
     ed.addCommand(M.Alt | C.UpArrow, () => cycleAgent(-1));
     ed.addCommand(M.Alt | C.DownArrow, () => cycleAgent(1));
-    // ⌘⌥↑↓ = rail 이동. Cmd 와 Ctrl 을 맞바꾼 키보드 배치가 있어 어느 쪽으로 눌러도 같게 건다.
-    ed.addCommand(M.CtrlCmd | M.Alt | C.UpArrow, () => cycleRail(-1));
-    ed.addCommand(M.CtrlCmd | M.Alt | C.DownArrow, () => cycleRail(1));
-    ed.addCommand(M.WinCtrl | M.Alt | C.UpArrow, () => cycleRail(-1));
-    ed.addCommand(M.WinCtrl | M.Alt | C.DownArrow, () => cycleRail(1));
+    if (isHostWindows()) {
+      ed.addCommand(M.CtrlCmd | M.Shift | C.LeftArrow, () => cycleRail(-1));
+      ed.addCommand(M.CtrlCmd | M.Shift | C.RightArrow, () => cycleRail(1));
+    } else {
+      ed.addCommand(M.CtrlCmd | M.Alt | C.UpArrow, () => cycleRail(-1));
+      ed.addCommand(M.CtrlCmd | M.Alt | C.DownArrow, () => cycleRail(1));
+      ed.addCommand(M.WinCtrl | M.Alt | C.UpArrow, () => cycleRail(-1));
+      ed.addCommand(M.WinCtrl | M.Alt | C.DownArrow, () => cycleRail(1));
+    }
   } catch {}
 }
 
@@ -145,7 +152,7 @@ if (MEMO_MODE) document.body.classList.add("memo-mode");
 // 창→스페이스 결속. 기존 분리창은 결속이 없어 활성 스페이스를 미러링하고(종전 동작 그대로),
 // 공유 창은 ?space=__shared__로 떠서 콘솔이 스페이스를 바꿔도 자기 스페이스를 계속 본다.
 const BOUND_SPACE = APP_PARAMS.get("space") || null;
-// 탭 하나만 담는 창은 주소에 그 탭을 적는다. 창의 범위를 주소가 정하는 기존 방식(mode·space)에
+// 분리 창은 주소에 처음 담은 탭(tab)과 창 id(win)를 적는다. 창의 범위를 주소가 정하는 기존 방식(mode·space)에
 // 값을 하나 더한 것이라, 이 값이 없으면 스페이스 전체를 보는 창이 된다.
 const BOUND_TAB = APP_PARAMS.get("tab") || null;
 initBrowserState({ BOUND_SPACE, BROWSER_MODE, wsSend });
@@ -301,7 +308,8 @@ async function copyText(text) {
 // 경로는 title(hover)로도 볼 수 있게 그대로 노출한다.
 function filePathBarHtml(path) {
   if (!path) return "";
-  return `<button class="fv-path" data-copy-path="${esc(path)}" title="${esc(path)}(눌러서 경로 복사)">${esc(path)}</button>`;
+  // 앞뒤 &lrm; 는 rtl 말줄임 안에서 맨 앞 "/" 가 끝으로 밀려 "Users/…/a.csv/" 로 보이는 것을 막는다.
+  return `<button class="fv-path" data-copy-path="${esc(path)}" title="${esc(path)}(눌러서 경로 복사)">&lrm;${esc(path)}&lrm;</button>`;
 }
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-copy-path]"); if (!btn) return;
@@ -588,12 +596,17 @@ function newBrowserTab(url, opts) {
     createWebview(id, inherit, target); // 바로 목적지로 이동한다(중간 about:blank 단계 없음)
     renderTabs(); showActiveTab();
   }
-  const mut = { op: "tab.open", space: sp, id, url: target, title: url ? "새 탭" : "Google", background };
+  // 백그라운드 탭은 누르기 전까지 페이지를 불러오지 않으므로, 그동안 칩에 보일 사이트 이름
+  let host = ""; try { host = new URL(target).hostname.replace(/^www\./, ""); } catch {}
+  const mut = { op: "tab.open", space: sp, id, url: target, title: url ? (host || "새 탭") : "Google", background };
   if (inherit !== undefined) mut.profile = inherit;
   // 그룹 탭은 처음부터 그 그룹 안에서 태어나야 한다. 뒤 mutation으로 옮기면 두 방송 사이에
   // 그룹 없는 탭으로 그려지는 순간이 생긴다.
   if (opts && opts.group) mut.group = opts.group;
-  bsMutate(mut);
+  // 분리 창에서 만든 탭은 그 창에 먼저 등록하고 만든다. 공유 활성 탭은 원래 창의 것이라 건드리지 않는다.
+  const claim = BROWSER_MODE ? callHook("detach.claim", id, sp) : null;
+  if (claim) { mut.background = true; claim.then(() => bsMutate(mut)); }
+  else bsMutate(mut);
   // 빈 새 탭은 주소를 넣기 위해 연다. 주소창에 포커스를 두고 전체 선택하면 붙여넣기 한 번으로 링크가 들어간다.
   if (!url && !background) setTimeout(() => { try { urlInput.focus(); urlInput.select(); } catch (e2) {} }, 30);
   return id;   // 부르는 쪽이 방금 만든 탭을 가리킬 수 있어야 한다(녹화 대상 승계 등)
@@ -670,6 +683,11 @@ initTabClose({
   exportBrowserHistory: (wcId) => window.acHost?.browserHistoryExport?.(wcId),
 });
 
+// 콘솔 창을 닫거나 앱을 끌 때 미저장 편집을 묻는 신호. 확인 대화상자는 main-window.cjs 의 will-prevent-unload.
+// 그 처리가 콘솔 창에만 있어 다른 창에서 막으면 묻지 않고 닫기가 취소됨
+if (!AUX_MODE) addEventListener("beforeunload", (e) => {
+  if (getTabSpaces().some((sp) => getTabs(sp).some((t) => isTabDirty(t)))) { e.preventDefault(); e.returnValue = ""; }
+});
 initTextEditor({
   $, esc, cssEsc, extOf, fileview, tabstrip,
   withFileViewTransition, bindAgentKeys, wsSend, isFileLikeKind, showToast,
@@ -849,7 +867,7 @@ initKeymapPage({
   getSecurityToggles: () => [...sitePerms.map((p) => ({
     id: "site:" + p.id,
     name: `${p.name} 사용`,
-    desc: `켜면 사이트가 ${p.name}을(를) 요청할 때 사이트마다 따로 묻고, 허용한 사이트에만 줍니다. 끄면 묻지 않고 모두 거절합니다.`,
+    desc: `켜면 사이트가 ${p.name} 권한을 요청할 때 사이트마다 따로 묻고, 허용한 사이트에만 줍니다. 끄면 묻지 않고 모두 거절합니다.`,
     on: p.on,
     clear: p.allowed + p.blocked ? { id: p.id, label: `기록 지우기 (허용 ${p.allowed} · 차단 ${p.blocked})` } : null,
   })), {
@@ -918,13 +936,15 @@ function handleWsOpen() {
   // 이 연결이 앱 UI임을 먼저 증명한다. 지목(권한 확대)은 이 증명이 있는 연결만 보낼 수 있다.
   // 루프백이라는 것만으로는 앱과 아무 로컬 프로세스가 구별되지 않기 때문이다.
   try { reportNoticeFocus(); } catch (e) {}
-  if (!MEMO_MODE) setTimeout(() => { for (const tid of getWebviewIds()) reportTabWc(getWebview(tid), tid); reportActiveBrowserWc(); }, 300);
+  if (!MEMO_MODE) setTimeout(reportAllBrowserTabs, 300);
   // 파일/docx/sheet 탭도 브라우저 탭과 같은 이유로 재연결마다 다시 요청해야 한다. 연결이
   // 끊겼거나 막 뜬 그 틈에 연 파일은 요청 자체가 안 나가 "불러오는 중…"에 영원히 갇힌다.
   if (!MEMO_MODE) setTimeout(retryStuckFileTabs, 300);
   // fs.watch 등록도 연결 객체에 묶여 서버 쪽에 있다. 재연결이면 중복전송 키를 비우고 다시 보낸다.
   if (!MEMO_MODE) { setLastWatchKey(""); setTimeout(syncWatchDirs, 300); }
 }
+
+function reportAllBrowserTabs() { for (const tid of getWebviewIds()) reportTabWc(getWebview(tid), tid); reportActiveBrowserWc(); }
 
 function handleWsClose(generation) {
   tabRejectGenerationIo(generation);
@@ -986,10 +1006,14 @@ function handleStateMessage(m) {
       const agents = getLastAgents();
       const foc = agents.find((a) => a.focused);
       if (foc && !BROWSER_MODE) scheduleHerdrSync(foc.paneId); // 분리창은 콘솔 포커스 동기화 안 함
+      // 포커스 pane 이 에이전트가 아니면 위 동기화가 스페이스를 못 채움. 선택이 없거나 herdr 에서 닫힌 스페이스면
+      // 탐색기·실행·메모가 빈 채로 또는 닫힌 스페이스에 남으므로 herdr 포커스 스페이스로 옮김
+      else if (!BROWSER_MODE && !getSpaces().some((s) => s.id === selectedSpaceId)) { const w = getSpaces().find((x) => x.focused); if (w) switchToSpaceOf({ workspaceId: w.id }); }
       if (curTarget) { const a = agentByPane(curTarget); if (a) { tName.textContent = nameOf(a); tSub.innerHTML = `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>`; paintStateDot(tDot, a); } }
       callHook("agentchat.sync"); // 에이전트 상태(답 기다림)와 pane 목록 변화를 채팅 보기에 알린다
       const running = agents.filter((a) => a.status === "working").length;
       $("#meta").innerHTML = `<span class="meta-count">${agents.length} · ${running}<span class="meta-run">▶</span></span>`;
+      $("#meta").title = "";
 }
 
 function handleBrowserStateMessage(m) { applyBrowserState(m.state); }
@@ -998,7 +1022,7 @@ function handleFsMessage(m) {
       if (handlePendingRevealFs(m)) { focusCreatedAfterList(m.path); return; }
       dirCache.set(m.path, m.error ? [] : (m.entries || []));
       syncWatchDirs();
-      if (m.git) mergeGitStatus(m.git); // 파일별 git 상태 병합
+      if (m.git) mergeGitStatus(m.git, m.path); // 파일별 git 상태 병합
       renderFileTree();
       focusCreatedAfterList(m.path);
 }
@@ -1006,7 +1030,7 @@ function handleFsMessage(m) {
 function handleFsOpMessage(m) {
       if (m.error) { showToast("파일 조작 실패", { level: "err", detail: String(m.error) }); }
       else {
-        if (m.from && m.newPath) retargetFileTabs(m.from, m.newPath); // rename/move: 열린 탭 경로 갱신
+        if (m.from && m.newPath && m.op !== "copy") retargetFileTabs(m.from, m.newPath); // rename/move: 열린 탭 경로 갱신. 복사는 원본 탭 유지
         if (m.parent && (m.op === "create-file" || m.op === "create-dir")) {
           setPendingCreateFocus({ path: m.newPath, parent: m.parent, isDir: m.op === "create-dir" });
           collapsed.dirs.delete(m.parent); saveCollapsed();
@@ -1036,14 +1060,16 @@ function handleBrowserDialogMessage(m) {
 function handleDirChangedMessage(m) {
       // 트리에 보이는 폴더면 목록을 다시 받는다(생성·삭제·이름변경이 그대로 보이게).
       if (dirCache.has(m.dir)) { dirCache.delete(m.dir); requestDir(m.dir); renderFileTree(); }
+      // 터미널·외부 편집기에서 바뀐 것도 깃 화면에 보이게. 저장 경로(requestReload 쪽)만 부르면 앱 밖 변경이 빠짐
+      callHook("git.refreshFor", m.dir);
       // 그 폴더에 열어둔 파일이 있으면 내용을 다시 읽는다. 이름 정보가 없으면 그 폴더의 열린 파일 전부.
       const chNames = Array.isArray(m.names) ? m.names : [];
       const chSeen = new Set();
       for (const sp of getTabSpaces()) for (const ft of getTabs(sp)) {
         if (!isFileLikeKind(ft.kind) || !ft.path || chSeen.has(ft.path)) continue;
-        const fdir = ft.path.slice(0, ft.path.lastIndexOf("/")) || "/";
-        if (fdir !== m.dir) continue;
-        const base = ft.path.slice(ft.path.lastIndexOf("/") + 1);
+        const fdir = pathDirname(ft.path) || "/";
+        if (!samePath(fdir, m.dir)) continue;
+        const base = pathBasename(ft.path);
         if (chNames.length && !chNames.includes(base)) continue;
         chSeen.add(ft.path); requestReload(ft.path);
       }
@@ -1072,7 +1098,7 @@ function handleFileMessage(m, responseIoEntry) {
         const binaryTarget = responseIoEntry && responseIoEntry.tabRef;
         try { window.acHost && acHost.revealInFinder && acHost.revealInFinder(m.path); } catch (e) {}
         if (binaryTarget) removeTabsNow([{ space: responseIoEntry.owner.space, tabId: responseIoEntry.tabId, tabRef: binaryTarget }]);
-        showToast("뷰어로 열 수 없는 형식입니다. Finder에서 보여줍니다", { level: "warn" });
+        showToast(`뷰어로 열 수 없는 형식입니다. ${isHostWindows() ? "탐색기" : "Finder"}에서 보여줍니다`, { level: "warn" });
         return;
       }
       // 편집 중(draft 존재)인 탭은 내용을 덮어쓰지 않는다(사용자 입력 보존). 최초 로드만 반영.
@@ -1110,14 +1136,27 @@ function handleFileSavedMessage(m, responseIoEntry) {
       if (m.error && !m.requestId) showToast("저장 실패", { level: "err", detail: String(m.error) });
 }
 
+// herdr 가 없거나 붙자마자 끊기면 재연결이 계속 실패한다. 같은 안내는 한 번만 쓰고, 간격을 늘려 다시 시도한다.
+// 5초 넘게 붙어 있었으면 정상 연결로 보고 처음 간격으로 돌아간다.
+const ptyRetry = { delay: 800, note: "", startedAt: 0 };
+
 function handlePtyStartedMessage() {
   // 실제 herdr 세션에 연결한다. 현재 크기를 즉시 반영한다.
+  ptyRetry.startedAt = Date.now();
   sendPtyResize();
 }
 
-function handlePtyExitMessage() {
-  if (getXterm()) getXterm().write("\r\n\x1b[2m[herdr 세션 detach됨, 재연결 시도…]\x1b[0m\r\n");
-  setPtyStarted(false); setTimeout(() => { if (getXterm()) startPty(); }, 800);
+function handlePtyExitMessage(m) {
+  if (ptyRetry.startedAt && Date.now() - ptyRetry.startedAt > 5000) { ptyRetry.delay = 800; ptyRetry.note = ""; }
+  ptyRetry.startedAt = 0;
+  const note = m && m.reason === "herdr-missing"
+    ? "[herdr 를 찾지 못했습니다. 저장소에서 ./setup 을 실행하거나 brew install herdr 로 설치하면 자동으로 연결합니다]"
+    : "[herdr 세션 detach됨, 재연결 시도…]";
+  if (getXterm() && note !== ptyRetry.note) getXterm().write(`\r\n\x1b[2m${note}\x1b[0m\r\n`);
+  ptyRetry.note = note;
+  const delay = ptyRetry.delay;
+  ptyRetry.delay = Math.min(delay * 2, 10000);
+  setPtyStarted(false); setTimeout(() => { if (getXterm()) startPty(); }, delay);
 }
 
 function handleControlErrorMessage(m) {
@@ -1284,7 +1323,11 @@ function handleServerToastMessage(m) {
 }
 
 function handleHerdrMessage(m) { if (!m.connected) $("#meta").textContent = "herdr 끊김"; }
-function handleErrorMessage() { $("#meta").textContent = "오류"; }
+function handleErrorMessage(m) {
+  const meta = $("#meta");
+  meta.textContent = m && m.code === "HERDR_UNREACHABLE" ? "herdr 연결 안 됨" : "오류";
+  meta.title = String((m && m.message) || "");
+}
 
 const WS_DISPATCH = {
   "hb": dispatchWs(ignoreWsMessage),
@@ -1312,6 +1355,7 @@ const WS_DISPATCH = {
   "closed-tabs": dispatchWs(handleClosedTabsMessage),
   "tab-reopen-history": dispatchWs(handleTabReopenHistoryMessage),
   "wake-tab": dispatchWs(handleWakeTabMessage),
+  "browser-tabs-resync": dispatchWs(() => { if (!MEMO_MODE) reportAllBrowserTabs(); }),
   "space-key-moved": dispatchWs(handleSpaceKeyMovedMessage),
   "space-keys": dispatchWs(handleSpaceKeysMessage),
   "tab-handles": dispatchWs(handleTabHandlesMessage),
@@ -1363,7 +1407,7 @@ function capabilityBootArgs(items) {
       // 띠만 다시 그리면 모자란다. 어느 탭이 떨어져 나갔는지가 바뀌면 이 창이 비출 탭도 바뀌는데,
       // 그 판정은 reconcileBrowserMode 안에 있다. 띠만 그리면 칩은 사라지고 화면은 그대로 그
       // 페이지다.
-      acHost: window.acHost, boundTab: BOUND_TAB,
+      acHost: window.acHost, boundTab: BOUND_TAB, detachedWin: APP_PARAMS.get("win") || null,
       redrawBrowser: () => { if (BROWSER_MODE) reconcileBrowserMode(); else renderBmTabs(); },
       // 뷰어 기능이 쓰는 앱 셸의 DOM·알림·판정. 기능이 직접 import 할 수 있는 것은 넘기지 않는다.
       fileview, filePathBarHtml, isFileLikeKind, showNotice,

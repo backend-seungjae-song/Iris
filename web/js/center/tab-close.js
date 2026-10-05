@@ -1,3 +1,4 @@
+import { isHostWindows, pathBasename, samePath, pathWithin, relativePath, joinPath } from "../core/host-path.js";
 // 소유 범위: 센터 탭 닫기 확인 대화상자, 닫기/폐기/경로 재지정 흐름, 탭바 닫기 이벤트.
 // 주입받는 것: main 소유 DOM·브라우저/Monaco 상태 접근자와 렌더·저장·감시 함수.
 // 제공 API: initTabClose, dirty 판정, 닫기·폐기·재지정·시트 모드 전환 함수.
@@ -274,13 +275,13 @@ export function retargetFileTabs(oldPath, newPath) {
     for (const t of getTabs(sp)) {
       if (!isFileLikeKind(t.kind) || !t.path) continue;
       let np = null;
-      if (t.path === oldPath) np = newPath;
-      else if (t.path.startsWith(oldPref)) np = newPath + "/" + t.path.slice(oldPref.length);
+      if (samePath(t.path, oldPath)) np = newPath;
+      else if (isHostWindows() ? pathWithin(oldPath, t.path) : t.path.startsWith(oldPref)) np = isHostWindows() ? joinPath(newPath, relativePath(oldPath, t.path)) : newPath + "/" + t.path.slice(oldPref.length);
       if (np) {
         const oldId = t.id, oldTabPath = t.path;
         pathMoves.set(oldTabPath, np);
         untrackFileWatch(oldTabPath, sp, oldId);
-        t.path = np; t.id = "file:" + np; t.label = np.split("/").pop(); trackFileWatch(sp, t);
+        t.path = np; t.id = "file:" + np; t.label = pathBasename(np); trackFileWatch(sp, t);
         if (getActiveTabId(sp) === oldId) setActiveTab(sp, t.id);
         for (const registryItem of tabIoRegistry) {
           const entry = registryItem[1];

@@ -1,4 +1,4 @@
-import net from "node:net";
+import { connectAgent } from "../agent-endpoint.mjs";
 
 import { acceptedPermissionVerdict } from "./protocol.mjs";
 
@@ -50,15 +50,19 @@ function consumeSocket(chunk) {
 }
 
 if (socketPath && paneId && cliSession) {
-  agent = net.createConnection(socketPath);
-  agent.setEncoding("utf8");
-  agent.on("connect", () => {
-    agentReady = true;
-    writeAgent({ role: "channel", v: 1, paneId, cliSession });
-  });
-  agent.on("data", consumeSocket);
-  agent.on("error", () => {});
-  agent.on("close", () => { agentReady = false; agent = null; latestPermission = null; });
+  let endpoint;
+  try { endpoint = connectAgent(socketPath); } catch {}
+  if (endpoint) {
+    agent = endpoint.socket;
+    agent.setEncoding("utf8");
+    agent.on("connect", () => {
+      agentReady = true;
+      writeAgent({ role: "channel", v: 1, paneId, cliSession, ...endpoint.auth });
+    });
+    agent.on("data", consumeSocket);
+    agent.on("error", () => {});
+    agent.on("close", () => { agentReady = false; agent = null; latestPermission = null; });
+  }
 }
 
 function handleMcp(message) {

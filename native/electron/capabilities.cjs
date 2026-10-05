@@ -32,6 +32,7 @@ const NATIVE_CAPABILITIES = [
   { id: "emulator", module: require.resolve("./emulator/emulator-host.cjs") },
   { id: "extensionloader", module: require.resolve("./extension-loader.cjs") },
   { id: "browserextensions", module: require.resolve("./browser-extensions.cjs") },
+  { id: "pagetranslate", module: require.resolve("./page-translate.cjs") },
   { id: "searchsuggest", module: require.resolve("./search-suggest.cjs") },
   { id: "sketch", module: require.resolve("./sketch-shot.cjs") },
 ];

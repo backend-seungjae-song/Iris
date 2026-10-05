@@ -97,6 +97,8 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
       assert.deepEqual(await page.evaluate(() => sent.at(-1)), {type:'tab.create',workspaceId:'owner',cwd:'/repo-wt/topic',launch});
       assert.equal(await page.evaluate(()=>selected),'agent','추가 메뉴가 기존 세션 선택을 바꾸지 않는다');
     }
+    assert.equal(await page.$(group('/repo-wt/unused')),null,'안 쓰는 worktree 는 접힌 묶음 안');
+    await page.click('[data-worktree-action="idle-toggle"]');
     await page.click(`${group('/repo-wt/unused')} [data-worktree-action="group-add"]`);
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
@@ -119,6 +121,16 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
     await page.evaluate(rename=>ws['worktrees.result']({requestId:rename.requestId,ok:true,repo:'/repo',primary:'/repo',entries:[{path:'/repo',primary:true,branch:'main'},{path:'/repo-wt/topic',branch:'feat/topic',label:rename.label,users:[],running:[],managed:true}]}),rename);
     assert.equal(await page.$eval(`${topic} .wt-group-name`,el=>el.textContent),'검색 개선');
     assert.equal(await page.$eval(`${topic} .wt-loc-branch`,el=>el.textContent),'feat/topic');
+    // 삭제가 막힌 이유를 메뉴 이름에 보인다
+    await page.click(`${topic} [data-worktree-action="group-menu"]`);
+    await page.locator('::-p-text(새로고침)').click();
+    await page.evaluate(()=>{const req=sent.findLast(msg=>msg.type==='worktrees.list');ws['worktrees.result']({requestId:req.requestId,ok:true,repo:'/repo',primary:'/repo',entries:[{path:'/repo',primary:true,branch:'main'},
+      {path:'/repo-wt/topic',branch:'feat/topic',users:[],running:[],managed:false},{path:'/repo-wt/unused',branch:'fix/unused',users:[],running:[],managed:true,change:{uncommitted:2}}]});});
+    for (const [path,label] of [['/repo-wt/topic','worktree 삭제 (Iris 에서 만든 것만)'],['/repo-wt/unused','worktree 삭제 (커밋하지 않은 변경 있음)']]) {
+      await page.click(`${group(path)} [data-worktree-action="group-menu"]`);
+      assert.deepEqual(await page.$eval('#ctxmenu .ci:last-child',el=>[el.textContent,el.classList.contains('disabled')]),[label,true]);
+      await page.keyboard.press('Escape');
+    }
     if (process.env.IRIS_WORKTREE_SCREENSHOTS) {
       mkdirSync(process.env.IRIS_WORKTREE_SCREENSHOTS,{recursive:true});
       await page.evaluate(()=>document.fonts.ready);

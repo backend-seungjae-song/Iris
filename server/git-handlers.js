@@ -83,9 +83,12 @@ function gitCodeOf(c) { return ({ M: "M", A: "A", D: "D", R: "R", C: "C", U: "U"
 // reqPath = 화면이 요청한 폴더. 응답에 포함해야 화면이 그 폴더가 어느 저장소로 해석됐는지
 // 기억할 수 있다. 중첩 저장소의 .git이 사라지면 같은 폴더가 다른 저장소로 해석되기 때문이다.
 export function gitStatusRich(root, reqPath) {
-  const r = git(root, ["status", "--porcelain=v1", "-uall", "--branch"]);
+  // -z: 한글 등 비ASCII 경로를 "\355\225..." 로 감싸지 않고 그대로 받음. 이름 바뀜은 새 경로 뒤에 옛 경로가 따로 옴
+  const r = git(root, ["status", "--porcelain=v1", "-z", "-uall", "--branch"]);
   const staged = [], changes = []; let branch = "", ahead = 0, behind = 0;
-  for (const line of (r.out || "").split("\n")) {
+  const fields = (r.out || "").split("\0");
+  for (let i = 0; i < fields.length; i++) {
+    const line = fields[i];
     if (!line) continue;
     if (line.startsWith("## ")) {
       // 커밋이 없는 브랜치는 "## No commits yet on main"(git 2.28 이전은 "Initial commit on")로 온다.
@@ -96,12 +99,12 @@ export function gitStatusRich(root, reqPath) {
       const mb = b.match(/behind (\d+)/); if (mb) behind = +mb[1];
       continue;
     }
-    const x = line[0], y = line[1]; let rel = line.slice(3);
-    if (rel.includes(" -> ")) rel = rel.split(" -> ").pop();
-    rel = rel.replace(/^"(.*)"$/, "$1");
+    const x = line[0], y = line[1], rel = line.slice(3);
+    const old = "RC".includes(x) || "RC".includes(y) ? fields[++i] || "" : "";
     const abs = path.join(root, rel);
     if (x === "?" && y === "?") { changes.push({ rel, abs, code: "U", untracked: true }); continue; }
-    if (x !== " " && x !== "?") staged.push({ rel, abs, code: gitCodeOf(x) });
+    // 옛 경로를 함께 넘겨야 diff 가 이름 바뀜으로 짝지음. 새 경로만이면 통째 추가로 보임
+    if (x !== " " && x !== "?") staged.push({ rel, abs, code: gitCodeOf(x), ...("RC".includes(x) && old ? { oldRel: old } : {}) });
     if (y !== " " && y !== "?") changes.push({ rel, abs, code: gitCodeOf(y), untracked: false });
   }
   // branches = 전환할 수 있는 로컬 브랜치. 커밋·전환 뒤에 오는 status 에 함께 실어 목록이 따로 낡지 않게 한다.
@@ -235,18 +238,24 @@ export function handleGit(ws, msg) {
         return;
       }
       if (msg.untracked) patch = git(root, ["diff", "--no-index", "--", "/dev/null", abs]).out;
-      else if (msg.staged) patch = git(root, ["diff", "--staged", "--", rel]).out;
+      else if (msg.staged) {
+        const old = msg.oldRel && inRoot(path.resolve(root, String(msg.oldRel))) ? [String(msg.oldRel)] : [];
+        patch = git(root, ["diff", "--staged", "-M", "--", ...old, rel]).out;
+      }
       else patch = git(root, ["diff", "--", rel]).out;
       ws.send(JSON.stringify({ type: "git-diff", root, file: abs, staged: !!msg.staged, patch }));
       return;
     }
-    if (op === "stage") git(root, ["add", "--", ...safeRels]);
-    else if (op === "unstage") git(root, ["restore", "--staged", "--", ...safeRels]);
-    else if (op === "stageAll") git(root, ["add", "-A"]);
+    // index.lock 이 남은 경우 등 git 이 거절하면 목록만 그대로라 눌러도 반응이 없어 보이므로 거절 문구 전달
+    let refused = "";
+    const change = (args) => { const r = git(root, args); if (!r.ok && !refused) refused = (r.err || r.out || "git 실행 실패").trim(); };
+    if (op === "stage") change(["add", "--", ...safeRels]);
+    else if (op === "unstage") change(["restore", "--staged", "--", ...safeRels]);
+    else if (op === "stageAll") change(["add", "-A"]);
     else if (op === "discard") {
-      if (safeRels.length) git(root, ["restore", "--", ...safeRels]);
+      if (safeRels.length) change(["restore", "--", ...safeRels]);
       const unt = (msg.untracked || []).map(String).filter((r) => inRoot(path.resolve(root, r)));
-      if (unt.length) git(root, ["clean", "-f", "--", ...unt]);
+      if (unt.length) change(["clean", "-f", "--", ...unt]);
     }
     else if (op === "commit") {
       const m = String(msg.message || "").trim();
@@ -268,6 +277,7 @@ export function handleGit(ws, msg) {
       if (files.length) error = `커밋하지 않은 변경이 ${b} 브랜치와 겹쳐 전환하지 못했습니다. 커밋하거나 되돌린 뒤 다시 하세요. (${files.join(", ")})`;
       ws.send(JSON.stringify(r.ok ? { type: "git-ok", op, root, message: `${b} 브랜치로 전환` } : { type: "git-error", op, root, error }));
     }
+    if (refused) ws.send(JSON.stringify({ type: "git-error", op, root, error: refused }));
     if (GIT_MUTATIONS.has(op)) { clearGitStatusCache(root); ws.send(JSON.stringify(gitStatusRich(root, dir))); recompute(); } // 조작 후 최신 상태 회신 + 파일트리 git 갱신
   } catch (e) { ws.send(JSON.stringify({ type: "git-error", op, root, error: String(e.message || e) })); }
 }

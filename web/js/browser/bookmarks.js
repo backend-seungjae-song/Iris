@@ -44,8 +44,9 @@ export function initBookmarks(deps) {
 // goUrl 은 main 이 소유한다. 주소 확정은 탭·webview 흐름이라 이 모듈의 책임이 아니다.
 export function wireUrlBar({ goUrl }) {
   const update = () => { sugTyped = urlInput.value; sugIdx = -1; openSug(sugTyped); };
-  urlInput.addEventListener("input", (ev) => { if (!sugComposing && !ev.isComposing) update(); });
-  urlInput.addEventListener("compositionstart", () => { sugComposing = true; closeSug(); });
+  // 한글 조합 중에도 추천 갱신(조합 끝까지 기다리면 스페이스를 쳐야 추천이 뜸). 목록만 그리고 입력값은 안 바꿈
+  urlInput.addEventListener("input", () => update());
+  urlInput.addEventListener("compositionstart", () => { sugComposing = true; });
   urlInput.addEventListener("compositionend", () => { sugComposing = false; update(); });
   urlInput.addEventListener("focus", () => { sugTyped = urlInput.value; });
   urlInput.addEventListener("blur", () => { cancelSuggestRequest(); setTimeout(() => { if (document.activeElement !== urlInput) closeSug(); }, 120); });
@@ -99,10 +100,10 @@ function paintSug() {
 }
 export function openSug(q) {
   cancelSuggestRequest(); sugSpace = curBmSpace(); sugQueries = []; showSug(q);
-  if (!String(q || "").trim() || sugComposing) return;
+  if (!String(q || "").trim()) return;
   const request = sugRequest, space = curBmSpace(), tab = activeBrowserId();
   const stillCurrent = () => request === sugRequest && space === curBmSpace() && tab === activeBrowserId()
-    && !sugComposing && document.activeElement === urlInput
+    && document.activeElement === urlInput
     && (urlInput.value === q || urlInput.value === sugItems[sugIdx]?.value);
   sugTimer = setTimeout(async () => {
     sugTimer = null;

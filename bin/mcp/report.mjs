@@ -26,6 +26,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { windowsPowerShellEnv } from "../../server/windows-powershell.cjs";
 import { artifactDir } from "../../server/artifacts-home.cjs";
 import qaExpiry from "../../server/qa-expiry-guard.cjs";
 import { renderPlain } from "./report-plain.mjs";
@@ -127,11 +129,16 @@ function forEmbed(p) {
   try {
     const d = pngSize(p);
     if (d && d.w > EMBED_MAX_W) {
-      const tmp = p.replace(/\.png$/i, `.w${EMBED_MAX_W}.png`);
+      const tmp = /\.png$/i.test(p) ? p.replace(/\.png$/i, `.w${EMBED_MAX_W}.png`) : `${p}.w${EMBED_MAX_W}.png`;
       if (!fs.existsSync(tmp)) {
-        execFileSync("sips", ["-Z", String(EMBED_MAX_W), p, "--out", tmp], { stdio: "ignore" });
+        if (process.platform === "win32") {
+          execFileSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+            fileURLToPath(new URL("./report-resize.ps1", import.meta.url)), "-SourcePath", p, "-DestinationPath", tmp,
+            "-MaximumWidth", String(EMBED_MAX_W)], { stdio: "ignore", windowsHide: true, timeout: 30_000, env: windowsPowerShellEnv() });
+        } else execFileSync("sips", ["-Z", String(EMBED_MAX_W), p, "--out", tmp], { stdio: "ignore" });
       }
-      if (fs.existsSync(tmp)) out = tmp;
+      const resized = pngSize(tmp);
+      if (resized && resized.w <= EMBED_MAX_W) out = tmp;
     }
   } catch {}
   shrunk.set(p, out);

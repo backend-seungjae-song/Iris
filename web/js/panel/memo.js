@@ -223,7 +223,8 @@ export function renderMemo() {
   renderMemoPreview();
   if (meta) {
     const s = orderedSpaces().find((x) => x.id === sp);
-    meta.textContent = sp ? (s ? s.label : sp) : "스페이스 선택";
+    // 목록에 없는 키(스페이스 없을 때의 "_" 등)는 사람이 읽을 이름이 아니라 비움
+    meta.textContent = sp ? (s ? s.label : "") : "스페이스 선택";
   }
 }
 // 저장되지 않은 편집은 파일 탭과 같은 표시로 알린다. 자동 저장이라 잠깐 떴다 사라지는 것이 정상이고,

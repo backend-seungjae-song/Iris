@@ -70,6 +70,30 @@ export default async function run() {
       }
       return true;
     });
+    // 이동은 비동기다. 호출 직후 주소를 읽으면 CLI·MCP 가 이동 전 주소를 결과로 받는다.
+    await checkAsync("CDP page back·reload는 메인 프레임 이동이 확정된 뒤의 주소를 낸다", async () => {
+      const { EventEmitter } = await import("node:events");
+      const { createPageCommands } = require_("../native/electron/cdp-cmd-page.cjs");
+      const commands = createPageCommands({ applyViewport: async () => ({ ok: true }), navigationTimeout: 2000 });
+      const wc = Object.assign(new EventEmitter(), {
+        url: "https://page.test/b",
+        getURL() { return this.url; },
+        navigationHistory: {
+          canGoBack: () => true,
+          goBack: () => setTimeout(() => {
+            wc.emit("did-navigate-in-page", {}, "https://page.test/b#frame", false);
+            setTimeout(() => { wc.url = "https://page.test/a"; wc.emit("did-navigate", {}, wc.url); }, 20);
+          }, 20),
+        },
+        reload: () => setTimeout(() => { wc.url = "https://page.test/after-redirect"; wc.emit("did-navigate", {}, wc.url); }, 20),
+      });
+      const back = await commands.back(async () => ({}), wc, {});
+      if (back?.url !== "https://page.test/a") throw new Error(`뒤로 결과 주소가 이동 전이다(${back?.url})`);
+      const reload = await commands.reload(async () => ({}), wc, {});
+      if (reload?.url !== "https://page.test/after-redirect") throw new Error(`새로고침 결과 주소가 이동 전이다(${reload?.url})`);
+      if (wc.listenerCount("did-navigate") || wc.listenerCount("did-fail-load")) throw new Error("이동 대기 리스너가 남는다");
+      return true;
+    });
     await checkAsync("CDP page wait은 readyState를 폴링하고 숫자는 고정 대기한다", async () => {
       const { createPageCommands } = require_("../native/electron/cdp-cmd-page.cjs");
       const commands = createPageCommands({ applyViewport: async () => ({ ok: true }) });

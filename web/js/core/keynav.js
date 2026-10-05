@@ -1,3 +1,4 @@
+import { isHostWindows } from "./host-path.js";
 // Iris 전역 키보드 내비게이션과 브라우저·메모·herdr 단축키를 한 순서로 등록한다.
 //
 // 소유 범위
@@ -89,7 +90,7 @@ export function initKeynav(deps) {
   document.addEventListener("keydown", (e) => {
     if (MEMO_MODE) return;
     if (isAgentRenaming()) return;
-    if (!e.altKey || e.metaKey || e.ctrlKey) return;
+    if (!isHostWindows() && (!e.altKey || e.metaKey || e.ctrlKey)) return;
     const hit = ["screen-main", "screen-browser", "screen-toggle", "screen-toggle-back"]
       .find((id) => matchBinding(e, bindingOf(id)));
     if (!hit) return;
@@ -118,7 +119,7 @@ export function initKeynav(deps) {
   document.addEventListener("keydown", (e) => {
     if (MEMO_MODE) return;
     if (isAgentRenaming()) return;
-    if (!e.altKey) return;
+    if (!isHostWindows() && !e.altKey) return;
     // Cmd 와 Ctrl 을 맞바꾼 키보드 배치가 있어 표의 mod 가 둘을 한 필드로 다룬다.
     const hit = ["rail-prev", "rail-next", "agent-prev", "agent-next", "tab-prev", "tab-next"]
       .find((id) => matchBinding(e, bindingOf(id)));
@@ -135,6 +136,7 @@ export function initKeynav(deps) {
   document.addEventListener("keydown", (e) => {
     const k = (e.key || "").toLowerCase();
     if (MEMO_MODE) {
+      if (isHostWindows() && e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey && k === "r") { e.preventDefault(); window.acHost?.appReload?.(); return; }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && k === "s") { e.preventDefault(); callHook("memo.archiveWindow"); }
       return;
     }
@@ -186,34 +188,39 @@ export function initKeynav(deps) {
     // cmd+w / ctrl+w = 현재 가운데 탭(파일/브라우저) 닫기
     // 탭 닫기: cmd+w=선택한 herdr pane 삭제(메인 창), ctrl+w=브라우저·센터 탭.
     if (e.metaKey && !e.ctrlKey && !e.altKey && k === "w" && !BROWSER_MODE) { e.preventDefault(); if (!e.repeat) closeCurrentHerdrPane(); return; }
+    // Windows에서는 Ctrl+Shift+W를 pane 닫기에 사용한다. Ctrl+W는 셸의 단어 삭제를 보존한다.
+    if (isHostWindows() && e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && k === "w" && !BROWSER_MODE) { e.preventDefault(); if (!e.repeat) closeCurrentHerdrPane(); return; }
     // ctrl+w=브라우저·센터 탭 닫기. 터미널 포커스 시엔 ctrl+w=셸 단어삭제라 양보.
-    if (e.ctrlKey && !e.metaKey && k === "w" && !(getTerminal() && getTerminal().contains(document.activeElement))) { e.preventDefault(); const space = getCenterSpace(); const t = curTabs().find((tab) => tab.id === getActiveTabId(space)); if (BROWSER_MODE) closeActiveTab(); else if (t) closeTabs([{ space, tabId: t.id, tabRef: t }]); return; }
+    if (e.ctrlKey && !e.metaKey && (!isHostWindows() || !e.shiftKey) && !e.altKey && k === "w" && !(getTerminal() && getTerminal().contains(document.activeElement))) { e.preventDefault(); const space = getCenterSpace(); const t = curTabs().find((tab) => tab.id === getActiveTabId(space)); if (BROWSER_MODE) closeActiveTab(); else if (t) closeTabs([{ space, tabId: t.id, tabRef: t }]); return; }
     // ⌘⇧E 요소선택과 ⌘⇧D 분리는 아래 capture 단계 핸들러가 전담하며, 포커스 위치와 무관하게 동작한다.
     // cmd+s / ctrl+s = 파일 저장 (편집 중인 파일)
-    if ((e.metaKey || e.ctrlKey) && k === "s") { e.preventDefault(); saveActiveFile(); return; }
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && k === "s" && !(isHostWindows() && getTerminal()?.contains(document.activeElement))) { e.preventDefault(); saveActiveFile(); return; }
     // 브라우저 리로드: ⌘R 리로드 · ⌘⇧R 강제 리로드. 분리 브라우저 창(BROWSER_MODE), 또는 메인 창에서
     // 브라우저 탭이 활성(도킹)이고 키 포커스가 터미널에 있지 않을 때 적용. 터미널 포커스(에이전트 작업)
     // 시엔 아래 이름변경으로 양보한다. activeWv()는 활성 센터 탭만 보므로 실제 포커스로 다시 판정한다.
     const termFocused = !BROWSER_MODE && !!(getTerminal() && getTerminal().contains(document.activeElement));
+    if (isHostWindows() && e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !termFocused && (BROWSER_MODE || activeWv())) {
+      e.preventDefault(); const r = activeWv(); try { if (r) r.el.reload(); } catch {} return;
+    }
     // 창 기준 분기: 브라우저 창은 ⌘R 리로드 / ⌘⇧R 강제 리로드.
     // 메인 창은 ⌘⇧R이 앱 강제 재로딩이므로 여기서 잡지 않고 아래로 흘린다. 메인 창의 ⌘R만
     // 도킹된 브라우저 탭이 활성이고 터미널 포커스가 아닐 때 페이지 리로드로 쓴다.
-    const wantPageReload = BROWSER_MODE || (!e.shiftKey && !termFocused && activeWv());
-    if (e.metaKey && !e.altKey && !e.ctrlKey && k === "r" && wantPageReload) {
+    const wantPageReload = (BROWSER_MODE && (!isHostWindows() || !e.shiftKey)) || (!e.shiftKey && !termFocused && activeWv());
+    if (((e.metaKey && !e.ctrlKey) || (isHostWindows() && e.ctrlKey && !e.metaKey && !e.shiftKey)) && !e.altKey && k === "r" && wantPageReload) {
       e.preventDefault(); const r = activeWv();
       try { if (r) { e.shiftKey ? r.el.reloadIgnoringCache() : r.el.reload(); } } catch {}
       return;
     }
     // 메인 창 ⌘⇧R = 앱 강제 재로딩. 브라우저 창·webview 활성일 땐 위에서 이미 페이지 강제 리로드로 처리됐다.
     // 이름변경보다 먼저 판정해야 한다. 아래 이름변경 조건이 shift를 배제하지 않으면 ⌘⇧R을 삼킨다.
-    if (!BROWSER_MODE && e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && k === "r") {
+    if ((!BROWSER_MODE || isHostWindows()) && ((e.metaKey && !e.ctrlKey) || (isHostWindows() && e.ctrlKey && !e.metaKey)) && e.shiftKey && !e.altKey && k === "r") {
       e.preventDefault();
       try { window.acHost && acHost.appReload ? acHost.appReload() : location.reload(); } catch { location.reload(); }
       return;
     }
     if (isAgentRenaming()) return;
     // 이름변경(메인 창): ctrl+shift+r(herdr) 또는 cmd+r. ⌘⇧R(앱 재로딩)·cmd+⌥R·cmd+⌃R은 배제.
-    if ((e.ctrlKey && e.shiftKey && k === "r" && !e.metaKey) || (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && k === "r")) { e.preventDefault(); startInlineRename(); return; }
+    if ((!BROWSER_MODE && isHostWindows() && e.key === "F2" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) || (!isHostWindows() && ((e.ctrlKey && e.shiftKey && k === "r" && !e.metaKey) || (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && k === "r")))) { e.preventDefault(); startInlineRename(); return; }
     // ⌘⇧T = 방금 닫은 탭 복원. 아래 탭 생성보다 먼저 판정한다. 생성 조건이 shift 를 배제하지만,
     // 순서로도 고정해 두어야 나중에 그 조건이 느슨해질 때 조용히 삼켜지지 않는다.
     if (matchBinding(e, bindingOf("reopen-tab"))) { e.preventDefault(); reopenLastClosed(); return; }
@@ -243,7 +250,14 @@ export function cycleSpace(dir) {
 // 넘지 않고 같은 스페이스의 탭들만 좌우로 넘긴다. 분리 브라우저 창엔 herdr 탭이 없어 브라우저 탭을 넘긴다.
 export function cycleCenterTab(dir) {
   if (BROWSER_MODE) { // 분리 브라우저 창: 서버 상태 브라우저 탭 순환
-    // 한 탭에 묶인 창에는 이동할 탭이 없다. 여기서 이동하면 공유 활성 탭이 바뀌어 원래 창까지 전환된다.
+    // 분리 창은 자기 탭 사이에서 그 창의 고른 탭만 바꾼다. 공유 활성 탭을 바꾸면 원래 창까지 전환된다.
+    const own = callHook("detach.ownTabs");
+    if (own) {
+      const mine = bmTabs().filter((t) => own.has(t.id)); if (mine.length < 2) return;
+      let j = mine.findIndex((t) => t.id === callHook("detach.boundTab")); if (j < 0) j = 0;
+      callHook("detach.select", mine[(j + dir + mine.length) % mine.length].id);
+      return;
+    }
     if (!mayWriteSharedActive(callHook("detach.boundTab"))) return;
     const arr = bmTabs(); if (arr.length < 2) return;
     let i = arr.findIndex((t) => t.id === bmActiveId()); if (i < 0) i = 0;
@@ -279,7 +293,7 @@ export function newHerdrTab() {
 }
 
 // Cmd+W는 선택한 세션 하나만 닫는다. 부모·자식이 같은 탭에 있어도 탭 전체를 닫지 않는다.
-function closeCurrentHerdrPane() {
+export function closeCurrentHerdrPane() {
   if (!getIsLocal() || BROWSER_MODE) return;
   const target = getCurTarget();
   const selected = agentByPane(target);

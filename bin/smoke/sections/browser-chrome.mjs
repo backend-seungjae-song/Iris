@@ -28,6 +28,57 @@ console.log("[10d] 콘솔 탭바·알림·AI 글로우");
 // renderBmTabs 가 콘솔 창의 #tabstrip 을 덮어쓰면 파일 탭 위치에 브라우저 탭 칩이 렌더된다.
 // 그 칩에는 콘솔 쪽 클릭 핸들러가 없어 눌러도 동작하지 않는다.
 check("브라우저 탭바는 분리 창 전용", () => /function renderBmTabs\(\)\s*\{[\s\S]{0,600}?if \(!BROWSER_MODE\) \{ renderTabs\(\); return; \}/.test(browserTabs));
+// 반대 방향. 표 저장 응답처럼 분리 창에서도 renderTabs 를 부르는 곳이 있다. 그대로 그리면 브라우저 탭 칩이 사라진다.
+// 스페이스를 고르기 전에 연 탭은 "_" 아래 저장된다. 그 키를 접은 스페이스로 보면 탭을 만들자마자 재운다.
+check("스페이스를 고르기 전에 연 브라우저 탭은 접은 스페이스 탭으로 재우지 않는다", () => {
+  const src = read("web/js/browser/webview.js");
+  const at = src.indexOf("export function isLiveSpaceKey(");
+  const body = src.slice(at, src.indexOf("\n}\n", at) + 3).replace(/^export /, "");
+  const live = new Function("getSpaces", `${body}; return isLiveSpaceKey;`)(() => [{ id: "w1" }]);
+  const consoleSpace = /export function consoleSpace\(\) \{ return getCenterSpace\(\) \|\| getSelectedSpaceId\(\) \|\| "_"; \}/.test(read("web/js/center/file-routing.js"));
+  return consoleSpace && live("_") && live("__shared__") && live("w1") && !live("/some/folder");
+});
+// 분리 상태에서 탭 없는 창만 열면 주소창 입력이 "브라우저 탭을 먼저 열어주세요"로 끝난다.
+check("브라우저 탭 열기는 분리 상태에서도 탭이 없으면 하나 만든다", () => {
+  const src = read("web/js/center/file-routing.js");
+  const at = src.indexOf("export function openBrowser(");
+  const body = src.slice(at, src.indexOf("\n}\n", at) + 3).replace(/^export /, "");
+  const run = (docked, tabs) => {
+    const calls = [];
+    new Function("consoleSpace", "setCenterSpace", "getBrowserState", "bsMutate", "acHost", "newBrowserTab", "window", "$",
+      `${body}; openBrowser();`)(
+      () => "_", () => {}, () => ({ docked, tabsBySpace: { _: tabs } }), () => {},
+      { openBrowser: () => calls.push("window") }, () => calls.push("tab"), { innerWidth: 1400 }, () => null);
+    return calls.join(",");
+  };
+  return run(false, []) === "window,tab" && run(false, [{ id: "t1" }]) === "window" && run(true, []) === "tab" && run(true, [{ id: "t1" }]) === "";
+});
+// 그룹은 서버 상태가 돌아온 뒤에 생기고 그룹 만들기·탭 넣기가 상태를 따로 보낸다. 바로 열거나 그룹만 생긴
+// 렌더에서 열면 칩이 없거나 다음 렌더가 입력칸을 덮어써 이름을 입력할 수 없다.
+check("새 그룹 이름 편집은 탭까지 그룹에 들어간 렌더에서 연다", () => {
+  const src = read("web/js/browser/tabs.js");
+  const make = sliceBetween(src, "function makeGroup(", "function startInlineGroupRename(");
+  const render = sliceBetween(src, "export function renderBmTabs(", "function makeGroup(");
+  return !/setTimeout\(\(\) => startInlineGroupRename/.test(make) && /pendingGroupRename = \{ gid, ids \}/.test(make)
+    && /pend\.ids\.every\(\(id\) => bmTabs\(\)\.some\(\(t\) => t\.id === id && t\.group === pend\.gid\)\)\) \{\s*pendingGroupRename = null; startInlineGroupRename\(pend\.gid\);/.test(render);
+});
+// 빈 가운데 화면은 메인 창에만 보이고, 메인 창의 ⌘T 는 터미널 탭을 만든다. 그 키를 브라우저 버튼 옆에 적으면
+// 안내대로 눌러도 브라우저 탭이 열리지 않는다.
+check("빈 가운데 화면의 브라우저 버튼에 터미널 탭 키를 적지 않는다", () => {
+  const html = read("web/index.html");
+  const btn = (html.match(/<button[^>]*data-empty-act="browser"[\s\S]*?<\/button>/) || [""])[0];
+  const mainNewTab = /BROWSER_MODE \? newBrowserTab\(\) : newHerdrTab\(\)/.test(read("web/js/core/keynav.js"));
+  return btn !== "" && mainNewTab && !/data-empty-key="new-tab"/.test(btn);
+});
+// 1180 창에 도킹하면 가운데가 456px 이라 도구 묶음(약 270px)이 주소칸을 0 으로 밀었다.
+check("좁은 가운데에서도 주소칸은 최소 폭을 지키고 도구 묶음이 다음 줄로 내려간다", () => {
+  const src = read("web/css/18-browser.css");
+  const bar = (src.match(/^\.urlbar \{[^}]*\}/m) || [""])[0];
+  const wrap = (src.match(/^\.url-wrap \{[^}]*\}/m) || [""])[0];
+  const min = Number((wrap.match(/min-width:(\d+)px/) || [])[1] || 0);
+  return /flex-wrap:wrap/.test(bar) && min >= 120;
+});
+check("콘솔 탭바 그리기는 분리 창에서 브라우저 탭바로 넘긴다", () => /export function renderTabs\(\)\s*\{[\s\S]{0,300}?if \(BROWSER_MODE\) \{ renderBmTabs\(\); return; \}/.test(read("web/js/center/tabs.js")));
 // 알림의 "그 탭으로"는 스페이스로 이동한 뒤 그 스페이스의 브라우저 탭을 연다.
 check("그 탭으로는 스페이스부터", () => /function gotoTabById[\s\S]{0,900}?focusSpace\(sp\)/.test(web)
   && /op: "tab\.switch", space: sp, id: tabId/.test(web));

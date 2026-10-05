@@ -14,15 +14,18 @@ const identity = (p) => {
 };
 const same = (a, b) => a && b && a.dev === b.dev && a.ino === b.ino;
 function safeDir(p, create = false) {
-  let current = path.parse(path.resolve(p)).root;
-  for (const part of path.resolve(p).split(path.sep).filter(Boolean)) {
+  const absolute = path.resolve(p);
+  let current = path.parse(absolute).root;
+  // 루트 뒤 조각만 순회(Windows 드라이브 문자 중복 결합 방지)
+  for (const part of absolute.slice(current.length).split(path.sep).filter(Boolean)) {
     current = path.join(current, part);
     if (create) { try { fs.mkdirSync(current, { mode: 0o700 }); } catch (e) { if (e.code !== "EEXIST") throw e; } }
     identity(current);
   }
   return p;
 }
-function syncDir(p) { const fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }
+// Windows 는 디렉터리 open·fsync 미지원
+function syncDir(p) { if (process.platform === "win32") return; const fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }
 function read(p) {
   const fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {

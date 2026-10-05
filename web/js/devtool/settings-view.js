@@ -1,3 +1,5 @@
+import { bindingOf, formatBinding } from "../core/keymap.js";
+import { isHostWindows } from "../core/host-path.js";
 // 설정 화면 렌더: 자료를 받아 HTML 문자열 하나를 돌려준다.
 //
 // 소유 범위
@@ -99,7 +101,10 @@ function keyCaps(keys) {
   const esc = escapeHtml;
   const out = [];
   let rest = String(keys || "");
-  while (rest && "⌘⌥⇧⌃".includes(rest[0])) { out.push(rest[0]); rest = rest.slice(1); }
+  if (isHostWindows()) {
+    let match;
+    while ((match = rest.match(/^(Ctrl|Alt|Shift|Win)\+/))) { out.push(match[1]); rest = rest.slice(match[0].length); }
+  } else while (rest && "⌘⌥⇧⌃".includes(rest[0])) { out.push(rest[0]); rest = rest.slice(1); }
   if (rest) out.push(rest);
   return out.map((k) => `<span class="km-kc">${esc(k)}</span>`).join("");
 }
@@ -263,7 +268,7 @@ function switcherPane(model) {
   const parts = [`<section class="km-switcher">
     <div class="km-phead"><span class="km-h2">창 전환</span><span class="km-sp"></span>
       <button class="km-btn" id="sw-refresh">다시 읽기</button></div>
-    <div class="km-note km-sw-intro">체크한 창들 사이만 ⌥Tab으로 오갑니다. 하나도 없으면 콘솔과 브라우저를 토글합니다.</div>`,
+    <div class="km-note km-sw-intro">체크한 창들 사이만 ${escapeHtml(formatBinding(bindingOf("screen-toggle")))}으로 오갑니다. 하나도 없으면 콘솔과 브라우저를 토글합니다.</div>`,
     globalPriorityToggleMarkup(status)];
 
   const permissionUsesAppIcons = sharedReason === "화면 기록 권한 없음";
@@ -292,7 +297,7 @@ function switcherPane(model) {
       parts.push(`<div class="km-note km-sw-list-note">${esc(sharedReason)}. 앱 아이콘으로 표시합니다.</div>`);
     }
     if (pickedRows.length) {
-      parts.push(`<div class="km-sh"><h3 class="km-sh-t">⌥Tab 이 도는 순서</h3><span class="km-sh-n">${esc(pickedRows.length)}</span></div>`);
+      parts.push(`<div class="km-sh"><h3 class="km-sh-t">${escapeHtml(formatBinding(bindingOf("screen-toggle")))} 이 도는 순서</h3><span class="km-sh-n">${esc(pickedRows.length)}</span></div>`);
       parts.push(`<div class="km-sw-list km-sw-picked-list">${switcherRowsMarkup(
         pickedRows, status, media, reasons.slice(0, pickedRows.length), sharedReason,
         { orderable: true, allWindows: rows },
@@ -307,7 +312,7 @@ function switcherPane(model) {
     }
     if (windows.some((window) => window.switchBlocked === true)) {
       parts.push(`<div class="km-note km-sw-blocked-note">전환 안 됨<br>
-        macOS 가 그 데스크톱으로 안 넘어감<br>
+        ${isHostWindows() ? "Windows가" : "macOS가"} 그 데스크톱으로 안 넘어감<br>
         그 앱이 이 데스크톱에도 창을 갖고 있으면 그렇게 됨</div>`);
     }
   }
@@ -491,7 +496,7 @@ function switchFailureText(reason) {
 // 고른 창이 있으면 이 옵션과 관계없이 전역으로 등록한다. 옵션은 고른 창이 없을 때의 다음 창 키만 바꾼다.
 function globalPriorityToggleMarkup(status) {
   const on = !!(status && status.globalPriority);
-  const key = escapeHtml(acceleratorLabel(status && status.accelerators?.next, "⌥Tab"));
+  const key = escapeHtml(acceleratorLabel(status && status.accelerators?.next, formatBinding(bindingOf("screen-toggle"))));
   // 창 목록 줄처럼 켜짐·꺼짐 글자 없이 스위치를 오른쪽 끝에. 목록과 떨어진 설정 한 줄
   return `<div class="km-toggle top km-sw-global">
       <div class="km-tx">
@@ -512,8 +517,8 @@ function switcherRegistrationWarning(status) {
   if (status.conflict === "internal:pick-mode") return "이 키는 요소 지목에 이미 쓰고 있습니다";
   if (status.conflict === "same-accelerator") return "다음 창 키와 이전 창 키가 같아 이전 창 키를 등록할 수 없습니다";
 
-  const nextKey = acceleratorLabel(status.accelerators?.next, "⌥Tab");
-  const prevKey = acceleratorLabel(status.accelerators?.prev, "⌥⇧Tab");
+  const nextKey = acceleratorLabel(status.accelerators?.next, formatBinding(bindingOf("screen-toggle")));
+  const prevKey = acceleratorLabel(status.accelerators?.prev, formatBinding(bindingOf("screen-toggle-back")));
   const failed = [
     nextFailed ? { name: `다음 창 키(${nextKey})`, reason: status.registerError?.next } : null,
     prevFailed ? { name: `이전 창 키(${prevKey})`, reason: status.registerError?.prev } : null,
@@ -538,11 +543,14 @@ function switcherRegistrationWarning(status) {
 
 function acceleratorLabel(value, fallback) {
   if (typeof value !== "string" || !value) return fallback;
-  const names = {
+  const names = isHostWindows() ? {
+    CommandOrControl: "Ctrl", Command: "Win", Control: "Ctrl", Ctrl: "Ctrl",
+    Alt: "Alt", Option: "Alt", Shift: "Shift", Super: "Win", Meta: "Win",
+  } : {
     CommandOrControl: "⌘", Command: "⌘", Control: "⌃", Ctrl: "⌃",
     Alt: "⌥", Option: "⌥", Shift: "⇧",
   };
-  return value.split("+").map((part) => names[part] || part).join("");
+  return value.split("+").map((part) => names[part] || part).join(isHostWindows() ? "+" : "");
 }
 
 function securityPane(toggles) {
@@ -562,8 +570,30 @@ function securityPane(toggles) {
     </div>`).join("") + `</div>`;
 }
 
-// 사람은 "⌘F" 로도 찾고 "찾기" 로도 찾는다.
-export function matchOne(item, q) {
+// 사람은 "⌘F" 로도 찾고 "찾기" 로도 찾는다. 조합을 "cmd shift d" 처럼 글자로 치기도 한다.
+export function matchOne(item, query) {
+  const q = String(query || "").trim();
   if (!q) return true;
-  return [item.label, item.where, item.keys, item.id].join(" ").toLowerCase().indexOf(q) >= 0;
+  if ([item.label, item.where, item.keys, item.id].join(" ").toLowerCase().indexOf(q) >= 0) return true;
+  const combo = comboQuery(q);
+  if (combo === null) return false;
+  const keys = String(item.keys || "").toLowerCase();
+  return combo.rest ? keys === combo.text : keys.startsWith(combo.text);
+}
+
+// 표의 mod 는 ⌘·⌃ 를 한 필드로 다루고 formatBinding 은 ⌘⌥⇧ 순서로 적으므로 같은 규칙으로 바꾼다.
+const MOD_WORDS = { cmd: "⌘", command: "⌘", ctrl: "⌘", control: "⌘", "⌘": "⌘", "⌃": "⌘",
+  opt: "⌥", option: "⌥", alt: "⌥", "⌥": "⌥", shift: "⇧", "⇧": "⇧" };
+const KEY_WORDS = { left: "←", right: "→", up: "↑", down: "↓" };
+function comboQuery(q) {
+  const mods = new Set(), rest = [];
+  for (const w of q.split(/[\s+]+/).filter(Boolean)) {
+    if (MOD_WORDS[w]) mods.add(MOD_WORDS[w]); else rest.push(KEY_WORDS[w] || w);
+  }
+  if (!mods.size || rest.length > 1) return null;
+  if (isHostWindows()) {
+    const names = { "⌘": "ctrl", "⌥": "alt", "⇧": "shift" };
+    return { rest: rest.length > 0, text: [...[..."⌘⌥⇧"].filter((m) => mods.has(m)).map((m) => names[m]), ...rest].join("+") };
+  }
+  return { rest: rest.length > 0, text: [..."⌘⌥⇧"].filter((m) => mods.has(m)).join("") + (rest[0] || "") };
 }

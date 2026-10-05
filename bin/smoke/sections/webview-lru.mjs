@@ -12,7 +12,7 @@ import { homedir, tmpdir } from "node:os";
 import { check, checkAsync, fnBody, read, readAll, require_, ROOT, sourceFiles } from "../core.mjs";
 import {
   aiState, aiTabs, allCss, allServer, allWebJs, archive, bookmarks, browserCommands, browserHandoff,
-  browserMessages, browserRuntime, browserState, browserStateOwner, browserWindowManagerSource,
+  browserMessages, browserRuntime, browserState, browserStateOwner, browserTabs, browserWindowManagerSource,
   cdpCaptureToolsSource, cdpCmdCaptureSource, cdpCmdNativeSource, cdpObservationSource,
   cdpSessionSource, centerTabs, chromeHandoffIpcSource, css, dock, downloadHookSource,
   fileRouting, fsIpcSource, herdrSync, httpHandler, localdev, main, mainJs, mainWindowSource,
@@ -77,12 +77,20 @@ check("잠자는 탭은 URL·프로필로 재생성", () => {
   return /spaceDefaultProfile\(stored\.sp\)/.test(seg) && /createWebview\(tabId, profile/.test(seg)
     && /sleeping: false/.test(seg);
 });
+// 처음부터 올리지 않은 탭(백그라운드 새 탭·복원 탭)은 discardedAt 0 이다. 그 탭을 처음 열 때 "잠자던 탭"
+// 알림이 뜨면 새 탭인데 깨웠다고 알리게 된다.
+check("깨움 알림은 실제로 회수됐던 탭에만", () => {
+  const seg = sliceBetween(webview, "function wakeWebview", "function sweepIdleWebviews", "깨움 알림은 실제로 회수됐던 탭에만");
+  return /if \(sleeping && sleeping\.discardedAt > 0\) \{[\s\S]*잠자던 탭을 다시 엽니다/.test(seg);
+});
 check("입력·스크롤이 LRU 최근성을 갱신", () => {
   const pre = read("native/electron/webview-preload.cjs");
   return /ac-user-activity/.test(pre) && /addEventListener\("input"/.test(pre)
     && /addEventListener\("scroll"/.test(pre) && /markWebviewUsed\(tabId\)/.test(webviewFactory);
 });
-check("잠자는 탭 UI 표시", () => /class="csleep"/.test(centerTabs) && /잠자는 탭 · 클릭하면 다시 엽니다/.test(centerTabs));
+// 잠든 탭도 깨어 있는 탭처럼 사이트 정보(파비콘·제목)로 보인다. 흐린 글자나 잠듦 표시를 붙이지 않는다.
+check("잠든 탭은 사이트 정보로 표시", () => !/csleep/.test(centerTabs) && !/csleep/.test(browserTabs)
+  && !/\.ctab\.sleeping|csleep/.test(allCss));
 check("스로틀은 사유별 참조이고 캡처도 보호", () => {
   const { createWebviewThrottle } = require_("../native/electron/webview-throttle.cjs");
   const edges = [];

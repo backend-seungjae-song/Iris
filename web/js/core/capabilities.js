@@ -304,9 +304,10 @@ export const CAPABILITIES = [
   },
   {
     id: "pagetranslate",
+    native: true,
     windows: ["main", "browser"],
-    files: ["browser/page-translate.js"],
-    css: [],
+    files: ["browser/page-translate.js", "browser/page-translate-ui.js", "browser/page-translate-settings.js"],
+    css: ["42-page-translate.css"],
     label: "페이지 번역",
     load: () => import("../browser/page-translate.js"),
   },

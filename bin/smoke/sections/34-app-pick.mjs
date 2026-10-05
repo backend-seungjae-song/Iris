@@ -6,6 +6,7 @@
 //   지금 목록은 이걸로 센다: node bin/importers.mjs bin/smoke/sections/34-app-pick.mjs
 import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 
 import { check, checkAsync, fnBody, read, readAll, require_ } from "../core.mjs";
@@ -208,7 +209,8 @@ check("주변 값에는 자기 코드 위치가 함께 붙는다", () => {
 });
 // 시뮬레이터를 보고 있을 때 켜고 끄게 되는데, 그 창에 포커스가 있으면 앱 안 단축키는 오지 않는다.
 check("요소 선택 단축키는 앱 밖에서도 온다", () => {
-  return /globalShortcut\.register\("CommandOrControl\+Shift\+E", togglePickModeGlobal\)/.test(pickModeSource)
+  return /function registerGlobalShortcut\(accelerator = "CommandOrControl\+Shift\+E"\)/.test(pickModeSource)
+    && /globalShortcut\.register\(accelerator, togglePickModeGlobal\)/.test(pickModeSource)
     && /globalShortcut\.unregisterAll\(\)/.test(pickModeSource);
 });
 check("pick-mode 전역 단축키가 main ready 조립에 연결된다", () =>
@@ -217,11 +219,58 @@ check("pick-mode 전역 단축키가 main ready 조립에 연결된다", () =>
   && /pickMode\.registerGlobalShortcut\(\);/.test(main));
 // 창 순서 조회가 실패해도 커서 추적은 계속 동작해야 한다. 여기서 예외가 나가면 펌프가 매 틱
 // 중단되어 하이라이트가 마지막 위치에 고정된다.
-check("창 순서 조회는 커서 추적을 못 죽인다", () => {
-  return /const \{ execFile \} = require\("node:child_process"\);/.test(main)
-    && /execFile,/.test(main)
-    && /function topmostIsOurs\(pt\) \{\s*\n\s*try \{/.test(pickModeSource)
-    && /if \(Array\.isArray\(parsed\) && parsed\.length\) zList = parsed;/.test(pickModeSource);
+await checkAsync("창 순서 조회는 커서 추적을 못 죽인다", async () => {
+  if (!/const \{ execFile \} = require\("node:child_process"\);/.test(main) || !/execFile,/.test(main))
+    throw new Error("macOS 창 순서 조회에 execFile이 전달되지 않았다");
+  if (!/if \(Array\.isArray\(parsed\) && parsed\.length\) zList = parsed;/.test(pickModeSource))
+    throw new Error("macOS 창 순서의 유효한 배열 확인이 빠졌다");
+  if (!/if \(Array\.isArray\(parsed\) && parsed\.length\) zList = parsed;/.test(pickModeSource))
+    throw new Error("macOS 창 순서 조회가 잘못된 목록을 저장한다");
+  for (const platform of ["darwin", "win32"]) {
+    const module = { exports: {} }, ipc = new Map(), sent = [];
+    let pump, now = 10000, calls = 0, dipCalls = 0;
+    const wc = { isDestroyed: () => false, send: (_name, value) => sent.push(value) };
+    const win = { webContents: wc, isDestroyed: () => false, isVisible: () => true,
+      isMinimized: () => false, getBounds: () => ({ x: 0, y: 0, width: 100, height: 100 }), setFocusable() {} };
+    runInNewContext(pickModeSource, { module, process: { platform, pid: 42 },
+      Date: { now: () => now }, setInterval: (fn) => { pump = fn; return 1; }, clearInterval() {},
+      require: (name) => {
+        if (name !== "../../server/win-native.cjs") throw new Error(`예상 밖 호출: ${name}`);
+        return { request: (input) => {
+          calls++;
+          if (input.x !== 20 || input.y !== 20) throw new Error("DIP 좌표를 물리 좌표로 변환하지 않았다");
+          if (calls === 1) throw new Error("동기 조회 실패");
+          if (calls === 2) return Promise.reject(new Error("비동기 조회 실패"));
+          return Promise.resolve({ ok: true, pid: calls === 3 ? 43 : 42 });
+        } };
+      },
+    });
+    module.exports.createPickMode({
+      app: { on() {} }, screen: { getCursorScreenPoint: () => ({ x: 10, y: 10 }), dipToScreenPoint: () => {
+        if (++dipCalls === 1) throw new Error("DIP 변환 실패"); return { x: 20, y: 20 };
+      } }, globalShortcut: {}, BrowserWindow: { getAllWindows: () => [win], fromWebContents: () => win },
+      ipcMain: { on: (name, fn) => ipc.set(name, fn), handle() {} },
+      execFile: (_file, _args, _opts, done) => {
+        calls++;
+        if (calls === 1) throw new Error("동기 조회 실패");
+        done(null, calls === 2 ? "invalid-json" : JSON.stringify([[42, 0, 0, 100, 100]]));
+      }, browserWindowManager: { allBrowserWindows: () => [win] }, getMainWindow: () => win,
+    });
+    ipc.get("ac-pick-mode")({ sender: wc }, true);
+    for (let i = 0; i < (platform === "win32" ? 6 : 3); i++) {
+      now += 1000;
+      pump();
+      await new Promise((resolve) => setImmediate(resolve));
+      if (platform === "win32" && i < 4 && sent.at(-1) !== null)
+        throw new Error("Windows 조회 실패·다른 앱 위에서 좌표를 보냈다");
+    }
+    pump();
+    if (calls < (platform === "win32" ? 5 : 3) || !sent.at(-1))
+      throw new Error(`${platform}: 실패 뒤 조회와 커서 전달을 복구하지 못했다`);
+    ipc.get("ac-pick-mode")({ sender: wc }, false);
+    pump();
+  }
+  return true;
 });
 await checkAsync("pick-mode는 실제 맨 앞인 우리 창 하나에만 좌표를 보내고 끄면 펌프를 멈춘다", async () => {
   const { createPickMode } = require_("../native/electron/pick-mode.cjs");
@@ -419,9 +468,12 @@ check("서버만 다시 떠도 실행기가 스스로 붙는다", () => {
 });
 // 서버가 다시 뜨면 그쪽 탭 장부는 비어 있다. 이쪽이 전부 다시 말하지 않으면 열린 탭이 통째로 사라진다.
 check("서버가 다시 뜨면 열린 탭을 전부 다시 알린다", () => {
+  // 실행기 재연결(browser-tabs-resync)도 같은 보고를 쓰므로 reportAllBrowserTabs 로 묶여 있음
   const seg = fnBody(mainJs, "handleWsOpen");
-  return /for \(const tid of getWebviewIds\(\)\) reportTabWc\(getWebview\(tid\), tid\)/.test(seg)
-    && /reportActiveBrowserWc\(\)/.test(seg);
+  const all = fnBody(mainJs, "reportAllBrowserTabs");
+  return /setTimeout\(reportAllBrowserTabs, \d+\)/.test(seg)
+    && /for \(const tid of getWebviewIds\(\)\) reportTabWc\(getWebview\(tid\), tid\)/.test(all)
+    && /reportActiveBrowserWc\(\)/.test(all);
 });
 // 명령은 탭마다 한 줄로 돈다. 막힌 명령 뒤에 서면 그걸 풀 명령까지 갇혀 영원히 못 빠져나온다.
 // handoff 도 같은 부류다. 사람에게 넘기는 순간 CDP 를 떼야 하는데, 멈춘 명령 뒤에 서면 사람이 로그인하는

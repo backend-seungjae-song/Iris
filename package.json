@@ -21,18 +21,19 @@
     "agent:context": "node bin/agent-context.mjs",
     "agent:run": "node bin/agent-run.mjs",
     "start": "node server/index.js",
-    "app": "IRIS_PORT=4291 IRIS_STATE_DIR=$HOME/.iris-dev electron native/electron/main.cjs",
+    "app": "node scripts/run-dev.mjs app",
     "build:docx-vendor": "esbuild scripts/docx-editor-core.entry.js --bundle --format=esm --platform=browser --external:module --minify --outfile=web/vendor/docx-editor-core.esm.js --metafile=web/vendor/docx-editor-core.meta.json",
     "build:vendor": "node scripts/build-vendor.mjs",
-    "dev": "PORT=4291 IRIS_PORT=4291 IRIS_STATE_DIR=$HOME/.iris-dev node --watch server/index.js",
-    "dev:app": "IRIS_PORT=4291 IRIS_STATE_DIR=$HOME/.iris-dev electron native/electron/main.cjs",
-    "dev:seed": "IRIS_STATE_DIR=$HOME/.iris-dev node bin/dev-seed.mjs",
+    "dev": "node scripts/run-dev.mjs server",
+    "dev:app": "node scripts/run-dev.mjs app",
+    "dev:seed": "node scripts/run-dev.mjs seed",
     "dist": "electron-builder --mac --arm64",
+    "dist:win": "node scripts/dist-win.mjs",
     "export:public": "node scripts/export-public.mjs",
     "sync:public": "node scripts/sync-public.mjs",
     "pull:public": "node scripts/pull-public.mjs",
     "icons": "electron scripts/make-icons.cjs",
-    "install:app": "bash scripts/install-app.sh",
+    "install:app": "node scripts/install-app.mjs",
     "prepare": "node scripts/build-vendor.mjs",
     "selftest": "node server/selftest.js",
     "smoke": "node bin/smoke.mjs",
@@ -96,16 +97,48 @@
         "NSAudioCaptureUsageDescription": "에뮬레이터 탭의 기기 소리 크기를 기기마다 따로 조절하기 위해 그 기기의 소리를 받아 다시 재생합니다.",
         "LSUIElement": false
       }
+    },
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "dist/herdr-win",
+          "to": "herdr",
+          "filter": [
+            "**/*",
+            "!.version"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "include": "scripts/windows-installer.nsh",
+      "runAfterFinish": false
+    },
+    "toolsets": {
+      "nsis": "1.2.1"
     }
   },
   "dependencies": {
     "@docx-editor.dev/core": "2.4.1",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "asn1js": "3.0.10",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "monaco-editor": "^0.52.2",
     "node-pty": "^1.1.0",
+    "pkijs": "3.4.0",
     "puppeteer-core": "25.10.0",
     "tldts": "7.4.11",
     "uqr": "0.1.3",

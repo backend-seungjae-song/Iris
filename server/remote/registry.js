@@ -1,3 +1,4 @@
+import { privatePath, privatePathAsync } from "./windows-private.cjs";
 import { createPublicKey } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -86,6 +87,7 @@ function defaultIo() {
     mkdir: async (directory) => {
       await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
       await fsp.chmod(directory, 0o700);
+      if (process.platform === "win32") await privatePathAsync(directory);
     },
     read: (file) => fsp.readFile(file, "utf8"),
     write: async (file, data, mode) => {
@@ -99,12 +101,14 @@ function defaultIo() {
     rename: (from, to) => fsp.rename(from, to),
     unlink: (file) => fsp.unlink(file),
     fsyncDir: async (directory) => {
+      if (process.platform === "win32") return;
       const handle = await fsp.open(directory, "r");
       try { await handle.sync(); } finally { await handle.close(); }
     },
     mkdirSync: (directory) => {
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
       fs.chmodSync(directory, 0o700);
+      if (process.platform === "win32") privatePath(directory);
     },
     writeSync: (file, data, mode) => {
       fs.writeFileSync(file, data, { mode });
@@ -117,6 +121,7 @@ function defaultIo() {
     renameSync: (from, to) => fs.renameSync(from, to),
     unlinkSync: (file) => fs.unlinkSync(file),
     fsyncDirSync: (directory) => {
+      if (process.platform === "win32") return;
       const descriptor = fs.openSync(directory, "r");
       try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
     },

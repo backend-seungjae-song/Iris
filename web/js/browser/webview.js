@@ -128,9 +128,10 @@ export function authoritativeAiProtection() {
 
 // 이 키가 지금 살아 있는 스페이스인가. 서버는 살아 있는 스페이스의 상태를 그 workspace_id로
 // 실어 보내고, 소유자가 없는(=접었거나 닫은) 스페이스의 것은 폴더 키 그대로 보낸다. 그래서
-// "목록에 있는 id인가"만 보면 된다. 공유 창은 스페이스가 아니라 늘 살아 있는 것으로 본다.
+// "목록에 있는 id인가"만 보면 된다. 공유 창과 스페이스를 고르기 전의 탭("_", center/file-routing.js
+// consoleSpace)은 스페이스가 아니라 늘 살아 있는 것으로 본다.
 export function isLiveSpaceKey(sp) {
-  return sp === "__shared__" || (getSpaces() || []).some((s) => s.id === sp);
+  return sp === "__shared__" || sp === "_" || (getSpaces() || []).some((s) => s.id === sp);
 }
 
 // 접은 스페이스의 탭은 기록만 남기고 메모리에서 내린다. 보관 기능의 목적이 그것이다.
@@ -253,7 +254,9 @@ export function wakeWebview(tabId) {
   // 기록 첫머리가 사용자가 하지 않은 이동 수십 줄로 채워진다.
   if (rec) rec.restoring = true;
   markWebviewUsed(tabId);
-  if (sleeping) {
+  // 알림은 실제로 떠 있다가 회수된 탭만. 처음부터 올리지 않은 탭(백그라운드 새 탭·복원 탭, discardedAt 0)은
+  // 잃을 입력·스크롤이 없음
+  if (sleeping && sleeping.discardedAt > 0) {
     bNote.textContent = "잠자던 탭을 다시 여는 중… 입력·스크롤 상태는 페이지에 따라 복원되지 않을 수 있습니다.";
     bNote.hidden = false;
     try { showToast("잠자던 탭을 다시 엽니다 · 페이지 입력/스크롤은 초기화될 수 있습니다.", { level: "info" }); } catch {}
@@ -384,7 +387,7 @@ export function newTabId() {
 }
 
 export function activeBrowserId() {
-  // 한 탭에 묶인 창(탭을 빼내 만든 창)은 그 탭이 활성이다. activeBySpace 는 스페이스마다 하나뿐이라
+  // 분리 창(탭을 빼내 만든 창)은 그 창이 고른 탭이 활성이다. activeBySpace 는 스페이스마다 하나뿐이라
   // 그 값을 따르면 같은 스페이스에서 뺀 창들이 전부 같은 페이지를 표시한다. 묶였는지는
   // 그 기능이 안다.
   if (BROWSER_MODE) {

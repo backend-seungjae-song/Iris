@@ -1,11 +1,11 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import * as archive from "./archive.js";
 import { attachAgentLineage, watchAgentLineage } from "./agent-lineage.js";
 import { attachQuestionState } from "./agent-question.js";
 import { attachCodexSessions } from "./codex-session.js";
+import { CONFIG_DIR as HERDR_CONFIG_DIR } from "./herdr-session.cjs";
 import { buildMonitorState } from "./join.js";
 import * as spaceKey from "./space-key.js";
 
@@ -52,7 +52,7 @@ function paneNo(paneId) {
 
 // herdr가 각 workspace를 어느 폴더의 것으로 보는지. 공개 API에는 없고 세션 파일에만 있으므로
 // (herdr 0.7.3 확인) 있으면 사용하고 없으면 건너뛴다. 이 값이 없어도 동작하지 않는 경로는 없다.
-function herdrIdentityCwds() { return herdrIdentityCwdsFrom(path.join(os.homedir(), ".config", "herdr", "session.json")); }
+function herdrIdentityCwds() { return herdrIdentityCwdsFrom(path.join(HERDR_CONFIG_DIR, "session.json")); }
 function herdrIdentityCwdsFrom(file) {
   const out = new Map();
   try {
@@ -76,7 +76,7 @@ export function buildSpaceRecoveryEvidence(workspaces = []) {
   ];
   const direct = Object.fromEntries(herdrIdentityCwds());
   try {
-    const dir = path.join(os.homedir(), ".config", "herdr", "session-backups");
+    const dir = path.join(HERDR_CONFIG_DIR, "session-backups");
     for (const file of fs.readdirSync(dir)) {
       if (!file.endsWith(".json")) continue;
       for (const [id, cwd] of herdrIdentityCwdsFrom(path.join(dir, file))) if (!direct[id]) direct[id] = cwd;

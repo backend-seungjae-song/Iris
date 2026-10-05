@@ -1,3 +1,4 @@
+import * as hostPath from "../../web/js/core/host-path.js";
 // 소유 범위: 편집기 조작 검사의 격리된 모듈 평가와 메모리 편집기·DOM 대역.
 // 제공 API: loadModule, editorRuntime, editorHarness, barHarness, memoOptions, monacoActionHarness.
 // 의존 대상: 현재 소스, Node vm, 설치된 Monaco의 Range·Selection·키 열거값.
@@ -16,7 +17,7 @@ export function loadModule(path, dependencies = {}) {
   const source = read(path);
   const names = [...source.matchAll(/export (?:async )?function (\w+)|export const (\w+)/g)].map((match) => match[1] || match[2]);
   return runInNewContext(source.replace(/^import [\s\S]*?;\n/gm, "").replace(/\bexport /g, "")
-    + `\n;({${names.join(",")}})`, { console, ...dependencies }, { filename: path });
+    + `\n;({${names.join(",")}})`, { console, ...hostPath, ...dependencies }, { filename: path });
 }
 
 export function editorRuntime() {

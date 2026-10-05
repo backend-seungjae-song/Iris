@@ -2,11 +2,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-function headlessShellCandidates(home = os.homedir()) {
+function headlessShellCandidates(home = os.homedir(), env = process.env) {
   const found = [];
   for (const [root, prefix] of [
     [path.join(home, ".cache/puppeteer/chrome-headless-shell"), ""],
     [path.join(home, "Library/Caches/ms-playwright"), "chromium_headless_shell-"],
+    ...(process.platform === "win32" ? [[path.join(env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "ms-playwright"), "chromium_headless_shell-"]] : []),
   ]) {
     let versions = [];
     try { versions = fs.readdirSync(root).filter((name) => name.startsWith(prefix)); } catch { continue; }
@@ -37,7 +38,7 @@ function isHeadlessShell(bin) {
 
 function headlessLaunchOptions({ home = os.homedir(), env = process.env } = {}) {
   const override = env.IRIS_HEADLESS_SHELL || env.CHROME_BIN;
-  const executablePath = override || headlessShellCandidates(home)[0];
+  const executablePath = override || headlessShellCandidates(home, env)[0];
   try {
     if (executablePath) {
       fs.accessSync(executablePath, fs.constants.X_OK);

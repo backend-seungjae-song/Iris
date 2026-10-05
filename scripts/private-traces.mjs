@@ -60,8 +60,8 @@ const ALLOWED_HOSTS = new Set([
   "api.kimi.com", "platform.minimax.io", "cli-chat-proxy.grok.com", "auth.x.ai",
   // 기능이 그 사이트를 대상으로 삼아 이름을 대는 곳
   //   claude.ai: Chrome 미러가 붙는 오리진, 챌린지 복구가 목적지를 가리는 기준
-  //   translate.google.com: 페이지 번역이 불러오는 로더
-  "claude.ai", "translate.google.com",
+  //   translate.googleapis.com·translate-pa.googleapis.com: 페이지 번역이 불러오는 로더와 번역 요청
+  "claude.ai", "translate.googleapis.com", "translate-pa.googleapis.com",
   // 화면·동작을 설명하려고 이름을 대는 실제 사이트
   "www.google.com", "accounts.google.com", "accounts.youtube.com", "myaccount.google.com", "mail.google.com", "naver.com", "m.naver.com",
   // 픽스처로 쓰는 일반 이름들. 특정 회사가 아니다
@@ -117,6 +117,8 @@ export function scanLine(line) {
   for (const m of line.matchAll(MAIL_RE)) {
     const v = m[0];
     if (NOT_MAIL.test(v)) continue;
+    // `https://user@host` 의 앞부분은 URL 사용자 정보이고 메일 주소가 아니다.
+    if (line.slice(Math.max(0, m.index - 3), m.index) === "://") continue;
     if (RESERVED_HOST.test(v.slice(v.indexOf("@") + 1))) continue;
     if (PUBLIC_MAIL.has(v.toLowerCase())) continue;
     found.push(`메일 주소(${v})`);

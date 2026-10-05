@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const { copyTreeSync } = require("../../server/copy-tree.cjs");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -36,7 +37,9 @@ function compareVersions(a, b) {
   return 0;
 }
 
-function discoverChromeExtensions(root = path.join(os.homedir(), "Library/Application Support/Google/Chrome")) {
+function discoverChromeExtensions(root = process.platform === "win32"
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Google", "Chrome", "User Data")
+  : path.join(os.homedir(), "Library/Application Support/Google/Chrome")) {
   const profiles = [];
   let info = {};
   try { info = JSON.parse(fs.readFileSync(path.join(root, "Local State"), "utf8")).profile?.info_cache || {}; } catch {}
@@ -77,7 +80,7 @@ function discoverChromeExtensions(root = path.join(os.homedir(), "Library/Applic
 function copyExtension(source, destination) {
   const root = fs.realpathSync(source);
   readManifest(root);
-  fs.cpSync(root, destination, {
+  copyTreeSync(root, destination, {
     recursive: true,
     errorOnExist: true,
     force: false,

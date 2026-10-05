@@ -55,8 +55,37 @@ const ACCELERATOR_KEY_NAMES = Object.freeze({
   ArrowLeft: "Left",
   ArrowRight: "Right",
   Tab: "Tab",
+  Backquote: "`",
 });
-const ACCELERATOR_PUNCTUATION = new Set(["-", "=", "[", "]", "\\", ";", "'", ",", ".", "/"]);
+const ACCELERATOR_PUNCTUATION = new Set(["-", "=", "[", "]", "\\", ";", "'", ",", ".", "/", "`"]);
+
+// 키맵 바인딩 → Electron Accelerator 문자열. 표현할 수 없는 키면 null. 요소 지목 전역 단축키도 같이 씀
+function acceleratorKey(binding) {
+  const raw = binding && (binding.code || binding.key);
+  if (typeof raw !== "string" || !raw) return null;
+  if (Object.prototype.hasOwnProperty.call(ACCELERATOR_KEY_NAMES, raw)) return ACCELERATOR_KEY_NAMES[raw];
+  if (ACCELERATOR_PUNCTUATION.has(raw)) return raw;
+  let match = raw.match(/^Digit([0-9])$/);
+  if (match) return match[1];
+  match = raw.match(/^Key([A-Za-z])$/);
+  if (match) return match[1].toUpperCase();
+  if (/^[A-Za-z]$/.test(raw)) return raw.toUpperCase();
+  if (/^[0-9]$/.test(raw)) return raw;
+  if (/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(raw)) return raw;
+  return null;
+}
+
+function acceleratorFor(binding) {
+  if (!binding) return null;
+  const key = acceleratorKey(binding);
+  if (!key) return null;
+  const parts = [];
+  if (binding.mod) parts.push("CommandOrControl");
+  if (binding.alt) parts.push("Alt");
+  if (binding.shift) parts.push("Shift");
+  parts.push(key);
+  return parts.join("+");
+}
 
 // 상태 폴더의 정본은 하나다. 주입을 받지만 기본값도 그 정본에서 가져온다. 경로를 직접 조합하거나
 // 다른 곳에서 받아 오면 개발 환경이 설치 앱의 파일을 쓰게 되어 계정·탭이 지워질 수 있다.
@@ -247,33 +276,6 @@ function createSwitcherHost({
     // B5 전에는 back 항목이 없으므로 next의 modifier를 그대로 물리고 Shift만 더한다.
     const prev = explicitBack || (next ? { ...next, shift: true } : { alt: true, shift: true, code: "Tab" });
     return { next, prev };
-  }
-
-  function acceleratorKey(binding) {
-    const raw = binding && (binding.code || binding.key);
-    if (typeof raw !== "string" || !raw) return null;
-    if (Object.prototype.hasOwnProperty.call(ACCELERATOR_KEY_NAMES, raw)) return ACCELERATOR_KEY_NAMES[raw];
-    if (ACCELERATOR_PUNCTUATION.has(raw)) return raw;
-    let match = raw.match(/^Digit([0-9])$/);
-    if (match) return match[1];
-    match = raw.match(/^Key([A-Za-z])$/);
-    if (match) return match[1].toUpperCase();
-    if (/^[A-Za-z]$/.test(raw)) return raw.toUpperCase();
-    if (/^[0-9]$/.test(raw)) return raw;
-    if (/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(raw)) return raw;
-    return null;
-  }
-
-  function acceleratorFor(binding) {
-    if (!binding) return null;
-    const key = acceleratorKey(binding);
-    if (!key) return null;
-    const parts = [];
-    if (binding.mod) parts.push("CommandOrControl");
-    if (binding.alt) parts.push("Alt");
-    if (binding.shift) parts.push("Shift");
-    parts.push(key);
-    return parts.join("+");
   }
 
   function unregisterDirection(dir) {
@@ -896,7 +898,7 @@ function createSwitcherHost({
     if (arg.op === "open-permissions") {
       const kind = arg.kind == null ? "accessibility" : arg.kind;
       if (!Object.prototype.hasOwnProperty.call(PERMISSIONS_URLS, kind)) return { error: "bad-kind" };
-      try { await shell.openExternal(PERMISSIONS_URLS[kind]); } catch {}
+      try { await shell.openExternal(process.platform === "win32" ? "ms-settings:privacy" : PERMISSIONS_URLS[kind]); } catch {}
       return { ok: true };
     }
     if (arg.op === "media") {
@@ -1001,4 +1003,4 @@ function irisKeyAction(windows, takesToggle) {
   return win ? { action: "raise", win } : { action: "none", win: null };
 }
 
-module.exports = { createSwitcherHost, irisKeyAction };
+module.exports = { createSwitcherHost, irisKeyAction, acceleratorFor };

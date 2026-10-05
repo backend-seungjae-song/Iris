@@ -1,3 +1,4 @@
+import { isHostWindows, pathBasename, relativePath } from "../core/host-path.js";
 // 통합 검색 결과를 현재 Space·Agent·탭·파일 스냅샷에서 만든다.
 //
 // 소유 범위
@@ -57,16 +58,25 @@ export function collectResults({ spaces, agents, browserState, filesByRoot }) {
     }
     const root = space.folder;
     if (root) for (const abs of filesByRoot.get(root) || []) {
-      rows.push({ kind: "파일", id: abs, spaceId: space.id, title: abs.split("/").pop(),
-        detail: `${owner} · ${abs.slice(root.length).replace(/^\//, "")}`, path: abs });
+      rows.push({ kind: "파일", id: abs, spaceId: space.id, title: pathBasename(abs),
+        detail: `${owner} · ${isHostWindows() ? relativePath(root, abs) || abs : abs.slice(root.length).replace(/^\//, "")}`, path: abs });
     }
   }
   return rows;
 }
 
+// 이름이 검색어와 같은 것 → 이름이 검색어로 시작 → 이름에 포함 → 설명에만 포함 순. 같은 순위 안은 수집 순서.
+// 순위 없이 자르면 이름이 정확히 같은 파일이 다른 스페이스의 부분 일치 뒤로 밀려 Enter 가 엉뚱한 것을 엶
+function matchRank(row, q) {
+  const title = String(row.title || "").toLocaleLowerCase();
+  if (title === q) return 0;
+  if (title.startsWith(q)) return 1;
+  return title.includes(q) ? 2 : 3;
+}
 export function filterResults(rows, kind, input) {
   const q = input.trim().toLocaleLowerCase();
   const out = rows.filter((row) => (kind === "전체" || row.kind === kind)
     && (!q || `${row.title} ${row.detail}`.toLocaleLowerCase().includes(q)));
+  if (q) out.sort((a, b) => matchRank(a, q) - matchRank(b, q));
   return out.slice(0, MAX_RESULTS);
 }

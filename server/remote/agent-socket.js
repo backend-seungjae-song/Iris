@@ -1,3 +1,5 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { privatePath } from "./windows-private.cjs";
 import fsp from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
@@ -112,6 +114,8 @@ async function removeStaleSocket(socketPath) {
 
 export function createAgentSocketServer(options = {}) {
   const socketPath = options.socketPath || path.join(stateHome(), "remote", "agent.sock");
+  const windows = process.platform === "win32";
+  let endpointToken = null;
   const agents = options.agents;
   const requests = options.requests;
   const isRemoteEnabled = options.isRemoteEnabled || (() => false);
@@ -146,6 +150,7 @@ export function createAgentSocketServer(options = {}) {
   function closeRecord(record, notifyQuestion = false) {
     if (record.closed) return;
     record.closed = true;
+    if (record.helloTimer) clearTimer(record.helloTimer);
     if (notifyQuestion && record.role === "question-hook" && record.requestRef) {
       void writeLine(record.socket, { type: "question.none" });
     }
@@ -236,9 +241,17 @@ export function createAgentSocketServer(options = {}) {
 
   function handleValue(record, value) {
     if (!record.role) {
+      if (windows) {
+        const supplied = typeof value?.token === "string" ? Buffer.from(value.token) : Buffer.alloc(0);
+        const expected = Buffer.from(endpointToken || "");
+        if (!expected.length || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return record.socket.destroy();
+        value = { ...value }; delete value.token;
+      }
       if (!validHello(value)) return record.socket.destroy();
       const agent = agents?.resolvePane?.(value.paneId);
       if (!agent || agent.kind !== "claude") return record.socket.destroy();
+      if (record.helloTimer) clearTimer(record.helloTimer);
+      record.helloTimer = null;
       record.role = value.role;
       record.paneId = value.paneId;
       record.cliSession = value.cliSession;
@@ -261,6 +274,10 @@ export function createAgentSocketServer(options = {}) {
     socket.setEncoding("utf8");
     const record = { socket, buffer: "", role: null, paneId: null, cliSession: null, closed: false,
       latestPermission: null, requestRef: null, questionTimer: null, pendingMessages: new Map() };
+    if (windows) {
+      record.helloTimer = setTimer(() => socket.destroy(), 2_000);
+      record.helloTimer?.unref?.();
+    }
     connections.add(record);
     socket.on("data", (chunk) => {
       record.buffer += chunk;
@@ -281,18 +298,29 @@ export function createAgentSocketServer(options = {}) {
   async function start() {
     if (server) return;
     await fsp.mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
-    await fsp.chmod(path.dirname(socketPath), 0o700);
-    await removeStaleSocket(socketPath);
+    if (windows) privatePath(path.dirname(socketPath));
+    else {
+      await fsp.chmod(path.dirname(socketPath), 0o700);
+      await removeStaleSocket(socketPath);
+    }
+    if (windows) endpointToken = randomBytes(32).toString("hex");
     const next = net.createServer(accept);
     await new Promise((resolve, reject) => {
       const failed = (cause) => { next.off("listening", ready); reject(cause); };
       const ready = () => { next.off("error", failed); resolve(); };
       next.once("error", failed);
       next.once("listening", ready);
-      next.listen(socketPath);
+      next.listen(windows ? { host: "127.0.0.1", port: 0, exclusive: true } : socketPath);
     });
     server = next;
-    await fsp.chmod(socketPath, 0o600);
+    if (windows) {
+      try {
+        const temporary = `${socketPath}.${process.pid}.tmp`;
+        await fsp.writeFile(temporary, JSON.stringify({ port: next.address().port, token: endpointToken }), { flag: "wx" });
+        privatePath(temporary);
+        await fsp.rename(temporary, socketPath);
+      } catch (cause) { await performStop(); throw cause; }
+    } else await fsp.chmod(socketPath, 0o600);
   }
 
   async function performStop() {
@@ -308,6 +336,14 @@ export function createAgentSocketServer(options = {}) {
       record.socket.destroy();
     }
     await closed;
+    if (windows) {
+      try {
+        const saved = JSON.parse(await fsp.readFile(socketPath, "utf8"));
+        if (saved.token === endpointToken) await fsp.unlink(socketPath);
+      } catch (cause) { if (cause?.code !== "ENOENT") throw cause; }
+      endpointToken = null;
+      return;
+    }
     try {
       const stat = await fsp.lstat(socketPath);
       const uid = typeof process.getuid === "function" ? process.getuid() : stat.uid;

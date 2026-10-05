@@ -72,6 +72,9 @@ const { createCaptureCommands } = require("./cdp-cmd-capture.cjs");
 const { createNativeCommands } = require("./cdp-cmd-native.cjs");
 const { createCdpCaptureTools } = require("./cdp-capture-tools.cjs");
 const { createCdpTransport } = require("./cdp-transport.cjs");
+const { createContextActionCommand } = require("./cdp-context-action.cjs");
+let contextActionCommand = async () => ({ ok: false, code: "unavailable" });
+function setContextActionProvider(getActions) { contextActionCommand = createContextActionCommand(getActions); }
 const deviceEmulation = createDeviceEmulation({
   attach: (wc) => ensureAttached(wc, { observe: false }),
   yieldToExplicitViewport: (wcId) => hiddenViewport.yieldToExplicitViewport(wcId),
@@ -245,11 +248,13 @@ const CMD_TIMEOUT_MS = 25000; // 서버의 30s보다 짧게 잡는다. 이유 �
 // 멈춘 탭이 큐를 영구히 물고 있지 않도록 명령 단위로 끊는다. 아래 CDP 약속은 영영 안 끝날 수 있는데,
 // 그건 그 탭의 사정이고 다음 명령·다른 탭이 그것을 기다릴 이유는 없다.
 function withCmdTimeout(promise, wcId, cmd) {
+  // 화면 action의 엔진 제한은 30초이고 원격 요청 제한은 36초다.
+  const timeoutMs = cmd === "contextaction" ? 35000 : CMD_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       const open = observation.dialogOpen(wcId);
       reject(codedError(ERROR_CODES.TIMEOUT,
-        `이 탭이 ${Math.round(CMD_TIMEOUT_MS / 1000)}초 동안 ${cmd}에 응답하지 않았습니다(wc=${wcId}).`
+        `이 탭이 ${Math.round(timeoutMs / 1000)}초 동안 ${cmd}에 응답하지 않았습니다(wc=${wcId}).`
         + (open
           ? ` 대화상자가 떠 있어 페이지가 멈춰 있습니다(${open.type}: "${open.message}"). 사람이 닫거나 \`iris-browser dialogs ok\`로 무장한 뒤 다시 시도하세요.`
           : cmd === "screenshot" || cmd === "observe" || cmd === "diff"
@@ -258,7 +263,7 @@ function withCmdTimeout(promise, wcId, cmd) {
               + "(browser_ask_user). 다른 창에 그냥 가려진 것만으로는 멈추지 않습니다."
             : " 페이지가 멈춰 있을 수 있습니다(모달·무한 루프·resolve 안 되는 promise).")
         + " 다른 탭은 영향받지 않습니다."));
-    }, CMD_TIMEOUT_MS);
+    }, timeoutMs);
     promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
   });
 }
@@ -597,6 +602,7 @@ async function jsClickSel(wc, sel, clickCount) {
 async function cdpExecRaw(webContentsMod, wcId, cmd, args) {
   const wc = webContentsMod.fromId(wcId);
   if (!wc || wc.isDestroyed()) throw codedError(ERROR_CODES.TAB_GONE, "브라우저 탭을 찾을 수 없음(wc=" + wcId + ")");
+  if (cmd === "contextaction") return contextActionCommand(wc, args || {});
   commandWebContentsMods.set(wc, webContentsMod);
   // [Cloudflare 통과] ref 없는 selector 클릭은 CDP 를 붙이지 않고 누른다. 붙이는 순간 이 탭이
   // 챌린지에서 봇으로 판정된다(확인 결과). 이미 붙어 있으면 먼저 뗀다. 그다음 탭 가시성으로 갈린다:
@@ -769,7 +775,7 @@ function setCaptureHold(fn) { captureHold = fn; }
 let paintableProbe = null;   // (wcId) => { ok, why }
 function setPaintableProbe(fn) { paintableProbe = fn; }
 function setViewportNotify(fn) { viewportNotify = fn; }
-module.exports = { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold,
+module.exports = { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setContextActionProvider,
   applyViewportTo: (wc, args) => deviceEmulation.apply(wc, args),
   setTouchDrag: (wc, on) => deviceEmulation.setTouchDrag(wc, on),
   forgetSecrets: resultSafety.forgetSecrets, clearAutoViewport, setShownProbe, setShownKnownProbe, setDefaultViewport,

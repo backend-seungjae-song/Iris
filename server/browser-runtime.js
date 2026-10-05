@@ -265,6 +265,10 @@ function wakeSleepingTab(tabId) {
   broadcast({ type: "wake-tab", tabId: String(tabId) });
   return true;
 }
+// 깨우기 대기 중인 탭 목록. 받을 창이 없던 깨우기 알림을 나중에 연결된 창에 다시 보내는 용도
+function pendingWakeTabIds() {
+  return [...tabWcWaiters.keys()];
+}
 function resolveTabWcWaiters(tabId, wc) {
   const waiters = tabId ? tabWcWaiters.get(tabId) : null;
   if (!waiters) return false;
@@ -1042,6 +1046,7 @@ export {
   uiTokenOk,
   unregisterGoneTab,
   visibleTabsFor,
+  pendingWakeTabIds,
   waitForTabWc,
   wakeSleepingTab,
   wcOfTabId,

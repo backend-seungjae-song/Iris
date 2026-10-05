@@ -164,12 +164,24 @@ check("단축키 변경은 로컬에서만", () =>
 
 // 새 조합을 받는 동안 그 키가 실제로 실행되면, ⌘⇧D 를 지정하려는 순간 창이 분리된다.
 check("녹음 중에는 그 키가 실행되지 않는다", () => {
-  const seg = /document\.addEventListener\("keydown", \(e\) => \{[\s\S]*?\}, true\);/.exec(page);
+  const seg = /window\.addEventListener\("keydown", \(e\) => \{[\s\S]*?\}, true\);/.exec(page);
   if (!seg) throw new Error("녹음 핸들러를 못 찾음");
   return /if \(!recording\) return;/.test(seg[0])
     && /e\.preventDefault\(\);/.test(seg[0])
-    && /e\.stopPropagation\(\);/.test(seg[0])
-    && /\}, true\);$/.test(seg[0]);   // 캡처여야 keynav 의 캡처보다 앞선다
+    && /e\.stopImmediatePropagation\(\);/.test(seg[0])
+    && /\}, true\);$/.test(seg[0]);   // window 캡처여야 먼저 등록된 document 캡처(keynav·touch-drag)보다 앞선다
+});
+
+// 녹화·스케치·분리·지목 조합을 소스에 다시 적으면 설정 화면에서 바꿔도 옛 조합이 동작한다.
+check("녹화·스케치·분리·지목 단축키는 키맵 표의 조합으로 판정한다", () => {
+  const drag = read("web/js/panel/touch-drag.js");
+  const emu = read("web/js/emulator/boot.js");
+  const seg = /document\.addEventListener\("keydown", \(e\) => \{[\s\S]*?\}, true\);/.exec(drag);
+  if (!seg) throw new Error("touch-drag 단축키 핸들러를 못 찾음");
+  return /\["rec-toggle", "sketch", "detach", "pick-toggle"\]\.find\(\(id\) => matchBinding\(e, bindingOf\(id\)\)\)/.test(seg[0])
+    && !/k === "[a-z]"|toLowerCase\(\)/.test(seg[0])
+    && /if \(!matchBinding\(e, bindingOf\("sketch"\)\)\) return;/.test(emu)
+    && !/toLowerCase\(\) !== "d"/.test(emu);
 });
 
 // 잠긴 것을 화면에서 누를 수 있으면 사용자는 바뀐 줄 안다.
@@ -197,6 +209,7 @@ check("화면이 rail 에 걸려 있고 DOM 이 있다", () =>
 
 await checkAsync("창 전환 목록은 진입과 다시 읽기에서만 새로 열거하고 revision은 host 목록만 읽는다", async () => {
   const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
   const previousFetch = globalThis.fetch;
   const listeners = {};
   const root = { addEventListener(type, handler) { listeners[type] = handler; } };
@@ -205,6 +218,7 @@ await checkAsync("창 전환 목록은 진입과 다시 읽기에서만 새로 �
   let refreshes = 0;
   let reloads = 0;
   globalThis.document = { addEventListener() {} };
+  globalThis.window = { addEventListener() {} };
   globalThis.fetch = async (url, options = {}) => {
     if (url !== "/features" || (options.method || "GET") !== "GET") throw new Error(`예상하지 않은 요청: ${url}`);
     return { ok: true, status: 200, json: async () => ({ exists: true, revision: 1, hidden: [], local: true }) };
@@ -252,6 +266,8 @@ await checkAsync("창 전환 목록은 진입과 다시 읽기에서만 새로 �
   } finally {
     if (previousDocument === undefined) delete globalThis.document;
     else globalThis.document = previousDocument;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
     globalThis.fetch = previousFetch;
   }
 });

@@ -48,6 +48,7 @@ function deviceProfile(cls, baseUa) {
   const v = (String(baseUa || "").match(/Chrome\/([\d.]+)/) || [])[1] || "";
   if (cls === "phone") return { ua: `Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Mobile Safari/537.36`, platform: "Android", platformVersion: "15", model: "Pixel 9", uaMobile: true };
   if (cls === "tablet") return { ua: `Mozilla/5.0 (Linux; Android 15; SM-X910) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`, platform: "Android", platformVersion: "15", model: "SM-X910", uaMobile: false };
+  if (process.platform === "win32") return { ua: null, platform: "Windows", platformVersion: "", model: "", uaMobile: false };
   return { ua: null, platform: "macOS", platformVersion: "15.0.0", model: "", uaMobile: false };
 }
 
@@ -132,9 +133,9 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
     const { full, brands } = uaBrands(baseUa);
     const restoreUa = async () => {
       const d = deviceProfile("desktop", baseUa);
-      await sendDeviceUserAgentOverride(wc, send, { userAgent: baseUa, platform: "MacIntel",
+      await sendDeviceUserAgentOverride(wc, send, { userAgent: baseUa, platform: process.platform === "win32" ? "Win32" : "MacIntel",
         userAgentMetadata: { brands, fullVersionList: brands.map((b) => ({ brand: b.brand, version: b.brand === "Not/A)Brand" ? "24.0.0.0" : full })),
-          fullVersion: full, platform: d.platform, platformVersion: d.platformVersion, architecture: "arm", model: "", mobile: false } }).catch(() => {});
+          fullVersion: full, platform: d.platform, platformVersion: d.platformVersion, architecture: process.platform === "win32" ? (process.arch === "arm64" ? "arm" : "x86") : "arm", model: "", mobile: false } }).catch(() => {});
     };
     if (args.clear || String(args.size || "").toLowerCase() === "clear") {
       await send("Emulation.clearDeviceMetricsOverride");
@@ -175,7 +176,7 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
     // 마우스 입력이 감싸는 창의 위젯을 거쳐 들어와서, 걸어두면 앱 헤더와 다른 탭까지 터치 커서가 된다.
     // 페이지 쪽 상태[크기·UA·maxTouchPoints]는 탭마다 분리되어 있음을 확인했고,
     // 커서를 바꾸는 것은 이것뿐이다. 그래서 포인터가 그 화면 안에 있는 동안만 켜며,
-    // setTouchDrag를 렌더러가 mouseenter/leave·탭 전환에서 호출한다.
+    // 렌더러가 mouseenter/leave·탭 전환에서 무장하고, touch-drag-arm.cjs 가 커서 위치로 setTouchDrag를 호출한다.
     const dragOk = cls !== "desktop";
     if (cls === "desktop") await ok("Emulation.setEmitTouchEventsForMouse", { enabled: false });
     if (!baseUserAgents.has(wc.id)) baseUserAgents.set(wc.id, baseUa);

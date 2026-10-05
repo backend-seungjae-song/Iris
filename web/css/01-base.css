@@ -53,9 +53,11 @@ body.motion-off, body.motion-off * { transition-duration:0s !important; animatio
 ::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb, var(--muted) 75%, transparent); background-clip:padding-box; }
 ::-webkit-scrollbar-thumb:active { background:var(--focus); background-clip:padding-box; }
 ::-webkit-scrollbar-corner { background:transparent; }
-/* 좁은 목록(탭줄·북마크줄)은 8px 도 내용 공간을 차지하므로 거기만 더 가늘게 한다(손잡이 4px). */
-.tabstrip::-webkit-scrollbar, .bookmark-bar::-webkit-scrollbar { width:8px; height:8px; }
-.tabstrip::-webkit-scrollbar-thumb, .bookmark-bar::-webkit-scrollbar-thumb { border-width:2px; }
+/* 좁은 목록(탭줄·북마크줄)은 8px 도 내용 공간을 차지하므로 거기만 더 가늘게 한다(손잡이 4px).
+   탭줄은 막대가 탭 높이를 줄여 숨김. 휠·트랙패드로 넘김(center/tabs.js) */
+.bookmark-bar::-webkit-scrollbar { width:8px; height:8px; }
+.bookmark-bar::-webkit-scrollbar-thumb { border-width:2px; }
+.tabstrip::-webkit-scrollbar { width:0; height:0; }
 [hidden] { display:none !important; } /* 작성자 display:flex/block가 UA [hidden]을 덮는 문제 방지 */
 html,body { height:100%; }
 body { margin:0; background:var(--app-bg); color:var(--fg);
@@ -84,3 +86,9 @@ body:has(#statusbar:not(:empty):not([hidden])) { --statusbar-h:24px; }
    z-index 는 이 문서에서 가장 높은 층(9999: 프로필·닫힌 탭 메뉴) 바로 아래다. 끄는 동안에만
    서므로 평소의 층 순서는 그대로다. 파일 컨텍스트 메뉴(300)처럼 낮은 것은 덮개가 가린다. */
 .drag-shield { position:fixed; inset:0; z-index:9998; background:transparent; }
+
+/* Windows는 시스템 제목 표시줄을 사용하므로 신호등 버튼 여백이 필요 없다. */
+.host-windows .app { padding-top:0; }
+.host-windows .titlebar { display:none; }
+.host-windows .memo-window { padding-top:0; }
+.host-windows .mw-titlebar { display:none; }

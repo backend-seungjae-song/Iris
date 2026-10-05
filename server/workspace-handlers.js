@@ -1,3 +1,4 @@
+import { commandForPane } from "./windows-shell.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -107,7 +108,8 @@ export function handleTab(ws, msg) {
         ws.send(JSON.stringify({ type: "control-error", message: `폴더가 없습니다: ${cwd}` })); return;
       }
     }
-    herdr.tabCreate(msg.workspaceId).then(async (res) => {
+    // 사용자가 연 탭이라 그 탭으로 화면을 옮긴다. 옮기지 않으면 새 탭을 만들어도 이전 탭이 계속 보인다.
+    herdr.tabCreate(msg.workspaceId, { focus: true }).then(async (res) => {
       // 생성 직후 이름 부여(#6): tab.create 반환에서 새 tab_id를 찾아 rename.
       const newId = res?.tab_id || res?.tab?.tab_id || res?.result?.tab_id;
       if (msg.name && typeof msg.name === "string" && newId) { try { await herdr.tabRename(newId, msg.name); } catch {} }
@@ -123,7 +125,8 @@ export function handleTab(ws, msg) {
           const commands = [];
           if (cwd) commands.push(shellCommand(["cd", "--", cwd]));
           if (argv) commands.push(shellCommand(argv));
-          await herdr.paneSendText(pane.pane_id, commands.join(" && ") + "\r");
+          await herdr.paneSendText(pane.pane_id, (process.platform === "win32"
+            ? await commandForPane(herdr, pane.pane_id, argv, cwd) : commands.join(" && ")) + "\r");
         } catch (e) {
           // 오류를 무시하면 명령만 입력된 탭이 남고 사용자는 이유를 알 수 없다.
           ws.send(JSON.stringify({ type: "control-error", message: `세션 실행 실패: ${e.message || e}` }));

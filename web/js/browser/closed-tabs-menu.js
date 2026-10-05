@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../core/keymap.js";
 // 브라우저 주소줄의 "닫은 탭" 목록. 최근에 닫은 것을 골라 복원한다.
 //
 // 소유 범위
@@ -35,7 +36,7 @@ export function closedMenuMarkup(list) {
   const esc = escapeHtml;
   const rows = (list || []).slice(0, 12);
   if (!rows.length) return `<div class="wvc-empty">되살릴 닫힌 탭이 없습니다.</div>`;
-  return `<div class="wvc-h">최근 닫은 탭<span class="wvc-key">⌘⇧T</span></div>`
+  return `<div class="wvc-h">최근 닫은 탭<span class="wvc-key">${shortcutLabel("⌘⇧T")}</span></div>`
     + rows.map((t) => {
       const name = t.title || t.label || t.url || t.path || "(제목 없음)";
       const key = t.kind === "center" ? (t.path || "") : (t.tabId || "");

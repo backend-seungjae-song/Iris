@@ -1,3 +1,4 @@
+import { isHostWindows } from "../core/host-path.js";
 // rail 메모: 스페이스 메모 본문과 날짜별 보관본, 닫힌 별도 메모를 관리한다.
 //
 // 소유 범위
@@ -32,6 +33,7 @@ import {
   setMemoShownSpace, updateMemoText,
 } from "./memo-store.js";
 import { syncMemoWindowState } from "./memo-window.js";
+import { askConfirm } from "../explorer/context-menu.js";
 import { getMemoMdMode, renderMemo, renderMemoPreview, setMemoValue } from "./memo.js";
 import { provide } from "../core/hooks.js";
 
@@ -47,7 +49,7 @@ const MM_ICON = {
   back: '<svg class="i" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg>',
 };
 // 보관 단축키의 수정 키. 단축키 표(keynav)는 mod 를 macOS 에서 ⌘, 그 밖에서 Ctrl 로 받는다.
-const MM_MOD = /Mac|iPhone|iPad/.test((globalThis.navigator && navigator.platform) || "") ? "⌘" : "Ctrl";
+const MM_MOD = isHostWindows() ? "Ctrl" : "⌘";
 
 let $, esc, wsSend, showToast, copyText;
 let MEMO_MODE = false;
@@ -159,7 +161,7 @@ export function mmRefresh() {
         <div class="mm-slot" id="mm-slot"${memoMdMode === "preview" ? ' style="display:none"' : ""}></div>
         <div class="md-body mm-edit-pv" id="mm-preview"${memoMdMode === "preview" ? "" : " hidden"}>${memoMdMode === "preview" ? mdToHtml(text) : ""}</div>
         <div class="mm-ebar">
-          <button class="mm-btn pri" data-mm="archive">오늘 자로 보관</button><span class="kbd" title="단축키">${MM_MOD}⇧S</span>
+          <button class="mm-btn pri" data-mm="archive">오늘 자로 보관</button><span class="kbd" title="단축키">${MM_MOD}${isHostWindows() ? "+Shift+" : "⇧"}S</span>
           <span class="mm-sp"></span>
           <button class="mm-btn txt dz" data-mm="clear">본문 비우기</button>
         </div>
@@ -195,11 +197,11 @@ function wireMemoAdmin() {
     switch (b.dataset.mm) {
       case "archive": wsSend({ type: "memo.archive", space: sp, text: memoTextOf(sp) }); break; // 보고 있는 스페이스 것을 담는다
       case "open": mmOpen = mmOpen === d ? null : d; mmRefresh(); break;
-      case "del": if (confirm(`${d} 보관본을 통째로 삭제할까요?`)) wsSend({ type: "memo.archive.delete", space: sp, date: d }); break;
+      case "del": askConfirm(`${d} 보관본을 통째로 삭제할까요?`).then((ok) => { if (ok) wsSend({ type: "memo.archive.delete", space: sp, date: d }); }); break;
       case "copy": if (a) copyText(a.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); break;
       // 하루치 안의 한 기록만 지운다. 잘못 담은 하나 때문에 하루를 버리지 않는다.
       case "bdel": { const bk = a && (a.blocks || []).find((x) => x.id === b.dataset.id); if (!bk) break;
-        if (confirm(`${d} ${bk.clock || "이전 기록"}에 보관한 것만 삭제할까요?`)) wsSend({ type: "memo.archive.block.delete", space: sp, date: d, id: bk.id }); } break;
+        askConfirm(`${d} ${bk.clock || "이전 기록"}에 보관한 것만 삭제할까요?`).then((ok) => { if (ok) wsSend({ type: "memo.archive.block.delete", space: sp, date: d, id: bk.id }); }); } break;
       case "bcopy": { const bk = a && (a.blocks || []).find((x) => x.id === b.dataset.id); if (bk) copyText(bk.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } break;
       case "restore": if (a) { // 덮지 않고 이어 붙인다. 작성 중인 내용을 잃지 않기 위한 것이다
         const cur = memoTextOf(sp);
@@ -208,11 +210,12 @@ function wireMemoAdmin() {
         updateMemoText(sp, next, { immediate: true });
         setMemoShownSpace(null); renderMemo(); mmRefresh(); showToast(`${d} 보관본을 이어 붙였습니다.`, { level: "info" });
       } break;
-      case "clear": if (confirm("지금 메모 본문을 비웁니다. 보관본은 그대로 남습니다. 계속할까요?")) {
+      case "clear": askConfirm("지금 메모 본문을 비웁니다. 계속할까요?", "보관본은 그대로 남습니다.").then((ok) => {
+        if (!ok) return;
         advanceMemoRevision();
         updateMemoText(sp, "", { immediate: true });
         setMemoShownSpace(null); renderMemo(); mmRefresh();
-      } break;
+      }); break;
       case "note-open": {
         const noteId = b.dataset.note, label = mmSpaceLabel(sp);
         if (noteId) Promise.resolve(window.acHost?.openLocalMemo?.({ spaceKey: spk(sp), noteId, spaceLabel: label }))

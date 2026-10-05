@@ -1,3 +1,4 @@
+import { pathBasename } from "../core/host-path.js";
 // 보관함: 보관한 스페이스와 세션을 묶어 찾고 복원하거나 삭제한다.
 //
 // 소유 범위
@@ -79,7 +80,7 @@ export function initArchive(deps) {
   send = deps.wsSend;
   showToast = deps.showToast;
   setPendingSpaceFocus = deps.setPendingSpaceFocus;
-  dom("#ar-body")?.addEventListener("click", (e) => {
+  dom("#ar-body")?.addEventListener("click", async (e) => {
     const pick = e.target.closest("[data-ar-pick]");
     if (pick) { arSel = pick.dataset.arPick; arRender(); return; }
     const more = e.target.closest("[data-ar-more]");
@@ -92,7 +93,7 @@ export function initArchive(deps) {
     if (forgetSpace) {
       const cwd = forgetSpace.dataset.arForgetSpace;
       const n = archives.filter((x) => (x.kind === "space" ? x.cwd : x.spaceCwd) === cwd).length;
-      if (!confirm(`이 스페이스의 보관 항목 ${n}개를 전부 지울까요?\n세션 자체는 남지만 여기서 되살릴 수는 없게 됩니다.`)) return;
+      if (!(await askConfirm(`이 스페이스의 보관 항목 ${n}개를 전부 지울까요?`, "세션 자체는 남지만 여기서 되살릴 수는 없게 됩니다."))) return;
       send({ type: "archive.forgetSpace", spaceCwd: cwd });
       return;
     }
@@ -102,7 +103,7 @@ export function initArchive(deps) {
     if (forget) {
       const it = archives.find((x) => x.id === forget.dataset.arForget);
       const nm = it ? (it.label || it.name || it.agent || "이 항목") : "이 항목";
-      if (!confirm(`"${nm}"을(를) 보관함에서 지울까요?\n세션 자체는 남지만 여기서 되살릴 수는 없게 됩니다.`)) return;
+      if (!(await askConfirm(`"${nm}"을(를) 보관함에서 지울까요?`, "세션 자체는 남지만 여기서 되살릴 수는 없게 됩니다."))) return;
       send({ type: "archive.forget", id: forget.dataset.arForget });
     }
   });
@@ -194,7 +195,7 @@ function arSpaceState(g) {
 }
 // 고른 스페이스의 상세. 되살리기는 머리에 한 번만 두고, 세션별 조작은 각 세션 아래에 둔다.
 function arGroupDetail(g, q, m) {
-  const name = g.label || g.cwd.split("/").pop() || g.cwd;
+  const name = g.label || pathBasename(g.cwd) || g.cwd;
   const st = arSpaceState(g);
   const cwd = escapeHtml(g.cwd);
   const hits = q ? g.kids.filter((k) => m.get(k.id).hit) : g.kids;
@@ -282,7 +283,7 @@ function arRender() {
     const head = `<button type="button" class="ar-group${on ? " on" : ""}" data-ar-pick="${escapeHtml(r.key)}" aria-pressed="${on}">`;
     if (r.g) {
       const g = r.g, st = arSpaceState(g);
-      const name = g.label || g.cwd.split("/").pop() || g.cwd;
+      const name = g.label || pathBasename(g.cwd) || g.cwd;
       return `${head}
         <span class="ar-l1"><span class="ar-name">${escapeHtml(name)}</span><span class="ar-when">${escapeHtml(arWhen(g.at))}</span></span>
         <span class="ar-l2"><span class="ar-st ${st.cls}">${st.short}</span><span class="ar-cnt">세션 ${g.kids.length}</span></span>

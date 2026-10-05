@@ -283,7 +283,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : 'Mac과 연결이 끊겼습니다.',
+              : '컴퓨터과 연결이 끊겼습니다.',
         );
       }
     } finally {
@@ -579,7 +579,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                                 child: Opacity(
                                   opacity: widget.frameIncludesOverlays ? 0 : 1,
                                   child: const _HumanBanner(
-                                    text: 'Mac 창 폭 1280px로 그립니다 · 두 손가락 확대',
+                                    text: '컴퓨터 창 폭 1280px로 그립니다 · 두 손가락 확대',
                                   ),
                                 ),
                               ),
@@ -744,7 +744,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ? error.message
             : error is ProtocolException
             ? error.message
-            : 'Mac과 연결이 끊겼습니다.',
+            : '컴퓨터과 연결이 끊겼습니다.',
       );
     }
   }
@@ -853,7 +853,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ? error.message
             : error is ProtocolException
             ? error.message
-            : 'Mac과 연결이 끊겼습니다.',
+            : '컴퓨터과 연결이 끊겼습니다.',
       );
     }
   }
@@ -899,7 +899,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ? error.message
             : error is ProtocolException
             ? error.message
-            : 'Mac과 연결이 끊겼습니다.',
+            : '컴퓨터과 연결이 끊겼습니다.',
       );
     }
   }
@@ -1197,7 +1197,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : 'Mac과 연결이 끊겼습니다.',
+              : '컴퓨터과 연결이 끊겼습니다.',
         );
       }
     }
@@ -2253,7 +2253,7 @@ class _ConnectionNotice extends StatelessWidget {
         border: Border.all(color: const Color(0x66ffffff)),
       ),
       child: const Text(
-        'Mac과 다시 연결하고 있습니다.',
+        '컴퓨터과 다시 연결하고 있습니다.',
         style: TextStyle(
           color: Colors.white,
           fontSize: 12,
@@ -2764,7 +2764,7 @@ class _BrowserElementSheetState extends State<BrowserElementSheet> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : 'Mac과 연결이 끊겼습니다.',
+              : '컴퓨터과 연결이 끊겼습니다.',
         );
       }
     } finally {

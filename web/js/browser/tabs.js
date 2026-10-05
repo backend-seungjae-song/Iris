@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../core/keymap.js";
 // 분리 브라우저 창의 탭바. 칩·다중 선택·그룹·우클릭 메뉴를 담당한다.
 //
 // 소유 범위
@@ -27,7 +28,7 @@
 //   이 API를 바꾸면 import 하는 파일도 함께 바꿔야 한다:
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/tabs.js
 import {
-  bmActiveId, bmTabs, boundSpace, bsMutate, curBmSpace, getBrowserState,
+  bmActiveId, bmTabs, boundSpace, bsMutate, curBmSpace, getBrowserState, isBrowserStateLoaded,
 } from "./state.js";
 import { aiBusyLabels, aiHolds } from "./ai-state.js";
 import { activeBrowserId, hasTabDialog, newTabId } from "./webview.js";
@@ -38,6 +39,7 @@ import { wireReorder } from "../core/reorder.js";
 import { fileKindById, isFileKindId } from "../core/file-kinds.js";
 import { callHook } from "../core/hooks.js";
 import { mayWriteSharedActive } from "./active-tab.js";
+import { askConfirm } from "../explorer/context-menu.js";
 
 let $, esc, cssEsc, showToast, showCtx, renderTabs, startTabRename, newBrowserTab;
 let BROWSER_MODE;
@@ -65,7 +67,6 @@ function tabLead(t) {
   const doc = fileKindById(t.kind);
   if (doc) return `<span class="cfav cfav-txt">${doc.docIcon || "📄"}</span>`;
   const st = getWebviewStatus(t.id) || {};
-  if (st.sleeping) return '<span class="csleep" title="메모리를 회수한 잠자는 탭 · 클릭하면 다시 엽니다"></span>';
   if (st.loading) return `<span class="cspin" title="불러오는 중"></span>`;
   if (st.audible) return `<span class="caudio" title="소리 재생 중">🔊</span>`;
   if (st.icon) return `<img class="cfav" src="${esc(st.icon)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'cfav cfav-txt',textContent:this.dataset.i||'·'}))" data-i="${esc(favLetter(t))}">`;
@@ -97,33 +98,52 @@ function tabChip(t, act) {
   // markTabDirty로 나중에 DOM에 끼워 넣어도 다음 브로드캐스트에 곧바로 지워진다.
   const local = isFileKindId(t.kind) && getTabs(boundSpace()).find((x) => x.id === t.id);
   const dirty = local && isTabDirty(local);
-  const cls = [t.id === act ? "active" : "", st.sleeping ? "sleeping" : "", t.group ? "in-group" : "", selTabs.has(t.id) ? "selected" : "", st.loading ? "loading" : "", busy.length ? "ai-held" : "", dirty ? "dirty" : ""].filter(Boolean).join(" ");
-  return `<div class="ctab${cls ? " " + cls : ""}" draggable="true" data-tab="${esc(t.id)}" title="더블클릭: 이름 변경 · 우클릭: 메뉴 · 드래그: 순서 변경 · Ctrl/⇧+클릭: 다중 선택">${dirty ? '<span class="cdirty"></span>' : ""}${tabLead(t)}${asking}${ai}<span class="cname">${esc(t.name || t.title || "브라우저")}</span><button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+  const cls = [t.id === act ? "active" : "", t.group ? "in-group" : "", selTabs.has(t.id) ? "selected" : "", st.loading ? "loading" : "", busy.length ? "ai-held" : "", dirty ? "dirty" : ""].filter(Boolean).join(" ");
+  return `<div class="ctab${cls ? " " + cls : ""}" draggable="true" data-tab="${esc(t.id)}" title="더블클릭: 이름 변경 · 우클릭: 메뉴 · 드래그: 순서 변경 · Ctrl/${shortcutLabel("⇧").replace(/\+$/, "")}+클릭: 다중 선택">${dirty ? '<span class="cdirty"></span>' : ""}${tabLead(t)}${asking}${ai}<span class="cname">${esc(t.name || t.title || "브라우저")}</span><button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+}
+// 이 창이 띠에 그리고 화면에 올릴 탭. 분리 창은 자기 탭만, 그 밖의 창은 다른 창으로 떨어져 나간 탭을 뺀
+// 나머지. 탭 분리가 로드되지 않았으면 스페이스의 탭 전부.
+export function shownBmTabs() {
+  const ownTabs = callHook("detach.ownTabs") || null;
+  const hiddenTabs = callHook("detach.hidden") || null;
+  const tabs = bmTabs();
+  if (ownTabs) return tabs.filter((x) => ownTabs.has(x.id));
+  if (hiddenTabs && hiddenTabs.size) return tabs.filter((x) => !hiddenTabs.has(x.id));
+  return tabs;
 }
 // 그룹 → 그 그룹의 탭 → … → 그룹 없는 탭 순으로 렌더한다. 접힌 그룹은 칩만 남고 탭이 숨는다
 // (webview는 유지되므로 로그인·스크롤 상태는 그대로이고, 렌더에서만 감춘다).
+// 탭 이름을 줄이지 않아 탭 줄이 넘칠 수 있음. 선택이 바뀐 때만 그 탭까지 스크롤(사용자가 옆으로 넘겨 둔 위치 유지)
+const revealedActive = new WeakMap();
+export function revealActiveTab(strip) {
+  const el = strip.querySelector(".ctab.active");
+  // 앞쪽 탭이 늘거나 이름이 바뀌어 활성 탭 위치가 밀린 경우도 다시 보여 줌. 사람이 휠로 넘긴 스크롤은 위치를 안 바꿔 유지
+  const key = el ? `${el.dataset.tab}:${el.offsetLeft}:${el.offsetWidth}` : null;
+  if (revealedActive.get(strip) === key) return;
+  // 화면에 그려지기 전(부팅 중 숨김)에는 스크롤이 안 되므로 기록하지 않고 다음 그리기에서 다시 시도
+  if (!strip.clientWidth) return;
+  revealedActive.set(strip, key);
+  if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
 export function renderBmTabs() {
   // 이 함수는 분리 브라우저 창 전용이다. 콘솔 창은 같은 #tabstrip에 파일·브라우저 탭을 renderTabs로
   // 그리는데, 여기서 덮어쓰면 파일 탭 자리에 브라우저 탭 칩이 들어간다. 그 칩에는 콘솔 쪽 클릭 연결이
   // 없어서 눌러도 아무 일이 없고 화면도 바뀌지 않는다. 브라우저 탭이 파일 쪽 탭에 생기고
   // 정상적으로 표시되지 않는다. 콘솔에서는 자기 탭바를 다시 그린다. 부르는 쪽은 "탭바 갱신"을 뜻하기 때문이다.
   if (!BROWSER_MODE) { renderTabs(); return; }
-  const act = bmActiveId(), groups = bmGroups();
-  // 탭 분리가 로드됐으면 두 가지를 알려 준다. 이 창이 한 탭에 묶였는가, 그리고 어느 탭이 지금
-  // 다른 창으로 떨어져 나갔는가. 로드되지 않았으면 둘 다 없고 이전과 같이 전부 그린다.
-  const onlyTab = callHook("detach.boundTab") || null;
-  const hiddenTabs = callHook("detach.hidden") || null;
-  let tabs = bmTabs();
-  if (onlyTab) tabs = tabs.filter((x) => x.id === onlyTab);
-  else if (hiddenTabs && hiddenTabs.size) tabs = tabs.filter((x) => !hiddenTabs.has(x.id));
+  const groups = bmGroups();
+  // 분리 창은 스페이스 탭 순서를 탭 분리 기능에 알려 준다(닫힌 탭 정리·이웃 탭 선택에 쓴다).
+  if (isBrowserStateLoaded()) callHook("detach.sync", bmTabs().map((x) => x.id));
+  const ownTabs = callHook("detach.ownTabs") || null;
+  const act = activeBrowserId() || bmActiveId();
+  const tabs = shownBmTabs();
   const live = new Set(tabs.map((x) => x.id));
   for (const id of [...selTabs]) if (!live.has(id)) selTabs.delete(id); // 닫힌 탭은 선택에서 정리
   bmOrder = [];
   let html = "";
-  // 탭 하나짜리 창에는 그룹 띠를 그리지 않는다. 그 창은 그 탭 하나가 전부라, 원래 창의 그룹이
-  // 따라오면 "빼냈는데 소속은 그대로"로 보인다.
+  // 분리 창에는 그룹 띠를 그리지 않는다. 원래 창의 그룹이 따라오면 "빼냈는데 소속은 그대로"로 보인다.
   // 그룹은 원래 창의 정리 도구다. 옮긴 것이 아니라 감춘 것이므로 원래 창에서는 그대로 유지된다.
-  if (!onlyTab) {
+  if (!ownTabs) {
     for (const g of groups) {
       const mine = tabs.filter((x) => x.group === g.id);
       html += `<div class="tgroup" data-group="${esc(g.id)}" title="클릭: 접기/펴기 · 우클릭: 그룹 메뉴">${g.collapsed ? "▶" : "▼"} ${esc(g.name)} <span class="tgcount">${mine.length}</span></div>`;
@@ -133,15 +153,17 @@ export function renderBmTabs() {
   } else {
     html += tabs.map((x) => tabChip(x, act)).join("");
   }
-  if (onlyTab) {
-    // 탭 하나짜리 창에는 추가 버튼도, 되돌리는 버튼도 두지 않는다. 되돌리는 방법은 크롬과 같다.
-    // 그 탭을 다른 창의 띠로 끌어다 놓으면 붙고, 창을 닫아도 원래 위치로 돌아간다.
-  } else {
-    html += `<div class="ctab-add" data-add="1" title="새 탭(구글)">+</div>`;
-    if (savedGroups().length) html += `<div class="ctab-add" data-saved="1" title="저장된 그룹 열기">📁</div>`;
-  }
+  // 분리 창에도 새 탭 버튼이 있다. 되돌리는 방법은 크롬과 같다. 탭을 다른 창의 띠로 끌어다 놓으면
+  // 붙고, 창을 닫으면 그 창의 탭이 원래 위치로 돌아간다.
+  html += `<div class="ctab-add" data-add="1" title="새 탭(구글)">+</div>`;
+  if (!ownTabs && savedGroups().length) html += `<div class="ctab-add" data-saved="1" title="저장된 그룹 열기">📁</div>`;
   tabstrip.innerHTML = html;
+  revealActiveTab(tabstrip);
   syncAiGlow();
+  const pend = pendingGroupRename;
+  if (pend && groups.some((g) => g.id === pend.gid) && pend.ids.every((id) => bmTabs().some((t) => t.id === id && t.group === pend.gid))) {
+    pendingGroupRename = null; startInlineGroupRename(pend.gid);
+  }
   // 띠의 끌기. 탭 분리가 로드됐으면 그 기능이 크롬과 같은 방식(포인터 기반)으로 연결한다.
   // 경계를 넘는 순간 창이 되고, 다른 창의 띠에 들어가는 순간 붙는다. 그 판정은 창 밖을 봐야
   // 해서 이 창이 할 수 없다.
@@ -158,12 +180,15 @@ export function renderBmTabs() {
 }
 // 그룹을 만들고 탭들을 넣은 뒤, 그 그룹 칩의 이름을 바로 인라인 편집 상태로 연다.
 // (Electron엔 window.prompt가 없으므로 이 코드베이스의 인라인 편집 방식을 따른다.)
+// 그룹은 서버가 상태를 돌려준 뒤에야 생기므로 편집은 renderBmTabs 에서 연다. 그룹 만들기·탭 넣기마다 상태가 따로 와서
+// 그룹만 생긴 렌더에서 열면 다음 렌더가 입력칸을 덮어씀 → 탭까지 다 들어간 렌더에서 연다
+let pendingGroupRename = null;
 function makeGroup(sp, ids, defaultName) {
   const gid = newId("g");
   bsMutate({ op: "group.create", space: sp, id: gid, name: (defaultName || "새 그룹").slice(0, 40) });
   for (const id of ids) bsMutate({ op: "tab.group", space: sp, id, group: gid });
+  pendingGroupRename = { gid, ids };
   renderBmTabs();
-  setTimeout(() => startInlineGroupRename(gid), 0); // 렌더 후 칩이 생기면 편집 시작
 }
 function startInlineGroupRename(gid) {
   const sp = boundSpace(), g = bmGroups().find((v) => v.id === gid); if (!g) return;
@@ -225,8 +250,8 @@ function openMultiCtx(x, y) {
   items.push({ label: `그룹에서 빼기 (${n})`, act: () => { for (const id of ids) bsMutate({ op: "tab.group", space: sp, id, group: null }); clearSel(); renderBmTabs(); } });
   items.push({ label: "선택 해제", act: () => { clearSel(); renderBmTabs(); } });
   items.push({ sep: true });
-  items.push({ label: `탭 ${n}개 닫기`, danger: true, act: () => {
-    if (!confirm(`선택한 탭 ${n}개를 닫을까요?`)) return;
+  items.push({ label: `탭 ${n}개 닫기`, danger: true, act: async () => {
+    if (!(await askConfirm(`선택한 탭 ${n}개를 닫을까요?`))) return;
     for (const id of ids) bsMutate({ op: "tab.close", space: sp, id });
     clearSel(); renderBmTabs();
   } });
@@ -253,8 +278,8 @@ function openGroupCtx(x, y, gid) {
     } },
     { sep: true },
     { label: "그룹만 해제 (탭 유지)", act: () => bsMutate({ op: "group.remove", space: sp, id: gid }) },
-    { label: `그룹 탭 모두 닫기 (${mine.length})`, danger: true, act: () => {
-      if (!confirm(`"${g.name}" 그룹의 탭 ${mine.length}개를 닫을까요?`)) return;
+    { label: `그룹 탭 모두 닫기 (${mine.length})`, danger: true, act: async () => {
+      if (!(await askConfirm(`"${g.name}" 그룹의 탭 ${mine.length}개를 닫을까요?`))) return;
       for (const v of mine) bsMutate({ op: "tab.close", space: sp, id: v.id });
       bsMutate({ op: "group.remove", space: sp, id: gid });
     } },
@@ -271,7 +296,7 @@ function openSavedCtx(x, y) {
   }
   items.push({ sep: true });
   for (const s of list) {
-    items.push({ label: `✕ "${s.name}" 저장 삭제`, danger: true, act: () => { if (confirm(`저장된 그룹 "${s.name}"을 삭제할까요? (열려있는 탭은 그대로)`)) bsMutate({ op: "saved.remove", id: s.id }); } });
+    items.push({ label: `✕ "${s.name}" 저장 삭제`, danger: true, act: async () => { if (await askConfirm(`저장된 그룹 "${s.name}"을 삭제할까요?`, "열려 있는 탭은 그대로입니다.")) bsMutate({ op: "saved.remove", id: s.id }); } });
   }
   showCtx(x, y, items);
 }
@@ -327,9 +352,8 @@ export function wireBrowserModeTabstrip() {
       // 평범한 클릭 = 선택 해제 후 전환(기존 동작). 여기서 동기 재렌더를 하면 두 번째 클릭이
       // 새로 만들어진 노드에 떨어져 dblclick(이름 수정)이 발생하지 않으므로, 선택이 있었을 때만 그린다.
       const had = clearSel(); selAnchor = id;
-      // 한 탭에 묶인 창에서는 공유 활성 탭을 옮기지 않는다. 그 창에는 칩이 하나뿐이라 옮길 곳도
-      // 없고, 옮기면 원래 창이 "여기서는 감춰진 탭"으로 끌려간다.
-      if (mayWriteSharedActive(callHook("detach.boundTab"))) bsMutate({ op: "tab.switch", space: sp, id });
+      // 분리 창에서는 그 창의 고른 탭만 바꾼다. 공유 활성 탭을 옮기면 원래 창이 "여기서는 감춰진 탭"으로 끌려간다.
+      if (!callHook("detach.select", id) && mayWriteSharedActive(callHook("detach.boundTab"))) bsMutate({ op: "tab.switch", space: sp, id });
       if (had) renderBmTabs();
     }
   }, true);

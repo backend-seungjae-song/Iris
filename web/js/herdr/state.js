@@ -1,3 +1,4 @@
+import { pathBasename } from "../core/host-path.js";
 // herdr가 방송한 에이전트·스페이스·터미널 탭 snapshot을 한 곳에서 소유한다.
 //
 // 소유 범위
@@ -37,7 +38,7 @@ export function getLastAgents() { return lastAgents; }
 export function getSpaces() { return spaces; }
 export function getTabsForSpace(id) { return tabsByWorkspace[id] || []; }
 export function agentKey(a) { return a.paneId || a.agent; }
-export function nameOf(a) { return a.tabLabel || (a.cwd ? a.cwd.split("/").pop() : a.agent); }
+export function nameOf(a) { return a.tabLabel || (a.cwd ? pathBasename(a.cwd) : a.agent); }
 export function agentByPane(paneId) { return lastAgents.find((a) => a.paneId === paneId); }
 export function agentsOfSpace(id) {
   // herdr가 들고 있는 실제 탭 순서를 따른다. tabId 문자열로 정렬하면 id는 탭을 옮겨도
