@@ -48,8 +48,9 @@ check("명령은 보내기 전에 먼저 남는다", () =>
   && /kind: "accepted", call_id: callId/.test(qaJournal));
 check("끝난 뒤 같은 call_id로 닫는다", () =>
   /kind: "completed", call_id: callId \|\| undefined/.test(qaJournal)
-  && /noteRunEvent\(callId, cmd, args, session, out, tries, runId\)/.test(qaJournalEntry)
-  && /noteRunEvent\(callId, cmd, args, session, last, tries, runId\)/.test(qaJournalEntry));
+  && /noteRunEvent\(callId, cmd, args, session, out, tries, runId, commandRun\)/.test(qaJournalEntry)
+  && /noteRunEvent\(callId, cmd, args, session, last, tries, runId, commandRun\)/.test(qaJournalEntry)
+  && /const st = capturedRun \|\| runOf\(session, runId\)/.test(qaJournal));
 // 회차는 세션이 아니라 요청에 포함된다. 세션에만 묶으면 회차 둘이 겹칠 때 나중 회차가 앞 회차를
 // 가로채고, 이 계약이 깨지면 동시 회차가 경고 없이 섞인다.
 check("회차는 요청마다 실리고 세션은 기본값일 뿐이다", () =>
