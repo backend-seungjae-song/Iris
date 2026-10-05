@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { artifactDir } from "./artifacts-home.cjs";
+import qaExpiry from "./qa-expiry-guard.cjs";
 
 // QA 브라우저 trace와 회차 journal·receipt·artifact 상태의 단일 owner.
 //
@@ -66,6 +67,7 @@ function runOf(session, runId) {
 function bindRun(session, runId) {
   const rid = String(runId || "run-" + Date.now());
   const dir = qaRunDir(rid);
+  const activeUse = runs.get(rid)?.activeUse || qaExpiry.acquireRun(rid, "journal-active");
   fs.mkdirSync(path.join(dir, "shots"), { recursive: true });
   // 이어 붙이는 회차면 지금까지의 순번·판정·호출 수를 이어받는다. 새로 1부터 매기면 한 회차
 // 안에 같은 번호가 둘이 되고, 파생된 manifest에서 어느 줄이 어느 판정인지 구분되지 않는다.
@@ -82,6 +84,7 @@ function bindRun(session, runId) {
     }
   } catch {}
   const st = runs.get(rid) || { runId: rid, dir, seq, receipts, calls };
+  st.activeUse = activeUse;
   st.seq = Math.max(st.seq, seq); st.receipts = Math.max(st.receipts, receipts); st.calls = Math.max(st.calls, calls);
   runs.set(rid, st);
   if (session) runBySession.set(String(session), rid);
@@ -203,8 +206,8 @@ function detailOf(d) {
 }
 // 재시도는 한 줄로 합친다. 재시도는 전송 계층의 동작이지 사용자가 수행한 단계가 아니고,
 // 상태를 바꾸는 명령은 재시도하지 않는다(READONLY_CMDS 제한).
-export function noteRunEvent(callId, cmd, args, session, res, tries, runId) {
-  const st = runOf(session, runId);
+export function noteRunEvent(callId, cmd, args, session, res, tries, runId, capturedRun) {
+  const st = capturedRun || runOf(session, runId);
   if (!st || !runLogged(cmd)) return;
   const a = args || {};
   const d = (res && res.data) || {};
@@ -308,6 +311,8 @@ function setLastFrame(st, tab, p) { (st.recLast || (st.recLast = new Map())).set
 // 프레임 하나를 남긴다. 돌려주는 것은 저널에 적을 사실이다.
 export async function recordFrame(st, tab, why, shoot) {
   if (!st) return null;
+  const use = qaExpiry.acquireRun(st.runId, "journal-frame");
+  try {
   const prev = lastFrame(st, tab);
   const out = path.join(st.dir, "rec", "tmp.png");
   const r = await shoot({ dpr: 1, settle: why === "before" ? 0 : undefined,
@@ -334,6 +339,7 @@ export async function recordFrame(st, tab, why, shoot) {
     dpr: d.dpr || 1, shot: "viewport",
     ...laneStamp(st) });
   return { path: kept, same: false };
+  } finally { use.release(); }
 }
 
 export function runFor(session, runId) { return runOf(session, runId); }
@@ -1028,8 +1034,15 @@ const shape = (st) => ({ runId: st.runId, dir: st.dir, journal: path.join(st.dir
 export function handleQaSessionCmd(cmd, args, session, runId) {
   if (cmd === "run") {
     const act = String((args && args.action) || "status");
+    if (["expiry_capability", "expiry_isolate", "expiry_receipt"].includes(act)) {
+      try { return { ok: true, data: qaExpiry.expiry(args) }; }
+      catch (e) { return { ok: false, error: String(e.message),
+        ...(["QA_IN_USE", "QA_ADMISSION_BUSY"].includes(e.code) ? { code: e.code } : {}) }; }
+    }
     if (act === "begin") {
-      const st = bindRun(session, (args && args.runId) || runId);
+      let st;
+      try { st = bindRun(session, (args && args.runId) || runId); }
+      catch (e) { return { ok: false, error: String(e.message) }; }
       const resumed = st.seq > 0;
       const decl = Array.isArray(args && args.surfaces)
         ? args.surfaces.map((x) => String(x).trim()).filter(Boolean) : null;
@@ -1107,6 +1120,8 @@ export function handleQaSessionCmd(cmd, args, session, runId) {
           + "\n\n밟거나, 못 밟는 사유와 함께 blue(사용자가 정해야 함)나 gray(분류 불가)로 닫습니다.\n"
           + "닫지 않고 넘기면 그 줄은 아무 데도 안 남습니다." };
         appendEvent(st, { kind: "run_end", source: "server" });
+        try { st.activeUse.release(); }
+        catch (e) { return { ok: false, error: String(e.message) }; }
         const open = st.calls - countCompleted(st);
         runs.delete(st.runId);
         for (const [k, v] of runBySession) if (v === st.runId) runBySession.delete(k);

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import qaExpiry from "./qa-expiry-guard.cjs";
 
 import { reportAgentSessionPath } from "./agent-session-path.js";
 import { MAX_APP_TARGETS, appTargetsFor, readAppTargets, setAppTargets } from "./app-targets.js";
@@ -394,6 +395,16 @@ const READONLY_CMDS = new Set(["url", "text", "snapshot", "screenshot", "observe
 // 응답에 sent 플래그를 달아 구조로 판별한다(sent:false = 미전송, true = 전송 후 응답 없음).
 const SENT_UNKNOWN_RE = /timeout\(30s\)/;   // 플래그가 없는 이전 경로 보완
 export async function runBrowserCmdResilient(cmd, args, session, runId) {
+  const commandRun = runFor(session, runId);
+  let commandUse, outputUse;
+  try {
+    commandUse = commandRun ? qaExpiry.acquireRun(commandRun.runId, "browser-command") : null;
+    outputUse = qaExpiry.acquirePaths([args?.path], "browser-output");
+  } catch (e) {
+    if (commandUse) commandUse.release();
+    return { ok: false, error: String(e.message) };
+  }
+  try {
   // 보내기 전에 먼저 기록한다. 이 줄이 있어야 전송 후 응답이 없는 구간이 로그에 남는다.
   const callId = noteRunAccepted(cmd, args, session, runId);
   // 조작은 직전·직후 화면을 남긴다. 회차가 열려 있을 때만 남기며, 회차 밖의 단발 조작까지 찍으면
@@ -408,7 +419,7 @@ export async function runBrowserCmdResilient(cmd, args, session, runId) {
     noteTrace(cmd, args, session, last);
     if (last && last.ok) {
       const out = i ? { ...last, data: { ...(last.data || {}), retried: i } } : last;
-      noteRunEvent(callId, cmd, args, session, out, tries, runId);
+      noteRunEvent(callId, cmd, args, session, out, tries, runId, commandRun);
       // 조작으로 시작된 렌더링이 끝난 뒤의 화면. 촬영이 실패해도 조작 결과는 그대로 반환한다.
       // 기록 실패가 이미 실행된 조작을 무효로 만들지 않는다.
       if (recRun) { try { await recordFrame(recRun, args && args.tab, "after", shoot); } catch {} }
@@ -432,8 +443,11 @@ export async function runBrowserCmdResilient(cmd, args, session, runId) {
   // 재시도해도 실패하면 시도 횟수까지 함께 알린다. 단순 실패와 대기 후에도 복구되지 않은 경우는 다르다.
   if (last && !last.ok && tries > 1) last = { ...last, error: `${last.error} (${tries}회 시도)` };
   // 실패도 기록한다. 실패를 빼면 로그와 그로부터 만든 보고서가 실제 결과를 반영하지 못한다.
-  noteRunEvent(callId, cmd, args, session, last, tries, runId);
+  noteRunEvent(callId, cmd, args, session, last, tries, runId, commandRun);
   return last;
+  } finally {
+    try { outputUse.release(); } finally { if (commandUse) commandUse.release(); }
+  }
 }
 // AI가 대신할 수 없는 단계(결제·본인확인·캡차·약관 동의)에서 사용자를 호출한다. 화면을 가져오지 않는다.
 // 호출하고 그 탭으로 가는 경로를 제공한 뒤, 사용자가 이동했는지만 반환한다. 완료 여부는 페이지를 보고 판단한다.

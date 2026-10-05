@@ -5,7 +5,7 @@
 //   분리하면서 본문을 바꾸지 않았고, 원본 대비 바이트 대조로 이를 강제한다.
 // 영향 범위: 러너가 동적 import 로 이 run 을 부르며 sources 의 공유 상수 계약도 함께 본다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs bin/smoke/sections/qa-run-journal.mjs
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -48,8 +48,9 @@ check("명령은 보내기 전에 먼저 남는다", () =>
   && /kind: "accepted", call_id: callId/.test(qaJournal));
 check("끝난 뒤 같은 call_id로 닫는다", () =>
   /kind: "completed", call_id: callId \|\| undefined/.test(qaJournal)
-  && /noteRunEvent\(callId, cmd, args, session, out, tries, runId\)/.test(qaJournalEntry)
-  && /noteRunEvent\(callId, cmd, args, session, last, tries, runId\)/.test(qaJournalEntry));
+  && /noteRunEvent\(callId, cmd, args, session, out, tries, runId, commandRun\)/.test(qaJournalEntry)
+  && /noteRunEvent\(callId, cmd, args, session, last, tries, runId, commandRun\)/.test(qaJournalEntry)
+  && /const st = capturedRun \|\| runOf\(session, runId\)/.test(qaJournal));
 // 회차는 세션이 아니라 요청에 포함된다. 세션에만 묶으면 회차 둘이 겹칠 때 나중 회차가 앞 회차를
 // 가로채고, 이 계약이 깨지면 동시 회차가 경고 없이 섞인다.
 check("회차는 요청마다 실리고 세션은 기본값일 뿐이다", () =>
@@ -112,7 +113,7 @@ check("영수증 번호는 회차가 있으면 서버 것을 쓴다", () =>
 // ── 요구 원장: 소스 모양이 아니라 실제로 실행해 확인한다 ──────────────────
 // 게이트를 소스로만 검사하면 `false &&` 한 줄에 우회된다(변이 검사에서 확인).
 await (async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "ac-ledger-"));
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "ac-ledger-")));
   process.env.IRIS_STATE_DIR = dir;
   const { handleQaSessionCmd } = await import(path.join(ROOT, "server/qa-journal.js"));
   const S = "smoke-ledger";
@@ -924,7 +925,7 @@ check("잠깐 뜬 알림의 실측값이 남는다", () =>
   // 소스 모양 검사는 실제 효과를 확인하지 못한다. 위 검사가 모두 통과해도 장부에 무엇이
   // 적히는지는 확인되지 않는다. 실제로 회차를 열고 도구 반환을 흘려 장부에 남는 줄을 읽는다.
   await checkAsync("도구가 돌려준 것이 실제로 장부에 적힌다", async () => {
-    const fdir = mkdtempSync(path.join(tmpdir(), "ac-leak-"));
+    const fdir = realpathSync(mkdtempSync(path.join(tmpdir(), "ac-leak-")));
     const prev = process.env.IRIS_STATE_DIR;
     process.env.IRIS_STATE_DIR = fdir;
     try {
