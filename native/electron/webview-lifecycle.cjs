@@ -132,6 +132,10 @@ function createWebviewLifecycle({
       if (aiDrivingAnywhere && aiDrivingAnywhere()) inheritCausality(wc, null);
       wc.setBackgroundThrottling(!noThrottleOpt); // 보호 사유는 렌더러/캡처 참조가 생긴 순간 아래에서 해제
       wc.once("destroyed", () => clearThrottleState(wc));
+      // 서버의 탭 등록 해제. 창을 닫으면 렌더러가 함께 사라져 직접 알리지 못함
+      // 해제 대상은 이 wc 번호뿐. 다른 창에서 새 wc 로 다시 등록된 탭은 유지
+      const goneWc = wc.id;
+      wc.once("destroyed", () => { try { ctlSend({ type: "browser-tab-gone", wc: goneWc }); } catch {} });
       // 페이지 우클릭 메뉴. guest 마다 한 번만 건다. 이 훅 자체가 생성 시점에 한 번 실행된다.
       try { if (attachContextMenu) attachContextMenu(wc); } catch {}
       // 페이지를 떠나면 채운 비번은 그 문서와 함께 사라지므로 가림막도 함께 제거한다(계속 쌓이지 않게 한다).

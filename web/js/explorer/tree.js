@@ -1,3 +1,5 @@
+import { shortcutLabel } from "../core/keymap.js";
+import { isHostWindows, isAbsolutePath, normalizePath, pathWithin, pathDirname, relativePath, joinPath, samePath } from "../core/host-path.js";
 // 포커스 스페이스의 파일 트리와 Spaces · Agents 목록을 렌더하고 파일 reveal을 이어 간다.
 //
 // 소유 범위
@@ -65,7 +67,11 @@ export function getSpaceList() { return spaceList; }
 export function getFileTree() { return fileTree; }
 export function invalidateDir(dir) { dirCache.delete(dir); }
 export function setPendingCreateFocus(value) { pendingCreateFocus = value; }
-export function mergeGitStatus(status) { Object.assign(gitStatus, status); }
+// fs.list 응답의 git = 그 폴더 아래 전체 상태. 응답에 없는 경로는 커밋·되돌리기로 깨끗해진 파일이라 이전 표시 삭제
+export function mergeGitStatus(status, dir) {
+  if (dir) for (const p of Object.keys(gitStatus)) if (isHostWindows() ? pathWithin(dir, p) : p === dir || p.startsWith(dir + "/")) delete gitStatus[p];
+  Object.assign(gitStatus, status);
+}
 
 function renderDir(dirPath, depth) {
   const entries = dirCache.get(dirPath), pad = depth * 12 + 8;
@@ -117,7 +123,7 @@ export function renderSpaces() {
     return `<div class="space-row${sel ? " sel" : ""}" draggable="true" data-space="${esc(s.id)}" data-folder="${esc(s.folder || "")}">`
       + `${SVG_GRIP}${tog}<span class="space-name">${esc(s.label)}</span>`
       + (!open && count ? `<span class="space-count" title="접힌 에이전트">${count}</span>` : "")
-      + (sel ? `<span class="kbd" title="스페이스 이동">⌥⇧↑↓</span>` : "")
+      + (sel ? `<span class="kbd" title="스페이스 이동">${shortcutLabel("⌥⇧↑↓")}</span>` : "")
       + `<span class="dot ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span></div>`
       + afterRow + ((ag && ag.html) || "");
   };
@@ -126,7 +132,8 @@ export function renderSpaces() {
 
 export function requestDir(p) { if (p && !dirCache.has(p)) { dirCache.set(p, "loading"); wsSend({ type: "fs.list", path: p }); } }
 function normalizeRevealPath(path) {
-  if (typeof path !== "string" || !path.startsWith("/")) return null;
+  if (typeof path !== "string" || !isAbsolutePath(path)) return null;
+  if (isHostWindows()) return normalizePath(path);
   const parts = [];
   for (const part of path.split("/")) {
     if (!part || part === ".") continue;
@@ -136,10 +143,15 @@ function normalizeRevealPath(path) {
   return "/" + parts.join("/");
 }
 function isRevealPathWithinRoot(root, targetPath) {
-  return !!root && !!targetPath && targetPath !== root
-    && targetPath.startsWith(root === "/" ? "/" : root + "/");
+  return !!root && !!targetPath && !samePath(targetPath, root) && pathWithin(root, targetPath);
 }
 function revealAncestorDirs(root, targetPath) {
+  if (isHostWindows()) {
+    const parent = pathDirname(targetPath), dirs = [root];
+    let dir = root;
+    for (const part of (relativePath(root, parent) || "").split("\\").filter(Boolean)) { dir = joinPath(dir, part); dirs.push(dir); }
+    return dirs;
+  }
   const parent = targetPath.slice(0, targetPath.lastIndexOf("/")) || "/";
   const dirs = [root];
   if (parent === root) return dirs;
@@ -223,7 +235,7 @@ export function handlePendingRevealFs(m) {
   if (m.error) { pendingReveal = null; return true; }
   dirCache.set(m.path, m.entries || []);
   syncWatchDirs();
-  if (m.git) Object.assign(gitStatus, m.git);
+  if (m.git) mergeGitStatus(m.git, m.path);
   p.expectedDir = null;
   continuePendingReveal(p);
   return true;

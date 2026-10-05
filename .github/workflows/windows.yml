@@ -1,0 +1,333 @@
+name: windows
+
+# Windows 설치 파일 빌드·설치·실행 확인
+# 실행 조건: 이 워크플로 파일이 있는 브랜치 push, 또는 수동 실행
+on:
+  push:
+    branches: [feat/windows-installer]
+  workflow_dispatch:
+
+jobs:
+  install-and-launch:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: 설치 진단 수집기 준비
+        shell: pwsh
+        run: |
+          $collector = @'
+          param([string]$Label, [string]$EvidenceRoot)
+          $ErrorActionPreference = 'Continue'
+          $dir = Join-Path $EvidenceRoot $Label
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Start-Transcript -Path (Join-Path $dir 'collector.log') -Force | Out-Null
+          try {
+            Get-Date -Format o | Set-Content (Join-Path $dir 'timestamp.txt')
+            $processes = @(Get-CimInstance Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop)
+            $related = @($processes | Where-Object { $_.Name -match '^(Iris|herdr|node|powershell|pwsh|OpenConsole|cmd)(\.exe)?$' })
+            $related | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine, CreationDate |
+              ConvertTo-Json -Depth 4 | Set-Content (Join-Path $dir 'processes.json')
+            $related | Format-List ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine, CreationDate |
+              Out-String -Width 4096 | Write-Host
+          } catch { Write-Warning "프로세스 수집 실패: $_" }
+          try {
+            $connections = @(Get-NetTCPConnection -LocalPort 4271 -ErrorAction Stop)
+            $connections | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess |
+              ConvertTo-Json -Depth 4 | Set-Content (Join-Path $dir 'port-4271.json')
+            $owners = @($connections.OwningProcess | Sort-Object -Unique | ForEach-Object {
+              Get-CimInstance Win32_Process -Filter "ProcessId = $_" -OperationTimeoutSec 10 -ErrorAction Stop
+            })
+            $owners | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine, CreationDate |
+              ConvertTo-Json -Depth 4 | Set-Content (Join-Path $dir 'port-4271-owners.json')
+            $owners | Format-List ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine |
+              Out-String -Width 4096 | Write-Host
+          } catch { "포트 조회 실패 또는 사용 없음: $_" | Set-Content (Join-Path $dir 'port-4271-error.txt') }
+          try {
+            $health = Invoke-WebRequest -Uri 'http://127.0.0.1:4271/healthz' -TimeoutSec 2 -ErrorAction Stop
+            "HTTP $($health.StatusCode)`n$($health.Content)" | Set-Content (Join-Path $dir 'healthz.txt')
+          } catch { "healthz 실패: $_" | Set-Content (Join-Path $dir 'healthz.txt') }
+          $irisState = $null
+          try {
+            $stateOutput = & node (Join-Path $env:RUNNER_TEMP 'iris-state-home.cjs')
+            $stateExit = $LASTEXITCODE
+            if ($stateExit -ne 0 -or -not $stateOutput) { throw "stateHome 조회 실패: $stateExit" }
+            $irisState = ([string]$stateOutput).Trim()
+            if (-not [System.IO.Path]::IsPathRooted($irisState)) { $irisState = $null; throw 'stateHome 절대 경로 없음' }
+            $irisState | Set-Content (Join-Path $dir 'iris-state-path.txt')
+            $lock = Join-Path $irisState 'server.lock'
+            if (Test-Path -LiteralPath $lock) {
+              Get-Content -LiteralPath $lock -Raw | Tee-Object -FilePath (Join-Path $dir 'server.lock') | Write-Host
+            } else { 'server.lock 없음' | Set-Content (Join-Path $dir 'server-lock-absent.txt') }
+          } catch { "상태 경로·잠금 조회 실패: $_" | Set-Content (Join-Path $dir 'iris-state-error.txt') }
+          # CI 상태·로그 원본
+          $roots = [ordered]@{
+            'herdr-state' = (Join-Path $env:APPDATA 'herdr')
+          }
+          if ($irisState) { $roots['iris-state'] = $irisState }
+          if ($env:XDG_CONFIG_HOME) { $roots['herdr-xdg-state'] = Join-Path $env:XDG_CONFIG_HOME 'herdr' }
+          foreach ($entry in $roots.GetEnumerator()) {
+            try {
+              if (Test-Path -LiteralPath $entry.Value) {
+                Get-ChildItem -LiteralPath $entry.Value -Recurse -Force -ErrorAction Continue |
+                  Select-Object FullName, Length, LastWriteTimeUtc |
+                  ConvertTo-Json -Depth 4 | Set-Content (Join-Path $dir "$($entry.Key)-inventory.json")
+                Copy-Item -LiteralPath $entry.Value -Destination (Join-Path $dir $entry.Key) -Recurse -Force -ErrorAction Continue
+              } else { Write-Host "상태 폴더 없음: $($entry.Value)" }
+            } catch { Write-Warning "상태 수집 실패: $($entry.Value): $_" }
+          }
+          try {
+            $userData = Join-Path $env:APPDATA 'Iris'
+            if (Test-Path -LiteralPath $userData) {
+              Get-ChildItem -LiteralPath $userData -Recurse -Force -File -ErrorAction Continue |
+                Where-Object { $_.Name -match '\.log($|\.)|^LOG($|\.)' } | ForEach-Object {
+                  $relative = $_.FullName.Substring($userData.Length).TrimStart('\')
+                  $target = Join-Path (Join-Path $dir 'iris-electron-logs') $relative
+                  New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
+                  Copy-Item -LiteralPath $_.FullName -Destination $target -Force -ErrorAction Continue
+                }
+            }
+          } catch { Write-Warning "Electron 로그 수집 실패: $_" }
+          Stop-Transcript | Out-Null
+          '@
+          $wrapper = @'
+          param([string]$Label)
+          $savedExit = $global:LASTEXITCODE
+          $child = $null
+          try {
+            $root = Join-Path $env:GITHUB_WORKSPACE 'evidence'
+            $dir = Join-Path $root $Label
+            New-Item -ItemType Directory -Force -Path $dir -ErrorAction Stop | Out-Null
+            $collector = Join-Path $env:RUNNER_TEMP 'iris-evidence-collector.ps1'
+            $arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', "`"$collector`"", '-Label', $Label, '-EvidenceRoot', "`"$root`"")
+            $child = Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList $arguments -PassThru -ErrorAction Stop -RedirectStandardOutput (Join-Path $dir 'collector-stdout.txt') -RedirectStandardError (Join-Path $dir 'collector-stderr.txt')
+            if (-not $child.WaitForExit(45000)) {
+              # 수집기 시간 제한
+              Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue
+              '증거 수집 45초 초과' | Set-Content (Join-Path $dir 'collector-timeout.txt')
+              Write-Warning '증거 수집 45초 초과'
+            } elseif ($child.ExitCode -ne 0) { Write-Warning "증거 수집 실패: $($child.ExitCode)" }
+            foreach ($file in @('collector-stdout.txt', 'collector-stderr.txt')) {
+              Get-Content -LiteralPath (Join-Path $dir $file) -ErrorAction SilentlyContinue | Write-Host
+            }
+          } catch { Write-Warning "증거 수집 실행 실패: $_" }
+          finally { $global:LASTEXITCODE = $savedExit }
+          '@
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'iris-evidence-collector.ps1') -Value $collector -Encoding utf8
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'iris-evidence.ps1') -Value $wrapper -Encoding utf8
+          $stateProbe = @'
+          const path = require('node:path');
+          delete process.env.IRIS_STATE_DIR;
+          const { stateHome } = require(path.join(process.env.GITHUB_WORKSPACE, 'server', 'state-home.cjs'));
+          process.stdout.write(stateHome());
+          '@
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'iris-state-home.cjs') -Value $stateProbe -Encoding utf8
+      - name: PowerShell 5.1·7 setup 준비 검사
+        shell: pwsh
+        run: |
+          & node --test test/windows-setup-native.mjs
+          if ($LASTEXITCODE -ne 0) { throw "setup 준비 회귀 검사 실패" }
+      - name: clone된 체크아웃에서 setup 실행·재실행·준비 확인
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          .\setup.cmd --yes
+          $firstExit = $LASTEXITCODE
+          if ($firstExit -ne 0) {
+            & (Join-Path $env:RUNNER_TEMP 'iris-evidence.ps1') 'first-setup-failed'
+            Write-Host "첫 setup 실패: $firstExit"
+            exit $firstExit
+          }
+          & node scripts/check-windows-update.mjs
+          $secondExit = $LASTEXITCODE
+          if ($secondExit -ne 0) { Write-Host "setup 업데이트 재실행 실패: $secondExit"; exit $secondExit }
+          .\setup.cmd --check
+          if ($LASTEXITCODE -ne 0) { throw "setup 준비 확인 실패" }
+      - name: Windows 기능 회귀 검사
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem test/windows-*.mjs | ForEach-Object { $_.FullName })
+          if ($tests.Count -lt 3) { throw "Windows 검사 파일 누락" }
+          $started = Get-Date
+          $trace = Join-Path $env:GITHUB_WORKSPACE 'evidence/windows-tests'
+          New-Item -ItemType Directory -Force -Path $trace | Out-Null
+          $env:IRIS_WINDOWS_TEST_TRACE_DIR = $trace
+          try {
+            & node --report-on-fatalerror --report-exclude-env --report-directory=$trace --test @tests
+            $testExit = $LASTEXITCODE
+            if ($testExit -ne 0) {
+              try {
+                Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=$started; Id=1000,1001} -ErrorAction Stop |
+                  Select-Object TimeCreated, ProviderName, Id, Message |
+                  ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $trace 'application-errors.json') -Encoding utf8
+              } catch { $_ | Out-String | Set-Content -LiteralPath (Join-Path $trace 'event-query.txt') -Encoding utf8 }
+              throw "Windows 기능 회귀 검사 실패: $testExit"
+            }
+          } finally { Remove-Item Env:IRIS_WINDOWS_TEST_TRACE_DIR -ErrorAction SilentlyContinue }
+      - name: setup 설치 결과 확인
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist -Filter "Iris Setup *.exe" | Select-Object -First 1
+          $exe = Get-Item -LiteralPath "$env:LOCALAPPDATA\Programs\Iris\Iris.exe" -ErrorAction Stop
+          "IRIS_EXE=$($exe.FullName)" | Out-File -Append $env:GITHUB_ENV
+          Write-Host "설치 위치: $($exe.FullName)"
+          $rel = { param($base) Get-ChildItem $base -Recurse -File | ForEach-Object { $_.FullName.Substring($base.Length).TrimStart("\") } | Sort-Object }
+          $unpacked = & $rel (Resolve-Path dist\win-unpacked\resources\herdr).Path
+          $installed = & $rel (Join-Path $exe.DirectoryName "resources\herdr")
+          Write-Host "win-unpacked:"; $unpacked | Write-Host
+          Write-Host "설치 폴더:"; $installed | Write-Host
+          7z e $setup.FullName '$PLUGINSDIR\app-64.7z' -oapp7z -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "설치 파일 압축본 추출 실패" }
+          Write-Host "설치 파일 압축본:"; 7z l app7z\app-64.7z | Select-String "resources.herdr" | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "설치 파일 압축본 조회 실패" }
+          $missing = $unpacked | Where-Object { $_ -notin $installed }
+          if ($missing) { throw "설치 폴더에 빠진 herdr 파일: $($missing -join ', ')" }
+
+      - name: 설치본 Windows 인증서 생성
+        shell: pwsh
+        run: |
+          $taskDir = Join-Path $env:RUNNER_TEMP "iris-cert-probe"
+          New-Item -ItemType Directory -Force -Path $taskDir | Out-Null
+          $probe = @'
+          const path = require("node:path");
+          const { pathToFileURL } = require("node:url");
+          const { X509Certificate } = require("node:crypto");
+          (async () => {
+            const { prepareGatewayCertificate } = await import(pathToFileURL(path.join(process.argv[2], "server/remote/certificate.js")));
+            const first = await prepareGatewayCertificate({ stateDir: process.argv[3] });
+            const second = await prepareGatewayCertificate({ stateDir: process.argv[3] });
+            const cert = new X509Certificate(first.certPem);
+            if (!cert.verify(cert.publicKey) || first.reused || !second.reused || first.certHash !== second.certHash) throw new Error("설치본 인증서 생성·재사용 실패");
+            console.log("설치본 인증서 생성·서명·재사용 통과");
+          })().catch((error) => { console.error(error); process.exitCode = 1; });
+          '@
+          $probeFile = Join-Path $taskDir "certificate-probe.cjs"
+          Set-Content -LiteralPath $probeFile -Value $probe -Encoding utf8
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          try {
+            # GUI 실행 파일의 종료 코드는 성공 출력 뒤에도 0 이 아닌 사례(run 37383563758) → 성공 문구로 판정, 종료 코드는 기록만
+            $out = & $env:IRIS_EXE $probeFile (Join-Path (Split-Path $env:IRIS_EXE) "resources/app.asar.unpacked") (Join-Path $taskDir "certificate-state") 2>&1 | Out-String
+            Write-Host $out
+            Write-Host "종료 코드: $LASTEXITCODE"
+            if ($out -notmatch "설치본 인증서 생성·서명·재사용 통과") { throw "설치본 인증서 검사 실패" }
+          } finally { Remove-Item Env:ELECTRON_RUN_AS_NODE }
+
+      - name: 실행 후 서버·herdr 확인
+        shell: pwsh
+        run: |
+          Start-Process -FilePath $env:IRIS_EXE
+          & node scripts/wait-installed-server.cjs
+          if ($LASTEXITCODE -ne 0) { throw "설치본 서버 준비 확인 실패" }
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:4271/healthz" -TimeoutSec 2
+          $health | ConvertTo-Json -Compress | Write-Host
+          # 터미널 연결 후 herdr 파이프 확인
+          $pipe = $null
+          for ($i = 0; $i -lt 60; $i++) {
+            $pipe = [System.IO.Directory]::GetFiles("\\.\pipe\") | Where-Object { $_ -like "*herdr*" } | Select-Object -First 1
+            if ($pipe) { break }
+            Start-Sleep -Seconds 1
+          }
+          Get-Process | Where-Object { $_.ProcessName -in @("Iris", "herdr") } | Format-Table Id, ProcessName, Path -AutoSize | Out-String | Write-Host
+          if (-not $pipe) { throw "herdr 네임드 파이프가 60초 안에 열리지 않음" }
+          Write-Host "herdr 파이프: $pipe"
+
+      - name: herdr 연결 진단
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $dir = Split-Path $env:IRIS_EXE
+          $herdr = Join-Path $dir "resources\herdr\herdr.exe"
+          $running = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            $status = & $herdr status server 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0 -and $status -match "status:\s*running") { $running = $true; break }
+            Start-Sleep -Seconds 1
+          }
+          Write-Host "== herdr status"; & $herdr status 2>&1 | Out-String | Write-Host
+          if (-not $running) { throw "herdr 서버가 running 이 아님" }
+          Write-Host "== herdr workspace list"; $ws = & $herdr workspace list 2>&1 | Out-String; Write-Host $ws
+          if ($LASTEXITCODE -ne 0 -or $ws -match "server_not_running|error") { throw "herdr workspace list 실패" }
+          $probe = @'
+          const net = require("net"), path = require("path");
+          const hs = require(path.join(process.argv[2], "server", "herdr-session.cjs"));
+          const s = hs.herdrSession(), ep = hs.herdrEndpoint(s.socket);
+          console.log(JSON.stringify({ session: s, endpoint: ep, APPDATA: process.env.APPDATA }));
+          const c = net.connect(ep, () => { console.log("connected"); c.write(JSON.stringify({ id: "1", method: "workspace.list", params: {} }) + "\n"); });
+          let buf = "";
+          c.on("data", (d) => { buf += d; if (buf.includes("\n")) { try { const r = JSON.parse(buf.slice(0, buf.indexOf("\n"))); const result = r.result ?? r; if (r.error || !Array.isArray(result.workspaces)) throw new Error("invalid response"); console.log("response:", buf.slice(0, 500)); process.exit(0); } catch(e) { console.error(e); process.exit(1); } } });
+          c.on("error", (e) => { console.log("error:", e.code, e.message); process.exit(1); });
+          c.on("end", () => console.log("end, buf:", buf.slice(0, 300)));
+          setTimeout(() => { console.log("timeout, buf:", buf.slice(0, 300)); process.exit(1); }, 8000);
+          '@
+          Set-Content -LiteralPath probe.cjs -Value $probe -Encoding utf8
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          try {
+            Write-Host "== Iris 주소 계산으로 직접 연결"
+            $probeOut = & $env:IRIS_EXE probe.cjs (Join-Path $dir "resources\app.asar.unpacked") 2>&1 | Out-String
+            $probeExit = $LASTEXITCODE
+            Write-Host $probeOut
+          } finally { Remove-Item Env:ELECTRON_RUN_AS_NODE }
+          Copy-Item "$env:APPDATA\herdr\herdr-server.log" evidence -ErrorAction SilentlyContinue
+          if ($probeExit -ne 0 -or $probeOut -notmatch "response:") { throw "Iris 주소로 herdr 응답을 받지 못함" }
+
+      - name: 화면 캡처
+        if: always()
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $bmp.Save("evidence\screen.png", [System.Drawing.Imaging.ImageFormat]::Png)
+
+      - name: 앱 종료 전 최종 진단
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $collector = Join-Path $env:RUNNER_TEMP 'iris-evidence.ps1'
+          if (Test-Path -LiteralPath $collector) { & $collector 'before-app-shutdown' }
+
+      - name: 창 닫기 후 정상 종료 확인
+        shell: pwsh
+        run: |
+          Get-Process Iris -ErrorAction SilentlyContinue | ForEach-Object { [void]$_.CloseMainWindow() }
+          for ($i = 0; $i -lt 60; $i++) {
+            if (-not (Get-Process Iris -ErrorAction SilentlyContinue)) { break }
+            Start-Sleep -Seconds 1
+          }
+          Start-Sleep -Seconds 3
+          $left = Get-Process Iris -ErrorAction SilentlyContinue
+          if ($left) { $left | Format-Table Id, Path | Out-String | Write-Host; throw "창을 닫은 뒤에도 Iris 프로세스가 남음" }
+          $lock = Join-Path $env:USERPROFILE ".iris\server.lock"
+          if (Test-Path -LiteralPath $lock) { throw "서버 잠금 파일이 남음(정상 종료 안 됨): $lock" }
+          Write-Host "Iris 프로세스 없음, server.lock 해제됨"
+          Write-Host "앱 종료 후 herdr 프로세스(참고):"; Get-Process herdr -ErrorAction SilentlyContinue | Format-Table Id, Path | Out-String | Write-Host
+
+      - name: 앱 종료 후 최종 진단
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $collector = Join-Path $env:RUNNER_TEMP 'iris-evidence.ps1'
+          if (Test-Path -LiteralPath $collector) { & $collector 'after-app-shutdown' }
+
+      - name: 기록 수집
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          Copy-Item "$env:USERPROFILE\.iris\*.log" evidence -ErrorAction SilentlyContinue
+          Get-ChildItem "$env:APPDATA\herdr" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName | Out-File evidence\herdr-config.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-evidence
+          path: evidence

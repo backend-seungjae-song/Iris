@@ -75,6 +75,8 @@ test("missing gh, missing PR and auth have distinct errors", async () => {
     [Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" }), "gh_missing"],
     [Object.assign(new Error("no pull requests found for branch"), { stderr: "no pull requests found for branch" }), "no_pr"],
     [Object.assign(new Error("auth"), { stderr: "run gh auth login" }), "auth_required"],
+    [Object.assign(new Error("remote"), { stderr: "no git remotes found\n" }), "no_remote"],
+    [Object.assign(new Error("host"), { stderr: "none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`\n" }), "not_github"],
   ]) {
     const h = harness({ gh: error });
     await h.handler(h.ws, { type: "githubpr.status", path: ROOT, branch: "feature" });

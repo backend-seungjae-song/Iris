@@ -78,7 +78,9 @@
 /* ── 단축키 ── */
 .km-tool { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding:0 24px; border-bottom:1px solid var(--line); }
 .km-keys-in { padding:12px 16px 16px; display:flex; flex-direction:column; gap:12px; }
-.km-cols { display:grid; grid-template-columns:1fr 1fr; gap:0 24px; }
+/* 1fr 의 최소 폭은 가장 긴 이름 폭이라 좁은 창(1180)에서 오른쪽 열이 밖으로 넘침. 두 열이 안 들어가면 한 열로*/
+.km-cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap:12px 24px; }
+.km-cols > * { min-width:0; }
 .km-grp + .km-grp { margin-top:12px; }
 
 /* 한 줄: 표시 칸 · 이름 · (되돌리기) · 조합. 이름과 조합 사이를 좁혀 눈이 한 줄을 따라가게 한다. */

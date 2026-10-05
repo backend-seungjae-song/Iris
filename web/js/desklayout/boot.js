@@ -1,3 +1,5 @@
+import { shortcutLabel } from "../core/keymap.js";
+import { isHostWindows } from "../core/host-path.js";
 // 창 레이아웃 저장·복원(desklayout)의 렌더러 쪽 입구.
 //
 // 소유 범위
@@ -30,7 +32,7 @@ export function keymapRows(status) {
     const note = status?.packaged === false ? "개발 실행에서는 등록 안 함"
       : registered === true ? "등록됨" : registered === false ? "등록 실패" : "";
     return {
-      id: `desklayout-${key}`, label, where: "Mac 전체", keys, defKeys: keys, note, noteBad: registered === false,
+      id: `desklayout-${key}`, label, where: isHostWindows() ? "Windows 전체" : "Mac 전체", keys: shortcutLabel(keys), defKeys: shortcutLabel(keys), note, noteBad: registered === false,
       lock: registered === false
         ? "다른 앱이 이 조합을 이미 쓰고 있을 수 있습니다. 그 앱의 단축키를 바꾼 뒤 Iris 를 다시 시작하세요."
         : "다른 앱을 쓰는 중에도 동작하는 단축키입니다. 조합은 바꿀 수 없습니다.",

@@ -412,7 +412,7 @@ class _ChangesPane extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '커밋·push·브랜치 전환은 Mac에서 합니다',
+                  '커밋·push·브랜치 전환은 컴퓨터에서 합니다',
                   style: TextStyle(color: context.iris.muted, fontSize: 13),
                 ),
               ),

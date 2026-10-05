@@ -348,6 +348,25 @@ export async function runDocxBlock8Checks() {
     return true;
   });
 
+  card("T22", "서버 docx 응답 종류마다 창의 메시지 처리기가 있어 저장 응답이 저장 요청에 닿는다", () => {
+    // 응답을 저장 요청(sendTabIo)에 넘기는 것은 dispatchWs 이고, 그 종류가 메시지 표에 없으면 불리지 않는다.
+    // 그러면 docxSaveTab 이 시간 초과까지 기다려 저장한 뒤에도 dirty 점이 남고 닫을 때 다시 묻는다.
+    const types = [...new Set([...read("server/docx-handlers.js").matchAll(/type:\s*"([\w.-]+)"/g)].map((m) => m[1]))];
+    docxAssert(types.includes("docx-saved"), `server/docx-handlers.js 응답 종류에서 docx-saved 를 찾지 못함: ${types.join(",")}`);
+    const missing = types.filter((type) => !new RegExp(`["']${type}["']\\s*:`).test(renderer));
+    docxAssert(!missing.length, `창의 메시지 표에 처리기가 없는 서버 docx 응답: ${missing.join(", ")}`);
+    return true;
+  });
+
+  card("T23", "이 탭이 저장한 내용 그대로인 감시 알림은 편집기를 다시 만들지 않는다", () => {
+    // 저장 응답과 감시 알림의 revision 은 둘 다 디스크 내용의 SHA-256. 같은 값을 다시 읽으면 커서·실행취소 기록이 사라진다.
+    const branch = docxWsHandler(renderer, "docx");
+    docxAssert(branch, "docx 메시지 처리기를 찾지 못함");
+    docxAssert(/m\.reason\s*===\s*["']watch["'][^\n]*m\.revision\s*===\s*target\.docxRevision/.test(branch),
+      "감시 알림의 revision 이 탭의 docxRevision 과 같을 때 그대로 두는 분기가 없음");
+    return true;
+  });
+
 }
 
 

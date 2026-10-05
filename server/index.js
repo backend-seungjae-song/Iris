@@ -1,4 +1,6 @@
 // Iris 서버. herdr 관제와 조종(채팅·요소 선택), 원격(폰) 접속을 담당한다.
+// 다른 모듈보다 먼저 로드: Windows 자식 프로세스 콘솔 창 숨김
+import "./win-console.cjs";
 import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
@@ -6,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { stateHome } from "./state-home.cjs";
+import { windowsServerPidState } from "./windows-state-lock.cjs";
 import { readHiddenSync } from "./feature-state-read.cjs";
 import { createCapabilityHost } from "./capabilities.js";
 
@@ -139,6 +142,7 @@ import {
   uiTokenOk,
   unregisterGoneTab,
   visibleTabsFor,
+  pendingWakeTabIds,
   waitForTabWc,
   wcOfTabId,
 } from "./browser-runtime.js";
@@ -206,10 +210,15 @@ const LOCK_PATH = path.join(IRIS_HOME, "server.lock");
 // rename으로 덮고 자기 pid를 읽어 확인하면, 여러 프로세스가 차례로 덮고 읽어 모두 자기 값을 읽고
 // 모두 성공한다. 그러면 여러 서버가 같은 상태 파일을 쓴다.
 // 그 pid가 정말 이 서버인가. pid는 재사용되므로 번호만으로는 알 수 없다.
+// Windows: /bin/ps 없음. PowerShell CIM 으로 명령줄 조회, 경로 구분자는 역슬래시
+function commandLineOf(pid) {
+  return execFileSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
+}
 function pidIsThisServer(pid) {
   if (!pid) return false;
+  if (process.platform === "win32") return windowsServerPidState(pid) !== "stale";
   try {
-    const cmd = execFileSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
+    const cmd = commandLineOf(pid);
     return cmd.includes("server/index.js");
   } catch { return false; }
 }
@@ -398,7 +407,7 @@ async function recomputeNow() {
     // 굳어 보호가 풀리므로, 스페이스 매핑이 갱신될 때마다 ai-targets도 다시 방송한다(변경 시에만 전송).
     broadcastAiTargets();
   } catch (e) {
-    broadcast({ type: "error", message: String(e.message || e) });
+    broadcast({ type: "error", message: String(e.message || e), code: e && e.code });
   }
 }
 
@@ -445,6 +454,9 @@ attachWs({
     ws.send(JSON.stringify({ type: "pick-mode", on: getPickMode() })); // 뒤늦게 뜬 창도 같은 위상으로 시작
     // 브라우저 공유 상태 초기 스냅샷(북마크·스페이스별 탭·활성 스페이스·도킹). 이후 변경은 broadcast.
     ws.send(JSON.stringify({ type: "browser-state", state: bsWire() }));
+    // 대기 중인 깨우기 알림 재전송. 탭 목록(browser-state) 뒤 순서
+    // 대상: 깨울 창이 없어 콘솔이 뒤늦게 띄운 분리 창
+    for (const tabId of pendingWakeTabIds()) ws.send(JSON.stringify({ type: "wake-tab", tabId }));
     // 구독 사용량 스냅샷과 표시 설정. 나중에 연 창도 상태바를 채운 상태로 시작한다.
     capabilityHost.onConnect(ws);
   },
@@ -534,8 +546,45 @@ attachWs({
 // 서버 종료 시 Chrome 인스턴스도 정리.
 // 이력 수집기는 자식 프로세스라 부모가 종료할 때 함께 종료하지 않으면 남는다. 앱이 꺼진 뒤에도
 // 디스크를 계속 읽으며 사용되지 않는 캐시를 쓴다.
-process.on("SIGINT", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
-process.on("SIGTERM", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
+function logWindowsShutdown(stage) {
+  if (process.platform !== "win32") return;
+  try { fs.appendFileSync(path.join(IRIS_HOME, "server.log"), `[server-shutdown] ${new Date().toISOString()} pid ${process.pid} ${stage}\n`); } catch {}
+}
+let windowsStopping = false;
+function shutdownWindows(reason) {
+  if (windowsStopping) return;
+  windowsStopping = true;
+  logWindowsShutdown(`종료 요청 ${reason}`);
+  for (const [index, stop] of shutdownCapabilities.entries()) {
+    const label = `${index}:${stop.name || "anonymous"}`;
+    logWindowsShutdown(`콜백 시작 ${label}`);
+    try { stop(); } catch (error) { logWindowsShutdown(`콜백 실패 ${label} ${error.message}`); }
+    logWindowsShutdown(`콜백 완료 ${label}`);
+  }
+  logWindowsShutdown("process.exit 시작");
+  process.exit(0);
+}
+if (process.platform === "win32") {
+  process.on("SIGINT", () => shutdownWindows("SIGINT"));
+  process.on("SIGTERM", () => shutdownWindows("SIGTERM"));
+} else {
+  process.on("SIGINT", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
+  process.on("SIGTERM", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
+}
+// Windows: 앱이 SIGTERM 대신 IPC 로 보내는 종료 요청. 앱이 먼저 꺼져 IPC 가 끊긴 경우도 같은 종료
+// macOS: IPC 채널 없음(process.send 없음)
+if (typeof process.send === "function") {
+  process.on("message", (m) => {
+    if (m && m.type === "iris:shutdown") {
+      if (process.platform === "win32") shutdownWindows("IPC");
+      else process.emit("SIGTERM", "SIGTERM");
+    }
+  });
+  process.on("disconnect", () => {
+    if (process.platform === "win32") shutdownWindows("disconnect");
+    else process.emit("SIGTERM", "SIGTERM");
+  });
+}
 
 // transcript는 파일이라 herdr 이벤트에 안 잡히는 서브에이전트 변화가 있다.
 // 안전망으로 주기적 재계산(느슨한 폴백, push가 주 경로).
@@ -563,8 +612,12 @@ function flushPendingState() {
 }
 for (const sig of ["exit", "SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
+    logWindowsShutdown(`상태 저장 시작 ${sig}`);
     flushPendingState();
-    try { if (Number(String(fs.readFileSync(LOCK_PATH, "utf8")).trim()) === process.pid) fs.unlinkSync(LOCK_PATH); } catch {}
+    logWindowsShutdown("상태 저장 완료");
+    try { if (Number(String(fs.readFileSync(LOCK_PATH, "utf8")).trim()) === process.pid) fs.unlinkSync(LOCK_PATH); }
+    catch (error) { logWindowsShutdown(`잠금 해제 오류 ${error.code || error.message}`); }
+    if (process.platform === "win32") logWindowsShutdown(`잠금 해제 확인 ${fs.existsSync(LOCK_PATH) ? "남음" : "없음"}`);
     if (sig !== "exit") process.exit(0);
   });
 }

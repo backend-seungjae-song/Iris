@@ -1,3 +1,4 @@
+import { shortcutLabel } from "./keymap.js";
 // 설치본의 기능 상태를 부팅 전에 읽고, 저장 성공 뒤에만 화면에 반영한다.
 import { RAIL_ITEMS, railItemById, lockedIds } from "./rail-items.js";
 import { CAPABILITIES } from "./capabilities.js";
@@ -63,7 +64,7 @@ export function featureHidden() {
 export function featurePendingRestart() { return new Set(pendingRestart); }
 // 설정을 바꿀 수 없는 이유. 비어 있으면 바꿀 수 있다.
 export function featureLockNote() {
-  if (loadError) return "기능 상태를 읽지 못해 선택 기능을 싣지 않았습니다. ⌘⇧R 로 다시 읽어 주세요";
+  if (loadError) return shortcutLabel("기능 상태를 읽지 못해 선택 기능을 싣지 않았습니다. ⌘⇧R 로 다시 읽어 주세요");
   return state.local ? "" : "원격 창에서는 기능 설정을 바꿀 수 없습니다";
 }
 function write(change) {
@@ -99,7 +100,7 @@ export function featureRestartNote(id) {
   if (cap?.alwaysIn?.includes("memo")) return "본 창에서만 빠집니다. 메모 창과 메모 서버는 유지됩니다";
   return featureNeedsRestart(id)
     ? "앱을 다시 시작하면 서버·네이티브에서도 빠집니다"
-    : "⌘⇧R 로 다시 읽으면 빠집니다";
+    : shortcutLabel("⌘⇧R 로 다시 읽으면 빠집니다");
 }
 
 export function featureEnableNote(id) {

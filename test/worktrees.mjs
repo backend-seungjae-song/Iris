@@ -305,6 +305,32 @@ test("실행 중: pane 셸의 자손 프로세스가 worktree 안을 cwd 로 두
   assert.equal(fs.existsSync(made.path), false);
 });
 
+test("대기: 마지막으로 worktree 안에서 실행한 같은 대화는 프로세스가 끝나도 그 worktree 에 남는다", async (t) => {
+  const { repo, message } = await fixture(t);
+  const made = await performWorktreeRequest({ type: "worktrees.create", ...message, name: "idle", branch: "feat/idle", base: "main" });
+  const inside = fs.realpathSync(made.path);
+  const agent = { agent: "claude", status: "working", workspaceId: "w1", paneId: "w1:p1", tabLabel: "구현", cwd: repo, sessionUuid: "Chat-1" };
+  replace({ workspaces: [{ id: "space-1", folder: repo }], state: [agent] });
+  const table = [{ pid: 100, ppid: 1 }, { pid: 101, ppid: 100 }, { pid: 102, ppid: 101 }];
+  const cwdOf = new Map([[100, repo], [101, repo], [102, inside]]);
+  const processes = { list: async () => table, cwds: async (pids) => new Map(pids.filter((pid) => cwdOf.has(pid)).map((pid) => [pid, cwdOf.get(pid)])) };
+  const scan = () => initWorktrees({ herdr: fakeHerdr([{ ...MAKER, cwd: repo }], { "w1:p1": 100 }), processes });
+  scan();
+  const working = await listOf(message, made.path);
+  assert.equal(working.running.length, 1);
+  assert.deepEqual(working.lastUsers.map((user) => user.paneId), ["w1:p1"]);
+  cwdOf.delete(102); table.pop();
+  replace({ workspaces: [{ id: "space-1", folder: repo }], state: [{ ...agent, status: "idle" }] });
+  scan();
+  const idle = await listOf(message, made.path);
+  assert.deepEqual(idle.running, []);
+  assert.deepEqual(idle.lastUsers.map((user) => [user.paneId, user.sessionUuid]), [["w1:p1", "Chat-1"]], "대기 중에도 남는다");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.IRIS_STATE_DIR, "worktree-last-sessions.json"), "utf8")).panes["w1:p1"].path, inside);
+  replace({ workspaces: [{ id: "space-1", folder: repo }], state: [{ ...agent, status: "idle", sessionUuid: "chat-2" }] });
+  scan();
+  assert.deepEqual((await listOf(message, made.path)).lastUsers, [], "다른 대화는 이어받지 않는다");
+});
+
 test("폴더가 지워진 스페이스는 FOLDER 로 알린다", async (t) => {
   const { dir, message } = await fixture(t);
   const gone = path.join(dir, "gone");

@@ -6,6 +6,10 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'\\''`)}'`;
 }
 
+function powershellQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 function timestamp(value) {
   return value.toISOString().replaceAll(/[-:.]/g, "");
 }
@@ -17,10 +21,15 @@ export function createQuestionHookInstaller(options = {}) {
   const socketPath = options.socketPath;
   const now = options.now || (() => new Date());
   const asNode = options.asNode ?? true;
-  if (![nodePath, hookPath, socketPath].every((value) => typeof value === "string" && path.isAbsolute(value))) {
+  const windows = (options.platform || process.platform) === "win32";
+  const paths = windows ? path.win32 : path;
+  if (![nodePath, hookPath, socketPath].every((value) => typeof value === "string" && paths.isAbsolute(value))) {
     throw new TypeError("question hook paths must be absolute");
   }
-  const command = `${asNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${[nodePath, hookPath, socketPath].map(shellQuote).join(" ")}`;
+  const command = windows
+    ? `${asNode ? "$env:ELECTRON_RUN_AS_NODE='1'; " : ""}& ${[nodePath, hookPath, socketPath].map(powershellQuote).join(" ")}; exit $LASTEXITCODE`
+    : `${asNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${[nodePath, hookPath, socketPath].map(shellQuote).join(" ")}`;
+  const hook = { type: "command", command, timeout: 600, ...(windows ? { shell: "powershell" } : {}) };
 
   function isIrisGroup(group) {
     return group?.matcher === "AskUserQuestion"
@@ -76,7 +85,7 @@ export function createQuestionHookInstaller(options = {}) {
     if (groups.some(isIrisGroup)) return { ok: true, installed: true, unchanged: true };
     settings.hooks.PreToolUse = [...groups, {
       matcher: "AskUserQuestion",
-      hooks: [{ type: "command", command, timeout: 600 }],
+      hooks: [hook],
     }];
     try {
       await save(settings, loaded.raw);

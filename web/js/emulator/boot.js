@@ -25,6 +25,7 @@
 //   web/emulator-window 의 전용 창 페이지, native/electron/emulator/emulator-host.cjs 의 IPC.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/emulator/boot.js
 import { callHook, hasHook, provide } from "../core/hooks.js";
+import { bindingOf, matchBinding } from "../core/keymap.js";
 import { registerTabView } from "../core/tab-views.js";
 import { addTab, ensureTabSpace, getActiveTabId, getCenterSpace, getTabs, getTabSpaces, removeTab, setActiveTab, setCenterSpace } from "../center/tab-store.js";
 import { notifyLayout, registerLayoutRegion } from "../core/layout-regions.js";
@@ -1170,7 +1171,7 @@ export function initCapability(c) {
   // 창으로 넘긴다. 에뮬레이터 화면을 보는 중이면 그보다 먼저(window 캡처 단계) 받아 스케치를 연다.
   startRestore();
   window.addEventListener("keydown", (e) => {
-    if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || (e.key || "").toLowerCase() !== "d") return;
+    if (!matchBinding(e, bindingOf("sketch"))) return;
     if (!visibleEntry() || !hasHook("sketch.open")) return;
     e.preventDefault(); e.stopImmediatePropagation();
     callHook("sketch.open");

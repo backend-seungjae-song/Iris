@@ -1,3 +1,4 @@
+import { privatePath } from "./windows-private.cjs";
 import { randomBytes as nodeRandomBytes, scrypt as nodeScrypt, timingSafeEqual } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -80,6 +81,7 @@ export function createPinStore(options = {}) {
   async function durableWrite(next) {
     await fsp.mkdir(remoteDir, { recursive: true, mode: 0o700 });
     await fsp.chmod(remoteDir, 0o700);
+    if (process.platform === "win32") privatePath(remoteDir);
     const temporary = `${pinFile}.${process.pid}.${++sequence}.tmp`;
     let renamed = false;
     try {

@@ -58,8 +58,9 @@ function resolveExtension({
   pathImpl = path,
 } = {}) {
   const root = extensionRoot || pathImpl.join(
-    osImpl.homedir(),
-    "Library/Application Support/Google/Chrome",
+    process.platform === "win32"
+      ? pathImpl.join(process.env.LOCALAPPDATA || pathImpl.join(osImpl.homedir(), "AppData", "Local"), "Google", "Chrome", "User Data")
+      : pathImpl.join(osImpl.homedir(), "Library/Application Support/Google/Chrome"),
     descriptor.chromeProfile,
     "Extensions",
     descriptor.id,

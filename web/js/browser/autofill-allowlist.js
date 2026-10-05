@@ -26,6 +26,7 @@ import { featureHidden } from "../core/features.js";
 import { getProfileChromeSource } from "./profiles.js";
 import { getBrowserState } from "./state.js";
 import { provide } from "../core/hooks.js";
+import { askConfirm } from "../explorer/context-menu.js";
 
 // 이 기능의 마크업 위치. index.html 에 두면 기능을 꺼도 바깥 요소가 파싱되므로 여기서 만든다.
 // 바깥 요소(aside 의 id·class)는 rail 표가 정본이고 여기는 안쪽만 담는다.
@@ -203,7 +204,7 @@ function wireAutofillAllowlist() {
     if (site) { afPick = site.dataset.afSite; afRefresh(false); return; }
     if (!window.acHost || !acHost.aiLoginSet) return;
     if (e.target.closest("[data-lockall]")) {
-      if (!confirm("허용해둔 계정을 전부 잠급니다. 계속할까요?")) return;
+      if (!(await askConfirm("허용해둔 계정을 전부 잠급니다. 계속할까요?"))) return;
       for (const x of afList.filter((v) => v.allowed)) await acHost.aiLoginSet(x.origin, x.username, false);
       afRefresh(); return;
     }

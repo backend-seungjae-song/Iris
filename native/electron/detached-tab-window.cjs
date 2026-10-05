@@ -1,8 +1,9 @@
-// 탭 하나만 담는 창. 크롬처럼 탭을 탭 띠에서 빼낼 때 쓴다.
+// 탭 띠에서 빼낸 탭을 담는 창. 크롬처럼 탭을 끌어내거나 "창으로 빼기"로 만들고, 그 창 안에서
+// 새 탭을 더 만들 수 있다. 창은 스페이스(공유 브라우저 포함)에만 속한다.
 //
 // 소유 범위
-//   tabId → BrowserWindow 장부와 그 창의 수명주기, 떨어져 나간 탭 목록의 방송.
-//   창 하나에 탭 하나이고 같은 탭은 창을 두 번 열지 않는다.
+//   창 id → { BrowserWindow, 스페이스, 탭 id 목록 } 과 그 창의 수명주기, 떨어져 나간 탭 목록의 방송.
+//   탭 하나는 많아야 한 창에만 속한다.
 //
 // 제공 API
 //   createDetachedTabWindows(deps) 하나만 내준다. 만들어진 API 는 열기·닫기·목록이며
@@ -17,8 +18,8 @@
 //   서브프레임·대화상자 차단·스로틀 중 하나라도 빠지면 그 창에서만 요소 선택이 동작하지 않거나,
 //   더 나쁘게는 파티션 가드가 없는 webview 가 생긴다. 검사가 두 자리를 대조한다.
 //   떨어진 탭은 옮긴 것이 아니라 감춘 것이다. 브라우저 상태의 탭 기록은 그대로 두고, 어느
-//   탭이 지금 떨어져 있는지만 이 모듈이 안다. 그래서 창을 닫으면 탭이 사라지지 않고 원래
-//   띠로 돌아온다. 창을 닫아 탭을 잃는 경로는 만들지 않는다.
+//   탭이 지금 어느 창에 있는지만 이 모듈이 안다. 그래서 창을 닫으면 그 창의 탭이 사라지지 않고
+//   원래 띠로 돌아온다. 창을 닫아 탭을 잃는 경로는 만들지 않는다. 창의 탭이 모두 빠지면 창을 닫는다.
 //   기록을 남기지 않는다. 앱을 다시 켜면 떨어진 탭은 없고 전부 자기 스페이스에 있다.
 //   끌기로 만든 창은 포커스를 가져가지 않는다(activate: false → showInactive). 가져가면 끌던
 //   창이 포커스를 잃고 그 순간 마우스 이벤트가 끊긴다. 끌기가 끝나지 못한 채 멈추고, 나중에
@@ -27,7 +28,7 @@
 //
 // 영향 범위
 //   공급자는 main.cjs 의 Electron 창·webview 정책 조각·window-layout 이다. 양방향 소비자는
-//   preload 의 detachTab·reattachTab·onDetachedTabs 와 web/js/browser 의 탭 띠다.
+//   preload 의 detachTab·reattachTab·claimDetachedTab·onDetachedTabs 와 web/js/browser 의 탭 띠다.
 //   여기가 일치하지 않으면 띠에서 감춰진 탭이 어느 창에도 없는 상태(탭 실종)가 된다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/detached-tab-window.cjs
 
@@ -43,11 +44,18 @@ function createDetachedTabWindows({
   loadUrlWithRetry, getAppUrl, noThrottleOpt, isTrustedSender, isAppQuitting,
   markAppAlive, log, screen,
 }) {
-  const wins = new Map(); // tabId -> BrowserWindow
-  const spaces = new Map(); // tabId -> space key
+  const wins = new Map(); // 창 id -> { win, space, tabs: Set<tabId> }
+  let seq = 0;
+
+  function winOfTab(tabId) {
+    for (const [wid, rec] of wins) if (rec.tabs.has(tabId)) return wid;
+    return null;
+  }
 
   function snapshot() {
-    return [...wins.keys()].map((tabId) => ({ tabId, space: spaces.get(tabId) || null }));
+    const out = [];
+    for (const [wid, rec] of wins) for (const tabId of rec.tabs) out.push({ tabId, space: rec.space, win: wid });
+    return out;
   }
 
   // 어느 탭이 떨어져 있는지는 모든 창이 함께 알아야 한다. 띠를 그리는 쪽이 그 값으로 감춘다.
@@ -59,6 +67,16 @@ function createDetachedTabWindows({
     return payload;
   }
 
+  // 탭을 지금 속한 창에서 뺀다. 그 창이 비면 닫는다(닫힘 처리에서 방송).
+  function removeFromWindow(tabId) {
+    const wid = winOfTab(tabId);
+    if (!wid) return false;
+    const rec = wins.get(wid);
+    rec.tabs.delete(tabId);
+    if (!rec.tabs.size) { try { rec.win.close(); } catch {} }
+    return true;
+  }
+
   // 분리 브라우저 창과 같은 정책이다. 달라지면 이 창의 webview 만 다른 규칙으로 동작한다.
   function applyWebviewPolicy(win) {
     win.webContents.on("will-attach-webview", (_ev, webPreferences) => {
@@ -67,6 +85,7 @@ function createDetachedTabWindows({
       webPreferences.nodeIntegrationInSubFrames = true;
       webPreferences.disableDialogs = true;
       webPreferences.backgroundThrottling = !noThrottleOpt;
+      webPreferences.transparent = false;
     });
     win.webContents.on("did-attach-webview", (_ev, guest) => {
       // 방금 붙은 게스트에는 브라우저 탭이 아닌 것도 온다(rail 화면이 담는 webview). 그것은
@@ -84,10 +103,15 @@ function createDetachedTabWindows({
     const sp = String(space || "").trim();
     if (!id || !sp) return null;
 
-    const existing = wins.get(id);
-    if (existing && !existing.isDestroyed()) {
-      try { if (activate) { existing.show(); existing.focus(); } else existing.showInactive(); } catch {}
-      return existing;
+    // 이미 혼자 떨어져 있는 탭이면 그 창을 앞으로. 다른 탭과 함께 있는 창이면 거기서 빼서 새 창으로.
+    const curWid = winOfTab(id);
+    if (curWid) {
+      const cur = wins.get(curWid);
+      if (cur.tabs.size === 1 && !cur.win.isDestroyed()) {
+        try { if (activate) { cur.win.show(); cur.win.focus(); } else cur.win.showInactive(); } catch {}
+        return cur.win;
+      }
+      cur.tabs.delete(id);
     }
 
     markAppAlive();
@@ -96,7 +120,7 @@ function createDetachedTabWindows({
       width: 1000, height: 760, minWidth: 420, minHeight: 320,
       // 띄우는 일은 아래에서 직접 한다. 끌기 중에는 포커스를 가져가면 안 된다.
       show: false,
-      backgroundColor: "#0A1620", titleBarStyle: "hiddenInset", acceptFirstMouse: true,
+      backgroundColor: "#0A1620", titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default", acceptFirstMouse: true,
       title: name ? `Iris — ${name}` : "Iris — 분리한 탭",
       webPreferences: {
         webviewTag: true, spellcheck: false, preload: preloadPath,
@@ -112,28 +136,49 @@ function createDetachedTabWindows({
       if (/^\[browser\]|error|Error/i.test(message)) log("[detached]", message);
     });
 
-    wins.set(id, win);
-    spaces.set(id, sp);
+    const wid = `w${++seq}`;
+    wins.set(wid, { win, space: sp, tabs: new Set([id]) });
 
-    const query = new URLSearchParams({ mode: "browser", space: sp, tab: id });
+    const query = new URLSearchParams({ mode: "browser", space: sp, win: wid, tab: id });
     loadUrlWithRetry(win, getAppUrl() + "/?" + query.toString());
 
     // 창을 닫는 것은 탭을 버리는 것이 아니라 되돌리는 것이다. 앱이 통째로 나가는 중이면
     // 되돌릴 화면도 없으므로 방송하지 않는다.
     win.on("closed", () => {
-      wins.delete(id); spaces.delete(id);
+      wins.delete(wid);
       if (!isAppQuitting()) broadcast();
     });
     broadcast();
     return win;
   }
 
+  // 탭을 원래 띠로 돌려보낸다. 그 탭만 있던 창이면 창이 닫힌다.
   function reattachTab(tabId) {
     const id = String(tabId || "").trim();
-    const win = wins.get(id);
-    if (!win || win.isDestroyed()) { wins.delete(id); spaces.delete(id); broadcast(); return false; }
-    try { win.close(); } catch {}
+    if (!removeFromWindow(id)) return false;
+    broadcast();
     return true;
+  }
+
+  // 탭을 분리 창에 넣는다. 그 창에서 새로 만든 탭과, 다른 분리 창에서 끌어온 탭이 여기로 온다.
+  // 같은 스페이스의 탭만 받는다. 탭 기록은 스페이스에 있으므로 창이 다른 스페이스 탭을 담으면 띠가 비게 된다.
+  function claimTab(winId, tabId, space) {
+    const rec = wins.get(String(winId || ""));
+    const id = String(tabId || "").trim();
+    if (!rec || rec.win.isDestroyed() || !id) return false;
+    if (space != null && String(space) !== rec.space) return false;
+    if (rec.tabs.has(id)) return true;
+    removeFromWindow(id);
+    rec.tabs.add(id);
+    broadcast();
+    return true;
+  }
+
+  // 끌기가 쓰는 판정. 그 탭 하나만 담은 창이면 그 창(창째로 끈다), 아니면 null(탭만 끈다).
+  function soloWindowFor(tabId) {
+    const wid = winOfTab(String(tabId || ""));
+    const rec = wid && wins.get(wid);
+    return rec && rec.tabs.size === 1 && !rec.win.isDestroyed() ? rec.win : null;
   }
 
   function registerDetachedTabIpc() {
@@ -152,6 +197,12 @@ function createDetachedTabWindows({
         return { ok: reattachTab(arg && arg.tabId) };
       } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
     });
+    ipcMain.handle("ac-claim-detached-tab", (e, arg) => {
+      try {
+        if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
+        return { ok: claimTab(arg && arg.win, arg && arg.tabId, arg && arg.space) };
+      } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+    });
     // 새로 뜬 창은 직접 요청해 현재 상태를 받는다. 방송만 있으면 늦게 뜬 창이 받지 못한다.
     ipcMain.handle("ac-detached-tabs", (e) => {
       if (!isTrustedSender(e)) return { tabs: [] };
@@ -164,11 +215,12 @@ function createDetachedTabWindows({
     BrowserWindow, ipcMain, screen, isTrustedSender,
     openDetachedTab: (a) => openDetachedTab(a),
     closeDetachedTab: (tabId) => reattachTab(tabId),
-    detachedWindowFor: (tabId) => wins.get(String(tabId || "")) || null,
+    moveDetachedTab: (tabId, winId, space) => claimTab(winId, tabId, space),
+    detachedWindowFor: (tabId) => soloWindowFor(tabId),
     log,
   });
 
-  return { openDetachedTab, reattachTab, detachedTabs: snapshot, registerDetachedTabIpc, tabDrag };
+  return { openDetachedTab, reattachTab, claimTab, detachedTabs: snapshot, registerDetachedTabIpc, tabDrag };
 }
 
 // 이 기능이 자기 연결을 직접 등록한다. 앱 셸(main.cjs)이 이 팩토리를 부르고 IPC 를 걸어 주던 두 줄을

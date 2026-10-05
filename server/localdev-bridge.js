@@ -32,6 +32,8 @@ async function readStatus() {
     }
     return { ok: true, data };
   } catch (e) {
+    // localdev.test 이름이 안 풀림: localdev(dnsmasq 설정) 없는 Mac
+    if (e?.cause?.code === "ENOTFOUND") return { ok: false, reason: "missing", detail: "ENOTFOUND" };
     return { ok: false, reason: "unreachable", detail: String(e?.cause?.code || e?.name || e?.message || e) };
   }
 }

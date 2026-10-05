@@ -92,6 +92,45 @@ function createWindowCatalog({ execFile, readCoreSource, log }) {
 
   let active = null;
 
+  const winNative = require("../../server/win-native.cjs");
+  async function windowsEnumerate() {
+    const result = await winNative.request({ op: "windows" });
+    if (!result.ok) return failure(result.error === "timeout" ? "timeout" : "exec", result.error);
+    const windows = require("./switcher-core.cjs").assignOrdinals(result.windows.map((w) => ({ ...normalizeWindow(w), pidStart: w.pidStart || "" })));
+    return { ok: true, windows, front: result.front };
+  }
+  async function windowsStep(input) {
+    const snapshot = await windowsEnumerate();
+    if (!snapshot.ok) return snapshot;
+    const core = require("./switcher-core.cjs");
+    const matches = [], missing = [], used = new Set();
+    for (const target of input.targets || []) {
+      const id = target.id ?? target.cgId;
+      let best = null, priority = Infinity;
+      for (const w of snapshot.windows) {
+        if (used.has(w.id)) continue;
+        if (target.cgId === w.cgId && (target.pid !== w.pid || (target.pidStart && target.pidStart !== w.pidStart))) continue;
+        const rank = core.matchWindow(target, w, "session");
+        if (rank === 4 && target.pidStart && target.pidStart !== w.pidStart) continue;
+        if (rank > 0 && rank < priority) { best = w; priority = rank; }
+      }
+      if (best) { used.add(best.id); matches.push({ id, window: best }); } else missing.push(id);
+    }
+    let resolved = matches.map((m) => m.id);
+    const front = matches.find((m) => m.window.id === snapshot.front)?.id ?? snapshot.front;
+    while (resolved.length) {
+      const id = core.selectTarget({ ...input, front, resolved }).id;
+      if (id == null) break;
+      const w = matches.find((m) => m.id === id).window;
+      if (w.pid === input.ownPid) return { ok: true, raised: null, own: id, resolved, missing, front };
+      const r = await winNative.request({ op: "focus", hwnd: w.id, pid: w.pid, start: w.pidStart });
+      if (r.ok) return { ok: true, raised: id, resolved, missing, front };
+      missing.push({ id, reason: r.error === "desktop-switch-unsupported" ? "desktop-switch-failed" : "raise-did-not-land" });
+      resolved = resolved.filter((other) => other !== id);
+    }
+    return { ok: true, raised: null, resolved, missing, front };
+  }
+
   function note(result) {
     if (!log || result.ok) return;
     try {
@@ -224,6 +263,7 @@ function createWindowCatalog({ execFile, readCoreSource, log }) {
   }
 
   async function enumerate() {
+    if (process.platform === "win32") return windowsEnumerate();
     const result = await execute("enumerate", {});
     if (!result.ok) return result;
     return { ok: true, windows: await addPidStarts(result.windows), front: result.front };
@@ -241,6 +281,7 @@ function createWindowCatalog({ execFile, readCoreSource, log }) {
   // 드러났고, 설정 화면을 열어 앱이 앞에 서 있으면 우연히 동작하기도 했다.
   // 호스트는 이미 ownPid 를 넘기고 있었고(switcher-host executeStep), 여기서만 누락됐다.
   function step({ ordered, cursor, dir, targets, ownPid } = {}) {
+    if (process.platform === "win32") return windowsStep({ ordered, cursor, dir, targets, ownPid });
     return execute("step", { ordered, cursor, dir, targets, ownPid });
   }
 

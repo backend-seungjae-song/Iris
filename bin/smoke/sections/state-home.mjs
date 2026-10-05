@@ -94,9 +94,10 @@ export default async function run() {
       // 0.0.0.0에 바인딩됐다(확인 결과, 수정 후 127.0.0.1로 복구).
       // 앱을 여는 줄과 새 앱의 서버 준비를 보는 줄은 모두 installed_env 를 거친다. 준비 확인이 개발
       // 포트·상태 폴더를 보면 개발 서버를 설치 앱의 서버로 여긴다.
+      // ELECTRON_RUN_AS_NODE 를 물려받으면 앱이 node 로 실행되자마자 끝나 새 앱도 되돌린 옛 앱도 뜨지 않는다.
       const sh = read("scripts/install-app.sh");
       const fn = sh.match(/^installed_env\(\) \{ env((?:\s+-u\s+\w+)+) "\$@"; \}$/m);
-      if (!fn || !["IRIS_STATE_DIR", "IRIS_PORT", "PORT", "REMOTE", "HOST"].every((v) => fn[1].includes("-u " + v))) return false;
+      if (!fn || !["IRIS_STATE_DIR", "IRIS_PORT", "PORT", "REMOTE", "HOST", "ELECTRON_RUN_AS_NODE"].every((v) => fn[1].includes("-u " + v))) return false;
       const opens = sh.split("\n").filter((line) => !/^\s*#/.test(line) && /\bopen -a\b/.test(line));
       return opens.length > 0 && opens.every((line) => /\binstalled_env open -a\b/.test(line))
         && /installed_env node scripts\/wait-installed-server\.cjs/.test(sh);

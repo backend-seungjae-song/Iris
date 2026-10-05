@@ -4,7 +4,7 @@
 
 ## 1. 설치하고 에이전트 준비하기
 
-Apple Silicon Mac과 macOS 14 이상이 필요합니다. **이 Mac에 관하여**에서 칩과 macOS 버전을 확인하세요. Intel Mac과 Windows는 지원하지 않습니다.
+Apple Silicon Mac과 macOS 14 이상이 필요합니다. **이 Mac에 관하여**에서 칩과 macOS 버전을 확인하세요. Intel Mac은 지원하지 않습니다. Windows x64는 [Windows 안내](../windows.md)의 설치 방법과 지원 범위를 먼저 확인하세요.
 
 `⌘Space`를 누르고 “터미널”을 검색해 여세요. 다음 명령을 한 줄씩 붙여넣고 Enter를 누릅니다.
 

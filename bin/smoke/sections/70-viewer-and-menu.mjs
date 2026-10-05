@@ -5,6 +5,7 @@
 // 영향 범위: 러너가 50 두 흐름 섹션 뒤·80 RED 블록 섹션 앞에서 이 run을 호출한다.
 //   지금 목록은 이걸로 센다: node bin/importers.mjs bin/smoke/sections/70-viewer-and-menu.mjs
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 
 import { b4Function, check, checkAsync, fnBody, read, readAll, require_, ROOT } from "../core.mjs";
 import {
@@ -123,9 +124,26 @@ console.log("\n[표 뷰어] 엑셀·CSV를 표로 연다");
     && /id: "sheet"[\s\S]*?read: \(path\) => \(\{ type: "sheet\.read", path \}\)/.test(viewerKinds)
     && /function requestFileContent\(path\)/.test(centerTabs)
     && /const kind = fileKindOf\(path, tab\);[\s\S]{0,200}kind\.read\(path, tab\)/.test(centerTabs));
-  check("여는 길이 둘이어도 같은 탭을 만든다", () =>
-    /function makeFileTab\(path\)/.test(centerTabs)
-    && ((centerTabs + fileRouting).match(/addTab\(sp, makeFileTab\(path\)\); requestFileContent\(path\)/g) || []).length >= 2);
+  check("여는 길이 둘이어도 같은 탭을 만든다", () => {
+    if (!/function makeFileTab\(path\)/.test(centerTabs)) return false;
+    for (const body of [b4Function(fileRouting, "openFileLocal"), b4Function(centerTabs, "restoreFileTabs")]) {
+      if (!/const tab = addTab\(sp, makeFileTab\(path\)\)/.test(body)
+        || !/requestFileContent\(path(?:, "open", sp, tab\.id)?\)/.test(body)
+        || !/trackFileWatch\(sp, tab\)/.test(body)) return false;
+    }
+    for (const platform of ["darwin", "win32"]) {
+      const tab = runInNewContext(b4Function(centerTabs, "makeFileTab").replace(/^export /, "")
+        + "\nmakeFileTab(filePath);", {
+        filePath: platform === "win32" ? "C:\\work\\sample.csv" : "/work/sample.csv",
+        fileKindOf: () => ({ tabKind: "sheet", tabFlags: { isSheet: true } }),
+        pathBasename: (p) => p.split(platform === "win32" ? "\\" : "/").pop(),
+        fileKinds: () => [{ tabFields: () => ({ sheet: null }) }],
+      });
+      if (tab.kind !== "sheet" || tab.label !== "sample.csv" || !tab.isSheet || tab.sheet !== null)
+        throw new Error(`${platform}: 공용 생성기가 표 탭을 만들지 않았다`);
+    }
+    return true;
+  });
   check("서버가 sheet.read를 받는다", () =>
     /msg\.type === "sheet\.read"/.test(srv) && /export async function handleSheetRead/.test(sheetHandlers));
   check("읽기 경계·크기 상한이 파일 읽기와 같다", () =>
@@ -201,6 +219,18 @@ console.log("\n[표 뷰어] 엑셀·CSV를 표로 연다");
     && /e\.target\.closest\("\.sv-corner"\)/.test(sheetEvents));
   check("찾기가 있다", () => /function svFind\(t, q, back\)/.test(sheetActions) && /data-sv="find-next"/.test(sheetRender));
   check("크게·작게가 있다", () => /function svZoom\(t, d\)/.test(sheetActions) && /data-sv="zoom-reset"/.test(sheetRender));
+  check("창 아래쪽 시트 탭 메뉴는 위로 열려 창 안에 보인다", () => {
+    const place = (anchorTop) => new Function("anchorTop", `
+      const innerWidth = 1000, innerHeight = 820, svCapture = null, svClosePopups = () => {}, setTimeout = () => {};
+      const box = { style: {}, offsetWidth: 160, offsetHeight: 132, addEventListener() {}, remove() {} };
+      const document = { createElement: () => box, body: { appendChild() {} }, addEventListener() {}, removeEventListener() {} };
+      const anchor = { hasAttribute: () => false, getBoundingClientRect: () => ({ left: 10, top: anchorTop, bottom: anchorTop + 20 }) };
+      ${fnBody(sheetActions, "svMenuAt")}
+      svMenuAt(anchor, "", () => {});
+      return parseFloat(box.style.top);`)(anchorTop);
+    const tabTop = place(790), toolTop = place(145);
+    return tabTop + 132 <= 812 && tabTop < 790 && toolTop === 167;
+  });
   check("고른 것을 아래에서 요약한다", () => /id="sv-stat"/.test(sheetRender) && /값 있는 칸/.test(sheetEdit));
   check("병합된 칸도 넘나든다", () => /function svAnchorOf\(t, r, c\)/.test(sheetModel) && /hidden\.set\(r \+ ","/.test(sheetModel));
   check("고정 경계가 선으로 보인다", () =>
@@ -227,16 +257,23 @@ console.log("\n[표 뷰어] 엑셀·CSV를 표로 연다");
     return !['"댓글 삽입', '"입력 도구', '"더보기"'].some((w) => block.includes(w));
   });
   check("메뉴 바도 긁은 그대로(계정 전용 껍데기 제외)", () => {
-    const block = sliceBetween(sheetModel, "const GS_MENUS = [", "const GS_TOOLBAR", "메뉴 바도 긁은 그대로(계정 전용 껍데기 제외)");
-    const hasAll = ["파일", "수정", "보기", "삽입", "서식", "데이터"].every((n) => block.includes('n: "' + n + '"'))
-      && block.includes('["찾기 및 바꾸기", "⌘⇧H"]')
-      && block.includes('["서식 지우기", "⌘\\\\"]')
-      && block.includes('["최적화 문제 풀이", ""]');
-    const noneOfShells = !["데이터 커넥터", "공유\"", "이메일\"", "Drive에 바로가기 추가",
-      "버전 기록", "오프라인 사용 설정", "보안 제한사항", "\"댓글\"", "사전 빌드된 테이블",
-      "그림 이모티콘", "스마트 칩", "데이터 분석", "그룹화 보기 만들기", "필터 보기 만들기",
-      "필터 보기로 저장", "시트 및 범위 보호"].some((w) => block.includes(w));
-    return hasAll && noneOfShells;
+    for (const platform of ["darwin", "win32"]) {
+      const km = runInNewContext(read("web/js/core/keymap.js").replace(/^import[^\n]*;$/gm, "").replace(/\bexport /g, "")
+        + "\n({ shortcutLabel });", { isHostWindows: () => platform === "win32" });
+      const menus = runInNewContext(sheetModel.replace(/^import[^\n]*;$/gm, "").replace(/\bexport /g, "")
+        + "\nGS_MENUS;", km);
+      if (Array.from(menus, (m) => m.n).join() !== "파일,수정,보기,삽입,서식,데이터") return false;
+      const items = menus.flatMap((m) => m.items);
+      for (const [label, mac, win] of [["찾기 및 바꾸기", "⌘⇧H", "Ctrl+Shift+H"],
+        ["서식 지우기", "⌘\\", "Ctrl+\\"], ["최적화 문제 풀이", "", ""]]) {
+        if (!items.some(([name, key]) => name === label && key === (platform === "win32" ? win : mac))) return false;
+      }
+      if (["데이터 커넥터", "공유", "이메일", "Drive에 바로가기 추가", "버전 기록", "오프라인 사용 설정",
+        "보안 제한사항", "댓글", "사전 빌드된 테이블", "그림 이모티콘", "스마트 칩", "데이터 분석",
+        "그룹화 보기 만들기", "필터 보기 만들기", "필터 보기로 저장", "시트 및 범위 보호"]
+        .some((label) => items.some(([name]) => name === label))) return false;
+    }
+    return true;
   });
   check("아직 안 옮긴 것은 그렇다고 말한다", () =>   // 아무 반응이 없으면 고장으로 보인다
     sheetActions.includes('showToast("아직 안 옮긴 기능입니다: "'));
@@ -410,7 +447,7 @@ check("webview 기본 배경이 흰색", () =>
 console.log("\n[메뉴] 화면을 다시 불러올 수 있다");
 const menuSource = read("native/electron/menu.cjs");
 check("보기 메뉴에 새로고침이 있다", () =>
-  /role: "reload", label: "새로고침", accelerator: "Cmd\+R"/.test(menuSource)
+  /role: "reload", label: "새로고침", accelerator: `\$\{modifier\}\+R`/.test(menuSource)
   && /role: "forceReload"/.test(menuSource));
 // 라벨만 있고 동작이 연결되지 않은 항목은 눌러도 아무 일이 없다. 그리고 "앱 새로고침" 에 가속기를
 // 두면 앱 전역에서 먼저 발화해 브라우저 창의 페이지 강제 리로드(⌘⇧R)를 가로챈다.

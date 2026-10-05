@@ -327,6 +327,20 @@ async function runChromeAuth({ url, session, partition, onStage, bounds, fields:
   let target;
   try { target = new URL(String(url)); } catch { return { ok: false, error: "주소를 해석할 수 없습니다." }; }
   if (!/^https?:$/.test(target.protocol)) return { ok: false, error: "http(s) 주소에서만 인증을 넘길 수 있습니다." };
+  if (process.platform === "win32") {
+    const browserId = String(chromeSource || "chrome").split(":", 1)[0] || "chrome";
+    const browser = require("../../server/win-native.cjs").browserPath(browserId);
+    if (!browser) return { ok: false, error: "연결된 Windows 브라우저를 찾지 못했습니다." };
+    return new Promise((resolve) => {
+      const child = spawn(browser, ["--new-window", target.href], { detached: true, stdio: "ignore", windowsHide: true });
+      child.once("error", () => resolve({ ok: false, error: "연결된 Windows 브라우저를 열지 못했습니다." }));
+      child.once("spawn", () => {
+        child.unref();
+        resolve({ ok: false, opened: true, via: "windows-native-open", cookieImport: false,
+          error: "브라우저에서 이 주소를 열었습니다. Windows Chrome의 App-Bound Encryption 쿠키는 Iris로 자동 이전할 수 없습니다. Iris에서 직접 로그인해 주세요." });
+      });
+    });
+  }
   if (!chromeSource || !cookieImport || typeof chromeCid !== "function") {
     return { ok: false, error: "이 Iris 프로필에 연결된 Chrome 계정이 없습니다. 계정 메뉴에서 Chrome 프로필을 먼저 가져와 주세요." };
   }

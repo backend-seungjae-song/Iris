@@ -77,7 +77,8 @@ body.browser-mode #wv-dock { display:grid; }
 .ico:disabled, .ico[disabled] { color:var(--faint); background:none; }
 
 /* 주소줄: 이동 · 주소 · 도구 세 묶음을 한 줄에 둔다. 색은 켜져 있는 것(북마크 별·크기 지정)에만 쓴다. */
-.urlbar { display:flex; align-items:center; gap:8px; flex:none; padding:8px 10px; border-bottom:1px solid var(--line); }
+/* 좁은 가운데(1180 창에 도킹)에서는 도구 묶음이 다음 줄로 내려간다. 주소칸은 최소 폭을 지켜 입력칸이 사라지지 않는다. */
+.urlbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex:none; padding:8px 10px; border-bottom:1px solid var(--line); }
 .ub-nav { display:flex; gap:2px; color:var(--muted); flex:none; }
 .ub-tools { display:flex; align-items:center; gap:2px; flex:none; }
 .ub-sep { width:1px; height:16px; background:var(--line); flex:none; margin:0 2px; }
@@ -95,7 +96,7 @@ body.browser-mode #wv-dock { display:grid; }
 .chip.on { border-color:var(--accent); color:var(--accent); }
 /* 제안 목록의 기준 박스는 입력칸만 감싼 래퍼다. .urlbar 전체를 기준으로 두면 버튼까지 포함한 폭이라
    왼쪽 끝이 창 끝에서 시작한다. 주소칸 안에 별표를 넣는다(크롬과 같은 위치). */
-.url-wrap { flex:1; min-width:0; height:28px; position:relative; display:flex; align-items:center; gap:8px; padding:0 10px;
+.url-wrap { flex:1; min-width:160px; height:28px; position:relative; display:flex; align-items:center; gap:8px; padding:0 10px;
   border-radius:var(--r); background:var(--raised); border:1px solid var(--line); color:var(--fg-2); font-size:var(--fs);
   transition:background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), transform .12s var(--ease), opacity var(--t) var(--ease); }
 .url-wrap:focus-within { border-color:var(--focus); }

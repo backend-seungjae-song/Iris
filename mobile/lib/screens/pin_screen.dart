@@ -50,7 +50,7 @@ class _AccessPinScreenState extends State<AccessPinScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 32, 20, 24),
                 children: [
                   Text(
-                    'Mac에서 정한 PIN을 입력하세요',
+                    '컴퓨터에서 정한 PIN을 입력하세요',
                     style: TextStyle(
                       color: context.iris.foreground,
                       fontSize: 24,
@@ -68,7 +68,7 @@ class _AccessPinScreenState extends State<AccessPinScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Mac의 Iris 원격 화면 → 접속 PIN에서 정하고 바꿉니다.',
+                    '컴퓨터의 Iris 원격 화면 → 접속 PIN에서 정하고 바꿉니다.',
                     style: TextStyle(
                       color: context.iris.muted,
                       fontSize: 14,

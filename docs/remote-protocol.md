@@ -105,7 +105,7 @@ Mac 화면은 연결 순서의 PIN 단계 안에서 숫자 6–32자리와 확�
 | `browser.profiles` | 브라우저 프로필 이름 목록 | `browser.profiles.result` |
 | `browser.profile.set` | 탭의 프로필 전환 | `remote.action.result` |
 | `browser.desktop` | 데스크톱 폭 전환 | `remote.action.result` |
-| `browser.translate` | 현재 페이지를 한국어로 번역 | `remote.action.result` |
+| `browser.translate` | 현재 페이지를 선택한 언어로 번역 | `remote.action.result` |
 | `browser.bookmarks` | 스페이스 북마크 목록 | `browser.bookmarks.result` |
 | `browser.bookmark.set` | 현재 탭 북마크 추가·삭제 | `remote.action.result` |
 | `browser.direct` | 현재 AI 조작 표시 해제 | `remote.action.result` |
@@ -190,7 +190,7 @@ Agent ref는 pane과 현재 세션 UUID를 함께 가리킨다. 일반 터미널
 | `browser.navigate` | `{type,rid,tab,url}`. HTTP(S), 1–2,048자, 공백·제어 문자 금지. |
 | `browser.tab.new` | `{type,rid,space,url?,title?,profile?,agent?,media?}`. `agent`가 있으면 현재 Agent.ref와 spaceRef를 다시 확인한다. `media`는 agent가 필수이며 url과 함께 보낼 수 없다. URL은 HTTP(S), `title` 1–80자, `profile` 1–60자. 기본 주소는 Google, 기본 제목은 `폰에서 연 탭`. | 성공 응답은 `{type:"remote.action.result",rid,result:"done",tab}`이며 `tab`은 방금 만든 탭의 공개 ref다.
 | `browser.desktop` | `{type,rid,tab,enabled}`. 켜면 1,280×800, 끄면 viewport 강제값을 없앤다. |
-| `browser.translate` | `{type,rid,tab}`. HTTP(S) 페이지를 기존 Iris 페이지 번역 기능으로 한국어 번역한다. |
+| `browser.translate` | `{type,rid,tab}`. HTTP(S) 페이지를 Iris 페이지 번역 기능에서 선택한 언어로 번역한다. |
 | `browser.direct` | `{type,rid,tab}`. 해당 탭의 현재 AI 조작 표시와 최근 AI 사용 표시를 지운다. |
 
 조작 성공은 `{type:"remote.action.result",rid,result}`다. `result`는 `done`, 상태가 같으면 `unchanged`, 에이전트나 pane으로 전달했으면 `sent`다. 폰 조작 자체는 AI 조작 표시를 만들지 않는다.

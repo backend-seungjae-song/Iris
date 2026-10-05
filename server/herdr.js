@@ -6,11 +6,11 @@
 //    pane 집합이 바뀌면 재구독한다. 전역 이벤트(pane.created 등)는 type만으로 구독.
 import net from "node:net";
 import { EventEmitter } from "node:events";
-import { herdrSession } from "./herdr-session.cjs";
+import { herdrEndpoint, herdrSession } from "./herdr-session.cjs";
 
 // 어느 세션의 소켓인지는 herdr-session.cjs 한 곳이 정한다. 여기서 경로를 다시 조합하면
 // pty.js 가 연결하는 세션과 갈라져, 사이드바와 터미널이 서로 다른 세션을 본다.
-const SOCK = herdrSession().socket;
+const SOCK = herdrEndpoint(herdrSession().socket);
 
 // type만으로 구독 가능한 전역 이벤트 (pane_id 불필요).
 const GLOBAL_SUBS = [
@@ -19,6 +19,15 @@ const GLOBAL_SUBS = [
   "workspace.focused", "workspace.moved", "workspace.reordered",
   "tab.created", "tab.closed", "tab.focused", "tab.renamed", "tab.moved",
 ].map((type) => ({ type }));
+
+// 소켓이 없거나(herdr 미설치·세션 미실행) 받는 쪽이 없으면 원문 "connect ENOENT …/herdr.sock" 대신
+// 사람이 할 일을 알 수 있는 문구로 바꾼다. 화면은 code 로 구분한다.
+function unreachable(e) {
+  if (!e || (e.code !== "ENOENT" && e.code !== "ECONNREFUSED")) return e;
+  const err = new Error("herdr 에 연결하지 못했습니다. herdr 가 설치되어 실행 중인지 확인하세요.");
+  err.code = "HERDR_UNREACHABLE";
+  return err;
+}
 
 export class HerdrClient extends EventEmitter {
   constructor() {
@@ -58,7 +67,7 @@ export class HerdrClient extends EventEmitter {
         if (msg.error) finish(reject, new Error(msg.error.message || "herdr error"));
         else finish(resolve, msg.result ?? msg);
       });
-      c.on("error", (e) => finish(reject, e));
+      c.on("error", (e) => finish(reject, unreachable(e)));
       c.on("end", () => finish(reject, new Error(`herdr closed: ${method}`)));
       timer = setTimeout(() => finish(reject, new Error(`herdr timeout: ${method}`)), 5000);
     });
@@ -101,8 +110,8 @@ export class HerdrClient extends EventEmitter {
   tabList(workspaceId) {
     return this.call("tab.list", { workspace_id: workspaceId }).then((r) => r.tabs || []);
   }
-  tabCreate(workspaceId) {
-    return this.call("tab.create", workspaceId ? { workspace_id: workspaceId } : {});
+  tabCreate(workspaceId, { focus = false } = {}) {
+    return this.call("tab.create", { ...(workspaceId ? { workspace_id: workspaceId } : {}), ...(focus ? { focus: true } : {}) });
   }
   tabRename(tabId, label) {
     return this.call("tab.rename", { tab_id: tabId, label });

@@ -1,3 +1,4 @@
+import { privatePath } from "./windows-private.cjs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +33,7 @@ export function createChannelRuntime(options = {}) {
     if (unregister) return;
     await fsp.mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 });
     await fsp.chmod(path.dirname(configPath), 0o700);
+    if (process.platform === "win32") privatePath(path.dirname(configPath));
     await atomicJson(configPath, {
       mcpServers: {
         "iris-remote": { command: nodePath, args: [scriptPath, socketPath],

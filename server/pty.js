@@ -15,19 +15,38 @@ const pty = require("node-pty");
 // herdr 실행 파일을 찾는 순서: 사람이 지정한 것 → PATH → 기본 설치 경로.
 // 한 사람의 홈 경로를 직접 지정하면 그 기기 밖에서는 터미널이 전혀 실행되지 않는다.
 // PATH는 launchd로 뜬 서버에서 로그인 셸의 것과 다르므로, 기본 경로를 마지막에 추가한다.
+const HERDR_FILE = process.platform === "win32" ? "herdr.exe" : "herdr";
+
+// 기본 설치 경로
+// Windows: herdr 공식 설치 스크립트(install.ps1)의 위치
+function defaultHerdrDirs() {
+  if (process.platform !== "win32") return [path.join(os.homedir(), ".local", "bin")];
+  const local = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  return [path.join(local, "Programs", "Herdr", "bin")];
+}
+
 export function findHerdrBin() {
   const named = (process.env.HERDR_BIN || "").trim();
   if (named) return named;
-  const dirs = [...(process.env.PATH || "").split(path.delimiter), path.join(os.homedir(), ".local", "bin")];
+  const dirs = [...(process.env.PATH || "").split(path.delimiter), ...defaultHerdrDirs()];
   for (const dir of dirs) {
     if (!dir) continue;
-    const candidate = path.join(dir, "herdr");
+    const candidate = path.join(dir, HERDR_FILE);
     try { accessSync(candidate, constants.X_OK); return candidate; } catch {}
   }
-  return "herdr"; // 찾지 못해도 spawn을 시도한다. 실패는 아래 onExit 경로가 알린다
+  // Windows 설치본의 동봉 herdr. 사용자가 설치한 herdr 가 없을 때만 사용
+  const bundled = (process.env.IRIS_BUNDLED_HERDR || "").trim();
+  if (bundled) { try { accessSync(bundled, constants.X_OK); return bundled; } catch {} }
+  return "herdr";
 }
 
-const HERDR_BIN = findHerdrBin();
+// 실행할 수 있는 herdr 가 없으면 null. 없는 파일을 spawn 하면 곧바로 종료되고 화면은 재연결만 반복해
+// 원인을 알 수 없다. 설치 직후 앱을 다시 켜지 않아도 연결되게 연결할 때마다 찾는다.
+export function runnableHerdrBin() {
+  const bin = findHerdrBin();
+  if (!path.isAbsolute(bin)) return (process.env.HERDR_BIN || "").trim() ? bin : null;
+  try { accessSync(bin, constants.X_OK); return bin; } catch { return null; }
+}
 // 어느 세션에 붙는지는 herdr-session.cjs 한 곳이 정한다. 여기에 이름을 직접 지정하면 개발 앱이
 // 사용자가 쓰는 그 채팅에 또 하나의 클라이언트로 붙고, herdr 가 공유 PTY 를 붙은 클라이언트
 // 크기로 리플로우해 사용자의 채팅 화면이 깨진다.
@@ -57,10 +76,16 @@ ensureSpawnHelper();
 // 확인 결과: shop CMS의 `next dev`가 포트 지정 없이 4271을 점유했고, 와일드카드(*:4271)로
 // 바인딩해 Iris의 127.0.0.1:4271과 충돌 없이 공존했다. 그래서 이름으로 접속하는 경로
 // (localhost → ::1)는 Iris가 아니라 CMS로 연결됐다.
-const SERVER_ONLY_ENV = ["PORT", "REMOTE"];
+// ELECTRON_RUN_AS_NODE 는 설치본이 Electron 을 node 로 쓰려고 서버에만 주는 값이다. 터미널로 넘어가면
+// 그 안에서 실행한 Electron 앱(electron ., 다른 Iris 개발 앱)이 앱이 아닌 node 로 떠서 app 이 없다며 죽는다.
+const SERVER_ONLY_ENV = ["PORT", "REMOTE", "ELECTRON_RUN_AS_NODE"];
+// Iris 를 Claude Code·Codex 세션의 셸에서 띄우면 그 세션의 표시가 서버 환경에 남는다. herdr 서버가 아직 없으면
+// attach 가 이 환경으로 서버를 띄우고, 그 안의 모든 pane 이 물려받는다. 그러면 pane 에서 실행한 Claude 의 훅과
+// 채널이 CLAUDE_CODE_SESSION_ID 로 Iris 를 띄운 세션을 자기 세션으로 보고한다(server/remote/hooks/ask-question.mjs).
+const AGENT_SESSION_ENV = /^(?:CLAUDECODE$|CLAUDE_CODE_|CLAUDE_PID$|CODEX_COMPANION_)/;
 export function cleanEnv() {
   const env = { ...process.env };
-  for (const k of Object.keys(env)) if (k.startsWith("HERDR_")) delete env[k];
+  for (const k of Object.keys(env)) if (k.startsWith("HERDR_") || AGENT_SESSION_ENV.test(k)) delete env[k];
   for (const k of SERVER_ONLY_ENV) delete env[k];
   env.TERM = "xterm-256color";
   return env;
@@ -71,15 +96,17 @@ export class PtyManager {
     this.sessions = new Map(); // ws → { proc }
   }
 
-  // 이 연결에 실제 herdr 터미널을 붙인다. 이미 있으면 재사용.
+  // 이 연결에 실제 herdr 터미널을 붙인다. 이미 있으면 재사용. herdr 가 없으면 null.
   start(ws, cols, rows, onData) {
     let s = this.sessions.get(ws);
     if (s && s.proc) return s;
-    const proc = pty.spawn(HERDR_BIN, ["session", "attach", SESSION], {
+    const bin = runnableHerdrBin();
+    if (!bin) return null;
+    const proc = pty.spawn(bin, ["session", "attach", SESSION], {
       name: "xterm-256color",
       cols: Math.max(20, cols | 0 || 120),
       rows: Math.max(5, rows | 0 || 32),
-      cwd: process.env.HOME,
+      cwd: process.env.HOME || os.homedir(),
       env: cleanEnv(),
         // raw 바이트를 그대로 전달한다. utf8 문자열 디코딩이 청크 경계에서 멀티바이트(한글)를
         // 잘라 깨뜨리는 것을 막는다. xterm이 바이트를 받아 부분 시퀀스를 스스로 조립한다.

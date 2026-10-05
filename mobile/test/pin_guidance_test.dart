@@ -14,7 +14,7 @@ Widget app(Widget home) =>
 void main() {
   testWidgets('PIN 입력 화면은 Mac에서 정하고 바꾸는 곳을 알려 준다', (tester) async {
     await tester.pumpWidget(app(const AccessPinScreen()));
-    expect(find.text('Mac의 Iris 원격 화면 → 접속 PIN에서 정하고 바꿉니다.'), findsOneWidget);
+    expect(find.text('컴퓨터의 Iris 원격 화면 → 접속 PIN에서 정하고 바꿉니다.'), findsOneWidget);
   });
 
   testWidgets('재연결 화면은 PIN 대기 초를 표시하고 연결을 막는다', (tester) async {
@@ -57,7 +57,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('Mac에 연결'));
+    await tester.tap(find.text('컴퓨터에 연결'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('connect-pin-sheet')), findsOneWidget);
     await tester.enterText(

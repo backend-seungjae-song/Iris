@@ -1,3 +1,4 @@
+import { isHostWindows, pathBasename } from "../core/host-path.js";
 // 파일 검색 팔레트. 현재 스페이스의 파일 트리를 fuzzy 검색해 여는 Quick Open을 맡는다.
 //
 // 소유 범위
@@ -16,6 +17,7 @@
 //   main 소유 lastAgents와 center 소유 centerSpace를 읽는 consoleSpace 경계,
 //   Explorer의 파일 reveal root 판정, WebSocket tree 응답 라우팅, sheet 파일 메뉴의 열기 동작.
 
+import { getSpaces } from "../herdr/state.js";
 import { consoleSpace, openFile } from "./file-routing.js";
 
 let esc, wsSend, getLastAgents;
@@ -31,7 +33,10 @@ export function initFilePalette(deps) {
 export function spaceRootFor(sp) {
   sp = sp || consoleSpace();
   const a = getLastAgents().find((x) => x.workspaceId === sp && x.cwd);
-  return a ? a.cwd : null;
+  if (a) return a.cwd;
+  // 셸만 열린 스페이스는 에이전트 cwd 가 없어 스페이스 폴더(탐색기 루트)로 대신함
+  const s = getSpaces().find((x) => x.id === sp);
+  return (s && s.folder) || null;
 }
 
 function ensurePaletteDom() {
@@ -76,12 +81,12 @@ function fuzzyScore(q, target) {
 
 function computePaletteMatches() {
   const q = (palInput.value || "").trim().toLowerCase();
-  const rootLen = palRoot ? palRoot.replace(/\/$/, "").length + 1 : 0;
+  const rootLen = palRoot ? palRoot.replace(isHostWindows() ? /[\\/]$/ : /\/$/, "").length + 1 : 0;
   if (!q) { palMatches = palFiles.slice(0, 200).map((abs) => ({ abs, rel: abs.slice(rootLen), pos: [] })); }
   else {
     const out = [];
     for (const abs of palFiles) {
-      const rel = abs.slice(rootLen), base = rel.split("/").pop();
+      const rel = abs.slice(rootLen), base = pathBasename(rel);
       const mb = fuzzyScore(q, base), mr = mb ? null : fuzzyScore(q, rel);
       if (!mb && !mr) continue;
       if (mb) { const off = rel.length - base.length; out.push({ abs, rel, score: mb.score + 100, pos: mb.pos.map((p) => p + off) }); }
@@ -106,7 +111,7 @@ function renderPaletteList() {
   if (!palRoot) { palListEl.innerHTML = `<li class="pal-empty">열린 스페이스가 없습니다</li>`; hint.textContent = ""; return; }
   if (!palFiles.length) { palListEl.innerHTML = `<li class="pal-empty">불러오는 중…</li>`; hint.textContent = ""; return; }
   palListEl.innerHTML = palMatches.map((m, i) => {
-    const base = m.rel.split("/").pop(), dir = m.rel.slice(0, m.rel.length - base.length);
+    const base = pathBasename(m.rel), dir = m.rel.slice(0, m.rel.length - base.length);
     return `<li class="pal-item${i === palSel ? " sel" : ""}" data-i="${i}"><span class="pal-name">${highlightMatch(base, m.pos, m.rel.length - base.length)}</span><span class="pal-dir">${esc(dir)}</span></li>`;
   }).join("") || `<li class="pal-empty">일치하는 파일 없음</li>`;
   hint.textContent = `${palMatches.length}${palMatches.length >= 200 ? "+" : ""} 결과${palTrunc ? " · 목록 일부만(대형 트리)" : ""}`;

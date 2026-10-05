@@ -10,7 +10,9 @@ import { snapshot } from "../../runtime-state.js";
 import { redactMacPaths, truncateUtf8 } from "../public-text.js";
 
 function executablePath(name) {
-  const candidates = [`/usr/bin/${name}`, `/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`];
+  const candidates = process.platform === "win32"
+    ? (process.env.PATH || "").split(path.delimiter).filter(Boolean).map((dir) => path.join(dir.replace(/^"|"$/g, ""), `${name}.exe`))
+    : [`/usr/bin/${name}`, `/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`];
   return candidates.find((candidate) => { try { fs.accessSync(candidate, fs.constants.X_OK); return true; } catch { return false; } }) || null;
 }
 

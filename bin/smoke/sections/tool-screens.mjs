@@ -128,6 +128,13 @@ await checkAsync("소스 제어 변경 목록은 폴더 트리로 묶이고 폴�
   return true;
 });
 
+// 전환이 거절되면 브랜치 목록이 그대로라 선택기를 다시 그리지 않는다. 고른 브랜치 항목을 그대로 두면
+// 실제 브랜치와 다른 이름이 보이고 같은 항목을 다시 골라도 전환 요청이 나가지 않는다.
+check("브랜치 항목을 고른 뒤 선택기는 지금 워크트리로 돌아간다", () => {
+  const sc = read("web/js/devtool/source-control.js");
+  return /scSelectValue\(scTarget, value\);[\s\S]{0,400}?if \(value\.startsWith\("branch:"\) && scTarget\) scDd\.setValue\(scTarget\);/.test(sc);
+});
+
 // 계정 화면의 마크업은 accounts-view.js 가, 이벤트 연결은 accounts-screen.js 가 갖는다.
 // 이름 하나가 빠지면 화면은 정상으로 보이고 버튼만 반응하지 않는다. 그래서 연결 쪽 소스에서
 // 참조하는 이름을 뽑아 마크업에 있는지 확인한다. 손으로 적은 목록은 연결이 바뀌어도 그대로다.
@@ -204,6 +211,9 @@ await checkAsync("diff 줄 번호가 옛쪽·새쪽을 따로 센다", async () 
   for (const r of rows) {
     if ((r.cls === "meta" || r.cls === "hunk") && (r.o || r.n)) throw new Error("머리 줄에 번호가 붙었다: " + r.text);
   }
+  // git 출력은 줄바꿈으로 끝난다. 그 뒤의 빈 조각은 파일의 줄이 아니다.
+  const ended = mod.diffRows(patch + "\n");
+  if (ended.length !== rows.length) throw new Error(`끝 줄바꿈이 줄을 하나 더 만든다: ${JSON.stringify(ended.at(-1))}`);
   return true;
 });
 
@@ -1029,6 +1039,8 @@ await checkAsync("부르는 이름은 채우는 자리가 있다", async () => {
     const src = read(rel).replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     // hasHook 도 호출 지점이다. 그 이름이 없으면 항상 거짓이 된다.
     for (const m of src.matchAll(/(?:callHook|hasHook)\(\s*"([^"]+)"/g)) called.set(m[1], rel);
+    // 네이티브 우클릭 메뉴는 등록된 이름을 main.js의 범용 listener에서 callHook으로 전달한다.
+    for (const m of src.matchAll(/registerContextAction(?:\?\.)?\(\s*\{\s*name:\s*"([^"]+)"/g)) called.set(m[1], rel);
     // 기능 id 를 앞에 붙여 부르는 이름(features.js 가 끌 때 부르는 `${id}.disabling`)은 기본 꺼짐 기능마다
     // 부르는 이름으로 센다. 그래서 기본 꺼짐 기능은 그 이름을 채워야 한다.
     for (const m of src.matchAll(/callHook\(\s*`\$\{\w+\}\.(\w+)`/g)) {
@@ -1300,15 +1312,23 @@ await checkAsync("끈 것은 부르지도 않고, 하나가 터져도 나머지�
 check("다시 읽으라는 안내가 실제 조합과 같다", () => {
   const keynav = read("web/js/core/keynav.js").replace(/\/\/[^\n]*/g, "");
   const page = read("web/js/devtool/keymap-page.js").replace(/\/\/[^\n]*/g, "");
-  // 메인 창에서 앱을 다시 읽는 지점이 shift 를 요구하는지 확인한다.
-  const seg = /if \(!BROWSER_MODE && e\.metaKey && e\.shiftKey && [^)]*k === "r"\) \{([\s\S]{0,300}?)\n    \}/.exec(keynav);
+  const seg = /if \(([^\n]+)\) \{\n      e\.preventDefault\(\);\n      try \{ window\.acHost && acHost\.appReload/.exec(keynav);
   if (!seg) throw new Error("앱 재로딩 자리를 못 찾음");
-  if (!/appReload|location\.reload/.test(seg[1])) throw new Error("그 자리가 다시 읽는 일을 안 한다");
+  const reloads = new Function("e", "BROWSER_MODE", "isHostWindows", "k", "return " + seg[1]);
+  for (const win of [false, true]) for (const browser of [false, true]) {
+    for (const ctrl of [false, true]) for (const meta of [false, true]) for (const shift of [false, true]) {
+      const e = { ctrlKey: ctrl, metaKey: meta, shiftKey: shift, altKey: false };
+      const want = shift && ((meta && !ctrl) || (win && ctrl && !meta)) && (!browser || win);
+      if (!!reloads(e, browser, () => win, "r") !== want) throw new Error(`앱 재로딩 조합 불일치: Windows=${win}, browser=${browser}, Ctrl=${ctrl}, Meta=${meta}, Shift=${shift}`);
+      if (reloads({ ...e, altKey: true }, browser, () => win, "r") || reloads(e, browser, () => win, "s")) throw new Error("다른 키가 앱을 다시 읽음");
+    }
+  }
   const features = read("web/js/core/features.js").replace(/\/\/[^\n]*/g, "");
   const note = sliceBetween(features, "export function featureRestartNote(id)", "export function featureIsKnown");
   if (!/showToast\([^;]*featureRestartNote\(id\)/.test(page)) throw new Error("설정이 기능별 다시 읽기 안내를 안 쓴다");
   const toast = /"([^"]*다시 읽으면[^"]*)"/.exec(note);
   if (!toast) throw new Error("안내 문구를 못 찾음");
+  if (!/shortcutLabel\("⌘⇧R 로 다시 읽으면 빠집니다"\)/.test(note)) throw new Error("Windows 안내가 수정키를 변환하지 않음");
   if (!/⌘⇧R/.test(toast[1])) throw new Error("안내가 ⌘⇧R 이 아니다: " + toast[1]);
   // ⌘R 만 적혀 있으면 그것은 이름 변경이다.
   if (/(^|[^⇧])⌘R/.test(toast[1])) throw new Error("⌘R 은 이름 변경이다: " + toast[1]);
@@ -2555,16 +2575,16 @@ await checkAsync("네이티브 기능 id 는 렌더러 표의 id 와 같은 낱�
   return true;
 });
 
-// ── 탭 분리 창은 자기 탭 하나가 전부다 ──────────────────────────────────────
+// ── 탭 분리 창에는 원래 창의 그룹이 따라오지 않는다 ─────────────────────────
 //
 // 빼낸 창에 원래 창의 그룹 띠가 따라오면 분리했는데 소속은 그대로인 것으로 보인다. 그룹은 원래
 // 창의 정리 도구다. 분리한 탭은 옮긴 것이 아니라 감춘 것이라 원래 창에서는 그대로 유지된다.
-check("탭 하나짜리 창은 그룹 띠를 안 그린다", () => {
+check("분리 창은 그룹 띠를 안 그린다", () => {
   const src = read("web/js/browser/tabs.js");
   const seg = sliceBetween(src, "export function renderBmTabs()", "\n}\n",
-    "탭 하나짜리 창은 그룹 띠를 안 그린다");
-  // 그룹을 순회하는 코드가 onlyTab 이 아닐 때로 제한돼 있어야 한다.
-  const guard = seg.indexOf("if (!onlyTab) {");
+    "분리 창은 그룹 띠를 안 그린다");
+  // 그룹을 순회하는 코드가 분리 창이 아닐 때로 제한돼 있어야 한다.
+  const guard = seg.indexOf("if (!ownTabs) {");
   const loop = seg.indexOf("for (const g of groups)");
   if (guard < 0) throw new Error("그룹 띠를 묶는 조건이 없다");
   if (loop < 0 || loop < guard) throw new Error("그룹을 도는 자리가 그 조건 밖에 있다");
@@ -2633,7 +2653,19 @@ check("끌기 판정은 렌더러가 하지 않는다", () => {
   return true;
 });
 
-check("탭 하나짜리 창에 되돌리기 단추를 두지 않는다", () => {
+// 다른 창이 보여 주는 탭의 페이지를 이 창에 남겨 두면 한 탭에 페이지가 둘이 되고, 합쳤을 때 이 창에 남은
+// 분리 전 페이지가 다시 보인다(확인 결과: 분리 창에서 옮긴 주소가 합치자 처음 주소로 돌아갔다).
+check("창은 자기가 보여 주지 않는 탭의 페이지와 잠든 기록을 내린다", () => {
+  const dockSrc = read("web/js/browser/dock.js");
+  const seg = sliceBetween(dockSrc, "export function reconcileBrowserMode()", "\n}\n",
+    "창은 자기가 보여 주지 않는 탭의 페이지와 잠든 기록을 내린다");
+  const drop = /const shownIds = new Set\(shownBmTabs\(\)\.map\(\(t\) => t\.id\)\);\s*for \(const t of tabs\) if \(!shownIds\.has\(t\.id\)\) \{[\s\S]*?removeWebview\(t\.id\);[\s\S]*?removeDiscardedWebview\(t\.id\);/;
+  if (!drop.test(seg)) throw new Error("보여 주지 않는 탭의 webview·잠든 기록을 내리지 않는다");
+  if (!/if \(!shownIds\.has\(t\.id\)\) continue;/.test(seg)) throw new Error("보여 주지 않는 탭을 이 창에서 만든다");
+  return true;
+});
+
+check("분리 창에 되돌리기 단추를 두지 않는다", () => {
   const tabs = read("web/js/browser/tabs.js");
   const feat = read("web/js/browser/detach-tab.js");
   // 되돌리는 방법은 크롬과 같다. 끌어다 붙이거나 창을 닫는다. 별도 버튼은 그 둘을 흐린다.
@@ -2775,4 +2807,17 @@ check("창이 포커스를 잃으면 끌기가 끝난다", () => {
   return true;
 });
 
+
+// 녹화 주입 코드는 템플릿 문자열이다. 그 안의 \s 는 문자열이 될 때 s 로 바뀌어, 페이지에 들어간 코드가
+// 공백 대신 글자 s 를 지운다. 소스가 아니라 만들어진 문자열을 평가해 본다.
+check("녹화 주입 코드의 정규식은 문자열이 된 뒤에도 공백을 가리킨다", () => {
+  const src = read("web/js/browser/record.js");
+  const a = src.indexOf("const REC_INJECT = `");
+  const b = src.indexOf("`;", a);
+  if (a < 0 || b < 0) return false;
+  const injected = runInNewContext(src.slice(a + "const REC_INJECT = ".length, b + 1));
+  new Function(injected);
+  const uses = injected.match(/\.replace\(\/[^/]*\/g/g) || [];
+  return uses.length >= 3 && uses.every((u) => u.includes("\\s+"));
+});
 }

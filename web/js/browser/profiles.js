@@ -343,7 +343,7 @@ export function openProfileMenu() {
     box.innerHTML = profs.length
       ? profs.map((p) => `<div class="pm-item pm-import" data-cid="${esc(p.id)}" data-clabel="${esc(p.label)}">${esc(p.label)}</div>`).join("")
       : blocked ? `<div class="pm-empty pm-blocked">${esc(blocked)}</div>`
-      : `<div class="pm-empty">설치된 Chrome 프로필 없음(macOS만 지원)</div>`;
+      : `<div class="pm-empty">설치된 Chrome 프로필 없음</div>`;
   })();
   menu.addEventListener("click", async (e) => {
     const imp = e.target.closest(".pm-import");

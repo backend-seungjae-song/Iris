@@ -7,7 +7,14 @@ const { inspectAndroidSetup } = require('./android-setup.cjs');
 
 function runCommand(file, args, { input, timeout = 15000, env } = {}) {
   return new Promise((resolve, reject) => {
-    const child = execFile(file, args, { timeout, maxBuffer: 4 * 1024 * 1024, env }, (error, stdout, stderr) => {
+    const batch = process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(file);
+    if (batch && [file, ...args].some(value => /[\x00-\x1f"&|<>^%!]/.test(value))) {
+      reject(new Error('Windows 명령 경로 또는 인자에 지원하지 않는 문자가 있습니다.'));
+      return;
+    }
+    const command = batch ? env?.ComSpec || process.env.ComSpec || 'cmd.exe' : file;
+    const commandArgs = batch ? [`/d /v:off /s /c "${[file, ...args].map(value => `"${value}"`).join(' ')}"`] : args;
+    const child = execFile(command, commandArgs, { timeout, maxBuffer: 4 * 1024 * 1024, env, ...(batch ? { windowsHide: true, windowsVerbatimArguments: true } : {}) }, (error, stdout, stderr) => {
       if (error) { error.message = String(stderr || error.message).trim(); reject(error); }
       else resolve(stdout);
     });
@@ -44,12 +51,12 @@ function createDeviceManager({ run = runCommand, platform = process.platform, en
         } catch (error) { out.ios.error = error.message; }
       })(),
       (async () => {
-        const setup = inspectAndroidSetup({ configuredPath: getSettings().androidSdkPath, home, env });
+        const setup = inspectAndroidSetup({ configuredPath: getSettings().androidSdkPath, home, env, platform });
         const sdk = setup.sdkPath;
         if (!sdk) { out.android.error = 'Android SDK를 찾지 못했습니다.'; return; }
         out.android.sdkPath = sdk;
         const tools = path.join(sdk, 'cmdline-tools');
-        const candidates = ['latest', ...entries(tools).filter(v => v !== 'latest').sort().reverse()].map(v => path.join(tools, v, 'bin', 'avdmanager'));
+        const candidates = ['latest', ...entries(tools).filter(v => v !== 'latest').sort().reverse()].map(v => path.join(tools, v, 'bin', platform === 'win32' ? 'avdmanager.bat' : 'avdmanager'));
         out.android.avdmanager = candidates.find(file => fs.existsSync(file)) || null;
         const imageRoot = path.join(sdk, 'system-images');
         for (const api of entries(imageRoot)) for (const tag of entries(path.join(imageRoot, api))) for (const abi of entries(path.join(imageRoot, api, tag))) {
@@ -138,6 +145,7 @@ function createDeviceManager({ run = runCommand, platform = process.platform, en
     const saved = preference && devices.find(d => (d.udid === preference || d.persistentId === preference) && d.runnable);
     if (saved) return saved;
     if (preference) fail('저장된 기본 기기를 실행할 수 없습니다. 런타임을 설치하거나 기본 기기 설정에서 다른 기기를 선택하세요.', 'saved_device_unavailable');
+    if (platform === 'win32') fail('기본 기기 설정에서 실행 가능한 Android 기기를 선택하세요.', 'default_device_required');
     const existing = chooseDefaultDevice(devices);
     if (existing) return existing;
     if (inventory.ios.error || !availability.serveSim?.ok) fail('기본 iPhone 13을 추가하려면 Xcode와 iOS 시뮬레이터 도구를 먼저 설정하세요.');

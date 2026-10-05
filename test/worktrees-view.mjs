@@ -89,6 +89,11 @@ function setup(entries, agents = [], extra = {}, tabs = []) {
   return {html, spaceId, repo};
 }
 let fixtureSequence = 0;
+// 안 쓰는 worktree 묶음을 펼친 목록
+function showIdle(spaceId) {
+  clickAction({ worktreeAction: "idle-toggle", wtSpace: spaceId });
+  return spaceList.innerHTML;
+}
 function groupOf(html, path) {
   const at = html.indexOf(`class="wt-group" data-wt-group=`);
   const groups = html.slice(at).split('<div class="wt-group"');
@@ -124,7 +129,8 @@ test("동일 작업 폴더의 저장소별 워크트리는 묶고 같은 브랜�
     primary(`/multi/${name}`), wt(name,{path:`${task}/worktrees/${name}`,branch:'feat/quest',taskUsers:[{paneId:'multi',sessionUuid:'session'}]}),
     wt('other',{path:`/other/${name}`,branch:'feat/quest'}),
   ]}));
-  const {html}=setup([], [{paneId:'multi',sessionUuid:'session',cwd:'/multi'}], {folder:'/multi',primary:null,repositories});
+  const {spaceId}=setup([], [{paneId:'multi',sessionUuid:'session',cwd:'/multi'}], {folder:'/multi',primary:null,repositories});
+  const html=showIdle(spaceId);
   const group=groupOf(html,task);
   assert.match(group,/wt-group-name">sample-task</);
   assert.doesNotMatch(html,/저장소 \d+개|wt-repositor|repositories-toggle/);
@@ -178,7 +184,7 @@ test("워크트리를 접어도 reveal 요청으로 고른 세션을 다시 표�
 });
 
 test("표시 이름은 폴더·브랜치 경로를 바꾸지 않고 HTML을 이스케이프한다", () => {
-  const {html}=setup([wt('label',{label:'검색 <개선>',branch:'feat/original'})]);
+  const html=showIdle(setup([wt('label',{label:'검색 <개선>',branch:'feat/original'})]).spaceId);
   const group=groupOf(html,`${WT}/label`);
   assert.match(group,/검색 &lt;개선&gt;/);
   assert.match(group,/feat\/original/);
@@ -209,10 +215,48 @@ test("숨겨져 있던 새 하위 에이전트도 현재 부모의 워크트리�
 test("하위 폴더의 linked worktree를 다시 읽어도 같은 실제 경로는 한 번만 표시한다", () => {
   const repo='/duplicates/client', task='/duplicates/client-dice-levelup';
   const entries=[primary(repo),wt('dice',{path:task,branch:'fix/dice-levelup-popup'})];
-  const {html}=setup([],[],{folder:'/duplicates',primary:null,repositories:[
+  const html=showIdle(setup([],[],{folder:'/duplicates',primary:null,repositories:[
     {repo,primary:repo,branches:['main'],entries},
     {repo:task,primary:repo,branches:['main'],entries},
-  ]});
+  ]}).spaceId);
   assert.equal(html.split(`class="wt-group" data-wt-group="${spaces[0].id}:${task}"`).length-1,1);
   assert.doesNotMatch(html,/choose-repo/);
+});
+
+test("안 쓰는 worktree 는 접힌 묶음에 모으고 눌러야 보인다", () => {
+  const live={session:{alive:true,paneId:'gone'}};
+  const {html,spaceId}=setup([primary('/fixture/idle'),wt('busy'),wt('made',{creator:live}),wt('old-a'),wt('old-b',{change:change({uncommitted:2})})],
+    [{paneId:'worker',cwd:`${WT}/busy`}],{folder:'/fixture/idle'});
+  assert.ok(groupOf(html,`${WT}/busy`));
+  assert.ok(groupOf(html,`${WT}/made`));
+  for(const name of ['old-a','old-b']) assert.doesNotMatch(html,new RegExp(`data-wt-path="${WT}/${name}"`));
+  assert.match(html,/data-worktree-action="idle-toggle"[^>]*aria-expanded="false">.*안 쓰는 worktree 2</);
+  const shown=showIdle(spaceId);
+  assert.match(shown,/aria-expanded="true">.*안 쓰는 worktree 2</);
+  for(const name of ['old-a','old-b']) assert.ok(groupOf(shown,`${WT}/${name}`));
+  assert.doesNotMatch(showIdle(spaceId),new RegExp(`data-wt-path="${WT}/old-a"`));
+});
+
+test("대기 중인 세션은 같은 대화가 마지막으로 실행한 worktree 에 남고, 지금 실행 중인 곳이 우선이다", () => {
+  const last=[{kind:'agent',paneId:'quiet',sessionUuid:'chat-1'}];
+  const {html}=setup([primary('/fixture/last'),wt('kept',{lastUsers:last}),wt('other',{lastUsers:[{kind:'agent',paneId:'quiet',sessionUuid:'old'}]})],
+    [{paneId:'quiet',sessionUuid:'chat-1',cwd:'/fixture/last',status:'idle'}],{folder:'/fixture/last'});
+  assert.match(groupOf(html,`${WT}/kept`),/data-target="quiet"/);
+  assert.doesNotMatch(groupOf(html,'/fixture/last'),/data-target="quiet"/);
+  assert.match(html,/안 쓰는 worktree 1</,'다른 대화의 기록만 있는 worktree 는 안 쓰는 묶음');
+  const moved=setup([primary('/fixture/moved'),wt('kept',{lastUsers:last}),wt('now',{running:[{kind:'agent',paneId:'quiet'}]})],
+    [{paneId:'quiet',sessionUuid:'chat-1',cwd:'/fixture/moved',status:'working'}],{folder:'/fixture/moved'}).html;
+  assert.match(groupOf(moved,`${WT}/now`),/data-target="quiet"/);
+  assert.doesNotMatch(groupOf(moved,`${WT}/kept`),/data-target="quiet"/);
+});
+
+test("여러 worktree 에 작업 기록으로만 이어진 세션은 기본 묶음에 보이고, 그 worktree 들은 안 쓰는 묶음에 들어간다", () => {
+  const linked={taskUsers:[{kind:'agent',paneId:'audit',sessionUuid:'s'}]};
+  const {html,spaceId}=setup([primary('/fixture/linked'),wt('qa-a',linked),wt('qa-b',linked)],
+    [{paneId:'audit',sessionUuid:'s',cwd:'/fixture/linked',status:'working'}],{folder:'/fixture/linked'});
+  assert.match(groupOf(html,'/fixture/linked'),/data-target="audit"/);
+  for(const name of ['qa-a','qa-b']) assert.doesNotMatch(html,new RegExp(`data-wt-path="${WT}/${name}"`));
+  assert.match(html,/안 쓰는 worktree 2</);
+  const shown=showIdle(spaceId);
+  for(const name of ['qa-a','qa-b']) assert.ok(groupOf(shown,`${WT}/${name}`));
 });

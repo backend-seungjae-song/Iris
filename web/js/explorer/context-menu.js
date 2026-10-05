@@ -1,3 +1,4 @@
+import { isHostWindows, normalizePath, pathDirname, pathBasename, pathWithin, relativePath } from "../core/host-path.js";
 // Explorer 파일·스페이스 컨텍스트 메뉴와 이름 입력 대화상자.
 //
 // 소유 범위
@@ -64,6 +65,7 @@ function spaceRoot() {
 
 function relPath(abs) {
   const r = spaceRoot();
+  if (isHostWindows()) return relativePath(r, abs) || pathBasename(abs);
   if (r && (abs === r || abs.startsWith(r + "/"))) return abs.slice(r.length + 1) || abs.split("/").pop();
   return abs.split("/").pop();
 }
@@ -84,7 +86,25 @@ export function spaceCtxItems(id) {
     { label: "이 스페이스 닫기", danger: true, disabled: !getIsLocal(), act: async () => {
       const n = (getLastAgents() || []).filter((a) => a.workspaceId === id).length;
       const warn = n ? `이 스페이스의 에이전트 ${n}개가 함께 종료됩니다.\n` : "";
-      if (!await askConfirm(`스페이스 "${name}"을(를) 닫을까요?`, `${warn}되돌릴 수 없습니다.`)) return;
+      // 닫힌 스페이스의 가운데 탭은 다시 열 곳이 없음. 미저장 편집은 닫기 전에 저장 여부를 물음
+      const dirty = getTabs(id).filter((tabRef) => isTabDirty(tabRef));
+      if (dirty.length) {
+        if (hasActiveCloseDialog()) return showToast("다른 저장 확인이 진행 중입니다", { level: "warn" });
+        const choice = await chooseDirtyAction(`스페이스 "${name}"을(를) 닫기 전에 저장할까요?`, [...dirty.map((tabRef) => tabRef.label || tabRef.path), warn].join("\n"));
+        if (!choice || choice === "cancel") return;
+        if (choice === "save") {
+          await Promise.allSettled(dirty.map((tabRef) => saveTabForClose(tabRef, id)));
+          if (getTabs(id).some((tabRef) => isTabDirty(tabRef))) { showToast("닫기 중단: 저장하지 못한 파일이 남아 있습니다", { level: "err" }); return; }
+        }
+      } else if (!await askConfirm(`스페이스 "${name}"을(를) 닫을까요?`, `${warn}되돌릴 수 없습니다.`)) return;
+      // 선택이 닫힌 스페이스에 남으면 탐색기·메모가 없는 스페이스를 가리킴. 옆 스페이스로 옮김
+      if (getSelectedSpaceId() === id) {
+        const list = orderedSpaces();
+        const at = list.findIndex((x) => x.id === id);
+        const next = list[at + 1] || list[at - 1];
+        if (next) focusSpace(next.id);
+      }
+      removeTabsNow(getTabs(id).map((tabRef) => ({ space: id, tabRef })));
       wsSend({ type: "space.close", workspaceId: id });
     } },
   ];
@@ -113,8 +133,9 @@ function createEntryMenuItems(destDir) {
 // extra: 부르는 쪽이 덧붙일 항목(탭바에서 부를 때의 닫기 계열). 메뉴 본체는 한 곳에만 둔다.
 // 트리와 탭바가 각자 메뉴를 만들면 한쪽만 오래된 상태로 남는다.
 export function openFileCtx(x, y, absPath, isDir, extra) {
-  const destDir = isDir ? absPath : absPath.slice(0, absPath.lastIndexOf("/"));
+  const destDir = isDir ? absPath : pathDirname(absPath);
   const normalizeLexicalPath = (value) => {
+    if (isHostWindows()) return normalizePath(value);
     const parts = [];
     for (const part of String(value || "").split("/")) {
       if (!part || part === ".") continue;
@@ -124,7 +145,7 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
   };
   const isPathWithin = (rootPath, childPath) => {
     const root = normalizeLexicalPath(rootPath), child = normalizeLexicalPath(childPath);
-    return child === root || child.startsWith(root === "/" ? "/" : root + "/");
+    return isHostWindows() ? pathWithin(root, child) : child === root || child.startsWith(root === "/" ? "/" : root + "/");
   };
   const filePathIdentity = async (pathValue) => {
     try { return await window.acHost?.filePathIdentity(pathValue); }
@@ -157,7 +178,7 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
   const items = [];
   items.push(...createEntryMenuItems(destDir));
   items.push({ sep: true });
-  items.push({ label: "Finder에서 보기", act: () => window.acHost?.revealInFinder(absPath) });
+  items.push({ label: isHostWindows() ? "탐색기에서 보기" : "Finder에서 보기", act: () => window.acHost?.revealInFinder(absPath) });
   items.push({ sep: true });
   items.push({ label: "상대 경로 복사", act: () => { copyText(relPath(absPath)).then((ok) => showToast(ok ? "상대 경로 복사됨" : "상대 경로를 복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } });
   items.push({ label: "경로 복사", act: () => { copyText(absPath).then((ok) => showToast(ok ? "경로 복사됨" : "경로를 복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } });
@@ -171,7 +192,7 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
   } });
   items.push({ sep: true });
   items.push({ label: "이름 변경", act: async () => {
-    const cur = absPath.split("/").pop();
+    const cur = pathBasename(absPath);
     const name = await askText("새 이름", cur, relPath(absPath));
     if (name && name.trim() && name.trim() !== cur) wsSend({ type: "fs.op", op: "rename", path: absPath, name: name.trim() });
   } });
@@ -215,7 +236,7 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
     const res = await window.acHost?.trashItem(absPath);
     if (!res || !res.ok) { showToast("삭제 실패", { level: "err", detail: String(res && res.error || "알 수 없음") }); return; }
     removeTabsNow(freshAffectedTabs);
-    const parent = absPath.slice(0, absPath.lastIndexOf("/")); invalidateDir(parent); requestDir(parent); renderFileTree(); showToast("휴지통으로 이동됨", { level: "ok" });
+    const parent = pathDirname(absPath); invalidateDir(parent); requestDir(parent); renderFileTree(); showToast("휴지통으로 이동됨", { level: "ok" });
   } });
   if (Array.isArray(extra)) items.push(...extra);
   showCtx(x, y, items);

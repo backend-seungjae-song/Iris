@@ -67,7 +67,7 @@ class PairingQr {
     // Mac 원격 화면의 휴대폰 Tailscale 설치 QR
     if (text.contains('com.tailscale.ipn')) {
       throw const ProtocolException(
-        'Tailscale 설치 QR입니다. 휴대폰 기본 카메라로 찍으세요. Iris 앱으로는 Mac에서 기기 추가를 눌러 나온 QR을 찍습니다.',
+        'Tailscale 설치 QR입니다. 휴대폰 기본 카메라로 찍으세요. Iris 앱으로는 컴퓨터에서 기기 추가를 눌러 나온 QR을 찍습니다.',
       );
     }
     final Object? decoded;
@@ -95,13 +95,13 @@ class PairingQr {
     final certHash = map['certHash'];
     final secret = map['secret'];
     if (address is! String || !_isIpv4(address)) {
-      throw const ProtocolException('Mac 주소가 올바르지 않습니다.');
+      throw const ProtocolException('컴퓨터 주소가 올바르지 않습니다.');
     }
     if (port is! int || port < 1 || port > 65535) {
-      throw const ProtocolException('Mac 연결 포트가 올바르지 않습니다.');
+      throw const ProtocolException('컴퓨터 연결 포트가 올바르지 않습니다.');
     }
     if (certHash is! String || !_sha256.hasMatch(certHash)) {
-      throw const ProtocolException('Mac 인증서 정보가 올바르지 않습니다.');
+      throw const ProtocolException('컴퓨터 인증서 정보가 올바르지 않습니다.');
     }
     if (secret is! String || !_pairingSecret.hasMatch(secret)) {
       throw const ProtocolException('페어링 비밀 정보가 올바르지 않습니다.');
@@ -137,7 +137,7 @@ class AuthChallenge {
       'nonce',
       'certHash',
     })) {
-      throw const ProtocolException('Mac이 올바른 연결 정보를 보내지 않았습니다.');
+      throw const ProtocolException('컴퓨터가 올바른 연결 정보를 보내지 않았습니다.');
     }
     final map = value! as Map<String, dynamic>;
     if (map['type'] != 'auth.challenge' ||
@@ -150,10 +150,10 @@ class AuthChallenge {
         !_sha256.hasMatch(map['nonce'] as String) ||
         map['certHash'] is! String ||
         !_sha256.hasMatch(map['certHash'] as String)) {
-      throw const ProtocolException('Mac이 올바른 연결 정보를 보내지 않았습니다.');
+      throw const ProtocolException('컴퓨터가 올바른 연결 정보를 보내지 않았습니다.');
     }
     if (map['certHash'] != pin) {
-      throw const ProtocolException('Mac의 인증서가 등록한 것과 다릅니다.');
+      throw const ProtocolException('컴퓨터의 인증서가 등록한 것과 다릅니다.');
     }
     return AuthChallenge(
       serverInstance: map['serverInstance'] as String,
@@ -615,10 +615,10 @@ ServerMessage parseServerMessage(String text) {
   try {
     decoded = jsonDecode(text);
   } on FormatException {
-    throw const ProtocolException('Mac이 읽을 수 없는 응답을 보냈습니다.');
+    throw const ProtocolException('컴퓨터가 읽을 수 없는 응답을 보냈습니다.');
   }
   if (decoded is! Map<String, dynamic>) {
-    throw const ProtocolException('Mac 응답 형식이 올바르지 않습니다.');
+    throw const ProtocolException('컴퓨터 응답 형식이 올바르지 않습니다.');
   }
   final advanced = _parseAdvancedServerMessage(decoded);
   if (advanced != null) return advanced;
@@ -805,7 +805,7 @@ ServerMessage parseServerMessage(String text) {
         }
       }
   }
-  throw const ProtocolException('Mac 응답 형식이 올바르지 않습니다.');
+  throw const ProtocolException('컴퓨터 응답 형식이 올바르지 않습니다.');
 }
 
 RemoteAgent? _parseAgent(Object? value) {

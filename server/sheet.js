@@ -743,7 +743,11 @@ export function writeSeparated(filePath, sep, edits) {
     row[e.c - 1] = e.v == null ? "" : String(e.v);
   }
   const q = (v) => (new RegExp(`["\\n\\r${sep === "\t" ? "\\t" : ","}]`).test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  const out = rows.map((r) => r.map((v) => q(String(v == null ? "" : v))).join(sep)).join("\n");
+  // 줄 끝 형식과 끝 줄바꿈도 원본을 따른다. 맞추지 않으면 칸 하나만 고쳐도 CRLF 파일은 모든 줄이,
+  // 끝 줄바꿈이 있던 파일은 마지막 줄이 바뀐 것으로 diff 에 잡힌다.
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const finalEol = rows.length && /\n$/.test(text) ? eol : "";
+  const out = rows.map((r) => r.map((v) => q(String(v == null ? "" : v))).join(sep)).join(eol) + finalEol;
   fs.writeFileSync(filePath, (bom ? "﻿" : "") + out, "utf8");
   return edits.length;
 }

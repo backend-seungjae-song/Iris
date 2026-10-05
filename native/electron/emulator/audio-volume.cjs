@@ -33,6 +33,23 @@ function parseProcessTable(text) {
   }
   return rows;
 }
+async function windowsPids(device) {
+  const port = androidConsolePort(device);
+  if (!port) return [];
+  const native = require("../../../server/win-native.cjs");
+  const r = await native.request({ op: "portPid", port });
+  if (!r.ok) return [];
+  const result = await native.request({ op: "processes" });
+  if (!result.ok) return [];
+  const owner = result.processes.find((p) => p.pid === r.pid);
+  if (!/^(?:qemu-system-[\w-]+|emulator)(?:\.exe)?$/i.test(owner?.name || "")) return [];
+  const selected = new Set([r.pid]);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const row of result.processes) if (selected.has(row.ppid) && !selected.has(row.pid)) { selected.add(row.pid); changed = true; }
+  }
+  return [...selected];
+}
 
 // 그 기기 launchd_sim 과 자손 전부. 명령줄에 기기 폴더가 들어간 프로세스도 포함(부모가 바뀐 경우 대비)
 function iosPids(rows, udid) {
@@ -66,6 +83,7 @@ function run(cmd, args) {
 }
 
 async function resolvePids(device) {
+  if (process.platform === "win32") return windowsPids(device);
   const port = androidConsolePort(device);
   if (port) {
     const out = await run("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
@@ -76,6 +94,9 @@ async function resolvePids(device) {
 
 // 소스 해시로 캐시. 설치 앱은 소스가 asar 안이라 swiftc 가 못 읽음 → 상태 폴더에 복사 후 컴파일
 function helperBuilder(cacheDir, deps = {}) {
+  if (process.platform === "win32") return async () => {
+    throw new Error("Windows 음량 조절은 공용 네이티브 도우미를 사용합니다.");
+  };
   const exec = deps.execFile || execFile;
   let pending = null;
   return () => {
@@ -128,6 +149,10 @@ function createVolumeController({ stateDir, deps = {} }) {
   }
 
   function stopHelper(entry) {
+    if (process.platform === "win32" && entry.winPids?.length) {
+      void require("../../../server/win-native.cjs").request({ op: "audio", pids: entry.winPids, volume: 1, muted: false });
+      entry.winPids = [];
+    }
     clearInterval(entry.timer);
     entry.timer = null;
     const h = entry.helper;
@@ -178,6 +203,28 @@ function createVolumeController({ stateDir, deps = {} }) {
 
   async function apply(device) {
     const entry = devices.get(device);
+    if (process.platform === "win32") {
+      const sendWindows = async () => {
+        if (entry !== devices.get(device)) return { ok: false, error: "기기 연결이 종료되었습니다" };
+        const pids = await findPids(device);
+        if (!pids.length) return { ok: false, error: "기기의 오디오 프로세스를 찾지 못했습니다" };
+        entry.winPids = pids;
+        const r = await require("../../../server/win-native.cjs").request({ op: "audio", pids, ...entry.level });
+        entry.error = r.ok ? null : r.error;
+        return r;
+      };
+      if (isPassthrough(entry.level)) {
+        clearInterval(entry.timer); entry.timer = null;
+        if (!entry.winPids?.length) return { ok: true };
+        const r = await require("../../../server/win-native.cjs").request({ op: "audio", pids: entry.winPids, ...entry.level });
+        entry.winPids = [];
+        return r;
+      }
+      if (!entry.timer) {
+        entry.timer = setInterval(() => { void sendWindows(); }, RESEND_MS); entry.timer.unref?.();
+      }
+      return await sendWindows();
+    }
     if (isPassthrough(entry.level)) { stopHelper(entry); return { ok: true }; }
     try { if (!entry.helper) await startHelper(device, entry); }
     catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -224,4 +271,4 @@ function createVolumeController({ stateDir, deps = {} }) {
   return { use, set, stopAll };
 }
 
-module.exports = { createVolumeController, iosPids, parseProcessTable, androidConsolePort, normalizeLevel, isPassthrough, helperBuilder };
+module.exports = { createVolumeController, iosPids, parseProcessTable, windowsPids, androidConsolePort, normalizeLevel, isPassthrough, helperBuilder };

@@ -1154,7 +1154,7 @@ export default async function run() {
     const edit = b4Function(sheetEdit, "svEdit");
     const close = b4Function(sheetEdit, "svCloseEdit");
     const dirty = b4Function(sheetEdit, "svTabDirty");
-    b3Assert(/_svEd\s*=\s*\{[\s\S]{0,240}\borig\s*:\s*ta\.value\b/.test(edit), "svEdit이 textarea 원래 값을 _svEd.orig에 저장하지 않음");
+    b3Assert(/_svEd\s*=\s*\{[\s\S]{0,240}\borig\s*:\s*svSrcAt\(sh,\s*r,\s*c\)/.test(edit), "svEdit이 칸의 원래 값을 _svEd.orig에 저장하지 않음(입력칸 시작값을 쓰면 한 글자 편집이 버려짐)");
     b3Assert(/(?:validCommit\s*&&\s*(?:v|el\.value)\s*!==\s*ed\.orig|(?:v|el\.value)\s*!==\s*ed\.orig\s*&&\s*validCommit)/.test(close), "svCloseEdit이 원래 값과 달라진 경우에만 commit하지 않음");
     b3Assert(/editorDirty\s*=\s*!!\([\s\S]{0,360}?\.el\.value\s*!==\s*[\s\S]{0,80}?\.orig/.test(dirty), "isTabDirty의 열린 editor 판정이 실제 값 변경을 비교하지 않음");
     return true;

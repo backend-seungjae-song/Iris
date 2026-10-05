@@ -59,7 +59,8 @@ function showNavigationFeedback(rec) {
   if (!rec || activeBrowserId() !== rec.tabId) return;
   const { url, note } = navigationDisplay(rec);
   if (document.activeElement !== urlInput) urlInput.value = isNewTab(url, rec) ? "" : url;
-  if (getLoadFailure(rec.tabId)) bNote.textContent = getLoadFailure(rec.tabId);
+  // 분리 창은 탭이 있으면 안내 줄을 숨기므로 실패 문구일 때 다시 표시
+  if (getLoadFailure(rec.tabId)) { bNote.textContent = getLoadFailure(rec.tabId); bNote.hidden = false; }
   else if (note || rec.navigationNote === bNote.textContent) bNote.textContent = note;
   rec.navigationNote = note;
 }
@@ -102,7 +103,7 @@ export function createWebview(tabId, profileOverride, initialUrl) {
   // 닫은 탭 복원은 marker를 먼저 붙인다. main의 will-attach가 src를 비운 뒤 최초 load 전에 history를
   // 넣고, marker 자체는 실제 네트워크/탐색 대상으로 쓰이지 않는다.
   el.setAttribute("allowpopups", ""); el.setAttribute("src", historyToken ? historyStage.src : historyFallbackUrl); el.dataset.tab = tabId; el.dataset.profile = profileId;
-  const rec = { el, tabId, ready: false, pending: null, url: "", title: "" };  // tabId 를 들고 다녀야 상태 판정이 탭에 붙는다
+  const rec = { el, tabId, ready: false, pending: null, url: "", title: "", createdAt: Date.now() };  // tabId 를 들고 다녀야 상태 판정이 탭에 붙는다
   let historyRestoring = false;
   let historyResultPromise = null;
   if (historyToken) {
@@ -209,6 +210,9 @@ export function createWebview(tabId, profileOverride, initialUrl) {
     if (activeBrowserId() === tabId && document.activeElement !== urlInput) urlInput.value = isNewTab(e.url, rec) ? "" : (e.url || "");
     if (activeBrowserId() === tabId) syncNavButtons();
     if (callHook("record.tracked", tabId)) callHook("record.push", { k: "nav", url: e.url, spa: true });
+    // 서버 반영. 빠뜨리면 재시작 때 마지막 문서 로드 주소로 돌아감. 미러 탭은 backend 주소가 정본
+    if (callHook("mirror.tabUrl", tabId)) return;
+    const navSp = spaceOfTabId(tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace()); if (navSp) bsMutate({ op: "tab.navigate", space: navSp, id: tabId, url: e.url });
   });
   // 로드가 끝난 시점의 주소·제목을 한 번 더 보고한다. did-navigate가 안 오는 이동(about:blank 등)이
   // 있어 그것만 쓰면 탭 목록이 실제와 어긋난 채 남는다. AI는 그 목록을 보고 어느 탭인지 정한다.
@@ -222,7 +226,10 @@ export function createWebview(tabId, profileOverride, initialUrl) {
       if (u && u !== rec.url && rec.navigationState !== "failed") rec.url = u;
       endNavigation(rec, u);
       showNavigationFeedback(rec);
-      if (!mirrorUrl) rec.title = el.getTitle() || rec.title;
+      // <title> 이 없는 문서(text/plain 등)는 page-title-updated 가 오지 않아 이전 페이지 제목이 탭에 남는다.
+      // 그때 getTitle() 은 주소를 돌려준다.
+      const title = mirrorUrl ? "" : el.getTitle();
+      if (title && title !== rec.title) applyTitle(title);
       reportTabWc(rec, tabId);
     } catch (e) {}
     callHook("mirror.loadSettled", tabId);
@@ -246,12 +253,13 @@ export function createWebview(tabId, profileOverride, initialUrl) {
     setLoadFailure(tabId, failure);
     showNavigationFeedback(rec);
   });
-  el.addEventListener("page-title-updated", (e) => { if (callHook("mirror.tabUrl", tabId)) return; rec.title = e.title || ""; reportTabWc(rec, tabId); const tab = curTabs().find((x) => x.id === tabId);
+  const applyTitle = (title) => { rec.title = title || ""; reportTabWc(rec, tabId); const tab = curTabs().find((x) => x.id === tabId);
     const navSpName = spaceOfTabId(tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace());
     const state = getBrowserState();
     const hasCustom = !!((state.tabsBySpace && state.tabsBySpace[navSpName] || []).find((x) => x.id === tabId && x.name)); // 커스텀 이름이 있으면 페이지 제목으로 덮지 않음
-    if (tab && !hasCustom) { tab.label = e.title ? e.title.slice(0, 22) : "브라우저"; renderTabs(); }
-    const navSp = navSpName; if (navSp) bsMutate({ op: "tab.navigate", space: navSp, id: tabId, title: e.title || "" }); if (BROWSER_MODE) renderBmTabs(); });
+    if (tab && !hasCustom) { tab.label = title || "브라우저"; renderTabs(); }
+    const navSp = navSpName; if (navSp) bsMutate({ op: "tab.navigate", space: navSp, id: tabId, title: title || "" }); if (BROWSER_MODE) renderBmTabs(); };
+  el.addEventListener("page-title-updated", (e) => { if (callHook("mirror.tabUrl", tabId)) return; applyTitle(e.title); });
   // 요소 선택 결과: webview preload가 sendToHost('orca-pick', pick)로 보낸다(안정 IPC 채널).
   el.addEventListener("ipc-message", async (e) => {
     if (e.channel === "ac-file-drop") {
@@ -479,7 +487,7 @@ export function updateWebviewMeta(rec, meta = {}) {
   const state = getBrowserState();
   const hasCustom = !!((state.tabsBySpace && state.tabsBySpace[navSp] || []).find((x) => x.id === tabId && x.name));
   const tab = curTabs().find((x) => x.id === tabId);
-  if (titleChanged && tab && !hasCustom) { tab.label = title ? title.slice(0, 22) : "브라우저"; renderTabs(); }
+  if (titleChanged && tab && !hasCustom) { tab.label = title || "브라우저"; renderTabs(); }
   if (BROWSER_MODE && (urlChanged || titleChanged)) renderBmTabs();
   if (urlChanged) pushHistory(url);
 }

@@ -1,3 +1,4 @@
+import { request as winRequest } from "./win-native.cjs";
 // 요소 지목 → 소스 코드 위치. 화면에서 지목한 요소를 파일:라인으로 변환한다.
 //
 // 배경
@@ -96,6 +97,12 @@ async function rootForPort(port) {
   const hit = rootCache.get(port);
   if (hit && Date.now() - hit.at < ROOT_TTL) return hit.root;
   let root = null;
+  if (process.platform === "win32") {
+    const result = await winRequest({ op: "portCwd", port: Number(port) });
+    root = result.ok && result.cwd ? result.cwd : null;
+    rootCache.set(port, { root, at: Date.now() });
+    return root;
+  }
   const pids = (await sh("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"])).split("\n").map((s) => s.trim()).filter(Boolean);
   for (const pid of pids.slice(0, 3)) {
     const out = await sh("lsof", ["-a", "-p", pid, "-d", "cwd", "-Fn"]);

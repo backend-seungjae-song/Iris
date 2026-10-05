@@ -68,6 +68,25 @@ check("찾기는 guest 가 한다 — 호스트가 페이지를 뒤지지 않는
   return usesGuest && !scansHost;
 });
 
+// Electron 의 findNext 는 "새 검색을 시작하는가"다(true = 첫 요청). 뒤집으면 입력 중 개수가 비고 다음·이전이 멈춘다.
+check("입력·다시 열기·탭 전환은 새 검색, 다음·이전은 이어 찾기로 부른다", () => {
+  const calls = [];
+  const handlers = {};
+  const el = (id) => ({ id, hidden: true, value: "", textContent: "", classList: { toggle() {} }, focus() {}, select() {},
+    addEventListener(type, fn) { handlers[id + ":" + type] = fn; } });
+  const els = new Map();
+  const $ = (sel) => { if (!els.has(sel)) els.set(sel, el(sel.slice(1))); return els.get(sel); };
+  const wv = { findInPage: (q, o) => calls.push(`${q}:${o.findNext}`), addEventListener() {}, removeEventListener() {}, stopFindInPage() {}, focus() {} };
+  mod.initFindInPage({ $, activeWv: () => ({ el: wv }) });
+  mod.openFind();
+  $("#wv-find-q").value = "domain";
+  handlers["wv-find-q:input"]();
+  mod.findNext(true);
+  mod.findNext(false);
+  mod.findRetarget();
+  mod.closeFind();
+  return calls.join(" ") === "domain:true domain:false domain:false domain:true";
+});
 check("막대를 닫으면 페이지의 강조를 걷는다", () => {
   return /stopFindInPage\("clearSelection"\)/.test(FIND) && /function closeFind\(\)[\s\S]{0,240}clearFind\(\)/.test(FIND);
 });

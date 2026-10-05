@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { windowsPowerShellEnv } from "../windows-powershell.cjs";
 import { findTailscaleExecutable } from "./network.js";
 
 const execFile = promisify(execFileCallback);
@@ -30,6 +31,7 @@ function failure(code) {
 }
 
 export function createTailscaleSetup(options = {}) {
+  const windows = (options.platform || process.platform) === "win32";
   const run = options.execFile || execFile;
   const spawn = options.spawn || spawnChild;
   const access = options.access || fs.access;
@@ -42,6 +44,9 @@ export function createTailscaleSetup(options = {}) {
   let lastError = null;
 
   async function findBrew() {
+    if (windows) {
+      try { await run("winget.exe", ["--version"], { timeout: 5000 }); return "winget.exe"; } catch { return null; }
+    }
     for (const candidate of BREW_EXECUTABLES) {
       try { await access(candidate, fs.constants.X_OK); return candidate; } catch {}
     }
@@ -106,7 +111,11 @@ export function createTailscaleSetup(options = {}) {
     return exclusive("install", async () => {
       if (await cliOrNull()) return { ok: true, unchanged: true };
       const brew = await findBrew();
-      if (!brew) return failure("tailscale-brew-not-found");
+      if (!brew) return failure(windows ? "tailscale-winget-not-found" : "tailscale-brew-not-found");
+      if (windows) {
+        await run(brew, ["install", "--id", "Tailscale.Tailscale", "--exact", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements"], { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 });
+        return await cliOrNull() ? { ok: true } : failure("tailscale-cli-not-found");
+      }
       await run(brew, ["install", "tailscale"], { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 });
       return { ok: true };
     });
@@ -116,6 +125,13 @@ export function createTailscaleSetup(options = {}) {
     return exclusive("start", async () => {
       const cli = await cliOrNull();
       if (!cli) return failure("tailscale-cli-not-found");
+      if (windows) {
+        const inner = "$ErrorActionPreference='Stop'; $env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules'); Start-Service -Name Tailscale";
+        const encoded = Buffer.from(inner, "utf16le").toString("base64");
+        const script = `$p=Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','${encoded}'; exit $p.ExitCode`;
+        await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { timeout: 5 * 60_000, maxBuffer: 64 * 1024, env: windowsPowerShellEnv() });
+        return { ok: true };
+      }
       if (cli === APP_CLI) {
         await run("/usr/bin/open", ["-a", "Tailscale"], { timeout: 10_000 });
         return { ok: true };

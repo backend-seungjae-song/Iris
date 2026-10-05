@@ -71,12 +71,12 @@ test("확장의 새 탭은 요청한 탭의 스페이스·그룹·실제 프로�
     await page.addScriptTag({ content: built.outputFiles[0].text });
     const result = await page.evaluate(async () => {
       Fixture.replaceBrowserState({ tabsBySpace: { source: [{ id: "opener", group: "g1", profile: "old" }] } });
-      Fixture.registerWebview("opener", { el: { dataset: { profile: "live-profile" }, getWebContentsId: () => 11 } });
+      Fixture.registerWebview("opener", { el: { dataset: { profile: "live-profile" }, getWebContentsId: () => 11 }, ready: true, createdAt: Date.now() });
       Fixture.initWebview({ getSpaces: () => [{ id: "source" }] });
       const calls = [], woken = [];
-      const aiContext = { BROWSER_MODE: true, BOUND_SPACE: null, createWebview: (id, profile, url) => {
+      const aiContext = { BROWSER_MODE: true, BOUND_SPACE: null, reportTabWc: () => {}, createWebview: (id, profile, url) => {
         woken.push({ id, profile, url });
-        Fixture.registerWebview(id, { el: { getWebContentsId: () => 22 } });
+        Fixture.registerWebview(id, { el: { getWebContentsId: () => 22 }, ready: false, createdAt: Date.now() });
       } };
       Fixture.initAiTabs(aiContext);
       const ctx = { getWebviewEntries: Fixture.getWebviewEntries, openBrowserTab: (url, options) => {

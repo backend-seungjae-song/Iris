@@ -54,6 +54,7 @@ function ensureHost() {
   host.setAttribute("aria-label", "Iris 알림");
   noticeList = el("div", "iris-notices-list");
   more = addButton(host, "", () => { expanded = !expanded; render(); }, "iris-notices-more");
+  more.hidden = true; // 알림 없이 anchorNotices 로 만들면 render 전까지 빈 버튼이 창 머리 줄을 덮음
   host.prepend(noticeList);
   document.body.append(host);
 }

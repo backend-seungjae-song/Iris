@@ -28,6 +28,7 @@ import { editorPref, toggleEditorPref, subscribeEditorPrefs, monacoPrefOpts } fr
 import { registerEditorHost, updateEditorHost } from "../core/editor-hosts.js";
 import { bindKeymapAction, shortcutLabel } from "../core/monaco-keys.js";
 import { subscribeKeymap } from "../core/keymap.js";
+import { askConfirm } from "../explorer/context-menu.js";
 
 let $ = null;
 let MEMO_MODE = false;
@@ -359,8 +360,8 @@ export function initMemoWindow() {
     if (!name) { event.currentTarget.value = mwDoc.name || "메모"; return; }
     wsSend({ type: "memo.note.rename", requestId: memoReqId("memo-rename"), space: MW_SPACE, noteId: MW_NOTE, name });
   });
-  $("#mw-delete").addEventListener("click", () => {
-    if (!shared && mwDoc && confirm(`“${mwDoc.name || "메모"}”를 삭제할까요? 관리 화면에서 복구할 수 있습니다.`))
+  $("#mw-delete").addEventListener("click", async () => {
+    if (!shared && mwDoc && await askConfirm(`“${mwDoc.name || "메모"}”를 삭제할까요?`, "관리 화면에서 복구할 수 있습니다."))
       wsSend({ type: "memo.note.delete", requestId: memoReqId("memo-delete"), space: MW_SPACE, noteId: MW_NOTE });
   });
   $("#mw-duplicate").addEventListener("click", async () => {

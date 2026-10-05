@@ -109,7 +109,7 @@ function label(entry) {
 
 function createHost(ctx) {
   const store = createStore({ fs: require("node:fs"), path: require("node:path"), stateDir: ctx.stateDir });
-  const mac = ctx.mac || createMac({ execFile });
+  const mac = ctx.mac || (process.platform === "win32" ? require("./win.cjs").createWin({ screen: ctx.screen }) : createMac({ execFile }));
   const selfPid = ctx.selfPid || process.pid;
   const displayDebounceMs = ctx.displayDebounceMs ?? DISPLAY_CHANGE_DEBOUNCE_MS;   // 검사는 짧게 준다
 
@@ -180,6 +180,7 @@ function createHost(ctx) {
       return {
         bundle: w.bundle, appName: w.appName, pid: w.pid, cgId: w.cgId, title: w.title, slot: w.slot,
         rect: rectToRatio(w.rect, area), edges: computeEdges(w.rect, area), desktop: w.desktop, own: w.own,
+        ...(process.platform === "win32" ? { desktopId: w.desktopId || null } : {}),
       };
     });
     const monitors = slots.map((s) => {
@@ -261,7 +262,7 @@ function createHost(ctx) {
         entries.push({
           key: `${current.pid}:${current.cgId}`, saved, current, to,
           inPlace: near(current.rect, to, IN_PLACE_TOLERANCE_PX),
-          desktopOk: !saved.desktop || saved.desktop === current.desktop,
+          desktopOk: process.platform === "win32" ? !saved.desktopId || saved.desktopId === current.desktopId : !saved.desktop || saved.desktop === current.desktop,
         });
       }
     }
@@ -286,7 +287,7 @@ function createHost(ctx) {
       if (e.current.onCurrent) foreign.push(e); else elsewhere.push(e);
     }
     if (foreign.length) {
-      const res = await mac.applyWindows(foreign.map((e) => ({ pid: e.current.pid, cgId: e.current.cgId, from: e.current.rect, to: e.to })));
+      const res = await mac.applyWindows(foreign.map((e) => ({ pid: e.current.pid, cgId: e.current.cgId, ...(process.platform === "win32" ? { pidStart: e.current.pidStart } : {}), from: e.current.rect, to: e.to })));
       foreign.forEach((e, i) => {
         const r = res.ok ? res.results[i] : { ok: false, reason: res.reason };
         outcome.set(e.key, { ok: !!(r && r.ok), reason: r && r.reason });
@@ -343,6 +344,7 @@ function createHost(ctx) {
       if (c.locked || state.locked) return { restored: false, reason: "locked" };
       const { entries } = planEntries(layout.latest, c);
       const { outcome, elsewhere } = await applyReachable(entries);
+
       startPending(layout.latest, new Set(elsewhere.map((e) => e.key)));
       const placed = [...outcome.values()].filter((o) => o.ok).length;
       ctx.log && ctx.log(`[desklayout] 자동 복원(${reason}): 맞춤 ${placed}, 보류 ${elsewhere.length}`);
@@ -373,6 +375,9 @@ function createHost(ctx) {
       const { entries, missing } = planEntries(layout.latest, c);
       const { outcome, elsewhere } = await applyReachable(entries);
 
+      if (process.platform === "win32") for (const e of entries) {
+        if (!e.desktopOk || elsewhere.includes(e)) outcome.set(e.key, { ok: false, reason: "desktop-switch-failed" });
+      }
       // 모니터마다 데스크톱이 따로면 ctrl+화살표가 어느 모니터를 넘기는지 정할 수 없어 데스크톱 이동은 하지 않는다.
       const shared = c.desktops.length === 1;
       const order = shared ? c.desktops[0].order : [];
@@ -392,6 +397,7 @@ function createHost(ctx) {
           const from = framed && framed.ok && !e.current.own ? e.to : e.current.rect;
           visits.get(at).push({
             key: e.key, pid: e.current.pid, cgId: e.current.cgId, own: e.current.own,
+            ...(process.platform === "win32" ? { pidStart: e.current.pidStart } : {}),
             from, to: e.to, target,
           });
         }
@@ -447,6 +453,13 @@ function createHost(ctx) {
   }
 
   function relaunch(bundleId) {
+    if (process.platform === "win32") {
+      if (!path.win32.isAbsolute(bundleId) || !fs.existsSync(bundleId)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const child = require("node:child_process").spawn(bundleId, [], { detached: true, stdio: "ignore", windowsHide: true });
+        child.once("error", () => resolve()); child.once("spawn", () => { child.unref(); resolve(); });
+      });
+    }
     return new Promise((resolve) => execFile("open", ["-b", bundleId], () => resolve()));
   }
 
@@ -585,7 +598,7 @@ function startPackaged(ctx, host) {
     ctx.app.once("browser-window-created", (_e, win) => win.webContents.once("did-finish-load", () => host.notify(message, level)));
   };
   // 다른 앱의 창을 읽고 옮기려면 손쉬운 사용 권한이 필요하다. 없으면 알리고 시스템 요청 창을 띄운다.
-  if (!systemPreferences.isTrustedAccessibilityClient(false)) {
+  if (process.platform !== "win32" && !systemPreferences.isTrustedAccessibilityClient(false)) {
     noticeAfterLoad("창을 옮기려면 손쉬운 사용 권한이 필요합니다. 시스템 설정에서 Iris 를 허용해 주세요.", "warn");
     systemPreferences.isTrustedAccessibilityClient(true);
   }

@@ -4,7 +4,7 @@
 
 Iris에서 Claude Code와 Codex 세션을 프로젝트별로 관리하고, 작업 중인 웹페이지와 파일을 함께 볼 수 있습니다. 에이전트의 대화를 열어 보거나 화면의 요소와 조작 기록을 전달할 수 있습니다.
 
-macOS 14 이상과 Apple Silicon Mac이 필요합니다. 현재는 소스를 내려받아 설치합니다.
+macOS에서는 macOS 14 이상과 Apple Silicon Mac이 필요합니다. Windows x64 설치 방법과 지원 범위는 [Windows 안내](docs/windows.md)를 참고하세요. Windows도 저장소를 내려받아 setup으로 설치합니다.
 
 [설치하기](#설치하기) · [비개발자 튜토리얼](docs/tutorials/non-developers.md) · [개발자 튜토리얼](docs/tutorials/developers.md)
 
@@ -80,6 +80,8 @@ git clone https://github.com/backend-seungjae-song/Iris.git
 cd Iris
 ./setup
 ```
+
+Windows PowerShell에서도 clone한 뒤 `cd Iris`와 `.\setup.cmd`를 실행합니다. `setup.cmd --check`는 준비 상태를 확인하고 `setup.cmd --yes`는 도구 설치와 에이전트 설정 질문에 동의한 것으로 처리합니다. 설치 위치와 현재 지원 범위는 [Windows 안내](docs/windows.md)에 있습니다.
 
 설치 중 필요한 도구를 확인하고 의존성을 내려받은 뒤 앱을 빌드해 `/Applications`에 설치합니다. 외부 설치 스크립트 실행과 에이전트 설정 변경 전에는 실행할 명령과 확인 질문이 표시됩니다.
 

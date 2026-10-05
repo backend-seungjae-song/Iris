@@ -75,7 +75,7 @@ export function initCapability(ctx) {
     noteCopied(s, writeClipboard(s));
   });
   provide("chatcopy.dragHint", (kind, overTerminal) => setDragHot(fileDragHotNext(kind, overTerminal)));
-  provide("chatcopy.dropFiles", (files) => insertDroppedPaths(files, { acHost, showToast }));
+  provide("chatcopy.dropFiles", (files) => insertDroppedPaths(files, { acHost, showToast, getCurTarget }));
 
   async function finishDrag(e) {
     let got = null;

@@ -145,6 +145,12 @@ try {
     "// 그 앱을 종료하면 기기도 함께 꺼진다. 그래서 Simulator 를 여는 요청은 아무것도 하지 않는다.",
     "var MAC_OPEN_SHIM = `#!/bin/sh",
   ].join("\n"));
+  const runtimeCopy = '(0, import_node_fs3.cpSync)(bundledPackageDir, stagingDir, { recursive: true });';
+  if (mainSource.split(runtimeCopy).length !== 2) {
+    throw new Error("Orca의 런타임 복사 코드가 변경되었습니다");
+  }
+  mainSource = mainSource.replace(runtimeCopy,
+    'require("../../../server/copy-tree.cjs").copyTreeSync(bundledPackageDir, stagingDir, { recursive: true });');
   writeFileSync(OUT_MAIN, mainSource);
   console.log(`  ${path.relative(ROOT, OUT_MAIN)} ← orca@${commit.slice(0, 9)}`);
 

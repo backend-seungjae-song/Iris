@@ -90,7 +90,7 @@ export function openFind() {
   input.focus();
   input.select();
   // 크롬처럼, 열려 있는 상태에서 다시 ⌘F 를 누르면 지금 글자를 고르기만 하고 다시 찾지 않는다.
-  if (input.value) { lastQuery = input.value; run(lastQuery, { findNext: false }); }
+  if (input.value) { lastQuery = input.value; run(lastQuery, { findNext: true }); }
   return true;
 }
 
@@ -106,7 +106,7 @@ export function closeFind() {
 
 export function findNext(forward) {
   if (!barOpen || !lastQuery) return;
-  run(lastQuery, { findNext: true, forward: forward !== false });
+  run(lastQuery, { findNext: false, forward: forward !== false });
 }
 
 // 탭이 바뀌었다. 이전 탭의 강조를 지우고 개수를 되돌린다. 막대는 열어 둔 채 새 탭에서 이어 찾는다.
@@ -115,7 +115,7 @@ export function findRetarget() {
   bindTo(null);
   setCount(0, 0);
   if (barOpen && !findAvailable()) closeFind();
-  else if (barOpen && lastQuery) run(lastQuery, { findNext: false });
+  else if (barOpen && lastQuery) run(lastQuery, { findNext: true });
 }
 
 export function initFindInPage(deps) {
@@ -125,7 +125,7 @@ export function initFindInPage(deps) {
   countEl = $("#wv-find-count");
   input.addEventListener("input", () => {
     lastQuery = input.value;
-    run(lastQuery, { findNext: false });
+    run(lastQuery, { findNext: true });
   });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); return; }

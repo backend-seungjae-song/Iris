@@ -130,7 +130,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : 'Mac과 연결이 끊겼습니다.',
+              : '컴퓨터과 연결이 끊겼습니다.',
         );
       }
     }
@@ -719,7 +719,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : 'Mac과 연결이 끊겼습니다.',
+              : '컴퓨터과 연결이 끊겼습니다.',
         );
       }
     }
@@ -972,14 +972,14 @@ class _TerminalKeySettingsScreenState extends State<TerminalKeySettingsScreen> {
                           children: [
                             const TextSpan(text: '키 줄은 '),
                             TextSpan(
-                              text: 'Mac마다 따로',
+                              text: '컴퓨터마다 따로',
                               style: TextStyle(
                                 color: context.iris.foreground2,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                             const TextSpan(
-                              text: ' 저장합니다. Mac의 키 설정이 다르면 그 Mac에 맞는 조합으로 지정해 두세요.',
+                              text: ' 저장합니다. 컴퓨터의 키 설정이 다르면 그 컴퓨터에 맞는 조합으로 지정해 두세요.',
                             ),
                           ],
                         ),
@@ -1195,7 +1195,7 @@ class TerminalKeyEditorSheet extends StatefulWidget {
     this.initialName = '',
     this.initialKey = '',
     this.initialCtrl = false,
-    this.macName = 'Mac',
+    this.macName = '컴퓨터',
     super.key,
   });
 

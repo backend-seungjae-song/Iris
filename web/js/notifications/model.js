@@ -1,3 +1,4 @@
+import { pathBasename } from "../core/host-path.js";
 // 에이전트 스냅샷의 상태 전이를 알림 기록으로 바꾼다.
 //
 // 소유 범위
@@ -53,7 +54,7 @@ export function reconcileNotifications(state, agents, now = Date.now()) {
       if (!existing && !restore) {
         records.unshift({ id: `${key}:${now}`, key, paneId: pane, terminalId: agent.terminalId || null,
           workspaceId: agent.workspaceId,
-          agentName: agent.tabLabel || agent.cwd?.split("/").pop() || agent.agent || "에이전트",
+          agentName: agent.tabLabel || (agent.cwd && pathBasename(agent.cwd)) || agent.agent || "에이전트",
           kind, at: now, read: !initialized, pending: PENDING.has(kind) });
       }
     }

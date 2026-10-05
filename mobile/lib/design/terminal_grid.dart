@@ -455,5 +455,5 @@ class TerminalGridPainter extends CustomPainter {
 String terminalErrorMessage(String code) => switch (code) {
   'terminal-frame-too-large' => '터미널 화면이 48 KiB를 넘어 표시할 수 없습니다.',
   'terminal-layout-unavailable' => '터미널 화면 크기를 확인할 수 없습니다. 다시 연결하세요.',
-  _ => '터미널 화면을 읽지 못했습니다. Mac에서 pane 상태를 확인하세요.',
+  _ => '터미널 화면을 읽지 못했습니다. 컴퓨터에서 pane 상태를 확인하세요.',
 };
