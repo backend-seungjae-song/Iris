@@ -29,7 +29,8 @@ async function analyze() {
   const resolutions = [];
   const built = await esbuild.build({
     absWorkingDir: ROOT,
-    entryPoints: filesBelow(REMOTE).filter((file) => file.endsWith(".js")).map(relative),
+    entryPoints: filesBelow(REMOTE).filter((file) => file.endsWith(".js")
+      || file.endsWith(".cjs") || file === path.join(REMOTE, "agent-endpoint.mjs")).map(relative),
     bundle: true,
     write: false,
     metafile: true,
@@ -93,23 +94,47 @@ test("원격 상태 파일은 stateHome 경로만 사용한다", async () => {
   const installerFile = path.join(REMOTE, "installer.js");
   const tailscaleSetupFile = path.join(REMOTE, "tailscale-setup.js");
   const sourceControlFeatureFile = path.join(REMOTE, "features", "source-control.js");
+  const suppliedPathHelpers = new Map([
+    [path.join(REMOTE, "windows-private.cjs"), /fs\.lstatSync\(file\)/g],
+    [path.join(REMOTE, "agent-endpoint.mjs"), /fs\.readFileSync\(socketPath, 'utf8'\)/g],
+  ]);
+  const executableEnvironment = new Map([
+    [networkFile, /\bprocess\.env\.(?:PATH|ProgramFiles)\b/g],
+    [sourceControlFeatureFile, /\bprocess\.env\.PATH\b/g],
+  ]);
   for (const [file, info] of analysis.inputs) {
     if (file !== REMOTE && !file.startsWith(`${REMOTE}${path.sep}`)) continue;
     const source = fs.readFileSync(file, "utf8");
     const external = new Set(info.imports.filter((item) => item.external).map((item) => item.path));
     const importsFs = [...external].some((name) => ["fs", "fs/promises", "node:fs", "node:fs/promises"].includes(name));
     const importsStateHome = info.imports.some((item) => item.target === stateHomeFile);
-    if (importsFs && file !== networkFile && file !== installerFile && file !== tailscaleSetupFile
+    if (suppliedPathHelpers.has(file)) {
+      // 호출자가 지정한 경로만 사용하는 Windows 도우미
+      const calls = [...source.matchAll(/\bfs\.\w+\s*\(/g)];
+      assert.equal(calls.length, 1, file);
+      assert.equal([...source.matchAll(suppliedPathHelpers.get(file))].length, 1, file);
+      assert.equal(info.imports.some((item) => ["path", "node:path", "os", "node:os"].includes(item.path)), false, file);
+    } else if (importsFs && file !== networkFile && file !== installerFile && file !== tailscaleSetupFile
       && file !== sourceControlFeatureFile) assert.equal(importsStateHome, true, file);
-    assert.equal(/\bprocess\s*(?:\?\.|\.)\s*env\b/.test(source), false, file);
+    const environmentRead = /\bprocess\s*(?:\?\.|\.)\s*env\b/;
+    if (executableEnvironment.has(file)) {
+      // Windows 실행 파일 탐색용 환경변수와 macOS 기존 계약
+      for (const [, method] of source.matchAll(/\bfs\s*\.\s*(\w+)/g)) {
+        assert.ok(["access", "accessSync", "constants"].includes(method), `${file}: fs.${method}`);
+      }
+      assert.equal(environmentRead.test(source.replace(executableEnvironment.get(file), "executableDirectory")), false, file);
+      const mac = await esbuild.transform(source, { define: { "process.platform": '"darwin"' }, minifySyntax: true });
+      assert.equal(environmentRead.test(mac.code), false, `${file}: macOS`);
+    } else assert.equal(environmentRead.test(source), false, file);
     assert.equal(/["']~(?:[\\/]|["'])/.test(source), false, file);
   }
 });
 
-test("원격 모듈의 외부 import는 게이트웨이의 ws만 허용한다", async () => {
+test("원격 외부 의존성은 게이트웨이·QR·Windows 인증서에만 허용한다", async () => {
   const analysis = await analyze();
   const gatewayRoot = path.join(REMOTE, "gateway");
   const pairingFile = path.join(REMOTE, "pairing.js");
+  const certificateFile = path.join(REMOTE, "certificate.js");
   for (const item of analysis.resolutions) {
     if (!item.importer || (item.importer !== REMOTE && !item.importer.startsWith(`${REMOTE}${path.sep}`))) continue;
     assert.equal(path.isAbsolute(item.path), false, `${item.importer}: ${item.path}`);
@@ -119,7 +144,9 @@ test("원격 모듈의 외부 import는 게이트웨이의 ws만 허용한다", 
     for (const item of info.imports) {
       if (!item.external || isBuiltin(item.path)) continue;
       assert.equal((file.startsWith(`${gatewayRoot}${path.sep}`) && item.path === "ws")
-        || (file === pairingFile && item.path === "uqr"), true, `${file}: ${item.path}`);
+        || (file === pairingFile && item.path === "uqr")
+        || (file === certificateFile && item.kind === "dynamic-import"
+          && ["asn1js", "pkijs"].includes(item.path)), true, `${file}: ${item.path}`);
     }
   }
 });

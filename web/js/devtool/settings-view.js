@@ -312,7 +312,7 @@ function switcherPane(model) {
     }
     if (windows.some((window) => window.switchBlocked === true)) {
       parts.push(`<div class="km-note km-sw-blocked-note">전환 안 됨<br>
-        ${isHostWindows() ? "Windows가" : "macOS가"} 그 데스크톱으로 안 넘어감<br>
+        ${isHostWindows() ? "Windows가" : "macOS 가"} 그 데스크톱으로 안 넘어감<br>
         그 앱이 이 데스크톱에도 창을 갖고 있으면 그렇게 됨</div>`);
     }
   }
