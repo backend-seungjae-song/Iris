@@ -15,7 +15,7 @@ const helper = new URL("../server/qa-expiry-guard.cjs", import.meta.url).pathnam
 const report = new URL("../bin/mcp/report.mjs", import.meta.url).href;
 const id = (p) => { const s = fs.lstatSync(p, { bigint: true }); return { dev: String(s.dev), ino: String(s.ino) }; };
 function fixture(t) {
-  const state = fs.mkdtempSync(path.join(os.tmpdir(), "qa-coordinate-"));
+  const state = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "qa-coordinate-")));
   process.env.IRIS_STATE_DIR = state;
   t.after(() => fs.rmSync(state, { recursive: true, force: true }));
   const root = path.join(state, "artifacts", "qa");

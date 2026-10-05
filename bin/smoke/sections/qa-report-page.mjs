@@ -5,7 +5,7 @@
 //   분리하면서 본문을 바꾸지 않았고, 원본 대비 바이트 대조로 이를 강제한다.
 // 영향 범위: 러너가 동적 import 로 이 run 을 부르며 sources 의 공유 상수 계약도 함께 본다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs bin/smoke/sections/qa-report-page.mjs
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -31,7 +31,7 @@ const devOf = (p) => p.replace(/\.html$/, "-dev.html");
 export default async function run() {
 console.log("\n[10h2] 보고서 렌더 결과");
 {
-  const tmp = mkdtempSync(path.join(tmpdir(), "ac-smoke-report-"));
+  const tmp = realpathSync(mkdtempSync(path.join(tmpdir(), "ac-smoke-report-")));
   process.env.IRIS_STATE_DIR = tmp;
   // 1x1 PNG. keepShot이 실제 파일을 찾아야 장면이 실린다.
   const png = Buffer.from(
