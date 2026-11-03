@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import puppeteer from "puppeteer-core";
+import { sliceBetween } from "../bin/slice-anchor.mjs";
 
 const require = createRequire(import.meta.url);
 const { headlessLaunchOptions } = require("../bin/headless-browser.cjs");
@@ -12,7 +13,7 @@ async function fixture(run, { enabled = true, chromeLayout = false } = {}) {
   let html = '<input id="url"><div id="url-sug" hidden></div><button id="other">다른 버튼</button>';
   if (chromeLayout) {
     const index = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
-    const header = index.slice(index.indexOf('<div class="browserview"'), index.indexOf('<div class="wv-wrap"')).replace('id="browserview" hidden', 'id="browserview"');
+    const header = sliceBetween(index, '<div class="browserview"', '<div class="wv-wrap"', "검색 주소창").replace('id="browserview" hidden', 'id="browserview"');
     const css = ['00-tokens', '01-base', '01c-components', '11-center-tabs', '17-editor-bar', '18-browser', '42-page-translate'].map(name => `<link rel="stylesheet" href="/css/${name}.css">`).join('');
     html = `<!doctype html><html><head>${css}</head><body><div class="center-body" style="height:100vh">${header}</div><div class="center-webviews" style="inset:80px 0 0;width:100%;height:calc(100% - 80px)"><button id="other">페이지 버튼</button></div></div></body></html>`;
   }

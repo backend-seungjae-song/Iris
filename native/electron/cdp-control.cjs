@@ -1025,7 +1025,7 @@ async function runCdpCmd(send, wc, cmd, args, webContentsMod) {
   switch (cmd) {
     // 무엇이 있는지 함께 알려 준다. 없다고 판단해 사람에게 넘기는 일이 있었다(확인 결과).
     default: throw new Error("알 수 없는 명령: " + cmd + ". 쓸 수 있는 것: snapshot text url screenshot shotsizes observe tabs "
-      + "goto back forward reload viewport wait click dblclick hover fill type phonetype bulkfill key phonekey phonefocus select focus clear check scroll scrollto "
+      + "goto back forward reload viewport wait click dblclick hover fill type phonetype bulkfill key phonekey phonefocus remoteframe remotewheel select focus clear check scroll scrollto "
       + "eval expect diff a11y locate "
       + "pdf login upload download dialog dialoginfo dialogs nativewin nativeclick nativekey newtab target untarget");
   }

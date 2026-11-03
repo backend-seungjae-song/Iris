@@ -151,23 +151,25 @@ test("open 뒤 process가 곧바로 종료되면 이전 bundle을 복원하고 �
   assert.equal(h.events.some((event) => event.startsWith("ready-check")), false);
 });
 
-test("앱이 종료를 거절하면 교체하지 않고 멈춘다", (t) => {
+test("앱이 종료를 거절하면 교체하지 않고 기존 앱을 다시 연다", (t) => {
   const h = harness(t, { quit: "refuse" });
   assert.notEqual(h.result.status, 0, h.result.stdout + h.result.stderr);
   assert.equal(installedVersion(h.app), "old");
   assert.deepEqual(oldBackups(h.dir), []);
   assert.ok(count(h.events, "quit") >= 1);
-  assert.equal(h.events.includes("ditto"), false);
-  assert.equal(h.events.includes("open"), false);
+  assert.equal(count(h.events, "ditto"), 1, "복사는 앱 종료 전에 끝난다");
+  assert.equal(count(h.events, "open"), 1, "종료하지 못한 기존 앱을 다시 열어야 한다");
+  assert.equal(fs.readdirSync(path.join(h.dir, "Applications")).some((name) => name.startsWith("Iris.app.new-")), false);
   assert.equal(h.running, true, "떠 있던 앱은 그대로 남는다");
 });
 
-test("복사 실패는 반쪽 번들을 치우고 이전 앱을 복원해 다시 연다", (t) => {
+test("앱을 끄기 전 복사 실패는 반쪽 스테이징을 지우고 실행 중인 앱을 유지한다", (t) => {
   const h = harness(t, { copy: "fail" });
   assert.notEqual(h.result.status, 0, h.result.stdout + h.result.stderr);
   assert.equal(installedVersion(h.app), "old");
   assert.deepEqual(oldBackups(h.dir), []);
-  assert.equal(count(h.events, "open"), 1, "종료했던 이전 앱을 다시 열어야 한다");
+  assert.equal(count(h.events, "open"), 0, "복사 실패 전에 앱을 종료하지 않는다");
+  assert.equal(fs.readdirSync(path.join(h.dir, "Applications")).some((name) => name.startsWith("Iris.app.new-")), false);
   assert.equal(h.running, true);
 });
 
