@@ -337,6 +337,20 @@ else
   info "앱이 아직 없어 에이전트 스킬 파일·세션 기록·지목 등록 훅은 앱을 넣은 뒤에 봅니다."
 fi
 
+# 세션 지목 블록의 「보내기」 줄이 부르는 명령. 맨 이름으로 부르므로 PATH 에 링크가 있어야 한다.
+PANE_SEND="$(pwd)/bin/iris-pane-send.mjs"
+PANE_SEND_LINK="$HOME/.local/bin/iris-pane-send"
+if [ "$(readlink "$PANE_SEND_LINK" 2>/dev/null)" = "$PANE_SEND" ]; then
+  ok "세션 간 전송 명령(iris-pane-send)이 연결돼 있습니다"
+elif [ "$CHECK" = "1" ]; then
+  warn "세션 간 전송 명령(iris-pane-send)이 연결돼 있지 않습니다 — ./setup 을 옵션 없이 돌리면 연결합니다"
+  note_fail
+else
+  run mkdir -p "$HOME/.local/bin" && run ln -sfn "$PANE_SEND" "$HOME/.local/bin/iris-pane-send" \
+    && ok "세션 간 전송 명령(iris-pane-send) 연결됨" || { bad "iris-pane-send 를 연결하지 못했습니다"; note_fail; }
+fi
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "~/.local/bin 이 PATH 에 없어 iris-pane-send 를 맨 이름으로 부를 수 없습니다";; esac
+
 echo
 if [ "$CHECK" = "1" ]; then
   if [ "$FAIL" = "0" ]; then echo "${BOLD}전부 준비돼 있습니다.${OFF}"; else echo "${BOLD}아직 덜 된 것이 있습니다 — 위의 ⚠️·❌ 줄을 보세요.${OFF}"; fi

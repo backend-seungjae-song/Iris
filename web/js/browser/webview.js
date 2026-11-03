@@ -13,7 +13,9 @@
 //
 // 유지 조건
 //   AI 상태가 불명확하면 전부 보호하고, 활성·녹화·미디어·질문·pinned·AI·최근 탭은 회수하지 않는다.
-//   잠든 탭은 잠들기 전 URL·프로필로 깨우며, 질문 응답은 질문을 낸 탭의 wc로 보낸다.
+//   잠들지 않게 한 탭과 입력하던 글이 남은 탭은 회수만 하지 않고 백그라운드 절전은 받는다.
+//   잠든 탭은 잠들기 전 URL·프로필·방문 기록으로 깨우며, 질문 응답은 질문을 낸 탭의 wc로 보낸다.
+//   입력칸에 사용자가 쓴 글이 남은 탭은 재우지 않는다.
 //
 // 영향 범위
 //   acHost의 webviewPolicy·setWebviewThrottleState와 DOM #wv-dialog, browser/webview-factory의 생성·wc
@@ -23,7 +25,7 @@
 import {
   aiRecentTabIds, getAiBusyTabs, getAiRecentKnown, getAiTargets, getAiTargetsKnown,
 } from "./ai-state.js";
-import { bmActiveId, bmTabs, getBrowserState } from "./state.js";
+import { bmActiveId, bmTabs, followsSharedSpace, getBrowserState } from "./state.js";
 import { callHook } from "../core/hooks.js";
 import { activeIdFor } from "./active-tab.js";
 import {
@@ -31,11 +33,14 @@ import {
   getWebviewLastUsedAt, getWebviewLastUsedEntries, getWebviewStatus, recordDiscardedWebview,
   recordWebviewUse, removeDiscardedWebview, removeWebview,
 } from "./webview-store.js";
-import { getActiveTabId, getCenterSpace, getCurrentTabs } from "../center/tab-store.js";
+import { paneActives, paneLayout } from "../center/pane-store.js";
+import { getCenterSpace, getCurrentTabs } from "../center/tab-store.js";
 
 let $, esc, wsSend, BROWSER_MODE, bNote, renderBmTabs, renderTabs;
 let getSpaces;
 let createWebview, forgetTabWc, showToast;
+let exportBrowserHistory = null;
+const capturingHistory = new Set();
 let profileIdForStored = (value) => String(value || "");
 let spaceDefaultProfile = () => "";
 let recTracked = () => false;
@@ -52,6 +57,7 @@ export function initWebview(deps) {
   ({ $, esc, wsSend, BROWSER_MODE, bNote, renderBmTabs, renderTabs,
     getSpaces,
     createWebview, forgetTabWc, showToast } = deps);
+  exportBrowserHistory = typeof deps.exportBrowserHistory === "function" ? deps.exportBrowserHistory : null;
 
   WEBVIEW_POLICY = (() => {
     try { return (window.acHost && acHost.webviewPolicy && acHost.webviewPolicy()) || {}; } catch { return {}; }
@@ -61,6 +67,7 @@ export function initWebview(deps) {
   WEBVIEW_RECENT = Math.max(0, Number(WEBVIEW_POLICY.recent ?? 3) || 0);
 
   if (WEBVIEW_LRU) setInterval(sweepIdleWebviews, Math.min(60000, Math.max(15000, WEBVIEW_IDLE_MS / 4)));
+  if (WEBVIEW_LRU) { try { window.acHost && acHost.onMemoryPressure && acHost.onMemoryPressure(() => sweepIdleWebviews(0)); } catch {} }
   document.addEventListener("click", (e) => {
     const b = e.target.closest(".wv-dialog [data-ans]"); if (!b) return;
     // 답은 지금 그려져 있는 그 탭으로 간다. 활성 탭으로 보내면 다른 탭이 묻고 있을 때 잘못된 곳에 답한다.
@@ -85,6 +92,20 @@ export function storedBrowserTab(tabId) {
     if (tab) return { sp, tab };
   }
   return null;
+}
+
+export function qaOwnedTab(tabId) {
+  return !!storedBrowserTab(tabId)?.tab?.qaRunId;
+}
+
+export function syncQaWebviewPlacement() {
+  let hasQa = false;
+  for (const [tabId, rec] of getWebviewEntries()) {
+    const owned = qaOwnedTab(tabId);
+    rec.el?.classList.toggle("qa-owned", owned);
+    hasQa ||= owned;
+  }
+  document.getElementById("wv-stack")?.classList.toggle("qa-keep", hasQa);
 }
 
 // 살려 둘 기준은 "최근 5분 안에 AI 가 실제로 썼는가" 하나다. 점유 여부(held)나 영속 tab.ai 는
@@ -130,22 +151,69 @@ export function authoritativeAiProtection() {
 // 실어 보내고, 소유자가 없는(=접었거나 닫은) 스페이스의 것은 폴더 키 그대로 보낸다. 그래서
 // "목록에 있는 id인가"만 보면 된다. 공유 창과 스페이스를 고르기 전의 탭("_", center/file-routing.js
 // consoleSpace)은 스페이스가 아니라 늘 살아 있는 것으로 본다.
-export function isLiveSpaceKey(sp) {
-  return sp === "__shared__" || sp === "_" || (getSpaces() || []).some((s) => s.id === sp);
+export function isLiveSpaceKey(sp, spaces = getSpaces() || []) {
+  return sp === "__shared__" || sp === "_" || spaces.some((s) => s.id === sp);
+}
+
+// 닫은 스페이스 탭으로 보고 재울 것인가. 보고 있는 탭은 재우지 않음(재우면 빈 화면에 새로고침도 안 됨).
+// 스페이스 목록이 비어 있으면 herdr 가 아직 보고하기 전(앱을 막 켠 때)이라 판정하지 않음
+export function sleepsWithDeadSpace(tabId, sp, activeId, spaces) {
+  if (tabId === activeId || !spaces || !spaces.length) return false;
+  return !isLiveSpaceKey(sp, spaces);
 }
 
 // 접은 스페이스의 탭은 기록만 남기고 메모리에서 내린다. 보관 기능의 목적이 그것이다.
 // 지우는 것이 아니라 재우는 것이라, 그 스페이스를 다시 열면 같은 위치에서 열린다.
 export function sleepDeadSpaceWebviews() {
-  let changed = false;
-  for (const id of getWebviewIds()) {
+  const deadSpaceSleeps = (id) => {
     const stored = storedBrowserTab(id);
-    if (!stored || isLiveSpaceKey(stored.sp)) continue;
-    if (tabDialogs[id] || getRecording()) continue;   // 확인 창이 떠 있거나 녹화 중이면 건드리지 않는다
-    changed = discardWebview(id, Date.now()) || changed;
-  }
+    if (!stored || !sleepsWithDeadSpace(id, stored.sp, activeBrowserId(), getSpaces() || []) || qaOwnedTab(id)) return false;
+    // 확인 창·녹화 중·입력하던 글이 남은 탭은 제외
+    return !(tabDialogs[id] || getRecording() || holdsDraft(id));
+  };
+  return sleepWithHistory(getWebviewIds().filter(deadSpaceSleeps), deadSpaceSleeps);
+}
+
+// 사용자가 쓴 글이 입력칸에 남은 탭 판정. 다시 불러오면 글이 사라져서 재우기 제외(Chrome 메모리 절약과 같은 조건)
+// 백그라운드 절전 판정(webviewProtected)에는 미포함. 글이 남은 탭도 절전 대상
+export function holdsDraft(tabId) {
+  return !!(getWebviewStatus(tabId) || {}).formDirty;
+}
+
+// 잠들지 않게 한 탭 판정. 새로고침 방지가 목적이라 재우기에서만 제외하고 백그라운드 절전은 적용
+export function keptAwake(tabId) {
+  const stored = storedBrowserTab(tabId);
+  return !!(stored && stored.tab.keepAwake);
+}
+
+// 재우기 전 방문 기록(스크롤·입력값 포함) 저장. 깨울 때 닫은 탭 복원과 같은 경로로 복원
+// 기록을 받는 사이 사용자가 그 탭을 다시 볼 수 있어서 받은 뒤 stillSleeps 로 재판정
+async function sleepWithHistory(ids, stillSleeps) {
+  const picked = ids.filter((id) => getWebview(id) && !capturingHistory.has(id));
+  for (const id of picked) capturingHistory.add(id);
+  let changed = false;
+  await Promise.all(picked.map(async (id) => {
+    const rec = getWebview(id);
+    try {
+      const history = await captureHistory(rec);
+      if (getWebview(id) !== rec || !stillSleeps(id)) return;
+      changed = discardWebview(id, Date.now(), history) || changed;
+    } finally {
+      capturingHistory.delete(id);
+    }
+  }));
   if (changed) { if (BROWSER_MODE) renderBmTabs(); else renderTabs(); scheduleWebviewThrottling(); }
   return changed;
+}
+
+async function captureHistory(rec) {
+  if (!exportBrowserHistory || !rec || !rec.el || typeof rec.el.getWebContentsId !== "function") return null;
+  try {
+    const result = await exportBrowserHistory(rec.el.getWebContentsId());
+    return result && result.ok && result.history ? result.history : null;
+  } catch {
+    return null;
+  }
 }
 
 export function recentWebviewIds() {
@@ -160,6 +228,7 @@ export function webviewProtected(tabId, aiProtected, recent) {
   if (aiProtected == null) return true; // authoritative 상태 미수신/불명확: fail-safe
   const rec = getWebview(tabId), status = getWebviewStatus(tabId) || {}, stored = storedBrowserTab(tabId);
   if (!rec || !stored) return true;
+  if (qaOwnedTab(tabId)) return true;
   // 녹화 보호는 녹화 대상 탭에만 적용한다. recording 하나로 모든 탭을 보호하면 녹화를 켜는 순간
   // 잠든 탭이 전부 깨어나고 그 복구 이동이 기록에 섞인다.
   if (tabId === activeBrowserId() || recTracked(tabId) || status.audible || status.loading || tabDialogs[tabId]) return true;
@@ -201,12 +270,12 @@ export function markWebviewUsed(tabId) {
   scheduleWebviewThrottling();
 }
 
-export function discardWebview(tabId, now) {
+export function discardWebview(tabId, now, history = null) {
   const rec = getWebview(tabId), stored = storedBrowserTab(tabId);
   if (!rec || !stored) return false;
   const url = rec.url || stored.tab.url || "about:blank";
   const profile = rec.el && rec.el.dataset ? rec.el.dataset.profile : profileIdForStored(stored.tab.profile);
-  recordDiscardedWebview(tabId, { url, profile, discardedAt: now });
+  recordDiscardedWebview(tabId, history ? { url, profile, discardedAt: now, history } : { url, profile, discardedAt: now });
   forgetTabWc(rec, tabId);
   try { rec.el.remove(); } catch {}
   removeWebview(tabId);
@@ -216,7 +285,8 @@ export function discardWebview(tabId, now) {
 
 // 지금 이 탭에 실제 크로미움을 올릴 것인가. 크롬처럼 보고 있는 탭 하나만 올린다.
 // 순수 판정이라 DOM 없이 부를 수 있고 검사가 그대로 부른다.
-export function shouldMaterializeTab(tabId, activeId, lruOn) {
+export function shouldMaterializeTab(tabId, activeId, lruOn, qaOwned = false) {
+  if (qaOwned) return true;
   if (!lruOn) return true;               // 재우기를 통째로 끈 롤백 모드(IRIS_WEBVIEW_LRU=0)
   return !!tabId && tabId === activeId;
 }
@@ -248,7 +318,7 @@ export function wakeWebview(tabId) {
   const url = (sleeping && sleeping.url) || stored.tab.url;
   removeDiscardedWebview(tabId);
   setTabStatus(tabId, { sleeping: false });
-  const rec = createWebview(tabId, profile, url && url !== "about:blank" ? url : undefined);
+  const rec = createWebview(tabId, profile, url && url !== "about:blank" ? url : undefined, (sleeping && sleeping.history) || null);
   // 잠자던 탭을 다시 여는 것은 앱 내부 동작이지 사용자의 이동이 아니다. 표시해 두지 않으면 그 복구
   // 이동이 녹화에 `goto` 로 남는다. 녹화를 켜는 순간 재우기가 풀려 잠든 탭이 한꺼번에 깨므로,
   // 기록 첫머리가 사용자가 하지 않은 이동 수십 줄로 채워진다.
@@ -264,24 +334,26 @@ export function wakeWebview(tabId) {
   return rec;
 }
 
-export function sweepIdleWebviews() {
+// idleMs: 이만큼 안 쓴 탭을 재움. 기기 메모리가 심각하면 0
+export function sweepIdleWebviews(idleMs = WEBVIEW_IDLE_MS) {
   if (!WEBVIEW_LRU) return;
   const aiProtected = authoritativeAiProtection();
   if (aiProtected == null) { scheduleWebviewThrottling(); return; }
-  const now = Date.now(), recent = recentWebviewIds();
+  // 기기 메모리가 심각할 때는 최근 쓴 탭도 재움. 보고 있는 탭·AI 사용 중·소리·고정 탭은 그대로
+  const now = Date.now(), recent = idleMs === 0 ? new Set() : recentWebviewIds();
   const candidates = getWebviewIds()
     .map((id) => [id, getWebviewLastUsedAt(id) || now])
-    .sort((a, b) => a[1] - b[1]);
-  let changed = false;
-  for (const [id, lastUsed] of candidates) {
-    if (now - lastUsed < WEBVIEW_IDLE_MS) continue;
-    if (webviewProtected(id, aiProtected, recent)) continue;
-    changed = discardWebview(id, now) || changed;
-  }
-  if (changed) {
-    if (BROWSER_MODE) renderBmTabs(); else renderTabs();
-    scheduleWebviewThrottling();
-  }
+    .sort((a, b) => a[1] - b[1])
+    .filter(([id, lastUsed]) => now - lastUsed >= idleMs && !webviewProtected(id, aiProtected, recent) && !holdsDraft(id) && !keptAwake(id))
+    .map(([id]) => id);
+  // 기록을 받은 뒤 판정: 그 사이 사용·AI 보호·입력 여부가 바뀐 탭 제외
+  const stillIdle = (id) => {
+    const ai = authoritativeAiProtection();
+    if (ai == null || holdsDraft(id) || keptAwake(id)) return false;
+    if (Date.now() - (getWebviewLastUsedAt(id) || Date.now()) < idleMs) return false;
+    return !webviewProtected(id, ai, idleMs === 0 ? new Set() : recentWebviewIds());
+  };
+  return sleepWithHistory(candidates, stillIdle);
 }
 
 // 페이지가 묻고 있는 것(alert/confirm/prompt). 창에 붙는 네이티브 시트로 두면 다른 탭을 보고
@@ -300,13 +372,23 @@ export function clearTabDialog(tabId) {
   delete tabDialogs[tabId];
 }
 
-// 묻는 탭이 활성 탭이 아니어도 반드시 띄운다. 활성 탭일 때만 그리면, 활성 탭 판정이
-// 어긋나는 순간 답할 방법이 사라지고 그 페이지는 멈춘 채로 남는다. 사용자에게는
-// 버튼이 동작하지 않는 것으로 보인다(확인 결과: 확인창이 뜬 탭에서 클릭이 전부 동작하지 않음).
+// 화면에 보이는 탭의 질문만 띄움. 다른 탭의 질문은 그 탭에 들어갔을 때 뜨고, 그 전까지는 탭 줄의 "?" 표시만
+// - 활성 탭 판정만 보면 판정이 어긋날 때 보이는 탭의 질문에 답할 수 없어 페이지가 멈춘 채로 남음
+//   (확인 결과: 확인창이 뜬 탭에서 클릭이 전부 동작하지 않음). 그래서 webview 가 실제로 그려지는지도 봄
+// - 숨긴 탭의 webview 는 display:none 이라 getClientRects 가 비어 있음
+// - 뒤에 깔린 QA 탭(qa-owned, 비활성)과 숨은 브라우저 칸(qa-keep)은 그려지지만 사람에게 안 보임
+// - 캡처 동안만 올린 탭(data-ac-held)도 그려지지만 1px 만 보임
 export function pendingDialogTabId() {
   const id = activeBrowserId();
-  if (id && tabDialogs[id]) return id;          // 보고 있는 탭이 묻고 있으면 그것부터
-  return Object.keys(tabDialogs)[0] || null;    // 아니면 기다리는 것 중 하나를 띄운다
+  if (id && tabDialogs[id]) return id;
+  return Object.keys(tabDialogs).find((tabId) => {
+    const webview = getWebview(tabId);
+    const el = webview && (webview.el || webview);
+    if (!(el && el.getClientRects && el.getClientRects().length)) return false;
+    if (el.dataset?.acHeld != null) return false;
+    if (el.classList?.contains("qa-owned") && !el.classList.contains("active")) return false;
+    return !el.closest?.(".center-webviews[hidden]");
+  }) || null;
 }
 
 export function renderTabDialog() {
@@ -318,15 +400,13 @@ export function renderTabDialog() {
   let host = "";
   const webview = getWebview(id);
   try { host = new URL((webview && webview.url) || "").host; } catch (e2) {}
-  // 보고 있지 않은 탭이 묻는 경우에는 그 사실을 밝힌다. 그러지 않으면 지금 화면이 물은 것으로 오해한다.
-  const other = id !== activeBrowserId();
   const btns = d.kind === "alert"
     ? '<button class="hot" data-ans="ok">확인</button>'
     : '<button data-ans="cancel">아니오</button><button class="hot" data-ans="ok">네</button>';
   el.hidden = false;
   el.dataset.tab = id;
   el.innerHTML = '<div class="wd-card" role="dialog" aria-modal="true">'
-    + '<div class="wd-host">' + esc(host || "이 페이지") + (other ? " (다른 탭)" : "") + '</div>'
+    + '<div class="wd-host">' + esc(host || "이 페이지") + '</div>'
     + '<div class="wd-msg">' + esc(d.message) + "</div>"
     + (d.kind === "prompt" ? '<input class="wd-in" id="wd-in" value="' + esc(d.def || "") + '" />' : "")
     + '<div class="wd-btns">' + btns + "</div></div>";
@@ -398,11 +478,25 @@ export function activeBrowserId() {
       order: bmTabs().map((t) => t.id),
     });
   }
-  const t = getCurrentTabs().find((x) => x.id === getActiveTabId(getCenterSpace())); return (t && t.kind === "browser") ? t.id : null;
+  const visible = paneActives(getCenterSpace());
+  const focus = paneLayout(getCenterSpace())?.focus || 0;
+  const tabs = getCurrentTabs();
+  const t = tabs.find((x) => x.kind === "browser" && x.id === visible[focus])
+    || tabs.find((x) => x.kind === "browser" && visible.includes(x.id));
+  return t ? t.id : null;
 }
 
 export function activeWv() {
   const id = activeBrowserId(); return id ? getWebview(id) : null;
+}
+
+// 활성 탭 새로고침. 잠든 탭이면 깨움(저장한 방문 기록이 있으면 그 기록으로, 없으면 저장된 주소로 다시 불러옴)
+export function reloadActiveTab(force = false) {
+  const id = activeBrowserId(); if (!id) return false;
+  const r = getWebview(id);
+  if (!r) return BROWSER_MODE && followsSharedSpace() ? false : !!wakeWebview(id);
+  try { force ? r.el.reloadIgnoringCache() : r.el.reload(); } catch {}
+  return true;
 }
 
 // 뒤로·앞으로 단추는 갈 곳이 없으면 누를 수 없게 둔다. 미러 탭은 기록을 원격 쪽이 갖고 있어 웹뷰에 물을 수

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
@@ -138,6 +139,23 @@ test("v6 요청은 모두 정확한 계약을 거쳐 처리표 결과를 만든�
     assert.equal(JSON.stringify(result).includes("/private/secret"), false, request.type);
   }
   operations.close();
+});
+
+test("키 버튼은 첫 키 뒤에 누를 키를 최대 7개까지 받는다", () => {
+  const step = { key: "Enter", modifiers: MOD };
+  const button = (then) => ({ type: "terminal.keys.set", rid: "k", keys: [{ id: "seq", label: "Esc Enter",
+    key: "Escape", modifiers: MOD, ...(then === undefined ? {} : { then }) }] });
+  assert.equal(isRemoteRequest(button(undefined)), true);
+  assert.equal(isRemoteRequest(button([step])), true);
+  assert.equal(isRemoteRequest(button(Array(7).fill(step))), true);
+  assert.equal(isRemoteRequest(button(Array(8).fill(step))), false);
+  assert.equal(isRemoteRequest(button([])), false);
+  assert.equal(isRemoteRequest(button([{ key: "Enter" }])), false);
+  assert.equal(isRemoteRequest(button([{ ...step, extra: 1 }])), false);
+  const result = { type: "terminal.keys", rid: "k", defaults: [], macShortcuts: [],
+    keys: [{ id: "seq", label: "Esc Enter", key: "Escape", modifiers: MOD, then: [step] }] };
+  assert.doesNotThrow(() => projectFeature(result));
+  assert.throws(() => projectFeature({ ...result, keys: [{ ...result.keys[0], then: [{ key: "x" }] }] }), /projection/);
 });
 
 test("v6 요청은 모르는 키·위험한 URL·본문과 이미지 상한을 거부한다", () => {
@@ -385,43 +403,17 @@ test("브라우저 프레임은 절대 스크린샷 경로만 변환한다", asy
   browser.close();
 });
 
-test("브라우저 프레임은 sips 실패와 384 KiB 초과를 같은 공개 사유로 구분한다", async (t) => {
-  const state = { tabsBySpace: { work: [{ id: "tab-one" }] }, activeBySpace: {}, profiles: [] };
-  const stateDirs = [];
-  t.after(() => {
-    for (const directory of stateDirs) fs.rmSync(directory, { recursive: true, force: true });
-  });
-  const makeBrowser = (execFile) => {
-    const stateDir = fs.mkdtempSync("/tmp/iris-remote-v6-");
-    stateDirs.push(stateDir);
-    const browser = createBrowserFeature({
-      randomBytes: randomSequence(), browserState: () => state, stateDir,
-      runtimeSnapshot: () => ({ workspaces: [{ id: "work", label: "작업" }] }),
-      tabMeta: () => ({ wc: 42 }), controlSnapshot: () => [], cdpReady: () => true,
-      requestCdp: async () => ({ ok: true, data: { path: "/tmp/source.png" } }), execFile,
-      setTimer: () => ({ unref() {} }), clearTimer() {}, send() {}, agents: {}, messages: {},
-    });
+test("브라우저 프레임은 JPEG 실패와 384 KiB 초과를 공개 사유로 반환한다", async () => {
+  for (const response of [{ ok: false }, { ok: true, jpeg: Buffer.alloc(MAX_BROWSER_FRAME_JPEG_BYTES + 1).toString("base64") }]) {
+    const browser = createBrowserFeature({ browserState: () => ({ tabsBySpace: { work: [{ id: "one" }] } }),
+      tabMeta: () => ({ wc: 42 }), cdpReady: () => true, requestCdp: async () => response,
+      execFile: () => { throw new Error("변환 프로세스 호출 금지"); }, agents: {}, messages: {},
+      setTimer: () => ({ unref() {} }), clearTimer() {} });
     const tab = browser.catalog().tabs[0].ref;
-    return { browser, request: { tab, width: 390, fps: 2, desktop: false } };
-  };
-
-  const failed = makeBrowser((_file, _args, _options, callback) => callback(new Error("sips failed")));
-  assert.deepEqual(await failed.browser.watchFrame({ connId: "phone" }, failed.request),
-    { ok: false, code: "browser-frame-unavailable" });
-  failed.browser.close();
-
-  const calls = [];
-  const oversized = makeBrowser((file, args, options, callback) => {
-    calls.push({ file, args, options });
-    fs.writeFileSync(args.at(-1), Buffer.alloc(MAX_BROWSER_FRAME_JPEG_BYTES + 1));
-    callback(null, "", "");
-  });
-  assert.deepEqual(await oversized.browser.watchFrame({ connId: "phone" }, oversized.request),
-    { ok: false, code: "browser-frame-unavailable" });
-  assert.equal(calls.length, 16);
-  assert.equal(calls.every((call) => call.file === "/usr/bin/sips"), true);
-  assert.equal(calls.every((call) => call.options.timeout === 3_000), true);
-  oversized.browser.close();
+    assert.deepEqual(await browser.watchFrame({ connId: "phone" }, { tab, width: 390, fps: 2, desktop: false }),
+      { ok: false, code: response.ok ? "browser-frame-unavailable" : "browser-command-unavailable" });
+    browser.close();
+  }
 });
 
 test("브라우저 결과는 연결·에이전트에 묶고 메시지를 보낼 때 원문으로 푼다", async () => {
@@ -796,13 +788,58 @@ test("실제 기능 투영은 pane·탭·스페이스 ID와 절대 경로를 내
 
   const state = { tabsBySpace: { "space-internal": [{ id: "tab-internal", url: "file:///Users/you/secret.html" }] },
     activeBySpace: { "space-internal": "tab-internal" }, profiles: [] };
-  let translated = false;
+  const { createCdpTransport } = requireCjs("../native/electron/cdp-transport.cjs");
+  const cdpControl = requireCjs("../native/electron/cdp-control.cjs");
+  const transportSockets = [];
+  class TransportSocket extends EventEmitter {
+    constructor() { super(); this.readyState = 0; this.sent = []; transportSockets.push(this); }
+    send(value) { this.sent.push(JSON.parse(value)); }
+    close() { this.readyState = 3; this.emit("close"); }
+    terminate() { this.close(); }
+  }
+  class TransportWebSocket {
+    constructor() { return new TransportSocket(); }
+  }
+  let contextActionCalls = 0;
+  const host = {
+    isDestroyed: () => false,
+    executeJavaScript: async () => { contextActionCalls++; return { ok: true, code: "translated" }; },
+  };
+  const guest = { id: 7, hostWebContents: host, isDestroyed: () => false, getType: () => "webview" };
+  cdpControl.setContextActionProvider((candidate) => candidate === host
+    ? [{ name: "pagetranslate.page" }] : []);
+  const transport = createCdpTransport({
+    WebSocket: TransportWebSocket,
+    port: 4291,
+    cdpExec: cdpControl.runCdp,
+    codedError: (code, message) => Object.assign(new Error(message), { code }),
+    tabGoneCode: "tab_gone",
+    execPath: "/fixture/Iris.app",
+    pid: 7001,
+    setIntervalFn: () => ({ unref() {} }),
+    clearIntervalFn() {},
+    setTimeoutFn() {},
+    log() {},
+    error() {},
+  });
+  transport.setupCdpControl({ fromId: (id) => Number(id) === guest.id ? guest : null });
+  const transportSocket = transportSockets[0];
+  transportSocket.readyState = 1;
+  transportSocket.emit("open");
+  let transportRequestId = 0;
+  const requestCdpThroughTransport = async (cmd, args, wc) => {
+    const id = `remote-${++transportRequestId}`;
+    transportSocket.emit("message", Buffer.from(JSON.stringify({ type: "cdp-exec", id, wc, cmd, args })));
+    await new Promise((resolve) => setImmediate(resolve));
+    const result = transportSocket.sent.find((message) => message.type === "cdp-result" && message.id === id);
+    assert.ok(result, "transport 결과가 필요하다");
+    return result.ok ? { ok: true, data: result.data } : { ok: false, error: result.error, code: result.code };
+  };
   const browser = createBrowserFeature({ randomBytes: randomSequence(), browserState: () => state,
     runtimeSnapshot: () => ({ workspaces: [{ id: "space-internal", label: "작업" }] }),
     tabMeta: () => ({ wc: 7, title: "문서", url: "file:///Users/you/secret.html" }),
     controlSnapshot: () => [{ tabId: "tab-internal", labels: [paneId] }], cdpReady: () => true,
-    requestCdp: async (cmd, args, wc) => { translated = cmd === "contextaction" && args.name === "pagetranslate.page" && wc === 7;
-      return { ok: true, data: { value: { ok: true } } }; }, agents: {}, messages: {}, send() {},
+    requestCdp: requestCdpThroughTransport, agents: {}, messages: {}, send() {},
   });
   const catalog = browser.catalog();
   const encoded = JSON.stringify(catalog);
@@ -812,8 +849,9 @@ test("실제 기능 투영은 pane·탭·스페이스 ID와 절대 경로를 내
   assert.equal(catalog.tabs[0].url, "");
   assert.deepEqual(catalog.tabs[0].controlling, ["에이전트"]);
   assert.equal((await browser.translate({ tab: catalog.tabs[0].ref })).ok, true);
-  assert.equal(translated, true, "해당 탭의 화면 번역 hook을 호출한다");
+  assert.equal(contextActionCalls, 1, "worker 메타 없는 transport 봉투는 기존 화면 번역 처리기에 도달한다");
   browser.close();
+  transportSocket.close();
 });
 
 test("Git·GitHub 기능은 소유 함수를 호출하고 절대 경로를 제거한다", async () => {
@@ -880,7 +918,7 @@ test("caps는 현재 기능만 내보내고 기능 경계 거부를 오류 코�
   const { operations, features } = fixture();
   features.capabilities = () => ["terminal.watch", "browser.tabs", "git.changes"];
   const caps = await operations.table.get("caps.get")({}, { type: "caps.get" });
-  assert.deepEqual(caps.requests.slice(-3), ["terminal.watch", "browser.tabs", "git.changes"]);
+  assert.deepEqual(caps.requests.slice(-5), ["terminal.watch", "browser.tabs", "git.changes", "terminal.prompts", "terminal.prompt-fallback"]);
   features.browser.newTab = async () => ({ ok: false, code: "forbidden" });
   features.source.diff = async () => ({ ok: false, code: "forbidden" });
   assert.equal((await operations.table.get("browser.tab.new")({}, requests[13])).error.code, "forbidden");

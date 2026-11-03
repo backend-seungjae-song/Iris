@@ -3,6 +3,7 @@ const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
 const { stateHome } = require("../../server/state-home.cjs");
 const { copyExtension, discoverChromeExtensions, displayName, readManifest, inside } = require("./browser-extension-catalog.cjs");
+const { prepareContentScripts } = require("./browser-extension-compatibility.cjs");
 
 const LIMITATION = "Electron은 Chrome 확장 API 일부만 지원합니다. 설치돼도 일부 기능이 작동하지 않을 수 있습니다. 확장의 사이트 접근 권한은 manifest.json에 따라 적용됩니다. 설치 후 현재 탭을 새로고침하세요.";
 const REACT_DEVTOOLS_ID = "fmkadmapgofadopljbjfkapdkoienihi";
@@ -97,6 +98,7 @@ function createBrowserExtensions(deps) {
       if (path.resolve(existing.path) !== target) throw new Error("같은 ID의 확장을 다른 기능에서 사용 중입니다.");
       return existing;
     }
+    prepareContentScripts(target);
     const extension = await api.loadExtension(target);
     if (!extension?.id || !api.getExtension(extension.id)) throw new Error("Electron에서 확장 설치를 확인하지 못했습니다.");
     if (record.sourceId && record.sourceId !== extension.id) {
@@ -312,7 +314,9 @@ function createBrowserExtensions(deps) {
       submenu.push({ label: "제거", click: run(() => remove(target.partition, record.key)) });
       items.push({ label: record.name, submenu });
     }
-    for (const extension of loaded.filter((item) => !managed.some((record) => record.id === item.id && ownsExtension(record, item)))) {
+    // browser-extensions/internal 아래는 Iris 내부 확장(Google 로그인 헤더 규칙). 사용자 확장 목록에서 제외
+    const internal = path.join(root, "internal");
+    for (const extension of loaded.filter((item) => !inside(internal, item.path) && !managed.some((record) => record.id === item.id && ownsExtension(record, item)))) {
       items.push({ label: `${extension.name} (다른 기능에서 관리)`, enabled: false });
     }
     if (items.length === 1) items.push({ label: "설치된 확장 없음", enabled: false });
@@ -346,7 +350,8 @@ function initCapability(ctx) {
   let compatibility = ctx.compatibility;
   if (!compatibility && typeof ctx.app.on === "function") {
     const tabs = require("./browser-extension-tabs.cjs").createExtensionTabs(ctx);
-    compatibility = require("./browser-extension-compatibility.cjs").createExtensionCompatibility({ ...ctx, createTab: (session, properties) => tabs.create(session, properties) });
+    compatibility = require("./browser-extension-compatibility.cjs").createExtensionCompatibility({ ...ctx, createTab: (session, properties) => tabs.create(session, properties),
+      lifecyclePath: path.join((ctx.stateHomeImpl || stateHome)(), "browser-extensions", "lifecycle.json") });
   }
   const manager = createBrowserExtensions({ ...ctx, compatibility });
   manager.ready.catch((error) => ctx.error?.("[browser-extensions]", errorText(error)));

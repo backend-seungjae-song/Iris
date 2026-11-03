@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { createDetachedTabWindows } = require("../native/electron/detached-tab-window.cjs");
 
-function setup() {
+function setup({ quitting = false } = {}) {
   const all = [];
   let nextId = 10;
   class FakeWindow {
@@ -31,24 +31,32 @@ function setup() {
     getBounds() { return { ...this.bounds }; }
     getContentBounds() { return { ...this.bounds }; }
     setBounds(b) { Object.assign(this.bounds, b); }
-    close() { if (this.destroyed) return; this.destroyed = true; for (const fn of this.listeners.closed || []) fn(); }
+    close() {
+      if (this.destroyed) return;
+      let prevented = false;
+      for (const fn of this.listeners.close || []) fn({ preventDefault() { prevented = true; } });
+      if (prevented) return;
+      this.destroyed = true; for (const fn of this.listeners.closed || []) fn();
+    }
   }
   const handlers = new Map(), listeners = new Map();
   const ipcMain = { handle: (ch, fn) => handlers.set(ch, fn), on: (ch, fn) => listeners.set(ch, fn) };
   const loaded = [];
   const cursor = { x: 0, y: 0 };
+  const timers = [];
   const api = createDetachedTabWindows({
     BrowserWindow: FakeWindow, ipcMain, preloadPath: "", webviewPreloadPath: "",
     windowLayout: { ownWindowTitle() {} }, guardWebviewPartition() {}, pinHiddenViewportById() {},
     webContents: {}, shell: { openExternal() {} }, loadUrlWithRetry: (w, url) => loaded.push(url),
     getAppUrl: () => "http://127.0.0.1:1", noThrottleOpt: false, isTrustedSender: () => true,
-    isAppQuitting: () => false, markAppAlive() {}, log() {},
+    isAppQuitting: () => quitting, markAppAlive() {}, log() {},
+    setTimer: (fn) => { timers.push(fn); return 0; },
     screen: { getCursorScreenPoint: () => ({ ...cursor }) },
   });
   api.registerDetachedTabIpc();
   api.tabDrag.registerTabDragIpc();
   const main = new FakeWindow({});   // 띠를 그리는 원래 창
-  return { api, FakeWindow, handlers, listeners, loaded, cursor, main };
+  return { api, FakeWindow, handlers, listeners, loaded, cursor, main, timers };
 }
 
 const byTab = (snap) => Object.fromEntries(snap.map((x) => [x.tabId, x.win]));
@@ -96,12 +104,43 @@ test("마지막 탭을 되돌리면 창이 닫히고 목록에서 빠진다", ()
   assert.deepEqual(last && last[1], { tabs: [] });
 });
 
-test("창을 닫으면 그 창의 탭이 모두 원래 띠로 돌아간다", () => {
-  const { api } = setup();
+test("사람이 창을 닫으면 그 창의 탭을 닫으라고 렌더러에 알리고, 답을 받은 뒤 창을 닫는다", () => {
+  const { api, listeners } = setup();
   const win = api.openDetachedTab({ space: "s1", tabId: "a" });
   api.claimTab(api.detachedTabs()[0].win, "b", "s1");
   win.close();
+  assert.equal(win.isDestroyed(), false, "탭을 닫기 전에는 창을 닫지 않는다");
+  const ask = win.sent.find(([ch]) => ch === "ac-detached-window-closing");
+  assert.deepEqual(ask && ask[1].tabs.sort(), ["a", "b"]);
+  listeners.get("ac-detached-window-close")({ sender: win.webContents });
+  assert.equal(win.isDestroyed(), true);
   assert.deepEqual(api.detachedTabs(), []);
+});
+
+test("다른 창이 보낸 닫기 답으로는 이 창을 닫지 않는다", () => {
+  const { api, listeners, main } = setup();
+  const win = api.openDetachedTab({ space: "s1", tabId: "a" });
+  win.close();
+  listeners.get("ac-detached-window-close")({ sender: main.webContents });
+  assert.equal(win.isDestroyed(), false);
+});
+
+test("렌더러가 답하지 않으면 시간이 지난 뒤 탭을 원래 띠로 돌리고 창을 닫는다", () => {
+  const { api, timers } = setup();
+  const win = api.openDetachedTab({ space: "s1", tabId: "a" });
+  win.close();
+  assert.equal(timers.length, 1);
+  timers[0]();
+  assert.equal(win.isDestroyed(), true);
+  assert.deepEqual(api.detachedTabs(), []);
+});
+
+test("앱을 끌 때는 탭을 닫지 않고 창만 닫는다", () => {
+  const { api } = setup({ quitting: true });
+  const win = api.openDetachedTab({ space: "s1", tabId: "a" });
+  win.close();
+  assert.equal(win.isDestroyed(), true);
+  assert.equal(win.sent.some(([ch]) => ch === "ac-detached-window-closing"), false);
 });
 
 test("혼자 있는 탭의 창을 다른 분리 창 띠에 놓으면 그 창으로 옮겨 가고 끌던 창은 닫힌다", async () => {

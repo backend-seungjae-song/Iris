@@ -1,36 +1,59 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:iris_remote/design/agent_tile.dart';
-import 'package:iris_remote/design/command_text.dart';
-import 'package:iris_remote/design/icon.dart';
-import 'package:iris_remote/design/markdown_text.dart';
-import 'package:iris_remote/design/sheet.dart';
-import 'package:iris_remote/design/tokens.dart';
+import 'package:iris_remote/design/action_bar.dart';
+import 'package:iris_remote/design/buttons.dart';
+import 'package:iris_remote/design/toast.dart';
 import 'package:iris_remote/format/control_characters.dart';
 import 'package:iris_remote/format/result_text.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
+import 'package:iris_remote/screens/response_host.dart';
+import 'package:iris_remote/screens/response_kit.dart';
 import 'package:iris_remote/state/remote_state.dart';
 
-Future<bool> showPermissionRequestSheet({
+Future<String?> showPermissionRequestSheet({
   required BuildContext context,
   required RemoteRequest request,
   required RemoteState state,
   required String agentName,
   required String agentKind,
   required String space,
-}) async {
-  final denied = await showIrisSheet<bool>(
-    context: context,
-    builder: (_) => PermissionRequestSheet(
-      request: request,
-      agentName: agentName,
-      agentKind: agentKind,
-      space: space,
-      onAnswer: (allow) => state.answerPermission(request, allow: allow),
-    ),
-  );
-  return denied ?? false;
+}) => showResponseHost(
+  context: context,
+  state: state,
+  request: request,
+  agentName: agentName,
+  agentKind: agentKind,
+  space: space,
+);
+
+enum _Variant { command, edit, tool }
+
+_Variant _variantOf(String tool) {
+  final name = tool.toLowerCase();
+  if (name.startsWith('mcp__')) return _Variant.tool;
+  if (const {
+    'edit',
+    'write',
+    'multiedit',
+    'notebookedit',
+    'apply_patch',
+  }.contains(name)) {
+    return _Variant.edit;
+  }
+  return _Variant.command;
+}
+
+// 요청 목록·대화 카드에서 쓰는 승인 종류 이름
+String permissionKindLabel(String tool) => switch (_variantOf(tool)) {
+  _Variant.command => '명령 실행 승인',
+  _Variant.edit => '파일 수정 승인',
+  _Variant.tool => tool.startsWith('mcp__') ? 'MCP 도구 승인' : '도구 사용 승인',
+};
+
+// mcp__서버__도구 형태를 서버와 도구로 나눔
+(String?, String) _splitTool(String tool) {
+  final match = RegExp(r'^mcp__(.+?)__(.+)$').firstMatch(tool);
+  return match == null ? (null, tool) : (match.group(1), match.group(2)!);
 }
 
 class PermissionRequestSheet extends StatefulWidget {
@@ -40,6 +63,10 @@ class PermissionRequestSheet extends StatefulWidget {
     required this.agentKind,
     required this.space,
     required this.onAnswer,
+    this.nav,
+    this.closedAs,
+    this.initialChoice,
+    this.onChoice,
     super.key,
   });
 
@@ -48,6 +75,12 @@ class PermissionRequestSheet extends StatefulWidget {
   final String agentKind;
   final String space;
   final Future<RequestAnswerResult> Function(bool allow) onAnswer;
+  final ResponseNav? nav;
+  // 목록에서 사라진 요청. gone 은 이유 불명, gone-expired 는 만료 시각이 지난 경우
+  final String? closedAs;
+  // 요청 사이를 오가도 고른 답을 보존: 0 허용, 1 거절
+  final int? initialChoice;
+  final ValueChanged<int>? onChoice;
 
   @override
   State<PermissionRequestSheet> createState() => _PermissionRequestSheetState();
@@ -55,26 +88,41 @@ class PermissionRequestSheet extends StatefulWidget {
 
 class _PermissionRequestSheetState extends State<PermissionRequestSheet> {
   bool _busy = false;
-  String? _result;
+  // 0 허용, 1 거절
+  late int? _choice = widget.initialChoice;
+  String? _gone;
+
+  void _pick(int choice) {
+    setState(() => _choice = choice);
+    widget.onChoice?.call(choice);
+  }
 
   PermissionRequestBody get _body =>
       widget.request.body as PermissionRequestBody;
 
   Future<void> _answer(bool allow) async {
-    if (_busy || _result != null) return;
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       final result = await widget.onAnswer(allow);
       if (!mounted) return;
-      final text = requestAnswerResultText(result.result);
-      setState(() => _result = text);
-      if (result.result == 'delivered' ||
-          result.result == 'already-answered' ||
-          result.result == 'expired') {
-        Navigator.of(context).pop(!allow && result.result == 'delivered');
+      switch (result.result) {
+        case 'delivered':
+          showIrisToast(context, '에이전트에게 보냈습니다');
+          Navigator.of(context).pop(!allow);
+        case 'already-answered' || 'expired':
+          setState(() => _gone = result.result);
+        default:
+          showIrisToast(
+            context,
+            requestAnswerResultText(result.result),
+            tone: IrisToastTone.error,
+          );
       }
     } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      if (mounted) {
+        showIrisToast(context, error.message, tone: IrisToastTone.error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -82,270 +130,197 @@ class _PermissionRequestSheetState extends State<PermissionRequestSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const IrisSheetGrabber(barKey: Key('permission-grabber')),
-        const SizedBox(height: 14),
-        SizedBox(
-          key: const Key('permission-header'),
-          height: 34,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              children: [
-                IrisAgentTile(
-                  key: const Key('permission-tile'),
-                  kind: widget.agentKind,
-                  status: 'blocked',
-                  small: true,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.agentName,
-                        style: TextStyle(
-                          color: context.iris.foreground2,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          height: 17 / 14,
-                        ),
-                      ),
-                      Text(
-                        '${widget.space} · 방금',
-                        style: TextStyle(
-                          color: context.iris.muted,
-                          fontSize: 13,
-                          height: 16 / 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+    final variant = _variantOf(_body.tool);
+    final gone = _gone ?? (_busy ? null : widget.closedAs);
+    if (gone != null) return _answered(context, variant, gone);
+    final request = widget.request;
+    final ago = responseAgo(request.createdAt);
+    final input = visibleControlCharacters(_body.input);
+    final denyHint = switch (variant) {
+      _Variant.command => '실행하지 않고 대화로 다시 지시합니다',
+      _Variant.edit => '수정하지 않고 대화로 다시 지시합니다',
+      _Variant.tool => '이 호출을 막고 대화로 다시 지시합니다',
+    };
+    final allowHint = switch (variant) {
+      _Variant.command => '이번 한 번 실행합니다',
+      _Variant.edit => '이번 수정만 적용합니다',
+      _Variant.tool => '이번 호출만 허용합니다',
+    };
+    final approval = variant != _Variant.tool;
+    final children = <Widget>[
+      switch (variant) {
+        _Variant.command => ResponseWhoRow(
+          name: '명령 실행 승인',
+          meta: '${widget.space} · $ago',
+          icon: 'terminal-window',
         ),
-        SizedBox(
-          key: const Key('permission-title'),
-          height: 42.35,
-          width: double.infinity,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 14, 4, 0),
-            child: Text(
-              '명령 실행을 허용할까요?',
-              style: TextStyle(
-                color: context.iris.foreground,
-                fontSize: 21,
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-                letterSpacing: -0.42,
-              ),
-            ),
-          ),
+        _Variant.edit => ResponseWhoRow(
+          name: '파일 수정 승인',
+          meta: '${widget.agentName} · ${widget.space} · $ago',
+          icon: 'pencil-simple',
         ),
-        if (_body.description.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 140),
-            child: SingleChildScrollView(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: IrisMarkdown(
-                  _body.description,
-                  key: const Key('permission-description'),
-                  compact: true,
-                  baseStyle: TextStyle(
-                    color: context.iris.foreground2,
-                    fontSize: 14.5,
-                    height: 1.45,
-                  ),
-                  textColor: context.iris.foreground2,
-                ),
-              ),
-            ),
+        _Variant.tool => ResponseKindRow(
+          label: _body.tool.startsWith('mcp__') ? 'MCP 도구 승인' : '도구 사용 승인',
+          tone: ResponseTone.approval,
+          icon: 'squares-four',
+          time: ago,
+        ),
+      },
+      ResponseTitle(key: const Key('permission-title'), switch (variant) {
+        _Variant.command => '이 명령을 실행할까요?',
+        _Variant.edit => '이 파일을 수정할까요?',
+        _Variant.tool => '이 도구 호출을 허용할까요?',
+      }, approval: approval),
+      ..._payload(context, variant, input),
+      ResponseSectionLabel('답 고르기', approval: approval),
+      ResponseOption(
+        key: const Key('permission-option-1'),
+        title: '허용',
+        description: allowHint,
+        approval: approval,
+        selected: _choice == 0,
+        onTap: _busy ? null : () => _pick(0),
+      ),
+      const SizedBox(height: 8),
+      ResponseOption(
+        key: const Key('permission-option-2'),
+        title: '거절',
+        description: denyHint,
+        negative: true,
+        approval: approval,
+        selected: _choice == 1,
+        onTap: _busy ? null : () => _pick(1),
+      ),
+    ];
+    final label = _busy
+        ? '보내는 중…'
+        : (_choice == null
+              ? '답을 고르세요'
+              : (_choice == 0 ? '‘허용’ 보내기' : '‘거절’ 보내기'));
+    return ResponseFrame(
+      header: switch (variant) {
+        _Variant.command => ResponseHeader.titledUpDown,
+        _Variant.edit => ResponseHeader.plainUpDown,
+        _Variant.tool => ResponseHeader.titledNext,
+      },
+      title: widget.agentName,
+      space: widget.space,
+      agentKind: widget.agentKind,
+      nav: widget.nav,
+      bodyPadding: approval
+          ? const EdgeInsets.fromLTRB(20, 4, 20, 28)
+          : const EdgeInsets.fromLTRB(16, 4, 16, 28),
+      bar: IrisActionBar(
+        buttons: [
+          IrisButton(
+            key: const Key('permission-later'),
+            label: '나중에',
+            tone: IrisButtonTone.ghost,
+            onPressed: _busy ? null : () => Navigator.of(context).maybePop(),
+          ),
+          IrisButton(
+            key: const Key('permission-send'),
+            label: label,
+            tone: IrisButtonTone.primary,
+            onPressed: _choice == null || _busy
+                ? null
+                : () => _answer(_choice == 0),
           ),
         ],
-        const SizedBox(height: 14),
-        _CommandBlock(
-          key: const Key('permission-command'),
-          command: visibleControlCharacters(_body.input),
-        ),
-        const SizedBox(height: 14),
-        ClipRRect(
-          key: const Key('permission-options'),
-          borderRadius: BorderRadius.circular(20),
-          child: Column(
-            children: [
-              _PermissionOption(
-                key: const Key('permission-option-1'),
-                index: 1,
-                label: _busy ? '보내는 중…' : '허용',
-                foreground: context.iris.brand,
-                weight: FontWeight.w600,
-                onPressed: _busy ? null : () => _answer(true),
-              ),
-              _PermissionOption(
-                key: const Key('permission-option-2'),
-                index: 2,
-                label: '거절하고 다시 지시',
-                foreground: context.iris.blocked,
-                onPressed: _busy ? null : () => _answer(false),
-              ),
-            ],
+      ),
+      children: children,
+    );
+  }
+
+  List<Widget> _payload(BuildContext context, _Variant variant, String input) {
+    final description = _body.description;
+    switch (variant) {
+      case _Variant.command:
+        return [
+          ResponseCodeBox(key: const Key('permission-command'), text: input),
+          if (description.isNotEmpty)
+            ResponseContextRow(
+              key: const Key('permission-description'),
+              icon: 'list-bullets',
+              label: '설명',
+              value: description,
+              first: true,
+            ),
+        ];
+      case _Variant.edit:
+        // 줄바꿈을 살려 줄마다 제어 문자를 보이게 바꾼 뒤 해석
+        final diff = parseDiff(
+          _body.input.split('\n').map(visibleControlCharacters).join('\n'),
+        );
+        return [
+          if (diff != null)
+            ResponseDiff(diff, fallbackName: _body.tool)
+          else
+            ResponseCodeBox(
+              key: const Key('permission-command'),
+              text: input,
+              prompt: null,
+              fontSize: 13.5,
+            ),
+          if (description.isNotEmpty)
+            ResponseContextRow(
+              key: const Key('permission-description'),
+              icon: 'list-bullets',
+              label: '설명',
+              value: description,
+              first: true,
+            ),
+        ];
+      case _Variant.tool:
+        final (server, tool) = _splitTool(_body.tool);
+        return [
+          if (description.isNotEmpty)
+            Text(description, style: responseLeadStyle(context)),
+          ResponseFacts([
+            if (server != null) ('서버', server),
+            ('도구', tool),
+            if (input.isNotEmpty) ('입력', input),
+          ]),
+        ];
+    }
+  }
+
+  Widget _answered(BuildContext context, _Variant variant, String gone) {
+    final remaining = gone.startsWith('gone')
+        ? (widget.nav?.count ?? 0)
+        : ((widget.nav?.count ?? 1) - 1).clamp(0, 99);
+    return ResponseFrame(
+      header: ResponseHeader.titledNext,
+      title: widget.agentName,
+      space: widget.space,
+      agentKind: widget.agentKind,
+      bar: responseAnsweredBar(
+        onHome: () => Navigator.of(context).pop(false),
+        remaining: remaining,
+        onNext: widget.nav?.onNext,
+      ),
+      children: [
+        ResponseAnswered(
+          title: responseGoneText(gone).$1,
+          detail: responseGoneText(gone).$2,
+          badge: responseGoneBadge(gone),
+          kindLabel: switch (variant) {
+            _Variant.command => '명령 실행 승인',
+            _Variant.edit => '파일 수정 승인',
+            _Variant.tool => '도구 사용 승인',
+          },
+          kindIcon: switch (variant) {
+            _Variant.command => 'terminal-window',
+            _Variant.edit => 'pencil-simple',
+            _Variant.tool => 'squares-four',
+          },
+          ghost: responseGhostCode(
+            context,
+            visibleControlCharacters(_body.input),
+            prompt: variant == _Variant.command ? r'$' : null,
           ),
         ),
-        if (_result != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(_result!, style: TextStyle(color: context.iris.muted)),
-          ),
       ],
-    );
-  }
-}
-
-class _CommandBlock extends StatelessWidget {
-  const _CommandBlock({required this.command, super.key});
-
-  final String command;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 66,
-      width: double.infinity,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: context.iris.background,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 44, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    r'$',
-                    style: IrisType.mono.copyWith(color: context.iris.faint),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: IrisCommandText(
-                      command: command,
-                      style: IrisType.mono.copyWith(
-                        color: context.iris.foreground2,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Positioned(
-              right: 6,
-              top: 6,
-              child: SizedBox.square(
-                dimension: 32,
-                child: TextButton(
-                  onPressed: () =>
-                      Clipboard.setData(ClipboardData(text: command)),
-                  style: const ButtonStyle(
-                    padding: WidgetStatePropertyAll(EdgeInsets.zero),
-                    overlayColor: WidgetStatePropertyAll(Colors.transparent),
-                  ),
-                  child: IrisIcon('copy', size: 16, color: context.iris.muted),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PermissionOption extends StatelessWidget {
-  const _PermissionOption({
-    required this.index,
-    required this.label,
-    required this.onPressed,
-    this.foreground,
-    this.weight = FontWeight.w400,
-    super.key,
-  }) : trailing = null;
-
-  final int index;
-  final String label;
-  final VoidCallback? onPressed;
-  final Color? foreground;
-  final FontWeight weight;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 56,
-      width: double.infinity,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: context.iris.level2,
-          border: index == 1
-              ? null
-              : Border(top: BorderSide(color: context.iris.separator)),
-        ),
-        child: TextButton(
-          onPressed: onPressed,
-          style: const ButtonStyle(
-            padding: WidgetStatePropertyAll(
-              EdgeInsets.symmetric(horizontal: 18),
-            ),
-            overlayColor: WidgetStatePropertyAll(Colors.transparent),
-            shape: WidgetStatePropertyAll(RoundedRectangleBorder()),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: context.iris.level3,
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '$index',
-                  style: TextStyle(
-                    color: context.iris.muted,
-                    fontFamily: 'monospace',
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: foreground ?? context.iris.foreground,
-                    fontSize: 17,
-                    fontWeight: weight,
-                    height: 20 / 17,
-                    letterSpacing: -0.17,
-                  ),
-                ),
-              ),
-              ?trailing,
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

@@ -22,6 +22,7 @@ import {
   textEditor, web, webviewFactory, webviewThrottleSource, wsCore,
 } from "../sources.mjs";
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
+import { workerUsesInputBaseCommand } from "../contracts/mcp-input-boundary.mjs";
 
 export default async function run() {
 console.log("[10m] 키 — 수식키는 같은 인자로 들어오고, 누른 탭 밖으로 새지 않는다");
@@ -43,12 +44,31 @@ console.log("[10m] 키 — 수식키는 같은 인자로 들어오고, 누른 �
     // 예외는 Cloudflare 통과용 네이티브 selector 클릭(cdp-control 의 nativeClickSel) 하나다. CDP 를
     // 붙이면 그 순간 이 탭이 챌린지에서 봇으로 걸리고(확인 결과: 부착 시 ahrefs Turnstile 실패),
     // CDP 없이 실제 입력을 넣는 방법이 sendInputEvent 뿐이라 그 함수만 허용한다. 그 밖의
-    // sendInputEvent 와 모든 dispatchKeyEvent 는 금지이고, 이 검사가 그 경계를 지킨다.
+    // 일반 MCP의 다른 sendInputEvent·dispatchKeyEvent 는 금지. QA 전용 입력은 별도 검사 대상.
     const nativeClickFn = sliceBetween(native, "async function nativeClickSel(", "// [Cloudflare 통과 · 배경 탭]", "네이티브 selector 클릭");
-    check("키는 창이 아니라 페이지 안에서 만들어진다", () =>
+    const relay = read("native/electron/relay/index.cjs");
+    const ordinaryNative = native.replace(read("native/electron/cdp-qa-input.cjs"), "")
+      .replace(read("native/electron/cdp-qa-keys.cjs"), "").replace(relay, "");
+    const workerCommands = read("server/mcp-worker/browser-service.js");
+    // 두 번째 예외: 사용자 포커스 보호 중 QA 글자(cdp-qa-input 의 sendCharsToTab). char 이벤트는 그 탭
+    // 위젯에만 닿고 포커스를 옮기지 않음(실측). 새는 것은 Tab 같은 키라 char 만 허용
+    const qaCharsFn = sliceBetween(read("native/electron/cdp-qa-input.cjs"), "function sendCharsToTab(", "const FOCUS_GUARDED_ERROR", "QA 글자 진짜 키");
+    // QA 입력의 기본 판정은 trusted(기존 동작)라 조립부가 판정 함수를 넘기지 않으면 보호가 없음
+    check("QA 입력 조립부가 사용자 포커스 판정을 넘긴다", () =>
+      /createQaInputCommands\(\{ prepareFocus: qaPrepareFocus, returnFocus: /.test(read("native/electron/cdp-control.cjs"))
+      && /async function qaPrepareFocus\(wc\)/.test(read("native/electron/cdp-control.cjs")));
+    // 앱 셸은 게스트 pointerdown 으로 메뉴를 닫고 가운데 칸을 고름. AI 의 페이지 안 클릭(합성)은 보내지 않음
+    check("게스트 누르기 알림은 진짜 누르기만 보낸다", () =>
+      /addEventListener\("pointerdown", \(e\) => \{\n  [^\n]*\n  if \(!e \|\| !e\.isTrusted\) return;\n  try \{ ipcRenderer\.sendToHost\("ac-guest-pointerdown"\)/
+        .test(read("native/electron/webview-preload.cjs")));
+    check("QA 글자 진짜 키는 char 이벤트만 보낸다", () =>
+      /sendInputEvent\(\{ type: "char", keyCode: ch \}\)/.test(qaCharsFn)
+      && (qaCharsFn.match(/sendInputEvent\(/g) || []).length === 1);
+    check("일반 MCP 키는 페이지 안에서 만들어진다", () =>
       /sendInputEvent\(/.test(nativeClickFn)
-      && !/sendInputEvent\(/.test(native.replace(nativeClickFn, ""))
-      && !/send\("Input\.dispatchKeyEvent"/.test(native)
+      && !/sendInputEvent\(/.test(ordinaryNative.replace(nativeClickFn, ""))
+      && !/send\("Input\.dispatchKeyEvent"/.test(ordinaryNative)
+      && !workerUsesInputBaseCommand(workerCommands)
       && /new KeyboardEvent\("keydown", init\)/.test(cdp));
     // 배경 탭(display:none)은 네이티브 입력이 닿지 않아 CDP-free `.click()` 으로 누른다. 이 경로는
     // CDP 를 붙이지 않아야 하고(부착이 탐지 신호) 네이티브 입력을 섞어서도 안 된다. executeJavaScript+.click() 만 쓴다.

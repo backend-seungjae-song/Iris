@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { extractPromptTargetMarkers, launchContext, submitPromptTargets } from "../bin/agent-context.mjs";
+import { extractPromptTargetMarkers, herdrAgentName, launchContext, submitPromptTargets } from "../bin/agent-context.mjs";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "iris-agent-context-"));
@@ -38,9 +38,12 @@ test("launch binds both exact terminal identities and returns a compact receipt"
   assert.equal(f.records[0].parent.sessionId, "parent-session");
   assert.equal(f.records[0].child.terminalId, "term_child");
   assert.equal(f.records[0].child.sessionId, "codex-child-session");
-  assert.equal(f.calls[0].includes("--no-focus"), true);
-  assert.equal(f.calls[0].includes("--no-daemon"), true);
-  assert.equal(f.calls[0].includes("--dangerously-bypass-approvals-and-sandbox"), false);
+  assert.equal(f.calls[0].kind, "codex");
+  assert.equal(f.calls[0].workspaceId, "w1");
+  assert.equal(f.calls[0].agentName, "inspect");
+  assert.equal(f.calls[0].agentArgs.includes("--no-daemon"), true);
+  assert.equal(f.calls[0].agentArgs.includes("/usr/local/bin/codex"), false);
+  assert.equal(f.calls[0].agentArgs.includes("--dangerously-bypass-approvals-and-sandbox"), false);
   assert.equal(JSON.stringify(result).includes("Inspect the assigned fixture"), false);
 });
 
@@ -108,7 +111,8 @@ test("overlapping launches with the same job id produce at most one child", asyn
 test("Claude launch gets its own known session id and explicit effort", async (t) => {
   const f = fixture(t);
   const result = await launchContext({ ...f.options, runtime: "claude", model: "sonnet", effort: "high" }, f.deps);
-  const args = f.calls[0];
+  const args = f.calls[0].agentArgs;
+  assert.equal(f.calls[0].kind, "claude");
   assert.equal(args[args.indexOf("--session-id") + 1], result.child.sessionId);
   assert.equal(args[args.indexOf("--effort") + 1], "high");
   assert.equal(args.includes("--dangerously-skip-permissions"), false);
@@ -342,4 +346,11 @@ test("SessionStart는 등록만 하고 UserPromptSubmit만 지목을 적용한�
   await submitPromptTargets({ session_id: "thread", hook_event_name: "SessionStart" }, deps);
   await submitPromptTargets({ session_id: "thread", hook_event_name: "UserPromptSubmit", prompt: "" }, deps);
   assert.deepEqual(modes, [true, false]);
+});
+
+test("herdr agent 이름은 소문자로 시작하는 32자 이하 slug", () => {
+  assert.equal(herdrAgentName("v201-Welcome_b"), "v201-welcome_b");
+  assert.equal(herdrAgentName("9job"), "a-9job");
+  assert.equal(herdrAgentName("x".repeat(80)).length, 32);
+  for (const id of ["v201-Welcome_b", "9job", "Review-API"]) assert.match(herdrAgentName(id), /^[a-z][a-z0-9_-]{0,31}$/);
 });

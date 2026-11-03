@@ -352,7 +352,18 @@ async function runChromeAuth({ url, session, partition, onStage, bounds, fields:
   return runProfileHandoff({ target, session, partition, entry, cookieImport, stage, bounds, fields, isCurrent });
 }
 
+// 탭과 짝지은 실제 브라우저 프로필에서 주소를 일반 창으로 엶. 짝지은 프로필이 없으면 그 브라우저가 마지막으로 쓴 프로필.
+// 원격 디버깅·별도 user-data-dir 없음(Chrome 은 기본 데이터 폴더의 원격 디버깅을 막음)
+function openInBrowserProfile(url, entry) {
+  const browser = BROWSER_APPS[(entry && entry.browser && entry.browser.id) || "chrome"];
+  if (!browser || !fs.existsSync(browser.bin)) return false;
+  const args = entry && entry.profile ? ["--profile-directory=" + entry.profile, url] : [url];
+  const child = spawn(browser.bin, args, { detached: true, stdio: "ignore" });
+  child.unref();
+  return true;
+}
+
 const waitFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-module.exports = { runChromeAuth, runProfileHandoff, osaRun, baseDomain, inScope,
+module.exports = { runChromeAuth, runProfileHandoff, openInBrowserProfile, osaRun, baseDomain, inScope,
   findPoisonedChrome, sanitizeFields, fillJs };

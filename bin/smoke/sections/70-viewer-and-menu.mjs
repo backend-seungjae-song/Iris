@@ -84,22 +84,59 @@ console.log("[2q] 사람 경로 게이트 — 확인은 사람이 밟는 길로�
     ["보이는지 판정", "el.getBoundingClientRect().height > 0"],
   ]) check(`eval ${label} 통과`, () => !deny("eval", { expression: expr }));
 
-  check("게이트는 명령 경로 한 곳에서만 불린다", () => {
-    const src = read("server/browser-commands.js");
-    return (src.match(/humanPathDeny\(/g) || []).length === 1
-      && /import \{ humanPathDeny \} from "\.\/human-path\.js"/.test(src);
+  check("일반 MCP 경로는 humanPathDeny를 호출하지 않는다", () => {
+    const src = read("server/mcp-worker/browser-service.js");
+    return !/humanPathDeny/.test(src)
+      && /ordinaryCommandDenied\(command\)/.test(src);
   });
-  // 거부 결과에 sent 필드가 붙으면 재시도 단계가 같은 거부를 네 번 더 반복한다.
-  check("거부는 재시도 사다리를 타지 않는다", () =>
-    /const denied = humanPathDeny\([\s\S]{0,120}?\n\s*if \(denied\) \{ resolve\(\{ ok: false, error: denied \}\); return; \}/.test(read("server/browser-commands.js")));
+  // QA 소유 탭은 거부하고 같은 요청의 일반 탭만 실행
+  await checkAsync("QA 소유 탭 거부는 그 탭의 입력 전달 전에 반환된다", async () => {
+    const { createWorkerBrowserService } = await import("../../../server/mcp-worker/browser-service.js");
+    const sent = [];
+    const service = createWorkerBrowserService({
+      hostApi: {
+        withCommand: (_command, run) => run(),
+        call: async (operation, input) => {
+          if (operation === "journal.accept" || operation === "journal.trace") return {};
+          if (operation === "browser.commandGuard") return { qaOwned: input.tabRef === "qa-tab" };
+          sent.push([operation, input]);
+          if (operation === "browser.commandTargetState") {
+            return { target: { tabId: input.tabRef, targetToken: { wcId: input.tabRef }, tab: {} } };
+          }
+          if (operation === "browser.executeWithDialog") return { ok: true, data: { clicked: input.tabId } };
+          return {};
+        },
+      },
+      activity: { run: (_kind, _id, run) => run() },
+    });
+    const results = [];
+    for (const tab of ["qa-tab", "normal-tab,qa-tab"]) {
+      results.push(await service.dispatch({ command: "click", args: { tab, selector: "button" },
+        identity: { session: "smoke-qa-guard" }, commandId: `smoke-qa-guard-${tab}` }));
+    }
+    const [single, mixed] = results;
+    return single.ok === false && /QA 회차가 소유한 탭/.test(single.error)
+      && mixed.ok === false && mixed.multi === true && mixed.okCount === 1
+      && mixed.targets?.find(target => target.tab === "qa-tab")?.ok === false
+      && mixed.targets?.find(target => target.tab === "normal-tab")?.ok === true
+      && sent.some(([, input]) => input?.tabRef === "normal-tab" || input?.tabId === "normal-tab")
+      && !sent.some(([, input]) => input?.tabRef === "qa-tab" || input?.tabId === "qa-tab");
+  });
   // 눌러서 이동한 것과 주소로 건너뛴 것을 기록에서 구별하지 못하면 우회가 드러나지 않는다.
   check("건너뛴 이동은 회차 장부·트레이스에 남는다", () => {
     const src = readAll("server");
     return /skipped_human_path: a\.reason/.test(src) && /주소로 건너뜀/.test(src);
   });
-  check("goto의 reason이 MCP·CLI 양쪽에서 서버까지 간다", () =>
-    /reason: String\(a\.reason\)/.test(read("bin/iris-mcp.mjs"))
-    && /if \(skipReason\) args\.reason = skipReason/.test(read("bin/iris-browser.mjs")));
+  check("QA는 reason·entry로 임의 주소 이동을 허용하지 않는다", () => {
+    const { validateQaCommand } = require_("../server/qa-protocol.js");
+    for (const cmd of ["goto", "new_tab", "eval"]) {
+      let denied = false;
+      try { validateQaCommand(cmd, { url: "https://shop.com/cart", reason: "QA", entry: true }); }
+      catch { denied = true; }
+      if (!denied) return false;
+    }
+    return !/reason: String\(a\.reason\)/.test(read("bin/iris-mcp.mjs"));
+  });
   // 계획 러너도 같은 게이트를 지난다. 되돌리기(reset)만 준비라서 통과하되 이유가 장부에 남는다.
   check("계획의 goto도 게이트를 지나고, reset만 이유를 달고 통과", () => {
     const plan = read("bin/qa-plan.mjs");

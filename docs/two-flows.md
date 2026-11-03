@@ -11,7 +11,7 @@
 | 앱 실행 명령 | `pnpm dev:app` | `open -a Iris` |
 | 프로필 | `~/Library/Application Support/Iris-dev` | `~/Library/Application Support/Iris` |
 | 상태·증거 | `~/.iris-dev/` | `~/.iris/` |
-| 코드 변경 반영 | 다시 실행 | `pnpm install:app` 으로 빌드·교체 |
+| 코드 변경 반영 | 다시 실행 | `pnpm install:app` 으로 MCP 교체, 앱 재시작이 필요하면 `--full` |
 
 ## 설계 이유
 
@@ -98,8 +98,11 @@ ln -s "$PWD/bin/iris-browser.mjs" ~/.local/bin/iris-browser
 설치 앱에 변경 사항을 반영할 때는 다음 명령을 실행한다.
 
 ```
-pnpm install:app # 종료 → 빌드 → 교체 → 실행
+pnpm install:app        # MCP 작업 프로세스만 바뀐 경우 앱 재시작 없이 교체
+pnpm install:app --full # 앱 재시작이 필요한 변경: 빌드 → 종료 → 교체 → 실행
 ```
+
+`--full` 없이 실행했는데 앱 재시작이 필요한 변경이 있으면 앱을 건드리지 않고 거부하며 그 파일을 알린다.
 
 quit·build·ditto를 수동으로 반복하면 일부 단계를 누락하여 이전 코드를 검사할 수 있다.
 `server/`만 수정했어도 앱을 재시작해야 반영된다. 서버는 앱의 자식 프로세스로 함께 시작된다.

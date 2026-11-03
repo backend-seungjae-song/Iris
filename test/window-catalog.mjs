@@ -514,6 +514,87 @@ test("T19 올리기 직전 사라진 창은 missing 성공 응답으로 보존�
   assert.deepEqual(await catalog.step({ targets: [{ id: "pick" }] }), expected);
 });
 
+function groupedTargets() {
+  return [11, 12, 13, 14].map((id) => ({ id, cgId: id, pid: id, ...(id === 12 || id === 13 ? { group: "g1" } : {}) }));
+}
+
+test("묶음 차례면 맨 앞 창을 올리고 나머지를 올린 뒤 맨 앞 창을 다시 올린다", () => {
+  const jxa = { ObjC: { import() {} }, core };
+  vm.runInNewContext(RUNNER_SRC, jxa);
+  const targets = groupedTargets();
+  const calls = [];
+  const result = jxa.irisStep({ ordered: [11, 12, 13, 14], cursor: null, dir: 1, targets },
+    { windows: targets, front: 11 },
+    (d) => { calls.push(`main:${d.id}`); return true; },
+    (d) => { calls.push(`also:${d.id}`); return true; });
+
+  assert.equal(result.raised, 12);
+  assert.deepEqual(Array.from(result.also), [13]);
+  assert.deepEqual(calls, ["main:12", "also:13", "main:12"]);
+});
+
+test("묶음의 창이 앞에 있으면 다음 차례는 묶음 다음 창이고, 거꾸로는 묶음 앞 창이다", () => {
+  const jxa = { ObjC: { import() {} }, core };
+  vm.runInNewContext(RUNNER_SRC, jxa);
+  const targets = groupedTargets();
+  const raisedFrom = (front, dir) => jxa.irisStep({ cursor: null, dir, targets },
+    { windows: targets, front }, () => true, () => true).raised;
+
+  assert.equal(raisedFrom(13, 1), 14);
+  assert.equal(raisedFrom(13, -1), 11);
+  assert.equal(raisedFrom(14, 1), 11);
+});
+
+test("다른 데스크톱에 남은 묶음 창은 left 에 남기고 전환은 성공한다", () => {
+  const jxa = { ObjC: { import() {} }, core };
+  vm.runInNewContext(RUNNER_SRC, jxa);
+  const targets = groupedTargets();
+  const result = jxa.irisStep({ cursor: null, dir: 1, targets }, { windows: targets, front: 11 },
+    () => true, () => ({ ok: false, reason: "other-desktop" }));
+
+  assert.equal(result.raised, 12);
+  assert.deepEqual(Array.from(result.also), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.left)), [{ id: 13, reason: "other-desktop" }]);
+});
+
+test("묶음의 맨 앞 창을 못 올리면 묶음의 다음 창이 그 자리를 맡는다", () => {
+  const jxa = { ObjC: { import() {} }, core };
+  vm.runInNewContext(RUNNER_SRC, jxa);
+  const targets = groupedTargets();
+  const result = jxa.irisStep({ cursor: null, dir: 1, targets }, { windows: targets, front: 11 },
+    (d) => d.id !== 12, () => true);
+
+  assert.equal(result.raised, 13);
+  assert.deepEqual(Array.from(result.missing), [12]);
+});
+
+test("묶음의 맨 앞 창이 이 앱 창이면 나머지만 올리고 그 창은 앱에 맡긴다", () => {
+  const jxa = { ObjC: { import() {} }, core };
+  vm.runInNewContext(RUNNER_SRC, jxa);
+  const targets = groupedTargets();
+  const calls = [];
+  const result = jxa.irisStep({ cursor: null, dir: 1, targets, ownPid: 12 }, { windows: targets, front: 11 },
+    (d) => { calls.push(`main:${d.id}`); return true; },
+    (d) => { calls.push(`also:${d.id}`); return true; });
+
+  assert.equal(result.own, 12);
+  assert.deepEqual(Array.from(result.also), [13]);
+  assert.deepEqual(calls, ["also:13"]);
+});
+
+test("묶음 결과의 also·left 는 osascript 응답 해석을 거쳐도 host 까지 간다", async () => {
+  const reply = { ok: true, raised: 1, also: [2], left: [{ id: 3, reason: "other-desktop" }],
+    resolved: [1, 2, 3], missing: [], front: 9 };
+  const catalog = catalogWith((_file, _args, _options, callback) => {
+    callback(null, JSON.stringify(reply), "");
+    return child();
+  });
+
+  const result = await catalog.step({ targets: [{ id: 1 }] });
+  assert.deepEqual(result.also, [2]);
+  assert.deepEqual(result.left, [{ id: 3, reason: "other-desktop" }]);
+});
+
 test("R10a 이번 snapshot에서 둘째 창이 사라졌으면 한 번에 셋째 창을 올린다", () => {
   const jxa = { ObjC: { import() {} }, core };
   vm.runInNewContext(RUNNER_SRC, jxa);
@@ -877,6 +958,7 @@ function loadRaiser() {
       resetClock: function () { __clock = 0; },
       keys: function () { return __keys.slice(); },
       step: function (input, snapshot, raiseWindow) { return irisStep(input, snapshot, raiseWindow); },
+      companion: function (d) { return irisRaiseCompanion(d); },
       processWindows: function (p, cgAll, cgOnScreen) { return irisProcessWindows(p, cgAll, cgOnScreen); },
     };
   `;
@@ -892,6 +974,19 @@ test("이미 이 데스크톱에 있으면 옮기지 않고 그 자리에서 그
   r.setRaiseAx(() => { raised += 1; return true; });
   assert.equal(r.raise(target), true);
   assert.deepEqual(r.keys(), [], "화면에 있는 창 때문에 데스크톱을 옮기면 안 된다");
+  assert.equal(raised, 1);
+});
+
+test("묶음의 나머지 창은 다른 데스크톱에 있으면 데스크톱을 넘어가지 않는다", () => {
+  const r = loadRaiser();
+  let raised = 0;
+  r.setOnScreen(() => []);
+  r.setRaiseAx(() => { raised += 1; return true; });
+  assert.deepEqual(r.companion(target), { ok: false, reason: "other-desktop" });
+  assert.deepEqual(r.keys(), []);
+  assert.equal(raised, 0);
+  r.setOnScreen(() => [110]);
+  assert.equal(r.companion(target), true);
   assert.equal(raised, 1);
 });
 
@@ -1087,6 +1182,22 @@ test("앞 창의 번호는 그 창의 번호와 같다", () => {
   assert.equal(out.windows.length, 2);
   assert.equal(out.front, out.windows[0].id,
     "앞 창의 번호가 그 창의 번호와 다르다 — 목록 밖으로 보여 첫 창만 되풀이된다");
+});
+
+test("같은 위치의 창이 여럿이면 제목으로 각자의 창 번호를 찾는다", () => {
+  // Iris 콘솔과 공유 브라우저가 같은 자리(2,35,1724x1027)에 있어 창 번호를 못 찾고, 묶음 전환이 엉뚱한 창을 올렸다
+  const r = loadRaiser();
+  const B = [2, 35, 1724, 1027];
+  const cgAll = [
+    { cgId: 8754, pid: 77, bounds: B, title: "Iris — 콘솔" },
+    { cgId: 8763, pid: 77, bounds: B, title: "Iris — 공유 브라우저" },
+  ];
+  const out = r.processWindows(axProcess({ titles: ["Iris — 공유 브라우저", "Iris — 콘솔"], bounds: [B, B] }), cgAll, cgAll);
+  assert.deepEqual(out.windows.map((w) => [w.matchTitle || w.title, w.cgId]), [["Iris — 공유 브라우저", 8763], ["Iris — 콘솔", 8754]]);
+  // 제목까지 같으면 고르지 않음
+  const same = r.processWindows(axProcess({ titles: ["Iris — 에뮬레이터", "Iris — 에뮬레이터"], bounds: [B, B] }),
+    cgAll.map((w) => ({ ...w, title: "Iris — 에뮬레이터" })), cgAll);
+  assert.deepEqual(same.windows.map((w) => w.cgId), [null, null]);
 });
 
 test("앞 창을 고른 목록의 번호로 옮긴다", () => {

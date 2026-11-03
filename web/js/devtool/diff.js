@@ -28,7 +28,7 @@ import { isHostWindows, pathBasename, joinPath } from "../core/host-path.js";
 import { repoNameOf } from "../core/repo-name.js";
 import { callHook } from "../core/hooks.js";
 import {
-  addTab, ensureTabSpace, getActiveTabId, getCenterSpace, getTabs, getTabSpaces,
+  addTab, ensureTabSpace, isTabVisible, getCenterSpace, getTabs, getTabSpaces,
   setActiveTab, setCenterSpace,
 } from "../center/tab-store.js";
 
@@ -89,7 +89,7 @@ export function openPatchDiff({ root, file, patch = null, number, base, spaceId,
   Object.assign(tab, { patch, base, error, patchRequest: requestId });
   if (activate) {
     setCenterSpace(sp); setActiveTab(sp, id); renderTabs(); showActiveTab();
-  } else if (getCenterSpace() === sp && getActiveTabId(sp) === id) renderDiffView(tab);
+  } else if (getCenterSpace() === sp && isTabVisible(sp, id)) renderDiffView(tab);
   return true;
 }
 // diff 한 장을 줄로 푼다. 번호는 hunk 머리(@@ -a,b +c,d @@)에서만 알 수 있고, 그 값을 놓치면
@@ -245,7 +245,7 @@ export function handleGitDiffMessage(m) {
     && (!m.root || !t.root || t.root === m.root);
   const patch = m.error ? ("[오류] " + m.error) : (m.patch || "");
   const sp = getCenterSpace();
-  const at = getTabs(sp).find((x) => x.id === getActiveTabId(sp));
+  const at = getTabs(sp).find((x) => isTabVisible(sp, x.id) && hit(x));
   const shown = at && hit(at) ? at.patch : undefined;
   for (const s of getTabSpaces()) for (const t of getTabs(s)) if (hit(t)) t.patch = patch;
   // 같은 내용으로 다시 그리면 읽던 스크롤 위치가 처음으로 돌아감

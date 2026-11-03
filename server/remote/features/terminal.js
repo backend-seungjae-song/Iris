@@ -4,7 +4,9 @@ import { createHash } from "node:crypto";
 
 const MAX_SCREEN_BYTES = 48 * 1024;
 const MAX_SCREEN_CELLS = 262144;
+const SCROLLBACK_LINES = [400, 200, null];
 const POLL_MS = 300;
+const READ_TIMEOUT_MS = 2000;
 
 export function terminalMouseMode(raw, truncated = false) {
   if (truncated || typeof raw !== "string") return false;
@@ -36,7 +38,7 @@ function screenText(value, identifiers) {
     .replace(/\x1bP[\s\S]*?\x1b\\/g, "");
   const parts = safe.split(/(\x1b\[[0-9;:?]*[ -/]*[@-~])/g);
   const visible = parts.filter((_part, index) => index % 2 === 0).join("");
-  // 색 코드가 경로·식별자 중간에 있어도 전체 문자열에서 찾는다. 같은 UTF-16 길이로 표시해 원문 위치를 유지한다.
+  // 색 코드로 나뉜 경로·식별자 검사와 원문 위치 보존
   const marked = redactPrivateText(visible, identifiers, (_label, original) => "\0".repeat(original.length));
   if (marked === visible) return safe;
   let offset = 0;
@@ -55,21 +57,76 @@ function textHash(text) {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-export function terminalSelection(text, row) {
+const MENU_ITEM = /^\s*((?:(?:[›❯]\s*)?\d+[.)])|[›❯●○])\s+(\S.*)$/u;
+// 체크 목록 아래의 번호 없는 제출·다음 줄
+const ACTION_LINE = /^\s+(?:[›❯]\s*)?(?:submit|next|done|제출|다음|완료)\s*$/iu;
+// 목록 아래 키 안내 줄
+export const KEY_HINT = /^(?:press\s+)?(?:enter|esc|tab|shift\+tab|ctrl\+[a-z]|←\/→|↑\/↓)(?=\s).*?(?:\bto\b|\bor\b|\bselect\b|\bback\b|\bcancel\b|\bconfirm\b|\bamend\b|\|)/iu;
+const RULE = /^\s*[─━═\-_]{8,}\s*$/u;
+
+// 선택 표시가 있는 목록 하나, 항목 사이의 들여쓴 설명 줄과 구분선 하나는 같은 목록으로 봄
+// 줄바꿈으로 나뉜 조각 잇기. 앞 조각이 긴 경로로 끝나면 단어 중간에서 잘린 것이라 공백 없이 이음
+export function joinFragments(pieces) {
+  let out = "";
+  for (const piece of pieces) {
+    if (!out) { out = piece; continue; }
+    const last = out.split(/\s+/).at(-1);
+    out += (last.length >= 35 && last.includes("/") ? "" : " ") + piece;
+  }
+  return out;
+}
+
+export function promptList(text) {
   // 줄 위치를 바꾸는 제어 코드가 남은 화면의 오선택 방지
   if (/\x1b\[(?![0-9;]*m)[0-9;?]*[ -/]*[@-~]/.test(text)) return null;
   const lines = text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").split(/\r?\n/);
   const candidates = [];
-  for (let index = 0; index < lines.length; index++) {
-    const match = lines[index].match(/^\s*((?:(?:[›❯]\s*)?\d+[.)])|[›❯●○])\s+(\S.*)$/u);
-    if (match) candidates.push({ row: index + 1, selected: /^[›❯●]/u.test(match[1]), numbered: /\d/.test(match[1]) });
+  lines.forEach((line, index) => {
+    const match = line.match(MENU_ITEM);
+    const action = ACTION_LINE.test(line);
+    if (match || action) candidates.push({ row: index + 1, selected: /^\s*[›❯●]/u.test(line), numbered: action ? null : /\d/.test(match[1]),
+      text: line.trim(), description: "" });
+  });
+  // ❯·› 표시가 우선이고, 없을 때만 ● 를 선택 표시로 봄(요약 목록의 ● 글머리와 구분)
+  const arrows = candidates.filter(item => /^[›❯]/u.test(item.text));
+  const marked = arrows.length ? arrows : candidates.filter(item => item.selected);
+  const between = (from, to, allowRule) => {
+    let rules = 0;
+    for (let row = from + 1; row < to; row++) {
+      const line = lines[row - 1];
+      if (!line.trim()) continue;
+      if (RULE.test(line)) { if (!allowRule || ++rules > 1) return false; continue; }
+      if (!/^\s{3,}\S/.test(line)) return false;
+    }
+    return true;
+  };
+  // 표시 줄마다 이어지는 목록을 만들고, 선택지 2개 이상인 목록이 하나일 때만 인정.
+  // 위쪽 대화 기록의 › 입력 줄은 선택지가 이어지지 않아 제외됨
+  const lists = [];
+  for (const mark of marked) {
+    let start = candidates.indexOf(mark), end = start;
+    while (start > 0 && between(candidates[start - 1].row, candidates[start].row, false)) start--;
+    while (end < candidates.length - 1 && between(candidates[end].row, candidates[end + 1].row, true)) end++;
+    const items = candidates.slice(start, end + 1);
+    if (items.length >= 2 && items.filter(item => item.numbered !== null).every((item, _, kinds) => item.numbered === kinds[0].numbered)) lists.push({ items, mark });
   }
-  // 한 목록과 한 선택 표시만 허용
-  if (candidates.length < 2 || candidates.some((item, index) => index > 0 && item.row !== candidates[index - 1].row + 1)) return null;
-  const selected = candidates.filter((item) => item.selected);
-  if (selected.length !== 1 || !candidates.some((item) => item.row === row)) return null;
-  if (candidates.some((item) => item.numbered !== candidates[0].numbered)) return null;
-  return row - selected[0].row;
+  if (lists.length !== 1) return null;
+  const { items, mark: markedItem } = lists[0];
+  items.forEach((item, index) => {
+    const stop = index + 1 < items.length ? items[index + 1].row : Math.min(lines.length + 1, item.row + 6);
+    const below = lines.slice(item.row, stop - 1).map(line => line.trim());
+    // 하단 키 안내는 마지막 줄들이라, 좁은 화면에서 둘째 줄로 접힌 부분까지 첫 안내 줄부터 버림
+    const footer = below.findIndex(line => KEY_HINT.test(line));
+    item.description = joinFragments((footer < 0 ? below : below.slice(0, footer))
+      .filter(line => line && !RULE.test(line) && !/^~\/\.claude\/plans\//.test(line))).slice(0, 300);
+  });
+  return { items, selectedIndex: items.indexOf(markedItem) };
+}
+
+export function terminalSelection(text, row) {
+  const list = promptList(text);
+  const index = list?.items.findIndex(item => item.row === row);
+  return list && index >= 0 ? index - list.selectedIndex : null;
 }
 
 export function encodeTerminalMouse(message) {
@@ -132,47 +189,91 @@ export function createTerminalFeature(options) {
   const now = options.now || Date.now;
   const touching = new Set();
   const lastTouch = new Map();
+  const promptReads = new Map();
+  const promptScreens = new Map();
+  const selecting = new Set();
+  const selectedScreens = new Map();
   const log = options.log || ((code) => console.warn(`[remote] ${code}`));
   function failure(code) { log(code); return { ok: false, code }; }
 
+  async function limited(operation) {
+    let timer;
+    try {
+      const deadline = new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error("terminal read timeout"),
+          { code: "terminal-read-timeout" })), options.readTimeoutMs ?? READ_TIMEOUT_MS);
+      });
+      return await Promise.race([operation(), deadline]);
+    } finally { clearTimeout(timer); }
+  }
+  function readReason(code) { log(`terminal-read reason=${code}`); }
+
   async function geometry(herdr, paneId) {
     if (typeof herdr.call !== "function") return null;
-    const result = await herdr.call("pane.layout", { pane_id: paneId });
+    const result = await limited(() => herdr.call("pane.layout", { pane_id: paneId }));
     const rect = (result?.layout || result)?.panes?.find((pane) => pane.pane_id === paneId)?.rect;
     return Number.isSafeInteger(rect?.width) && Number.isSafeInteger(rect?.height)
       && rect.width > 0 && rect.height > 0 && rect.width <= 4096 && rect.height <= 4096
       ? { columns: rect.width, rows: rect.height } : null;
   }
 
-  async function read(agent, mouse = true) {
+  async function read(agent, mouse = true, record = null) {
     const herdr = getHerdr();
     if (!herdr || typeof herdr.paneRead !== "function") return null;
     try {
       const source = agent.source || {};
-      const value = await herdr.paneRead(source.paneId, "visible", "ansi", false);
-      const size = await geometry(herdr, source.paneId);
+      const value = await limited(() => herdr.paneRead(source.paneId, "visible", "ansi", false));
+      let size;
+      try { size = await geometry(herdr, source.paneId); }
+      catch (error) {
+        if (error.code === "terminal-read-timeout") throw error;
+        size = null;
+      }
       let mouseMode = false;
-      if (mouse && size) {
+      let recentHash = null;
+      if (size && (mouse || record)) {
         // 화면 스냅샷에 모드 정보가 없으면 입력 금지
         try {
-          const raw = await herdr.paneRead(source.paneId, "recent", "ansi", false);
-          mouseMode = terminalMouseMode(raw?.text ?? raw, !!raw?.truncated);
-        } catch { /* 모드 확인 실패 시 입력 금지 */ }
+          const raw = await limited(() => herdr.paneRead(source.paneId, "recent", "ansi", false));
+          recentHash = textHash(raw?.text ?? (typeof raw === "string" ? raw : ""));
+          mouseMode = !!size && terminalMouseMode(raw?.text ?? raw, !!raw?.truncated);
+        } catch (error) {
+          if (error.code === "terminal-read-timeout") throw error;
+          readReason("terminal-recent-unavailable");
+        }
       }
       const original = value?.text ?? (typeof value === "string" ? value : "");
       const text = screenText(original,
         [source.paneId, source.sessionUuid, source.sessionId, source.terminalId, source.workspaceId]);
+      const visibleHash = textHash(original);
+      let stale = false;
+      if (record) {
+        if (record.visibleHash !== visibleHash) {
+          record.staleSince = null;
+          record.recentChanges = 0;
+          record.stale = false;
+        } else if (recentHash && record.recentHash && recentHash !== record.recentHash) {
+          record.staleSince ??= now();
+          record.recentChanges = (record.recentChanges || 0) + 1;
+          if (record.recentChanges >= 3 && now() - record.staleSince >= 2000) record.stale = true;
+        }
+        record.visibleHash = visibleHash;
+        record.recentHash = recentHash;
+        stale = record.stale;
+      }
       const error = value?.truncated || Buffer.byteLength(text, "utf8") > MAX_SCREEN_BYTES || size && size.columns * size.rows > MAX_SCREEN_CELLS
-        ? "terminal-frame-too-large" : size ? null : "terminal-layout-unavailable";
+        ? "terminal-frame-too-large" : !size ? "terminal-layout-unavailable" : stale ? "terminal-screen-stale" : null;
       const frame = { revision: Number.isSafeInteger(value?.revision) && value.revision >= 0 ? value.revision : 0,
         text: error === "terminal-frame-too-large" ? "" : text, truncated: false, mouseMode,
         ...(size || {}), ...(error ? { error } : {}) };
       frame.hash = textHash(JSON.stringify([original, size, mouseMode, error]));
-      if (error) log(error);
+      if (error) readReason(error);
       return frame;
-    } catch {
-      log("terminal-read-unavailable");
-      return { revision: 0, text: "", truncated: false, hash: textHash("terminal-read-unavailable"), mouseMode: false, error: "terminal-read-unavailable" };
+    } catch (error) {
+      const code = error.code === "terminal-read-timeout" || /herdr timeout:/.test(error.message || "")
+        ? "terminal-read-timeout" : "terminal-read-unavailable";
+      readReason(code);
+      return { revision: 0, text: "", truncated: false, hash: textHash(code), mouseMode: false, error: code };
     }
   }
 
@@ -183,65 +284,98 @@ export function createTerminalFeature(options) {
       send(record.connId, { type: "terminal.frame", agent: record.agentRef, ...frame });
     }
   }
-  async function poll(record) {
-    if (watches.get(record.connId) !== record || record.reading) return;
-    record.reading = true;
-    const agent = agents.resolve(record.agentRef);
-    const frame = agent ? await read(agent) : null;
-    record.reading = false;
-    if (watches.get(record.connId) !== record) return;
-    push(record, frame);
+  function schedule(record) {
+    if (watches.get(record.connId) !== record || record.timer) return;
     record.timer = setTimer(() => { record.timer = null; void poll(record); }, POLL_MS);
     record.timer?.unref?.();
+  }
+  async function poll(record) {
+    if (watches.get(record.connId) !== record) return;
+    if (record.reading) { schedule(record); return; }
+    record.reading = true;
+    let frame;
+    try {
+      const agent = agents.resolve(record.agentRef);
+      frame = agent ? await read(agent, true, record) : null;
+    } catch {
+      readReason("terminal-agent-unavailable");
+    } finally { record.reading = false; }
+    if (watches.get(record.connId) !== record) return;
+    push(record, frame);
+    schedule(record);
   }
   async function refresh(record) {
     if (!record || watches.get(record.connId) !== record || record.reading) return;
     record.reading = true;
-    const agent = agents.resolve(record.agentRef);
-    const frame = agent ? await read(agent) : null;
-    record.reading = false;
+    let frame;
+    try {
+      const agent = agents.resolve(record.agentRef);
+      frame = agent ? await read(agent, true, record) : null;
+    } catch {
+      readReason("terminal-agent-unavailable");
+    } finally { record.reading = false; }
     if (watches.get(record.connId) === record) push(record, frame);
   }
   async function touch(entry, message, mouse) {
+    const reject = code => { if (!mouse) log(`prompt reason=${code}`); return failure(code); };
     const record = watches.get(entry.connId);
-    if (!record || record.agentRef !== message.agent) return failure("forbidden");
-    if (touching.has(entry.connId) || now() - (lastTouch.get(entry.connId) ?? -Infinity) < 100) return failure("busy");
+    if (!record || record.agentRef !== message.agent) return reject("forbidden");
+    if (touching.has(entry.connId) || now() - (lastTouch.get(entry.connId) ?? -Infinity) < 100) return reject("busy");
+    if (!mouse && selecting.has(message.agent)) return reject("busy");
     touching.add(entry.connId); lastTouch.set(entry.connId, now());
+    if (!mouse) selecting.add(message.agent);
     try {
       await agents.refresh?.();
       const agent = agents.resolve(message.agent);
-      if (!agent) return failure("forbidden");
-      const frame = await read(agent);
-      if (!frame) return failure("unavailable");
+      if (!agent) return reject("forbidden");
+      const frame = await read(agent, true, record);
+      if (!frame) return reject("unavailable");
       push(record, frame);
-      if (frame.error) return failure(frame.error);
-      if (frame.hash !== message.hash || frame.columns !== message.columns || frame.rows !== message.rows) return failure("terminal-stale-screen");
+      if (frame.error) return reject(frame.error);
+      if (frame.hash !== message.hash || frame.columns !== message.columns || frame.rows !== message.rows) { log("prompt reason=stale-screen"); return reject("terminal-stale-screen"); }
       if (!Number.isSafeInteger(message.row) || message.row < 1 || message.row > frame.rows
-        || mouse && (!Number.isSafeInteger(message.column) || message.column < 1 || message.column > frame.columns)) return failure("invalid-request");
+        || mouse && (!Number.isSafeInteger(message.column) || message.column < 1 || message.column > frame.columns)) return reject("invalid-request");
       let bytes;
       if (mouse) {
-        if (!frame.mouseMode) return failure("terminal-mouse-unavailable");
+        if (!frame.mouseMode) return reject("terminal-mouse-unavailable");
         bytes = encodeTerminalMouse(message);
       } else {
+        if (promptScreens.get(message.agent) === frame.hash && selectedScreens.get(message.agent) === frame.hash) {
+          log("prompt reason=already-submitted");
+          return reject("terminal-stale-screen");
+        }
         const difference = terminalSelection(frame.text, message.row);
-        if (difference == null) return failure("terminal-selection-unavailable");
+        if (difference == null) return reject("terminal-selection-unavailable");
         bytes = (difference < 0 ? "\x1b[A" : "\x1b[B").repeat(Math.abs(difference)) + "\r";
       }
-      if (!bytes) return failure("invalid-request");
+      if (!bytes) return reject("invalid-request");
       await agents.refresh?.();
       const current = agents.resolve(message.agent);
-      if (!current || current.source.paneId !== agent.source.paneId) return failure("forbidden");
+      if (!current || current.source.paneId !== agent.source.paneId) return reject("forbidden");
       const verifiedSize = await geometry(getHerdr(), current.source.paneId);
-      if (verifiedSize?.columns !== frame.columns || verifiedSize?.rows !== frame.rows) return failure("terminal-stale-screen");
+      if (verifiedSize?.columns !== frame.columns || verifiedSize?.rows !== frame.rows) return reject("terminal-stale-screen");
+      if (!mouse && promptScreens.get(message.agent) === frame.hash) {
+        selectedScreens.set(message.agent, frame.hash);
+        if (selectedScreens.size > 128) selectedScreens.delete(selectedScreens.keys().next().value);
+      }
       await getHerdr().paneSendText(current.source.paneId, bytes);
       await refresh(record);
       return { ok: true };
-    } catch { return failure("unavailable"); }
-    finally { touching.delete(entry.connId); }
+    } catch { return reject("unavailable"); }
+    finally { touching.delete(entry.connId); if (!mouse) selecting.delete(message.agent); }
   }
 
   return {
     available,
+    readPrompt(agent) {
+      let record = promptReads.get(agent.ref);
+      if (!record) {
+        record = {}; promptReads.set(agent.ref, record);
+        if (promptReads.size > 128) promptReads.delete(promptReads.keys().next().value);
+      }
+      return read(agent, true, record);
+    },
+    markPrompt(agent, hash) { promptScreens.set(agent, hash); if (promptScreens.size > 128) promptScreens.delete(promptScreens.keys().next().value); },
     async watch(entry, agentRef) {
       await agents.refresh?.();
       const agent = agents.resolve(agentRef);
@@ -249,13 +383,12 @@ export function createTerminalFeature(options) {
       this.closeConnection(entry.connId);
       const record = { connId: entry.connId, agentRef, revision: 0, timer: null, reading: true };
       watches.set(entry.connId, record);
-      const frame = await read(agent);
+      const frame = await read(agent, true, record);
       record.reading = false;
       if (watches.get(entry.connId) !== record) return null;
       if (!frame) { watches.delete(entry.connId); return null; }
       remember(record, frame);
-      record.timer = setTimer(() => { record.timer = null; void poll(record); }, POLL_MS);
-      record.timer?.unref?.();
+      schedule(record);
       return frame;
     },
     async input(agentRef, text) {
@@ -280,15 +413,19 @@ export function createTerminalFeature(options) {
       const agent = agents.resolve(agentRef), herdr = getHerdr();
       if (!agent) return failure("forbidden");
       try {
-        const value = await herdr.paneRead(agent.source.paneId, "recent", "ansi", false);
         const size = await geometry(herdr, agent.source.paneId);
         if (!size) return failure("terminal-layout-unavailable");
         const source = agent.source;
-        const text = screenText(value?.text ?? "", [source.paneId, source.sessionUuid, source.sessionId, source.terminalId, source.workspaceId]);
-        if (value?.truncated || Buffer.byteLength(text, "utf8") > MAX_SCREEN_BYTES) return failure("terminal-frame-too-large");
-        const lineCount = Math.max(1, text.split(/\r?\n/).length);
-        if (size.columns * lineCount > MAX_SCREEN_CELLS) return failure("terminal-frame-too-large");
-        return { ok: true, text, columns: size.columns, lineCount };
+        // 깊은 기록부터 시도, 크기 상한을 넘으면 줄 수를 줄이고 마지막은 herdr 기본 분량
+        for (const lines of SCROLLBACK_LINES) {
+          const value = await limited(() => herdr.paneRead(agent.source.paneId, "recent", "ansi", false, lines));
+          const text = screenText(value?.text ?? "", [source.paneId, source.sessionUuid, source.sessionId, source.terminalId, source.workspaceId]);
+          if (value?.truncated || Buffer.byteLength(text, "utf8") > MAX_SCREEN_BYTES) continue;
+          const lineCount = Math.max(1, text.split(/\r?\n/).length);
+          if (size.columns * lineCount > MAX_SCREEN_CELLS) continue;
+          return { ok: true, text, columns: size.columns, lineCount };
+        }
+        return failure("terminal-frame-too-large");
       } catch { return failure("terminal-read-unavailable"); }
     },
     select(entry, message) { return touch(entry, message, false); },

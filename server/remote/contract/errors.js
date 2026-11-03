@@ -9,6 +9,8 @@ const ERROR_CODES = Object.freeze([
   "terminal-frame-too-large",
   "terminal-layout-unavailable",
   "terminal-read-unavailable",
+  "terminal-read-timeout",
+  "terminal-screen-stale",
   "terminal-stale-screen",
   "terminal-selection-unavailable",
   "terminal-mouse-unavailable",
@@ -16,6 +18,17 @@ const ERROR_CODES = Object.freeze([
   "browser-tab-unavailable",
   "browser-frame-unavailable",
   "browser-command-unavailable",
+  "gh_missing",
+  "auth_required",
+  "no_pr",
+  "no_remote",
+  "not_github",
+  "timeout",
+  "output_limit",
+  "command_failed",
+  "bad_response",
+  "unsupported_host",
+  "invalid_run",
 ]);
 
 const ERROR_CODE_SET = new Set(ERROR_CODES);

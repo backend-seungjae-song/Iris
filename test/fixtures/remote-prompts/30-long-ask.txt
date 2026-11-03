@@ -1,0 +1,42 @@
+
+❯ Use the AskUserQuestion tool
+  once. Question text must be
+  long, 4 sentences in
+  Korean, with a question mark
+  in the middle sentence and
+  another at the end, like:
+  '원인을 찾으려면 진단 빌드를
+  설치해야 합니다. 지금
+  설치해도 될까요? 빌드는 앱을
+  켜 둔 채 하고 교체 순간에만
+  재시작됩니다(다른 세션의
+  변경도 함께 들어갑니다).
+  진행할까요?' Options: '지금
+  설치', '나중에'.
+───────────────────────────────
+ ☐ 진단 빌드
+
+│ 원인을 찾으려면 진단 빌드를
+│ 설치해야 합니다. 지금
+│ 설치해도 될까요? 빌드는 앱을
+│ 켜 둔 채 하고 교체 순간에만
+│ 재시작됩니다(다른 세션의
+│ 변경도 함께 들어갑니다).
+│ 진행할까요?
+
+❯ 1. 지금 설치
+     앱을 켜 둔 채 진단 빌드를
+     만들고, 교체 순간에만 앱을
+     재시작합니다. 다른 세션의
+     변경도 함께 들어갑니다.
+  2. 나중에
+     지금은 설치하지 않습니다.
+     원인 조사는 설치 없이
+     가능한 범위까지만
+     진행합니다.
+  3. Type something.
+───────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to
+navigate · Esc to cancel

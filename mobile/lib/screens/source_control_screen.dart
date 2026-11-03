@@ -55,6 +55,8 @@ class _SourceControlSheetState extends State<SourceControlSheet> {
   GitHubPrResult? _pr;
   String _pane = 'changes';
   String? _error;
+  // PR을 못 불러와도 변경 목록은 그대로 보이게 PR 쪽 오류는 따로 둔다
+  String? _prError;
   bool _loading = true;
 
   bool get _canChanges => widget.session.supports('git.changes');
@@ -70,24 +72,28 @@ class _SourceControlSheetState extends State<SourceControlSheet> {
   }
 
   Future<void> _load() async {
-    try {
-      final values = await Future.wait<ServerMessage>([
-        if (_canChanges && _changes == null)
-          widget.session.gitChanges(widget.agent.ref),
-        if (_canPr && _pr == null) widget.session.githubPr(widget.agent.ref),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        for (final value in values) {
-          if (value is GitChangesResult) _changes = value;
-          if (value is GitHubPrResult) _pr = value;
-        }
-      });
-    } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    Future<void> loadChanges() async {
+      if (!_canChanges || _changes != null) return;
+      try {
+        final value = await widget.session.gitChanges(widget.agent.ref);
+        if (mounted) setState(() => _changes = value);
+      } on RemoteFailure catch (error) {
+        if (mounted) setState(() => _error = error.message);
+      }
     }
+
+    Future<void> loadPr() async {
+      if (!_canPr || _pr != null) return;
+      try {
+        final value = await widget.session.githubPr(widget.agent.ref);
+        if (mounted) setState(() => _pr = value);
+      } on RemoteFailure catch (error) {
+        if (mounted) setState(() => _prError = error.message);
+      }
+    }
+
+    await Future.wait<void>([loadChanges(), loadPr()]);
+    if (mounted) setState(() => _loading = false);
   }
 
   @override
@@ -173,20 +179,24 @@ class _SourceControlSheetState extends State<SourceControlSheet> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                ? Center(
-                    child: Text(
-                      _error!,
-                      style: TextStyle(color: context.iris.muted),
-                    ),
-                  )
                 : _pane == 'changes'
-                ? _ChangesPane(changes: _changes, onOpen: widget.onOpenDiff)
+                ? _error != null
+                      ? Center(
+                          child: Text(
+                            _error!,
+                            style: TextStyle(color: context.iris.muted),
+                          ),
+                        )
+                      : _ChangesPane(
+                          changes: _changes,
+                          onOpen: widget.onOpenDiff,
+                        )
                 : _PullRequestPane(
                     session: widget.session,
                     agent: widget.agent,
                     result: _pr,
                     changes: _changes,
+                    error: _prError,
                   ),
           ),
         ],
@@ -436,11 +446,13 @@ class _PullRequestPane extends StatelessWidget {
     required this.agent,
     required this.result,
     required this.changes,
+    this.error,
   });
   final ActiveRemoteSession session;
   final RemoteAgent agent;
   final GitHubPrResult? result;
   final GitChangesResult? changes;
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
@@ -448,7 +460,8 @@ class _PullRequestPane extends StatelessWidget {
     if (pr == null) {
       return Center(
         child: Text(
-          '열린 PR이 없습니다.',
+          error ?? '열린 PR이 없습니다.',
+          textAlign: TextAlign.center,
           style: TextStyle(color: context.iris.muted),
         ),
       );

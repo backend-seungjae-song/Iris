@@ -7,7 +7,7 @@
 //   목록·현재 space·활성 id query와 space 초기화·탭 추가/제거/교체·활성/space 변경 command.
 //
 // 의존 대상
-//   외부 모듈이나 DOM에 의존하지 않는다. 탭 객체 identity와 목록 순서는 호출자가 만든 그대로 보존한다.
+//   pane-store의 칸 상태, tab-views의 화면 등록표, viewer.presentsTab 훅
 //
 // 유지 조건
 //   없는 space 조회는 빈 목록이고, 제거는 같은 객체만 지우며, 활성 id는 호출자가 정한 시점에만 바뀐다.
@@ -19,8 +19,11 @@
 //   현재 목록은 아래 명령으로 확인한다.
 //   node bin/importers.mjs web/js/center/tab-store.js
 
+import { callHook } from "../core/hooks.js";
+import { tabViewOf } from "../core/tab-views.js";
+import { paneActive, paneLayout, paneSelect, paneSync, paneVisible } from "./pane-store.js";
+
 const tabsBySpace = {};
-const activeBySpace = {};
 let centerSpace = null;
 
 export function ensureTabSpace(space) {
@@ -42,6 +45,7 @@ export function getTabSpaces() {
 
 export function addTab(space, tab) {
   ensureTabSpace(space).push(tab);
+  paneSync(space, getTabs(space));
   return tab;
 }
 
@@ -51,20 +55,23 @@ export function removeTab(space, tab) {
   const index = list.indexOf(tab);
   if (index < 0) return false;
   list.splice(index, 1);
+  paneSync(space, list);
   return true;
 }
 
 export function replaceTabs(space, tabs) {
   tabsBySpace[space] = tabs;
+  paneSync(space, tabs);
   return tabs;
 }
 
 export function getActiveTabId(space) {
-  return activeBySpace[space];
+  return paneActive(space);
 }
 
-export function setActiveTab(space, tabId) {
-  activeBySpace[space] = tabId;
+export function setActiveTab(space, tabId, index) {
+  paneSync(space, getTabs(space));
+  paneSelect(space, tabId, index);
   return tabId;
 }
 
@@ -75,4 +82,18 @@ export function getCenterSpace() {
 export function setCenterSpace(space) {
   centerSpace = space;
   return space;
+}
+
+export function isTabVisible(space, tabId) {
+  if (!paneVisible(space, tabId)) return false;
+  const layout = paneLayout(space);
+  if (!layout || layout.panes[layout.focus].active === tabId) return true;
+  const tabs = getTabs(space);
+  const tab = tabs.find((t) => t.id === tabId);
+  const focused = tabs.find((t) => t.id === layout.panes[layout.focus].active);
+  const panel = (t) => !t ? null : t.kind === "browser" ? "browserview"
+    : t.kind === "file" ? (callHook("viewer.presentsTab", t) ? "fileview" : null)
+      : tabViewOf(t.kind)?.panelId;
+  const key = panel(tab);
+  return !key || key !== panel(focused);
 }

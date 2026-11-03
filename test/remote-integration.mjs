@@ -165,7 +165,7 @@ test("실제 TLS+WS에서 챌린지·서명·caps·오류 뒤 중지가 연결�
   assert.equal(authOk.type, "auth.ok");
   assert.equal(authOk.v, REMOTE_RPC_VERSION);
   assert.match(authOk.resumeToken, /^[A-Za-z0-9_-]{43}$/);
-  assert.equal(authOk.pinIdleMinutes, 30);
+  assert.equal(authOk.pinIdleMinutes, 10);
   socket.send(JSON.stringify({ type: "caps.get" }));
   const caps = await read();
   assert.equal(caps.type, "caps");

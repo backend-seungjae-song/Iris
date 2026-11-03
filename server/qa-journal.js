@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { artifactDir } from "./artifacts-home.cjs";
 import qaExpiry from "./qa-expiry-guard.cjs";
+import { listFromSource, nominalFault, quoteFromSource } from "./qa-row-contract.js";
 
 // QA 브라우저 trace와 회차 journal·receipt·artifact 상태의 단일 owner.
 //
@@ -13,14 +14,15 @@ import qaExpiry from "./qa-expiry-guard.cjs";
 //   run/journal/trace 명령 handler, accepted/completed 기록 함수와 bulkfill용 runSurfaces 조회 port.
 //
 // 의존 대상
-//   node:fs/path와 state-home의 상태 루트에만 의존하며 browser·transport·다른 handler를 import하지 않는다.
+//   node:fs/path, state-home의 상태 루트, qa-row-contract의 파일 인용·목록·문체 판정
+//   browser·transport·다른 handler import 없음
 //
 // 유지 조건
 //   입력값은 길이·선택 라벨까지만 남기고, 서버 run_id·seq·t가 외부 event 값을 덮어야 한다.
 //   증거는 발급 시점에 회차 폴더로 고정하며 accepted/completed 짝·순서·실패 기록을 보존한다.
 //
 // 영향 범위
-//   server/index.js의 runSessionCmd·runBrowserCmdResilient·bulkfill 배선과 state-home coverage,
+//   server/mcp-host/handlers.js의 journal 연산, server/mcp-worker/browser-service.js의 명령 기록·bulkfill,
 //   bin/iris-mcp.mjs browser_run/journal/report 흐름 및 bin/smoke.mjs QA 회차·증거 게이트 검사.
 
 // 폴더는 호출 시점에 읽는다. import 시점에 고정하면 그 모듈을 먼저 로드한 쪽이 폴더를 정하게
@@ -596,119 +598,6 @@ function rowOpen(st, id, path) {
   return { ok: true, row: rowShape(row), path: p };
 }
 
-// 근거 원문을 파일에서 그대로 읽어 온다.
-//
-// 직접 옮겨 적는 경로가 있으면 원문과 달라진다. 오타 하나여도 결과는 같다. 보고서를 읽는
-// 사람이 근거로 삼는 문장이 원문이 아니게 된다.
-//
-// source가 "경로:시작-끝" 형식이면 그 파일의 해당 줄을 읽어 쓴다. 호출하는 쪽은 위치만
-// 전달하고 내용은 파일에서 읽는다. 읽지 못하면 넘어가지 않고 거절한다. 읽지 못한 내용을
-// 직접 적은 값으로 채우면 이 장치가 없는 것과 같다.
-const SRC_RANGE = /^(.*?):(\d+)(?:-(\d+))?$/;
-function quoteFromSource(src) {
-  const m = SRC_RANGE.exec(String(src || "").trim());
-  if (!m) return null;
-  const file = m[1], a = Number(m[2]), b = m[3] ? Number(m[3]) : Number(m[2]);
-  if (!file || !Number.isFinite(a) || !Number.isFinite(b) || a < 1 || b < a) return null;
-  let text;
-  try { text = fs.readFileSync(file, "utf8"); }
-  catch { return { error: `그 파일을 읽지 못했습니다: ${file}` }; }
-  const lines = text.split("\n");
-  if (b > lines.length) return { error: `${file}는 ${lines.length}행까지입니다(요청 ${a}-${b}).` };
-  // 들여쓰기는 문장이 아니다. 왼쪽 공백만 공통으로 제거한다.
-  const picked = lines.slice(a - 1, b);
-  const pad = Math.min(...picked.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length));
-  return { quote: picked.map((l) => l.slice(Number.isFinite(pad) ? pad : 0)).join("\n").trim() };
-}
-
-// 목록도 인용과 같이 파일에서 읽어 온다.
-//
-// 직접 옮겨 적은 목록은 작성자가 아는 것만 담는다. 시스템은 확인하기로 한 것에서 확인한 것을
-// 뺀 값만 계산하므로, 한 차원이 빠진 목록도 100% 확인했다고 표시된다. 목록 자체의 완전성은
-// 검사하지 않는다(확인 결과: 알림은 코드에 발생 지점이 여섯인데 회차는 승인 하나로 닫혔고
-// 원장에는 누락이 없었다).
-//
-// 그래서 코드에 여섯이 있으면 목록도 여섯이다. pick이 찾은 것이 곧 항목이고, 그중 어느 줄도
-// 확인하지 않은 항목이 있으면 회차가 닫히지 않는다.
-function listFromSource(from) {
-  const raw = String((from && from.source) || "").trim();
-  const pick = String((from && from.pick) || "").trim();
-  if (!raw || !pick) return { error:
-    "from에는 source(파일)와 pick(찾을 규칙)이 둘 다 필요합니다.\n"
-    + '  from: { source: "libs/…/notifier.service.ts", pick: "async (\\\\w+)\\\\(" }' };
-  const file = raw.replace(/:\d+(-\d+)?$/, "");
-  let re;
-  try { re = new RegExp(pick, "g"); }
-  catch (e) { return { error: `pick이 규칙이 아닙니다: ${pick} (${e.message})` }; }
-  let text;
-  try { text = fs.readFileSync(file, "utf8"); }
-  catch { return { error: `그 파일을 읽지 못했습니다: ${file}` }; }
-  const items = [], seen = new Set();
-  text.split("\n").forEach((line, i) => {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(line))) {
-      if (m[0] === "") { re.lastIndex += 1; continue; }   // 빈 매치는 위치가 진행되지 않는다
-      const id = String(m[1] != null ? m[1] : m[0]).trim();
-      if (id && !seen.has(id)) {
-        seen.add(id);
-        items.push({ id, text: line.trim().slice(0, 200), at: `${file}:${i + 1}` });
-      }
-    }
-  });
-  // 항목이 0개인 목록은 규칙이 적용되지 않은 것이다. 남은 개수를 먼저 확인한다.
-  if (!items.length) return { error:
-    `그 규칙이 ${file}에서 아무것도 못 찾았습니다: ${pick}\n`
-    + "0개짜리 목록은 완전한 목록과 구별되지 않습니다 — 규칙을 고치거나 items로 직접 적으세요." };
-  const out = { items, from: { source: file, pick } };
-  const usedIn = String((from && from.usedIn) || "").trim();
-  if (usedIn) {
-    const got = scanUsage(usedIn, items.map((x) => x.id), file);
-    if (got.error) return got;
-    const un = new Set(got.unused);
-    for (const it of items) if (un.has(it.id)) it.unused = true;
-    // 상한 때문에 일부만 검색했으면 그 사실을 기록한다. 알리지 않으면 전부 검색한 것으로 읽힌다.
-    out.from.usedIn = usedIn;
-    out.from.scanned = got.scanned;
-    if (got.capped) out.from.capped = SCAN_CAP;
-  }
-  return out;
-}
-
-// 선언만 있고 호출되지 않는 항목은 목록에는 등록되지만 실제로는 실행되지 않는다.
-//
-// 목록을 한 파일에서 읽어 오면 그 파일이 정확하다는 전제가 생긴다. 발신기에 메서드가 여섯인데
-// 호출부가 다섯이면 실제 발신은 다섯이고, 그 차이는 목록으로 드러나지 않는다. 그래서 호출
-// 지점도 함께 확인한다. 코드가 있다는 것과 그것이 실행된다는 것은 다른 사실이다.
-const CODE_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".dart", ".py",
-  ".go", ".java", ".kt", ".rb", ".php", ".vue", ".svelte", ".swift", ".cs"]);
-const SKIP_DIR = new Set(["node_modules", ".git", "dist", "build", "coverage", ".next",
-  ".working", "vendor", "__pycache__", ".dart_tool"]);
-const SCAN_CAP = 5000;
-function scanUsage(root, ids, exclude) {
-  const left = new Set(ids);
-  let seen = 0, capped = false;
-  const walk = (d) => {
-    if (capped || !left.size) return;
-    let ents = [];
-    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of ents) {
-      if (capped || !left.size) return;
-      const full = path.join(d, e.name);
-      if (e.isDirectory()) { if (!SKIP_DIR.has(e.name) && !e.name.startsWith(".")) walk(full); continue; }
-      if (!CODE_EXT.has(path.extname(e.name))) continue;
-      if (full === exclude) continue;
-      if (++seen > SCAN_CAP) { capped = true; return; }
-      let text; try { text = fs.readFileSync(full, "utf8"); } catch { continue; }
-      for (const id of [...left]) if (text.includes(id)) left.delete(id);
-    }
-  };
-  const st0 = (() => { try { return fs.statSync(root); } catch { return null; } })();
-  if (!st0) return { error: `부르는 자리를 찾을 폴더가 없습니다: ${root}` };
-  walk(st0.isDirectory() ? root : path.dirname(root));
-  return { unused: [...left], scanned: seen, capped };
-}
-
 // 이 회차가 든 목록들. 하나만 주면 하나, 여럿 주면 여럿이다.
 function setsOf(st) { return Array.isArray(st.sets) ? st.sets : (st.list ? [st.list] : []); }
 
@@ -914,46 +803,6 @@ function ledgerGaps(st) {
       + " (그 항목을 covers로 가리키는 줄을 세우거나, 못 보는 사유와 함께 blue·gray로 닫습니다)");
   }
   return gaps;
-}
-
-// 보고서 문장은 명사형으로 끝낸다. 판정문·발견·결정·선택지가 대상이고 근거 원문 인용과
-// 의문문은 제외한다. 인용은 그대로 실어야 하므로 어미를 바꾸면 원문이 아니게 되고, 묻는
-// 문장은 명사형이 뜻을 흐린다.
-//
-// 규칙으로 적어 두는 것만으로는 지켜지지 않는다(확인 결과: 한 회차의 판정문 아홉이 전부
-// 서술형이었다). 그래서 문장이 서술형으로 끝나면 받지 않는다.
-//
-// 문장 끝만 확인한다. 인용부호·마침표를 제거하고 남은 마지막 글자가 "다"나 "요"면 서술형이다.
-// 물음표로 끝나면 통과시키고, 애매하면 통과시킨다. 이 검사는 어미만 보고 뜻은 보지 않는다.
-const NARRATIVE_TAIL = /(다|요)$/;
-function narrativeSentences(text) {
-  const bad = [];
-  String(text == null ? "" : text)
-    .split(/\n+/)
-    .flatMap((para) => para.split(/(?<=[^0-9]\.|[?!])\s+/))
-    .map((x) => x.trim()).filter(Boolean)
-    .forEach((one) => {
-      if (/[?？]\s*["'\u201d\u2019)\]]*$/.test(one)) return;      // 묻는 문장은 그대로 둔다
-      const tail = one.replace(/["'\u201c\u201d\u2018\u2019)\]\s.。!?？]+$/u, "");
-      if (NARRATIVE_TAIL.test(tail)) bad.push(one);
-    });
-  return bad;
-}
-function nominalFault(label, text) {
-  const bad = narrativeSentences(text);
-  if (!bad.length) return null;
-  return `${label}: 보고서는 라벨체입니다. 종결어미를 붙이지 않습니다.\n`
-    + bad.slice(0, 3).map((x) => `  서술형: ${x}`).join("\n")
-    + (bad.length > 3 ? `\n  … 외 ${bad.length - 3}문장` : "")
-    + "\n예: \"버튼이 안 눌렸다\" → \"버튼 미반응\" · \"사유가 비어 있다\" → \"사유 없음\"\n"
-    + "-임·-함·-음 같은 명사형 어미도 종결어미입니다. 여기서는 -다·-요만 막지만 그것도 걷어냅니다.\n"
-    + "근거 원문(quote)과 묻는 문장은 이 검사에서 빠집니다.\n"
-    // 여기서 막힌 사람이 가장 흔히 하는 일이 문장을 잘라 뜻을 지우는 것이다. 해결 방법이
-    // 압축이 아니라 분해라는 것을 그 시점에 안내한다. 안내가 없으면 같은 줄에서 반복해서
-    // 막힌다(확인 결과: 결정 선택지 하나를 닫는 데 세 번 걸렸고 뜻이 깎였다).
-    + "뜻이 깎이면 문장으로 되돌리지 말고 줄을 더 쌓습니다 — 한 줄에 한 사실입니다.\n"
-    + "  \"구매자는 앱을 열어 직접 봐야 한다\"\n"
-    + "  → \"구매자 알림 없음\" / \"확인 경로: 앱에서 내 중고거래 직접 열기\"";
 }
 
 // 고칠 코드가 없는 발견. 결함 목록에 섞으면 개발자는 고칠 수 없는 항목을 받고, 정해야 할

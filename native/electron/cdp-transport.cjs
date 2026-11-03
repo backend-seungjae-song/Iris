@@ -34,16 +34,26 @@ function createCdpTransport({
   clearIntervalFn = clearInterval,
   log = console.log,
   error = console.error,
+  relayControl = null,
+  features = [],
+  onRegistered = null,
 }) {
   // main이 서버(기본 4271, IRIS_PORT로 갈림)에 WS 실행기로 붙어 cdp-exec를 처리한다. 서버 재시작에도 자동 재연결.
   // 팝업 창처럼 렌더러가 모르는 조종 대상은 여기서 서버에 알린다. 연결이 끊겨 있으면 붙은 뒤에 보낸다.
   // 앱이 먼저 뜨고 서버가 늦게 올라오는 순서에서도 등록이 누락되지 않게 하기 위해서다.
   let ctlWs = null;
   const ctlPending = [];
-  function ctlSend(msg) {
-    if (ctlWs && ctlWs.readyState === 1) { try { ctlWs.send(JSON.stringify(msg)); return; } catch {} }
-    ctlPending.push(msg);
-    if (ctlPending.length > 50) ctlPending.shift();
+  function ctlSend(msg, onDelivered) {
+    if (ctlWs && ctlWs.readyState === 1) {
+      try {
+        ctlWs.send(JSON.stringify(msg));
+        onDelivered?.(true);
+        return true;
+      } catch {}
+    }
+    ctlPending.push({ msg, onDelivered });
+    if (ctlPending.length > 50) ctlPending.shift()?.onDelivered?.(false);
+    return false;
   }
   function setupCdpControl(webContentsMod) {
     let retry = 0;
@@ -76,8 +86,13 @@ function createCdpTransport({
         retry = 0; ctlWs = sock; lastMsg = now();
         // 누가 붙었는지 남긴다. 중복이 생겼을 때 어느 쪽인지 알아야 고칠 수 있다.
         try { sock.send(JSON.stringify({ type: "cdp-executor-register",
-          app: execPath, pid })); } catch {}
-        while (ctlPending.length) { const m = ctlPending.shift(); try { sock.send(JSON.stringify(m)); } catch { break; } }
+          app: execPath, pid, ...(features.length ? { features } : {}) })); } catch {}
+        while (ctlPending.length) {
+          const pending = ctlPending.shift();
+          try { sock.send(JSON.stringify(pending.msg)); pending.onDelivered?.(true); }
+          catch { pending.onDelivered?.(false); break; }
+        }
+        try { onRegistered?.(); } catch {}
       });
       sock.on("message", async (data) => {
         lastMsg = now();
@@ -94,10 +109,38 @@ function createCdpTransport({
           try { sock.close(); } catch {}
           return;
         }
+        if (m.type === "worker.accept") {
+          try {
+            const result = await relayControl?.acceptGeneration(m.workerGeneration, sock, { takeover: m.takeover === true });
+            sock.send(JSON.stringify({ type: "worker.accepted", id: m.id, workerGeneration: m.workerGeneration, ok: true, data: result }));
+          } catch (e) {
+            try { sock.send(JSON.stringify({ type: "worker.accepted", id: m.id, workerGeneration: m.workerGeneration,
+              ok: false, error: String((e && e.message) || e), code: e && e.code })); } catch {}
+          }
+          return;
+        }
+        if (m.type === "worker.retire") {
+          try {
+            const result = await relayControl?.retireGeneration(m.workerGeneration, { force: m.force === true });
+            sock.send(JSON.stringify({ type: "worker.retired", id: m.id, workerGeneration: m.workerGeneration, ok: true,
+              ...(result?.forced ? { forced: true, leftovers: result.leftovers || [] } : {}), data: result }));
+          } catch (e) {
+            try { sock.send(JSON.stringify({ type: "worker.retired", id: m.id, workerGeneration: m.workerGeneration,
+              ok: false, error: String((e && e.message) || e), code: e && e.code, details: e && e.details })); } catch {}
+          }
+          return;
+        }
         if (m.type !== "cdp-exec") return;
         try {
-          if (!m.wc) throw codedError(tabGoneCode, "활성 브라우저 탭이 없습니다 — 브라우저를 먼저 여세요.");
-          const result = await cdpExec(webContentsMod, m.wc, m.cmd, m.args);
+          if (!m.wc && m.cmd !== "qa-anchor" && !relayControl?.isBaseCommand(m.cmd))
+            throw codedError(tabGoneCode, "활성 브라우저 탭이 없습니다 — 브라우저를 먼저 여세요.");
+          const result = await cdpExec(webContentsMod, m.wc, m.cmd, m.args, {
+            workerGeneration: m.workerGeneration,
+            commandId: m.commandId,
+            callId: m.callId,
+            targetToken: m.targetToken,
+            ...(m.unit ? { unit: m.unit } : {}),
+          });
           sock.send(JSON.stringify({ type: "cdp-result", id: m.id, ok: true, data: result }));
         } catch (e) {
           try { sock.send(JSON.stringify({ type: "cdp-result", id: m.id, ok: false,

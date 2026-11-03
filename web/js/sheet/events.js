@@ -19,6 +19,7 @@
 //   main의 docx 명령·switchSheetMode·isFileLikeKind, 전역 copy/cut/paste·keydown 우선순위.
 //
 // model/formula/conditional ← render ← edit ← actions ← events 방향만 유지한다.
+import { filePane } from "../center/pane-view.js";
 import { GS_MENUS, SV_MENU_SUBLIST, svSheet, svSrcAt } from "./model.js";
 import { svA1 } from "./formula.js";
 import { getActiveTabId, getCenterSpace, getCurrentTabs } from "../center/tab-store.js";
@@ -46,10 +47,7 @@ export function initSheetEvents(deps) {
   };
 
   // ── 눌렀을 때 ───────────────────────────────────────────────────────────────
-  // docx 클릭(찾기/바꾸기·링크·모드전환·메뉴)과 sheet 클릭(셀·툴바)이 원래 fileview 하나에 델리게이트
-  // 돼 있었는데, docx가 docxview 패널로 옮겨가며 그 서브트리 이벤트가
-  // fileview까지 올라오지 않는다. 그래서 이 핸들러를 두 패널 모두에 붙인다. 함수 안에서
-  // t.docxMode/t.sheetMode로 이미 갈라 처리하므로 로직 자체는 그대로 재사용된다.
+  // 표 원문 모드 버튼은 칸별 텍스트 화면에도 존재
   function fileviewClickHandler(e) {
     const t = currentTab();
     if (!t || !isFileLikeKind(t.kind)) return;
@@ -159,8 +157,7 @@ export function initSheetEvents(deps) {
     const rh = e.target.closest("th.sv-rh");
     if (rh) { const r = +rh.dataset.r; grow({ r1: r, c1: 1, r2: r, c2: sh.colsCount }); return; }
   }
-  fileview.addEventListener("click", fileviewClickHandler);
-  docxview.addEventListener("click", fileviewClickHandler);
+  for (const root of new Set([fileview, docxview, filePane(0), filePane(1)])) root.addEventListener("click", fileviewClickHandler);
   
   function fileviewKeydownHandler(e) {
     const gm = e.target.closest(".gd-menu [data-gm]");
@@ -292,7 +289,7 @@ export function initSheetEvents(deps) {
   // ── 키보드 ──────────────────────────────────────────────────────────────────
   // 구글 시트와 같은 위치에 같은 키. 글자를 그냥 치면 그 칸에서 고치기가 시작된다.
   document.addEventListener("keydown", (e) => {
-    const t = svTab(); if (!t || !t.sheet) return;
+    const t = svTab(); if (!t || !t.sheet || currentTab() !== t) return;
     const el = e.target, tag = (el.tagName || "").toLowerCase();
   
     // 칸 위에 뜬 입력칸에서.
@@ -304,8 +301,8 @@ export function initSheetEvents(deps) {
       return;
     }
     if (tag === "input" || tag === "textarea") {
-      // 되돌리기·저장은 어디에 커서가 있든 듣는다. 수식 입력줄에 커서를 둔 채 ⌘Z를 눌렀을 때
-      // 아무 일도 일어나지 않으면 편집 뒤 되돌리기가 동작하지 않는 것으로 보인다(확인).
+      if (!fileview.contains(el)) return;
+      // 표의 수식 입력줄에서도 같은 저장·되돌리기 동작
       if ((e.metaKey || e.ctrlKey) && /^[zyZYsS]$/.test(e.key)) {
         e.preventDefault();
         if (e.key === "s" || e.key === "S") svSave(t);

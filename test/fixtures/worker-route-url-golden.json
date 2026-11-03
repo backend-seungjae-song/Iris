@@ -1,0 +1,38 @@
+[
+  {
+    "name": "ordinary",
+    "url": "https://example.test/page?a=1",
+    "title": "Example",
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/page?a=1",
+        "title": "Example"
+      }
+    }
+  },
+  {
+    "name": "empty-title",
+    "url": "about:blank",
+    "title": "",
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "about:blank",
+        "title": ""
+      }
+    }
+  },
+  {
+    "name": "unicode",
+    "url": "https://example.test/한글",
+    "title": "제목 — 한글",
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/한글",
+        "title": "제목 — 한글"
+      }
+    }
+  }
+]

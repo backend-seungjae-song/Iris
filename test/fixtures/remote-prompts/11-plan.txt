@@ -1,0 +1,44 @@
+
+  ⎿  /plan to preview
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+  ───────────────────────────────────────────────────────────────
+   Ready to code?
+
+   Here is Claude's plan:
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   도구 동작 테스트 세션 계획
+
+   Context
+
+   Bash, Edit, Write, WebFetch, AskUserQuestion, 계획 모드가
+   각각 동작하는지 8단계로 확인하는 테스트 세션이다. 1~7단계는
+   실행을 마쳤고, 8단계는 계획 모드 진입과 ExitPlanMode
+   제출이다.
+
+   실행 결과
+
+   1. out/a.txt 생성, 내용 hi 확인
+   2. notes.txt 첫 줄 line one을 line 1로 수정
+   3. new.md 생성, 내용 hello
+   4. WebFetch로 https://example.com 조회, 제목 Example Domain
+      확인
+   5. 단일 선택 질문, 답 A (Recommended)
+   6. 다중 선택 질문, 사용자 응답 없음
+   7. 질문 두 개 동시, 답 빨강과 고양이
+   8. 계획 모드 진입 후 이 계획 제출
+
+   남은 일
+
+   - 6단계 다중 선택 질문을 다시 확인하려면 승인 후              ↓
+  ───────────────────────────────────────────────────────────────
+   Claude has written up a plan and is ready to execute. Would
+   you like to proceed?
+
+   ❯ 1. Yes, and use auto mode
+     2. Yes, manually approve edits
+     3. Tell Claude what to change
+        shift+tab to approve with this feedback
+
+   ctrl+g to edit in VS Code ·
+   ~/.claude/plans/silly-leaping-turtle.md

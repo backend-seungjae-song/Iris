@@ -89,6 +89,9 @@ body.right-collapsed #right-restore { display:block; }
 .htab-x { flex:none; display:inline-flex; align-items:center; margin-right:-4px; padding:1px; border-radius:var(--r-s); opacity:0; }
 .htab:hover .htab-x, .htab.on .htab-x { opacity:.6; }
 .htab-x:hover { opacity:1; background:var(--hover); color:var(--fg); }
+/* 누르는 영역: 그림은 그대로, 위아래는 탭 높이(24px)까지, 왼쪽 5px(이름과의 간격 6px 안)·오른쪽은 탭 끝까지 */
+.htab-x { position:relative; }
+.htab-x::before { content:""; position:absolute; inset:-6px -4px -6px -5px; }
 
 /* 누를 수 있는 요소의 전환. 전역 와일드카드로 걸면 터미널 글자 판까지 전환이 걸리므로 요소마다 준다. */
 .right-head .sidebar-toggle, .right-head .collapse-btn, #right-restore, .htab, .htab-add, .htab-x,

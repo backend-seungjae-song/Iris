@@ -12,6 +12,9 @@ const { dialog, BrowserWindow, nativeImage, webContents: electronWebContents } =
 const { buildSnapshot } = require("./snapshot-engine.cjs");
 const { artifactDir } = require("../../server/artifacts-home.cjs");
 const { port: acPort } = require("../../server/env.cjs");
+const { createElectronRelay, BASE_COMMANDS } = require("./relay/index.cjs");
+const { createCommandUnits } = require("./relay/command-units.cjs");
+const { createUnitWiring } = require("./relay/unit-wiring.cjs");
 
 // 찍은 화면이 쌓이는 위치. 개발 인스턴스와 설치된 앱이 같은 폴더를 쓰면 개발 회차의 증거가
 // 설치된 앱 것과 섞여 증거의 출처를 구분할 수 없다. 상태 폴더는
@@ -42,6 +45,37 @@ const refRegistry = require("./cdp-ref-registry.cjs");
 const { withLayout } = require("./cdp-layout.cjs");
 const { createUploadController } = require("./cdp-upload.cjs");
 const { createAiCausality } = require("./ai-causality.cjs");
+const userFocus = require("./user-focus.cjs");
+// 그 탭을 담은 창을 사용자가 지금 쓰고 있는지(OS 키 창). 모르면 쓰는 쪽
+const windowFocused = (host) => { const w = BrowserWindow.fromWebContents(host); return !w || w.isDestroyed() || w.isFocused(); };
+const focusStateOf = (wc) => userFocus.focusState(wc, { windowFocused });
+const ownsUserFocus = async (wc) => userFocus.canSendKeys(await focusStateOf(wc));
+const pressAllowed = async (wc) => userFocus.canPress(await focusStateOf(wc));
+// QA 진짜 입력 준비. 누르기가 사용자 포커스를 옮기지 않는 창이면 그 창 안에서 이 탭에 포커스를 주고 trusted
+// 사용자가 쓰는 창의 다른 곳에 포커스가 있으면 입력 동안만 빌리고(borrowed) 끝나면 returnFocus 로 반환
+// 빌리지 못하면 guarded
+// 사용자가 치는 중이면 멈출 때까지 기다리고, 계속 치면 busy
+const USER_TYPING_WAIT_MS = 10000;
+let lastUserKeyAt = 0;
+// AI 가 조작 중인 탭의 키는 AI 입력이라 제외
+function noteUserKey(wcId) {
+  if (aiDriving(wcId)) return;
+  lastUserKeyAt = Date.now();
+}
+async function qaPrepareFocus(wc) {
+  for (const started = Date.now(); ;) {
+    const state = await focusStateOf(wc);
+    const plan = userFocus.qaFocusPlan(state, userFocus.userQuiet(lastUserKeyAt, Date.now()));
+    if (plan === "trusted") return "trusted";
+    if (plan === "borrow") return (await userFocus.borrowWindowFocus(wc)) ? "borrowed" : "guarded";
+    if (plan === "claim") {
+      if (!(await userFocus.claimWindowFocus(wc))) return "guarded";
+      return userFocus.canSendKeys(await focusStateOf(wc)) ? "trusted" : "guarded";
+    }
+    if (Date.now() - started >= USER_TYPING_WAIT_MS) return "busy";
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+}
 const resultSafety = require("./cdp-result-safety.cjs");
 const overlay = require("./cdp-overlay.cjs");
 const { createCdpSession } = require("./cdp-session.cjs");
@@ -54,12 +88,18 @@ const observation = createObservation({
   isTabShown: (wcId) => isTabShown(wcId),
   now: Date.now,
   shotsDir: SHOTS_DIR,
+  captureMoment: async (id, send, moment) => {
+    // QA 장면은 기대 효과와 후보 감시에서 촬영
+    if (qaContents.has(id)) return null;
+    return null;
+  },
 });
 const { createHiddenViewport } = require("./cdp-hidden-viewport.cjs");
 const hiddenViewport = createHiddenViewport({
   isTabShown: (wcId) => isTabShown(wcId),
   shownStateKnown: () => shownStateKnown(),
-  hasExplicitDevice: (wcId) => deviceEmulation.hasExplicitDevice(wcId),
+  // 명시 지정 크기(QA 화면 크기 포함)도 숨은 탭 대체 크기 적용 대상에서 제외
+  hasExplicitDevice: (wcId) => deviceEmulation.hasExplicitDevice(wcId) || !!deviceEmulation.viewportFor(wcId),
   navigationEpoch: (wcId) => refRegistry.navigationEpoch(wcId),
   now: Date.now,
   isDisabled: () => process.env.IRIS_NO_HIDDEN_VP === "1",
@@ -67,6 +107,13 @@ const hiddenViewport = createHiddenViewport({
 const { createDeviceEmulation } = require("./cdp-device-emulation.cjs");
 const { createPageCommands } = require("./cdp-cmd-page.cjs");
 const { createInputCommands, dispatchMouse } = require("./cdp-cmd-input.cjs");
+const { createQaInputCommands } = require("./cdp-qa-input.cjs");
+const { createQaExpectCommands } = require("./cdp-qa-expect.cjs");
+const { createQaCaptureCommands, imageRenderer } = require("./cdp-qa-capture.cjs");
+const { createQaReactionCommands } = require("./cdp-qa-reaction.cjs");
+const { createQaLoginCommands } = require("./cdp-qa-login.cjs");
+const { createQaViewportCommands } = require("./cdp-qa-viewport.cjs");
+const { createQaLedgerAnchor } = require("./qa-ledger-anchor.cjs");
 const { createInspectCommands } = require("./cdp-cmd-inspect.cjs");
 const { createCaptureCommands } = require("./cdp-cmd-capture.cjs");
 const { createNativeCommands } = require("./cdp-cmd-native.cjs");
@@ -81,6 +128,8 @@ const deviceEmulation = createDeviceEmulation({
   notify: (wcId, box) => { if (viewportNotify) viewportNotify(wcId, box); },
 });
 const commandWebContentsMods = new WeakMap();
+const qaLedgerAnchor = createQaLedgerAnchor();
+const qaContents = new Set();
 // ── OS 네이티브 창(AX) ───────────────────────────────────────────────────────
 const nativeAx = require("./cdp-native-ax.cjs");
 
@@ -99,14 +148,26 @@ const upload = createUploadController({
 // main의 will-download와 같은 원시 객체를 고치지 않고 상태 소유 모듈의 의미 함수로만 만난다.
 const downloadState = require("./download-state.cjs");
 
+let electronRelay = null;
+let replayExecutorState = () => {};
+
+const unitWiring = createUnitWiring({
+  getUnits: () => commandUnits,
+  getRelay: () => electronRelay,
+  codedError,
+  liveWc: (wcId) => liveWc(wcId),
+});
 const cdpTransport = createCdpTransport({
   WebSocket,
   port: acPort(),
-  cdpExec: (webContentsMod, wcId, cmd, args) => cdpExec(webContentsMod, wcId, cmd, args),
+  cdpExec: (webContentsMod, wcId, cmd, args, meta) => cdpExec(webContentsMod, wcId, cmd, args, meta),
   codedError,
   tabGoneCode: ERROR_CODES.TAB_GONE,
   execPath: process.execPath,
   pid: process.pid,
+  relayControl: unitWiring.relayControl(BASE_COMMANDS),
+  features: ["worker-command-unit", "worker-input-commands", "worker-page-commands", "worker-native-commands", "worker-qa-input-commands", "worker-qa-observe-commands", "worker-ax-tree"],
+  onRegistered: () => replayExecutorState(),
 });
 const { ctlSend, setupCdpControl } = cdpTransport;
 
@@ -129,6 +190,9 @@ function policyUrl(wcId) {
 }
 const attachPolicy = createCdpAttachPolicy({
   keepers: [
+    (wcId) => qaReactionCommands.hasActive(wcId),
+    // worker 의 QA 반응 관찰은 scoped 가 아닌 구독으로 살아 있음 (관찰이 끝나기 전에는 CDP 를 떼면 심은 스크립트가 사라짐)
+    (wcId) => !!(electronRelay && electronRelay.hasPersistentSubscription(wcId)),
     (wcId) => overlay.hasActive(wcId),
     (wcId) => deviceEmulation.hasExplicitDevice(wcId),
     (wcId) => { const plan = planFor(wcId); return plan.queue.length > 0 || !!plan.mode; },
@@ -162,12 +226,14 @@ const cdpSession = createCdpSession({
   attachBlockedCode: ERROR_CODES.CDP_BLOCKED,
 });
 const { ensureAttached, resetCdpSession, detachIdle, registerSessionPrimer,
-  noteChildSession, dropChildSession, childrenOf, noteFrameOrigin, planFor } = cdpSession;
+  noteChildSession, dropChildSession, childrenOf, noteFrameOrigin, noteDocumentNavigation, planFor } = cdpSession;
+replayExecutorState = () => cdpSession.replayExecutorState();
 // webview-lifecycle 이 main-frame 탐색마다 부른다. url 이 null 이면 탐색이 끝난 것이다.
 // 금지 호스트로 들어가는 순간 붙어 있던 CDP 를 즉시 뗀다.
 function noteNavigation(wcId, url) {
   const id = Number(wcId);
   if (url == null) { pendingNavigation.delete(id); attachPolicy.reconsider(id); return false; }
+  cdpSession.noteDocumentNavigation(id);
   pendingNavigation.set(id, String(url));
   if (!isGoogleAuthUrl(url)) return false;
   const wc = liveWc(id);
@@ -267,10 +333,25 @@ function withCmdTimeout(promise, wcId, cmd) {
     promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
   });
 }
+// worker 명령 단위 · 옛 처리기와 같은 대기열(cdpQueues)·시간 초과·비밀 가리기·관찰 순간 비움
+const commandUnits = createCommandUnits({
+  queues: cdpQueues,
+  execute: (request) => electronRelay.execute(request),
+  redact: (key, value) => resultSafety.redactSecrets(key, value),
+  attachMoments: (key, cmd, value) => attachMoments(key, cmd, value),
+  resetSession: (key) => { const wc = liveWc(key); if (wc) resetCdpSession(wc); },
+  deadSession: { test: (text) => DEAD_SESSION_RE.test(text) }, // DEAD_SESSION_RE 는 아래에서 정의
+  liveTab: (key) => !!liveWc(key),
+  refreshTarget: (key) => cdpSession.targetGenerations(key),
+  watchTab: (key, onGone) => unitWiring.watchTab(key, onGone),
+  codedError,
+  onClose: ({ generation, commandId }) => electronRelay?.releaseCommand(generation, commandId),
+  timeoutMs: CMD_TIMEOUT_MS,
+});
 // 막힌 것을 푸는 명령은 대기열에 서면 안 된다. 명령은 탭마다 한 줄로 실행되는데, 확인 창에 걸려
 // 멈춘 명령 뒤에 서면 그것을 닫을 명령까지 함께 갇혀 아무것도 실행할 수 없다.
 // 이 명령들은 페이지가 멈춰 있어도 실행되는 것들이다(브라우저 층 또는 OS 접근성).
-const QUEUE_BYPASS = new Set(["dialog", "dialoginfo", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff"]);
+const QUEUE_BYPASS = new Set(["dialog", "dialoginfo", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff", "redact"]);
 // CDP 없이 실행되는 명령. Google 로그인 호스트에서는 이것만 허용한다. tabs·target·newtab 은 서버가
 // 처리해 여기 오지 않는다. dialog 는 CDP 로 닫는 명령이라 빠지고, dialogs(계획 무장)는 장부만 바꾼다.
 const CDP_FREE_CMDS = new Set(["goto", "url", "back", "forward", "reload", "wait", "text", "screenshot",
@@ -279,7 +360,7 @@ const CDP_FREE_CMDS = new Set(["goto", "url", "back", "forward", "reload", "wait
 // observe 는 여기 없다. 촬영할 때 안에서 screenshot 을 다시 부르므로 그 호출이 스스로 걸린다.
 // 그래서 screenshot:false 로 부른 observe(진단 버퍼만 읽는다)는 막히지 않는다.
 // diff 도 없다. 이미 찍어 둔 그림 파일 둘을 읽을 뿐이라 창이 그리지 않아도 된다.
-const NEEDS_PIXELS = new Set(["screenshot"]);
+const NEEDS_PIXELS = new Set(["screenshot", "qa-screenshot"]);
 // 합성된 키는 그 webview 가 그려지고 있어야 도달한다. login 은 예외로, 키를 만들어 보내지 않고
 // preload IPC 로 값을 넣으므로 그림이 필요 없다.
 const KEYS_NEED_PAINT = (cmd) => NEEDS_KEYS.has(cmd) && cmd !== "login";
@@ -291,7 +372,9 @@ const KEYS_NEED_PAINT = (cmd) => NEEDS_KEYS.has(cmd) && cmd !== "login";
 // 그 사이 사용자가 누른 다운로드가 취소되고 파일 선택창이 빈 채로 닫힌다.
 // 페이지 상태를 읽기만 하거나 우리 장부만 보는 것들이다.
 const READ_ONLY_CMDS = new Set(["snapshot", "text", "url", "tabs", "shotsizes", "screenshot",
-  "diff", "a11y", "locate", "expect", "picks", "app-picks", "dialoginfo", "nativewin", "observe", "history"]);
+  "diff", "a11y", "locate", "expect", "picks", "app-picks", "dialoginfo", "nativewin", "observe", "history",
+  "qa-screenshot", "qa-observe", "qa-login-info", "qa-select-resolve", "qa-viewport-state",
+  "qa-reaction-start", "qa-reaction-poll", "qa-reaction-end", "qa-target-resolve", "qa-background-observe", "qa-reaction-drain", "qa-settle"]);
 const causality = createAiCausality();
 function enterAiCommand(wcId, cmd) { return READ_ONLY_CMDS.has(cmd) ? null : causality.enter(wcId); }
 function leaveAiCommand(ticket) { causality.leave(ticket); }
@@ -301,12 +384,133 @@ function aiDrivingAnywhere() { return causality.anyDriving(); }
 // 그 명령이 만든 창에 표식을 물려준다. 돌려주는 함수를 부를 때까지 그 wc 는 AI 로 분류된다.
 function holdAiCausality(wcId) { return causality.hold(wcId); }
 
+electronRelay = createElectronRelay({
+  webContents: electronWebContents,
+  targetState: {
+    generations: (wcId) => cdpSession.targetGenerations(wcId),
+    ownsChildSession: (wcId, sessionId) => cdpSession.ownsChildSession(wcId, sessionId),
+    isRegistered: (wcId) => cdpSession.hasSessionPrimer(wcId),
+    frames: (wcId) => Array.from(childrenOf(wcId)),
+    reset: (wc) => { resetCdpSession(wc); return cdpSession.targetGenerations(wc.id); },
+  },
+  currentUrl: (wcId) => { const wc = liveWc(wcId); return wc ? wc.getURL() : ""; },
+  pendingUrl: (wcId) => pendingNavigation.get(Number(wcId)) || "",
+  blockedUrl: isGoogleAuthUrl,
+  redact: resultSafety.redactSecrets,
+  rememberSecret: resultSafety.rememberSecret,
+  observation,
+  upload,
+  downloadState,
+  dialogPlan: {
+    set: (wcId, value, text) => {
+      const plan = planFor(wcId);
+      plan.queue = value?.queue ? [...value.queue] : [];
+      plan.mode = value?.mode || null;
+      plan.text = text;
+      ctlSend({ type: "browser-dialog-plan", wc: Number(wcId), plan: value, text });
+    },
+  },
+  qaMode: (wc, enabled, send) => setQaMode(send || relaySend(wc), wc, enabled),
+  qaViewport: (wc, args, send) => qaViewportCommands["qa-viewport"](send || relaySend(wc), wc, args),
+  qaViewportRelease: (wc) => qaViewportCommands.release(wc),
+  hiddenViewport: {
+    // QA 탭은 옛 cdpExecInner 처럼 호스트 확대 보정(reconcile), 그 밖의 탭은 숨은 탭 크기 준비
+    ensureReady: async (wc, command, send) => {
+      await ensureQaReady(send || relaySend(wc), wc, command);
+      return { ready: true };
+    },
+    release: async (wc) => {
+      return hiddenViewport.release(wc.id, relaySend(wc));
+    },
+  },
+  nativeAx: { describe: () => nativeAx.axDescribe(), click: (button) => nativeAx.axClick(button), key: (key) => nativeAx.axKey(key) },
+  qaAnchor: (args) => qaLedgerAnchor(args),
+  // 옛 cdpExecRaw 의 로그인 호스트 차단 · attachPolicy.touch · ensureAttached 순서 그대로
+  attach: (wc, command) => {
+    if (attachPolicy.blocked(wc.id)) {
+      detachAiSession(wc);
+      throw codedError(ERROR_CODES.CDP_BLOCKED,
+        `로그인 호스트에서는 CDP 를 붙이지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: `
+        + [...CDP_FREE_CMDS].join(" ") + ". 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.");
+    }
+    attachPolicy.touch(wc.id);
+    ensureAttached(wc);
+    return cdpSession.targetGenerations(wc.id);
+  },
+  // 페이지·읽기·캡처 처리기 앞 단계 · 옛 cdpExecRaw 의 noCdp 판정(로그인 호스트 · 로그인 호스트로 가는 goto)과
+  // 붙임. noCdp 이면 AI 세션을 떼고 CDP 없이 되는 명령만 통과
+  gate: (wc, command, args) => {
+    const noCdp = attachPolicy.blocked(wc.id) || (command === "goto" && isGoogleAuthUrl(gotoTarget(args && args.url)));
+    if (noCdp) {
+      detachAiSession(wc);
+      if (!CDP_FREE_CMDS.has(command)) {
+        throw codedError(ERROR_CODES.CDP_BLOCKED,
+          `로그인 호스트에서는 CDP 를 붙이지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: `
+          + [...CDP_FREE_CMDS].join(" ") + ". 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.");
+      }
+      return { noCdp: true, ...cdpSession.targetGenerations(wc.id) };
+    }
+    attachPolicy.touch(wc.id);
+    ensureAttached(wc);
+    return { noCdp: false, ...cdpSession.targetGenerations(wc.id) };
+  },
+  releaseAttach: (wcId) => attachPolicy.release(wcId),
+  screencastShot: (wc, ms) => captureTools.screencastShot(wc, ms),
+  stitch: (tiles, width, height, px) => captureTools.composeTiles(tiles, width, height, px),
+  diff: (before, after, out, threshold) => captureTools.diffPng(before, after, out, threshold),
+  same: (prev, buffer) => captureTools.samePng(prev, buffer),
+  refs: { record: (wcId, map) => refRegistry.recordSnapshot(wcId, map), resolve: (wcId, ref) => refRegistry.resolveRef(wcId, ref) },
+  detachIdle: (wc) => detachIdle(wc),
+  ai: causality,
+  captureHold: (wcId, on) => captureHold ? captureHold(wcId, on) : false,
+  focus: {
+    state: async (wc) => {
+      const state = await focusStateOf(wc);
+      return {
+        canSendKeys: userFocus.canSendKeys(state),
+        canPress: userFocus.canPress(state),
+        shown: isTabShown(wc.id),
+        shownKnown: shownStateKnown(),
+        // 그림이 나오는 창인가 · 옛 cdpExecInner 의 WINDOW_NOT_DRAWING 판정 입력
+        paint: paintState(wc.id),
+      };
+    },
+    prepare: qaPrepareFocus,
+    return: (wc) => userFocus.returnWindowFocus(wc),
+  },
+  viewport: {
+    explicit: (wcId) => deviceEmulation.viewportFor(wcId),
+    current: (wcId) => deviceEmulation.viewportFor(wcId),
+    revision: (wcId) => deviceEmulation.viewportRevision(wcId),
+    apply: (wc, args) => deviceEmulation.apply(wc, args),
+  },
+  contextAction: (wc, args) => contextActionCommand(wc, args),
+  renderImage: imageRenderer(BrowserWindow),
+  loginProvider: (wc, opts) => {
+    if (!loginProvider) throw new Error("로그인 제공자가 없습니다.");
+    return loginProvider(wc, opts);
+  },
+  cancelTarget: (wcId) => { const wc = liveWc(wcId); if (wc) detachAiSession(wc); },
+  clearDialogPlan: (wcId) => cdpSession.clearDialogPlan(wcId),
+  emitEvent: (event, onDelivered) => ctlSend({ type: "relay-event", event }, onDelivered),
+  codedError,
+});
+
+function relaySend(wc) {
+  return (method, params, sessionId) => wc.debugger.sendCommand(method, params || {}, sessionId);
+}
+
 // 디버거 세션이 끊긴 것("target closed"·"detached")은 실패가 아니라 상태이며, 다시 붙이면 그대로
 // 이어갈 수 있다. 이 오류를 그대로 내보내면 그 탭에서 이후 명령이 모두 실패한다.
 const DEAD_SESSION_RE = /target closed|detached from target|not attached|session closed|no session with given id|session .*(?:not found|does not exist)/i;
 
 async function execWithReattach(webContentsMod, wcId, cmd, args) {
-  const out = await execWithReattachRaw(webContentsMod, wcId, cmd, args);
+  return attachMoments(wcId, cmd, await execWithReattachRaw(webContentsMod, wcId, cmd, args));
+}
+
+// 명령 응답에 관찰 순간을 비워 붙임 (QA 탭은 qa-observe 만) · worker 단위의 마지막 호출도 같은 규칙
+function attachMoments(wcId, cmd, out) {
+  if (qaContents.has(Number(wcId)) && cmd !== "qa-observe") return out;
   try {
     const ms = observation.drainMoments(wcId);
     if (ms && out && typeof out === "object" && !Array.isArray(out)) { out.moments = ms.list; ms.commit(); }
@@ -319,7 +523,7 @@ async function execWithReattachRaw(webContentsMod, wcId, cmd, args) {
     return await cdpExecRaw(webContentsMod, wcId, cmd, args);
   } catch (e) {
     // 관문이 막은 것은 끊긴 세션이 아니다. 다시 붙여도 같은 답이므로 그대로 알린다.
-    if (e && e.code === ERROR_CODES.CDP_BLOCKED) throw e;
+    if (cmd.startsWith("qa-") || (e && e.code === ERROR_CODES.CDP_BLOCKED)) throw e;
     if (!DEAD_SESSION_RE.test(String((e && e.message) || e))) throw e;
     const wc = webContentsMod.fromId(Number(wcId));
     if (!wc || wc.isDestroyed()) throw tagError(e, ERROR_CODES.TAB_GONE);
@@ -334,7 +538,7 @@ async function execWithReattachRaw(webContentsMod, wcId, cmd, args) {
 // Electron webContents 조회는 조립부에 남기고, 상태와 명령 판정은 hidden viewport 소유 모듈에 맡긴다.
 function pinHiddenViewport(wc, opts) {
   try {
-    if (!wc || wc.isDestroyed()) return;
+    if (!wc || wc.isDestroyed() || qaContents.has(wc.id)) return;
     const dbg = wc.debugger;
     if (!dbg.isAttached()) return;
     hiddenViewport.pin(wc.id, (method, params) => dbg.sendCommand(method, params || {}), opts);
@@ -347,6 +551,8 @@ function pinHiddenViewportById(wcId, webContentsMod, opts) {
 }
 function clearAutoViewport(wcId, webContentsMod) {
   const id = Number(wcId);
+  // 명시 지정 크기(QA·기기 선택)는 탭 표시 전환에 유지
+  if (deviceEmulation.viewportFor(id)) return false;
   let send = () => Promise.resolve();
   try {
     const wc = webContentsMod && webContentsMod.fromId(id);
@@ -354,7 +560,7 @@ function clearAutoViewport(wcId, webContentsMod) {
   } catch {}
   return hiddenViewport.clearAutoViewport(id, send);
 }
-function setDefaultViewport(width, height) { hiddenViewport.setDefaultViewport(width, height); }
+function setDefaultViewport(width, height, wcId) { hiddenViewport.setDefaultViewport(width, height, wcId); }
 // 화면에서 눌러서 고르는 선택기(overlay)를 그 탭의 모든 문서에 심는다.
 // 렌더러의 webview.executeJavaScript 는 최상위 프레임에서만 실행되므로, 대상이 iframe 안에
 // 있는 화면에서는 눌러도 반응이 없었다. 교차 출처든 같은
@@ -395,7 +601,7 @@ function diagSince(wcId, since, webContentsMod) {
   void webContentsMod;
   return observation.diagSince(wcId, since);
 }
-const NEEDS_KEYS = new Set(["fill", "type", "key", "phonetype", "phonekey", "login"]);
+const NEEDS_KEYS = new Set(["fill", "type", "key", "phonetype", "phonekey", "login", "qa-input", "qa-login-input"]);
 // 이 탭이 지금 화면에 그려지고 있는가. main이 렌더러 보고로 채우며, 모르면 안 보이는 쪽으로 가정한다
 // (붙잡기는 보이는 탭에 걸어도 해가 없고, 반대로 빠뜨리면 입력이 조용히 사라진다).
 let shownProbe = null;
@@ -407,9 +613,31 @@ function setShownKnownProbe(fn) { shownKnownProbe = typeof fn === "function" ? f
 function shownStateKnown() { try { return !!(shownKnownProbe && shownKnownProbe()); } catch { return false; } }
 function isTabShown(wcId) { try { return !!(shownProbe && shownProbe(Number(wcId))); } catch { return false; } }
 async function ensureQaReady(send, wc, cmd) {
+  // 이동으로 호스트 확대가 바뀌었으면 QA 크기 다시 적용
+  if (qaContents.has(wc.id)) { if (cmd !== "qa-viewport") await qaViewportCommands.reconcile(send, wc); return; }
   return hiddenViewport.ensureReady(send, wc.id, cmd);
 }
-function cdpExec(webContentsMod, wcId, cmd, args) {
+function cdpExec(webContentsMod, wcId, cmd, args, meta = {}) {
+  const hasWorkerMeta = meta.workerGeneration != null || meta.commandId != null
+    || meta.callId != null || meta.targetToken != null;
+  if (hasWorkerMeta && electronRelay?.isBaseCommand(cmd)) {
+    const target = { ...(meta.targetToken || {}) };
+    if (wcId && target.wcId != null && Number(target.wcId) !== Number(wcId)) {
+      throw codedError("STALE_TARGET", "중계 봉투와 target token의 webContents가 다릅니다.");
+    }
+    if (wcId && target.wcId == null) target.wcId = Number(wcId);
+    const request = {
+      workerGeneration: meta.workerGeneration,
+      commandId: meta.commandId,
+      callId: meta.callId,
+      command: cmd,
+      target,
+      args: args || {},
+    };
+    // unit 표시가 있으면 옛 처리기와 같은 탭 대기열·비밀 가리기·관찰 순간 비움을 거침 (없으면 지금 설치 앱의 worker 와 호환)
+    return unitWiring.dispatchBase(request, meta.unit);
+  }
+  if (hasWorkerMeta && meta.unit?.phase === "end") return unitWiring.endUnit(meta, wcId);
   const key = Number(wcId) || 0;
   const guard = (p) => p.then((v) => resultSafety.redactSecrets(key, v));
   if (QUEUE_BYPASS.has(cmd)) return guard(withCmdTimeout(execWithReattach(webContentsMod, wcId, cmd, args), key, cmd));
@@ -444,6 +672,26 @@ function cdpExec(webContentsMod, wcId, cmd, args) {
 // 잡혀 `iris-browser toString` 이 "알 수 없는 명령" 안내 대신 "[object Object]" 를 돌려주고
 // `__proto__` 는 `handler is not a function` 이 된다(재현 확인). 이전 switch 는 그 이름들을
 // 전부 default 로 보냈으므로, 상속을 끊어야 안내 계약이 유지된다.
+const qaInputCommands = createQaInputCommands({ prepareFocus: qaPrepareFocus, returnFocus: (wc) => userFocus.returnWindowFocus(wc),
+  isTabShown: (wc) => isTabShown(wc && wc.id) });
+const qaViewportCommands = createQaViewportCommands({ viewportOwner: deviceEmulation, notify: (id, box) => { if (viewportNotify) viewportNotify(id, box); },
+  yieldViewport: (id) => hiddenViewport.yieldToExplicitViewport(id) });
+const qaCaptureCommands = createQaCaptureCommands({ fs, path, shotsDir: SHOTS_DIR, nativeImage, refRegistry,
+  renderImage: imageRenderer(BrowserWindow), captureHold: (id, on) => captureHold ? captureHold(id, on) : false,
+  observation, redact: resultSafety.redactSecrets });
+const qaReactionCommands = createQaReactionCommands({ observation,
+  screenshot: qaCaptureCommands["qa-screenshot"] });
+async function setQaMode(send, wc, enabled) {
+  if (!enabled) { await qaReactionCommands.dispose(wc.id); qaContents.delete(wc.id); return { ok: true }; }
+  if (!qaContents.has(wc.id)) {
+    qaContents.add(wc.id);
+    wc.once("destroyed", () => qaContents.delete(wc.id));
+    hiddenViewport.yieldToExplicitViewport(wc.id);
+    if (!deviceEmulation.viewportFor(wc.id)) await send("Emulation.clearDeviceMetricsOverride");
+  }
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  return { ok: true };
+}
 const commandHandlers = Object.assign(Object.create(null), {
   ...createPageCommands({ applyViewport: (wc, args) => deviceEmulation.apply(wc, args) }),
   ...createInputCommands({
@@ -453,7 +701,19 @@ const commandHandlers = Object.assign(Object.create(null), {
     isTabShown,
     run: runCdpCmd,
     webContentsMod: (wc) => commandWebContentsMods.get(wc),
+    ownsUserFocus,
+    pressAllowed,
   }),
+  async "qa-mode"(send, wc, args) {
+    return setQaMode(send, wc, args.enabled === true);
+  },
+  ...qaInputCommands,
+  ...qaCaptureCommands,
+  ...qaReactionCommands,
+  ...createQaLoginCommands({ loginProvider: () => loginProvider, input: qaInputCommands["qa-input"], resultSafety }),
+  ...qaViewportCommands,
+  ...createQaExpectCommands({ screenshot: (_send, wc, args) =>
+    cdpExecRaw(commandWebContentsMods.get(wc), wc.id, "qa-screenshot", args) }),
   ...createInspectCommands({
     buildSnapshot,
     refRegistry,
@@ -591,6 +851,8 @@ async function jsClickSel(wc, sel, clickCount) {
       + `if(e.offsetParent===null&&getComputedStyle(e).position!=='fixed')return {found:true,ok:false,why:'숨겨진 요소'};`
       + `if(e.disabled)return {found:true,ok:false,why:'비활성 요소'};`
       + `if(b.width<=0||b.height<=0)return {found:true,ok:false,why:'크기가 0인 요소'};`
+      // 사람이 누를 때처럼 커서도 이동(입력칸을 누른 뒤 type 이 그 칸에 들어가게)
+      + `if(typeof e.focus==='function'){try{e.focus({preventScroll:true});}catch(_){}}`
       + `for(let i=0;i<${clickCount};i++)e.click();return {found:true,ok:true};})()`,
       true);
   } catch { return null; }
@@ -600,21 +862,27 @@ async function jsClickSel(wc, sel, clickCount) {
 }
 
 async function cdpExecRaw(webContentsMod, wcId, cmd, args) {
+  if (cmd === "qa-anchor") {
+    const result = await qaLedgerAnchor(args || {});
+    if (!result?.ok) throw new Error(result?.error || "QA 장부 머리 해시를 확인할 수 없습니다");
+    return result.data;
+  }
   const wc = webContentsMod.fromId(wcId);
   if (!wc || wc.isDestroyed()) throw codedError(ERROR_CODES.TAB_GONE, "브라우저 탭을 찾을 수 없음(wc=" + wcId + ")");
   if (cmd === "contextaction") return contextActionCommand(wc, args || {});
   commandWebContentsMods.set(wc, webContentsMod);
   // [Cloudflare 통과] ref 없는 selector 클릭은 CDP 를 붙이지 않고 누른다. 붙이는 순간 이 탭이
   // 챌린지에서 봇으로 판정된다(확인 결과). 이미 붙어 있으면 먼저 뗀다. 그다음 탭 가시성으로 갈린다:
-  //  - 보이는 탭 → 네이티브 입력(sendInputEvent, 실제 입력이라 대화형 Turnstile 체크박스까지 커버)
-  //  - 배경 탭(display:none) → 페이지 안 `.click()`(네이티브 입력이 도달하지 못하는 유일 경로)
+  //  - 보이는 탭이고 누르기가 사용자 포커스를 옮기지 않음(user-focus.cjs canPress) → 네이티브 입력(sendInputEvent, 실제 입력이라 대화형 Turnstile 체크박스까지 커버)
+  //  - 배경 탭(display:none)이나 누르면 사용자 포커스가 옮겨 가는 탭 → 페이지 안 `.click()`(사용자 포커스를 옮기지 않는 경로)
   // 성공하면 CDP 없이 끝낸다. 요소를 찾지 못하면(null) 아래 기존 CDP 경로로 내려가고, 요소는
   // 있으나 누를 수 없으면(가려짐·비활성·0크기) 그 사유를 돌려준다. 억지로 CDP 로 눌러 챌린지를 깨우지 않는다.
   if ((cmd === "click" || cmd === "dblclick") && args && args.sel && !args.ref) {
     try {
       if (wc.debugger.isAttached()) { try { detachIdle(wc); } catch {} }
       const clicks = cmd === "dblclick" ? 2 : 1;
-      const r = isTabShown(wc.id)
+      // 네이티브 mouseDown 은 그 창의 키보드 포커스를 이 탭으로 옮김. 사용자 포커스가 옮겨 가면 페이지 안 click()
+      const r = isTabShown(wc.id) && await pressAllowed(wc)
         ? await nativeClickSel(wc, args.sel, clicks)
         : await jsClickSel(wc, args.sel, clicks);
       if (r) return { ...r, ref: args.sel };
@@ -623,6 +891,8 @@ async function cdpExecRaw(webContentsMod, wcId, cmd, args) {
   args = args || {};
   // 진단 조회. 부착 정책을 건드리지 않고 지금 상태만 답한다. 이 명령이 창을 열면 실측이 불가능하다.
   if (cmd === "cdpstate") return cdpState(wc);
+  // 서버가 가진 글(확인 창 문구 등)을 이 탭의 결과 guard 로 가림. 페이지에 닿지 않아 멈춘 페이지에서도 응답
+  if (cmd === "redact") return { ok: true, text: String(args.text == null ? "" : args.text) };
   // 사람에게 넘기는 순간. AI 조작 창을 닫고 유지 조건이 없으면 CDP 를 바로 뗀다.
   if (cmd === "handoff") return handoff(wc);
   // Google 로그인 호스트(지금 문서·진행 중 탐색·이 goto 의 목적지)에서는 AI 세션을 붙이지 않는다.
@@ -774,13 +1044,17 @@ function setCaptureHold(fn) { captureHold = fn; }
 // 사용자 화면을 가져가므로, 조용히 빗나가는 대신 무엇이 막는지 알린다.
 let paintableProbe = null;   // (wcId) => { ok, why }
 function setPaintableProbe(fn) { paintableProbe = fn; }
+function paintState(wcId) {
+  if (!paintableProbe) return { ok: true };
+  try { return paintableProbe(wcId) || { ok: true }; } catch { return { ok: true }; }
+}
 function setViewportNotify(fn) { viewportNotify = fn; }
 module.exports = { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setContextActionProvider,
   applyViewportTo: (wc, args) => deviceEmulation.apply(wc, args),
   setTouchDrag: (wc, on) => deviceEmulation.setTouchDrag(wc, on),
   forgetSecrets: resultSafety.forgetSecrets, clearAutoViewport, setShownProbe, setShownKnownProbe, setDefaultViewport,
   noteChildSession, dropChildSession, noteFrameOrigin, injectOverlayAllFrames, hoverAtPoint, diagSince,
-  aiDriving, aiDrivingAnywhere, holdAiCausality,
-  registerSessionPrimer, noteNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, setPaintableProbe,
-  // 앱 안에서도 실행기를 쓸 수 있게 연다(선택한 요소를 그 자리에서 잘라 찍는 데 쓴다).
+  aiDriving, aiDrivingAnywhere, holdAiCausality, noteUserKey,
+  registerSessionPrimer, noteNavigation, noteDocumentNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, setPaintableProbe,
+  // ⑦·⑧에서도 메인에 유지 — pick·sketch의 동일 출처 iframe 조회와 full-page stitch 보존
   runCdp: (webContentsMod, wcId, cmd, args) => cdpExec(webContentsMod, wcId, cmd, args || {}) };

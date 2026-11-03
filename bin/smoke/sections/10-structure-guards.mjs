@@ -95,14 +95,14 @@ check("사용자 UI BrowserWindow 생성 지점은 정해진 일곱 곳뿐이다
     const opts = src.slice(m.index, m.index + 400);
     if (/offscreen:\s*true/.test(opts)) offscreen++; else ui++;
   }
-  // offscreen 하나는 전체 캡처 타일을 canvas 로 이어 붙이는 보이지 않는 창이다(cdp-capture-tools).
+  // offscreen 둘은 전체 캡처 타일 합성과 QA 이미지 가림용 canvas다.
   // 넷째는 탭을 빼낸 분리 창이다(detached-tab-window). 다섯째는 에뮬레이터 분리 창이다
   // (emulator/emulator-host.cjs). 여섯째는 창 레이아웃 단축키 결과를 모니터 가운데에 띄우는 투명 알림 창이다
   // (desk-layout/hud.cjs). 일곱째는 현재 프로필의 확장 팝업·설정 창이다(browser-extensions.cjs).
   // 창 종류가 늘면 이 수를 직접 올리게 하는 것이 이 검사의 목적이다.
   // 창을 늘리는 것은 검토 없이 지나가면 안 되는 결정이다.
   if (ui !== 7) throw new Error(`사용자 UI 창 생성 ${ui}곳 — 메인·브라우저·메모·탭분리·에뮬레이터·창 레이아웃 알림·확장 팝업 일곱이어야 한다`);
-  if (offscreen !== 1) throw new Error(`보이지 않는 유틸 창 생성 ${offscreen}곳 — 타일 합성 하나뿐이어야 한다`);
+  if (offscreen !== 2) throw new Error(`보이지 않는 유틸 창 생성 ${offscreen}곳 — 타일 합성·QA 이미지 가림 둘이어야 한다`);
   return true;
 });
 check("순차 점검표가 카탈로그의 모든 화면을 정확한 순서로 포함한다", () => {
@@ -388,8 +388,8 @@ check("server 의 모든 모듈이 index.js 에서 import 로 닿는다", () => 
     // 연결하는 줄이 `new URL("./x.js", import.meta.url)` 이다. 호출하는 코드는 실재하는데
     // 검사가 그 형태를 몰라 실패하고, 그러면 쓰지 않는 import 를 추가해 통과시키는 회피만
     // 남는다. 그래서 인식할 연결 형태를 늘린다.
-    for (const m of read(cur).matchAll(/from\s+"(\.[^"]+)"|new URL\(\s*"(\.[^"]+)"\s*,\s*import\.meta\.url\s*\)/g)) {
-      const target = path.posix.normalize(`${dir}/${m[1] || m[2]}`);
+    for (const m of read(cur).matchAll(/from\s+"(\.[^"]+)"|\bimport\(\s*"(\.[^"]+)"\s*\)|new URL\(\s*"(\.[^"]+)"\s*,\s*import\.meta\.url\s*\)/g)) {
+      const target = path.posix.normalize(`${dir}/${m[1] || m[2] || m[3]}`);
       if (known.has(target)) stack.push(target);
     }
   }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sliceBetween } from "../bin/slice-anchor.mjs";
-import { returnPlace, phoneControls, pickSurface, pickTargetAt, PICK_PASS } from "../web/js/emulator/controls.js";
+import { returnPlace, phoneControls, pickSurface, pickTargetAt, PICK_PASS, createKeyboardQueue } from "../web/js/emulator/controls.js";
 
 test("분리 전 자리와 배치 엔진 상태에 따라 복귀한다", () => {
   assert.equal(returnPlace("column", true), "column");
@@ -11,8 +11,8 @@ test("분리 전 자리와 배치 엔진 상태에 따라 복귀한다", () => {
 });
 
 test("플랫폼별로 지원하는 폰 조작만 보인다", () => {
-  assert.deepEqual(phoneControls("Android"), ["back", "home", "recents", "rotate", "volume_down", "volume_up", "lock"]);
-  assert.deepEqual(phoneControls("iOS"), ["home", "rotate"]);
+  assert.deepEqual(phoneControls("Android"), ["back", "home", "recents", "rotate", "volume_down", "volume_up", "lock", "lang"]);
+  assert.deepEqual(phoneControls("iOS"), ["home", "rotate", "lang"]);
   assert.deepEqual(phoneControls(null), []);
 });
 
@@ -57,4 +57,56 @@ test("에뮬레이터 툴바 아이콘은 서로 다른 모양이다", async () 
     assert.ok(!seen.has(svg), `${name} 아이콘이 ${seen.get(svg)} 와 같음`);
     seen.set(svg, name);
   }
+});
+
+test("한/영 전환 대기열은 누른 순서대로 키와 전환을 보내고 전환 뒤 기다린다", async () => {
+  const log = [];
+  let release1, release2;
+  let t = 0;
+  const q = createKeyboardQueue({ sendFrame: (f) => log.push(f.usage), delay: async (ms) => { log.push("wait" + ms); t += ms; }, now: () => t, settleMs: 1100 });
+  assert.equal(q.enqueueFrames([{ usage: 1 }]), false); // 전환 전에는 바로 보냄
+  q.enqueueSwitch(new Promise((r) => { release1 = r; }));
+  assert.equal(q.enqueueFrames([{ usage: 10 }]), true);
+  q.enqueueSwitch(new Promise((r) => { release2 = r; }));
+  assert.equal(q.enqueueFrames([{ usage: 20 }]), true);
+  release2({ frames: [{ usage: 224 }] }); // 두 번째 응답이 먼저 와도 순서 유지
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(log, []);
+  release1({ frames: [{ usage: 224 }] });
+  await q.idle();
+  // 두 번째 전환은 첫 전환 시각(0)에서 2500ms 뒤: 0+40+1100+4+120=1264 → 1236 더 기다림
+  assert.deepEqual(log, [224, "wait40", "wait1100", 10, "wait4", "wait120", "wait1236", 224, "wait40", "wait1100", 20, "wait4", "wait120"]);
+  assert.equal(q.enqueueFrames([{ usage: 30 }]), false);
+});
+
+test("전환이 실패하면 기다리지 않고 남은 키를 보내고, 비우면 남은 키를 버린다", async () => {
+  const log = [];
+  let t = 0;
+  const q = createKeyboardQueue({ sendFrame: (f) => log.push(f.usage), delay: async (ms) => { log.push("wait" + ms); t += ms; }, now: () => t, settleMs: 1100 });
+  q.enqueueSwitch(Promise.resolve(null));
+  q.enqueueFrames([{ usage: 10 }]);
+  await q.idle();
+  assert.deepEqual(log, [10, "wait4", "wait120"]);
+  let release;
+  q.enqueueSwitch(new Promise((r) => { release = r; }));
+  q.enqueueFrames([{ usage: 20 }]);
+  q.clear();
+  release({ frames: [{ usage: 224 }] });
+  await q.idle();
+  assert.deepEqual(log, [10, "wait4", "wait120"]);
+  assert.equal(q.enqueueFrames([{ usage: 30 }]), false);
+});
+
+test("비운 뒤 새로 누른 전환과 키는 이어서 보낸다", async () => {
+  const log = [];
+  let t = 0;
+  const q = createKeyboardQueue({ sendFrame: (f) => log.push(f.usage), delay: async (ms) => { log.push("wait" + ms); t += ms; }, now: () => t, settleMs: 1100 });
+  let release;
+  q.enqueueSwitch(new Promise((r) => { release = r; }));
+  q.clear();
+  q.enqueueSwitch(Promise.resolve({ frames: [{ usage: 224 }] }));
+  q.enqueueFrames([{ usage: 10 }]);
+  release({ frames: [{ usage: 99 }] });
+  await q.idle();
+  assert.deepEqual(log, [224, "wait40", "wait1100", 10, "wait4", "wait120"]);
 });

@@ -1,16 +1,20 @@
 import 'package:iris_remote/design/browser_groups.dart';
+import 'package:iris_remote/diagnostics/app_log.dart';
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 
+import 'package:flutter/scheduler.dart';
+
+import 'browser_gestures.dart';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:iris_remote/design/buttons.dart';
 import 'package:iris_remote/design/composer.dart';
 import 'package:iris_remote/design/icon.dart';
-import 'package:iris_remote/design/session_header.dart';
+import 'package:iris_remote/design/motion.dart';
 import 'package:iris_remote/design/sheet.dart';
 import 'package:iris_remote/design/tokens.dart';
 import 'package:iris_remote/format/result_text.dart';
@@ -71,11 +75,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   StreamSubscription<BrowserFrame>? _frames;
   StreamSubscription<RemoteConnectionStatus>? _connectionStates;
   BrowserFrame? _frame;
+  StreamSubscription<BrowserFrameStatus>? _frameStatuses;
+  bool _reloading = false;
+  Timer? _frameRecovery;
+
   BrowserTool _tool = BrowserTool.none;
   BrowserRecordResult? _record;
   bool _recordPaused = false;
   bool _desktop = false;
-  BrowserInputMode _inputMode = BrowserInputMode.trackpad;
   Offset _cursor = const Offset(0.5, 0.5);
   double _frameZoom = 1;
   BrowserElementHoverResult? _hoveredElement;
@@ -90,12 +97,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
   String? _result;
   String? _messageResult;
   String? _error;
+  // 상태 스트림이 준 오류 코드와 그 코드로 만든 문구
+  ({String message, String code})? _statusError;
+  final FocusNode _addressFocus = FocusNode();
   final TextEditingController _address = TextEditingController();
   final TextEditingController _directInput = TextEditingController();
   final TextEditingController _recordNote = TextEditingController();
   final TextEditingController _sketchText = TextEditingController();
   late final TextEditingController _messageText;
-  final GlobalKey _sketchKey = GlobalKey();
+  final GlobalKey _frameKey = GlobalKey();
+  Timer? _sketchScrollTimer;
+  Timer? _sketchHoldTimer;
+  bool _sketchHeld = false;
   final List<_Stroke> _strokes = [];
   _Stroke? _activeStroke;
   Color _penColor = const Color(0xffff7a72);
@@ -118,12 +131,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _messageText = TextEditingController(
       text: widget.state.composerTextFor(_agentRef),
     )..addListener(_messageTextChanged);
-    if (!widget.state.supports('browser.mouse')) {
-      _inputMode = BrowserInputMode.direct;
-    }
     if (widget.humanRequest != null) _tool = BrowserTool.direct;
     _frames = widget.state.session.browserFrames.listen((frame) {
-      if (mounted && frame.tab == _tabRef) setState(() => _frame = frame);
+      if (mounted && frame.tab == _tabRef) {
+        _frameRecovery?.cancel();
+        setState(() {
+          _frame = frame;
+          _error = null;
+          _reloading = false;
+        });
+      }
+    });
+    _frameStatuses = widget.state.session.browserFrameStatuses.listen((status) {
+      if (!mounted || status.tab != _tabRef) return;
+      setState(() {
+        _error = status.error == null
+            ? null
+            : switch (status.error) {
+                'browser-tab-unavailable' => '탭을 깨우지 못했습니다. 다시 연결하고 있습니다.',
+                'browser-controller-unavailable' => '컴퓨터의 브라우저 연결을 기다리고 있습니다.',
+                _ => '화면을 받지 못했습니다. 자동으로 다시 시도하고 있습니다.',
+              };
+        _statusError = status.error == null
+            ? null
+            : (message: _error!, code: status.error!);
+        if (status.error != null) _reloading = false;
+      });
     });
     _connectionStates = widget.state.session.connectionStates.listen((status) {
       if (!mounted) return;
@@ -144,14 +177,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
   @override
   void dispose() {
     _frames?.cancel();
+    _frameStatuses?.cancel();
+    _frameRecovery?.cancel();
     _connectionStates?.cancel();
     _invalidateElementHighlight();
     _mouseMotionTimer?.cancel();
     _pageTextTimer?.cancel();
     _postClickTimer?.cancel();
     _address.dispose();
+    _addressFocus.dispose();
     _directInput.dispose();
     _recordNote.dispose();
+    _releaseSketchScroll();
     _sketchText.dispose();
     _messageText
       ..removeListener(_messageTextChanged)
@@ -160,6 +197,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   BrowserTab? get _tab => widget.state.browserTab(_tabRef);
+
+  String? get _errorCode =>
+      _statusError?.message == _error ? _statusError?.code : null;
+
+  void _retryFrame() => unawaited(_watch());
+
+  void _focusAddress() => _addressFocus.requestFocus();
 
   void _messageTextChanged() {
     widget.state.setComposerText(_agentRef, _messageText.text);
@@ -201,8 +245,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _tabRef,
         width: width,
         desktop: _desktop,
+        fps: widget.state.supports(browserFastFrameCapability) ? 20 : 2,
       );
       _watchedWidth = width;
+      if (_frame == null) {
+        _frameRecovery?.cancel();
+        _frameRecovery = Timer(const Duration(seconds: 3), () {
+          if (!mounted || _frame != null || _reconnecting) return;
+          setState(() => _error = '화면을 기다리고 있습니다. 자동으로 다시 시도하고 있습니다.');
+          unawaited(_watch());
+        });
+      }
     } on RemoteFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     }
@@ -283,7 +336,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : '컴퓨터과 연결이 끊겼습니다.',
+              : '컴퓨터와 연결이 끊겼습니다.',
         );
       }
     } finally {
@@ -303,410 +356,447 @@ class _BrowserScreenState extends State<BrowserScreen> {
             body: Center(child: Text('브라우저 탭을 찾을 수 없습니다.')),
           );
         }
-        final space =
-            widget.state.browserSpace(tab.space)?.name ??
-            agent?.space ??
-            '스페이스';
         for (final item in widget.state.browserTabGroups) {
           if (_initializedTabGroups.add(item.ref) && item.collapsed) {
             _collapsedTabGroups.add(item.ref);
           }
         }
-        return Scaffold(
-          body: SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                IrisSessionHeader(
-                  title: _host(tab),
-                  subtitle: '$space 스페이스 탭',
-                  mode: SessionMode.browser,
-                  tabs: [
-                    for (final group in browserTabGroups(
+        // 스케치 모드에서 뒤로가기는 화면을 나가지 않고 모드만 끔
+        return PopScope(
+          canPop: _tool != BrowserTool.sketch,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _setTool(BrowserTool.none);
+          },
+          child: Scaffold(
+            // 스케치 중 글 입력으로 키보드가 올라와도 화면이 줄지 않아 그림 위치가 그대로
+            resizeToAvoidBottomInset: _tool != BrowserTool.sketch,
+            body: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  BrowserTabStrip(
+                    groups: browserTabGroups(
                       tab,
                       widget.state.browserTabs,
                       widget.state.browserTabGroups,
-                    )) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: ActionChip(
-                          label: Text(
-                            group.name,
-                            style: TextStyle(
-                              color: group.color == null
-                                  ? null
-                                  : browserGroupColor(group.color),
-                            ),
-                          ),
-                          onPressed: group.ref == null
-                              ? null
-                              : () => setState(() {
-                                  if (!_collapsedTabGroups.add(group.ref!)) {
-                                    _collapsedTabGroups.remove(group.ref!);
-                                  }
-                                }),
-                        ),
-                      ),
-                      if (group.ref == null ||
-                          !_collapsedTabGroups.contains(group.ref))
-                        for (final item in group.tabs)
-                          IrisBrowserTab(
-                            tab: item,
-                            selected: item.ref == tab.ref,
-                            onPressed: () => _selectTab(item),
-                          ),
-                    ],
-                    if (widget.state.supports('browser.tab.new'))
-                      IrisNewBrowserTab(onPressed: () => _newTab(tab.space)),
-                  ],
-                  onBack: () => Navigator.of(context).pop(),
-                  canTerminal:
-                      widget.onOpenTerminal != null &&
-                      widget.state.supports('terminal.watch'),
-                  canChat: agent != null,
-                  canBrowser: true,
-                  onChat: () => Navigator.of(context).pop(),
-                  onTerminal: widget.onOpenTerminal,
-                  onBrowser: () {},
-                ),
-                _AddressBar(
-                  controller: _address,
-                  profile: tab.profile,
-                  desktop: _desktop,
-                  canNavigate: widget.state.supports('browser.navigate'),
-                  onNavigate: _navigate,
-                  onBookmark: widget.state.supports('browser.bookmark.set')
-                      ? () => _bookmark(true)
-                      : null,
-                ),
-                Expanded(
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            _FrameSurface(
-                              key: const Key('browser-frame'),
-                              frame: _frame,
-                              referenceImage: _desktop
-                                  ? widget.desktopFrameImage
-                                  : switch (_tool) {
-                                      BrowserTool.pick =>
-                                        widget.selectionFrameImage ??
-                                            widget.frameImage,
-                                      BrowserTool.record =>
-                                        widget.recordFrameImage ??
-                                            widget.frameImage,
-                                      BrowserTool.sketch =>
-                                        widget.sketchFrameImage ??
-                                            widget.frameImage,
-                                      _ => widget.frameImage,
-                                    },
-                              error: _error,
-                              inputMode: _tool == BrowserTool.pick
-                                  ? (widget.state.supports(
-                                          'browser.element.hover',
+                    ),
+                    collapsed: _collapsedTabGroups,
+                    selectedRef: tab.ref,
+                    onSelect: _selectTab,
+                    onToggleGroup: (ref) => setState(() {
+                      if (!_collapsedTabGroups.add(ref)) {
+                        _collapsedTabGroups.remove(ref);
+                      }
+                    }),
+                    onNewTab: widget.state.supports('browser.tab.new')
+                        ? () => _newTab(tab.space)
+                        : null,
+                  ),
+                  _AddressBar(
+                    controller: _address,
+                    focusNode: _addressFocus,
+                    profile: tab.profile,
+                    desktop: _desktop,
+                    failed: _error != null && _frame == null,
+                    canNavigate: widget.state.supports('browser.navigate'),
+                    onNavigate: _navigate,
+                    onBack: () => Navigator.of(context).pop(),
+                    onTerminal:
+                        widget.onOpenTerminal != null &&
+                            widget.state.supports('terminal.watch')
+                        ? widget.onOpenTerminal
+                        : null,
+                    onReload: widget.state.supports('browser.history')
+                        ? () => _history('reload')
+                        : null,
+                    reloading: _reloading,
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              KeyedSubtree(
+                                key: _frameKey,
+                                child: _FrameSurface(
+                                  key: const Key('browser-frame'),
+                                  frame: _frame,
+                                  referenceImage: _desktop
+                                      ? widget.desktopFrameImage
+                                      : switch (_tool) {
+                                          BrowserTool.pick =>
+                                            widget.selectionFrameImage ??
+                                                widget.frameImage,
+                                          BrowserTool.record =>
+                                            widget.recordFrameImage ??
+                                                widget.frameImage,
+                                          BrowserTool.sketch =>
+                                            widget.sketchFrameImage ??
+                                                widget.frameImage,
+                                          _ => widget.frameImage,
+                                        },
+                                  inputMode: _tool == BrowserTool.pick
+                                      ? (widget.state.supports(
+                                              'browser.element.hover',
+                                            )
+                                            ? BrowserInputMode.trackpad
+                                            : BrowserInputMode.direct)
+                                      : !widget.state.supports('browser.mouse')
+                                      ? BrowserInputMode.direct
+                                      : BrowserInputMode.trackpad,
+                                  cursor: _cursor,
+                                  zoom: _frameZoom,
+                                  highlightedElement: _tool == BrowserTool.pick
+                                      ? _hoveredElement
+                                      : null,
+                                  canDirectTap: widget.state.supports(
+                                    'browser.pointer',
+                                  ),
+                                  canDirectScroll: widget.state.supports(
+                                    'browser.scroll',
+                                  ),
+                                  onCursor: (value, point, action) {
+                                    setState(() => _cursor = value);
+                                    if (_tool == BrowserTool.pick) {
+                                      _queueElementHover(point);
+                                    } else {
+                                      _queueMouseMotion(point, action);
+                                    }
+                                  },
+                                  onMouse: _handleMouseAction,
+                                  onDirectTap: (point, action) =>
+                                      action == 'click' ||
+                                          _tool == BrowserTool.pick
+                                      ? _handleFrameTap(point)
+                                      : _sendPoint(point, action),
+                                  canWheel:
+                                      widget.state.supports(
+                                        browserWheelCapability,
+                                      ) ||
+                                      widget.state.supports('browser.mouse'),
+                                  onScroll: _sendWheel,
+                                  onZoom: (value) =>
+                                      setState(() => _frameZoom = value),
+                                  onZoomEnd: _refreshZoomedFrame,
+                                  sketching: _tool == BrowserTool.sketch,
+                                  onStroke: _onStroke,
+                                  imageOverlay:
+                                      _tool == BrowserTool.sketch &&
+                                          !widget.frameIncludesOverlays
+                                      ? (rect) => CustomPaint(
+                                          painter: _SketchPainter(
+                                            _strokes,
+                                            _activeStroke,
+                                            rect,
+                                            _frameZoom,
+                                          ),
                                         )
-                                        ? BrowserInputMode.trackpad
-                                        : BrowserInputMode.direct)
-                                  : !widget.state.supports('browser.mouse')
-                                  ? BrowserInputMode.direct
-                                  : _inputMode,
-                              cursor: _cursor,
-                              zoom: _frameZoom,
-                              highlightedElement: _tool == BrowserTool.pick
-                                  ? _hoveredElement
-                                  : null,
-                              canDirectTap: widget.state.supports(
-                                'browser.pointer',
-                              ),
-                              canDirectScroll: widget.state.supports(
-                                'browser.scroll',
-                              ),
-                              onCursor: (value, point, action) {
-                                setState(() => _cursor = value);
-                                if (_tool == BrowserTool.pick) {
-                                  _queueElementHover(point);
-                                } else {
-                                  _queueMouseMotion(point, action);
-                                }
-                              },
-                              onMouse: _handleMouseAction,
-                              onDirectTap: (point, action) =>
-                                  action == 'click' || _tool == BrowserTool.pick
-                                  ? _handleFrameTap(point)
-                                  : _sendPoint(point, action),
-                              onDirectScroll: (dy) => _action(
-                                () => widget.state.session.browserScroll(
-                                  _tabRef,
-                                  dy,
+                                      : null,
                                 ),
                               ),
-                              onZoom: (value) =>
-                                  setState(() => _frameZoom = value),
-                              onZoomEnd: _refreshZoomedFrame,
-                            ),
-                            if (!_desktop && widget.overlayBuilder != null)
-                              Positioned.fill(
-                                child: IgnorePointer(
-                                  child: widget.overlayBuilder!(context, _tool),
-                                ),
-                              ),
-                            if (!widget.frameIncludesOverlays &&
-                                tab.aiControlled &&
-                                _tool == BrowserTool.none) ...[
-                              IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: const Color(0xfff4a1a7),
-                                      width: 2,
+                              if (!_desktop && widget.overlayBuilder != null)
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    child: widget.overlayBuilder!(
+                                      context,
+                                      _tool,
                                     ),
-                                    boxShadow: const [
-                                      BoxShadow(
-                                        color: Color(0x73f4a1a7),
-                                        blurRadius: 28,
-                                        spreadRadius: -4,
-                                      ),
-                                    ],
                                   ),
                                 ),
-                              ),
-                              Positioned(
-                                bottom: 14,
-                                left: 0,
-                                right: 0,
-                                child: Center(
-                                  child: Container(
-                                    width: 165,
-                                    height: 32,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
+                              if (!widget.frameIncludesOverlays &&
+                                  tab.aiControlled &&
+                                  _tool == BrowserTool.none) ...[
+                                IgnorePointer(
+                                  child: DecoratedBox(
                                     decoration: BoxDecoration(
-                                      color: const Color(0xd1140a0c),
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Container(
-                                          width: 7,
-                                          height: 7,
-                                          decoration: const BoxDecoration(
-                                            color: Color(0xfff4a1a7),
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Flexible(
-                                          child: Text(
-                                            _typingLabel(tab.controlling),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Color(0xffffd9dc),
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
+                                      border: Border.all(
+                                        color: const Color(0xfff4a1a7),
+                                        width: 2,
+                                      ),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Color(0x73f4a1a7),
+                                          blurRadius: 28,
+                                          spreadRadius: -4,
                                         ),
                                       ],
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
-                            if (_reconnecting)
-                              const Positioned(
-                                top: 8,
-                                left: 12,
-                                right: 12,
-                                child: _ConnectionNotice(),
-                              ),
-                            if (_tool == BrowserTool.sketch)
-                              Positioned.fill(
-                                child: RepaintBoundary(
-                                  key: _sketchKey,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onPanStart: _startStroke,
-                                    onPanUpdate: _updateStroke,
-                                    onPanEnd: (_) => _endStroke(),
-                                    child: widget.frameIncludesOverlays
-                                        ? const SizedBox.expand()
-                                        : CustomPaint(
-                                            painter: _SketchPainter(
-                                              _strokes,
-                                              _activeStroke,
+                                Positioned(
+                                  bottom: 14,
+                                  left: 0,
+                                  right: 0,
+                                  child: Center(
+                                    child: Container(
+                                      width: 165,
+                                      height: 32,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xd1140a0c),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 7,
+                                            height: 7,
+                                            decoration: const BoxDecoration(
+                                              color: Color(0xfff4a1a7),
+                                              shape: BoxShape.circle,
                                             ),
                                           ),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            child: Text(
+                                              _typingLabel(tab.controlling),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Color(0xffffd9dc),
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            if (_tool == BrowserTool.direct)
-                              Positioned(
-                                top: 6,
-                                left: 12,
-                                right: 12,
-                                child: Opacity(
-                                  opacity: widget.frameIncludesOverlays ? 0 : 1,
-                                  child: const _HumanBanner(
-                                    text: '직접 조작 중 · 에이전트는 기다립니다',
+                              ],
+                              if (_error != null && _frame == null)
+                                Positioned.fill(
+                                  child: IrisFadeIn(
+                                    child: _BrowserErrorView(
+                                      message: _error!,
+                                      code: _errorCode,
+                                      onRetry: _retryFrame,
+                                      onEditAddress: _focusAddress,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            if (_tool == BrowserTool.record && _record != null)
-                              Positioned(
-                                top: 6,
-                                left: 12,
-                                right: 12,
-                                child: Opacity(
-                                  opacity: widget.frameIncludesOverlays ? 0 : 1,
-                                  child: _RecordBanner(
-                                    result: _record!,
-                                    paused: _recordPaused,
-                                    onPause: _pauseRecord,
+                              if (_tool == BrowserTool.sketch)
+                                Positioned(
+                                  right: 12,
+                                  bottom: 12,
+                                  child: _SketchScrollButtons(
+                                    onUp: () => _scrollSketch(-1),
+                                    onDown: () => _scrollSketch(1),
+                                    onPress: _pressSketchScroll,
+                                    onRelease: _releaseSketchScroll,
                                   ),
                                 ),
-                              ),
-                            if (_desktop && _tool == BrowserTool.none)
-                              Positioned(
-                                left: 12,
-                                right: 12,
-                                bottom: 12,
-                                child: Opacity(
-                                  opacity: widget.frameIncludesOverlays ? 0 : 1,
-                                  child: const _HumanBanner(
-                                    text: '컴퓨터 창 폭 1280px로 그립니다 · 두 손가락 확대',
+                              if (_frameZoom > 1.01)
+                                Positioned(
+                                  right: _tool == BrowserTool.sketch ? 68 : 12,
+                                  bottom: 12,
+                                  child: IgnorePointer(
+                                    child: _ZoomChip(zoom: _frameZoom),
                                   ),
                                 ),
-                              ),
-                          ],
+                              if (_reconnecting || _error != null)
+                                Positioned(
+                                  top: 12,
+                                  left: 12,
+                                  right: 12,
+                                  child: Column(
+                                    children: [
+                                      if (_reconnecting)
+                                        const _ConnectionNotice(),
+                                      if (_reconnecting && _error != null)
+                                        const SizedBox(height: 8),
+                                      if (_error != null)
+                                        _BrowserNotice(
+                                          title: _frame == null
+                                              ? 'Mac 화면을 기다리는 중'
+                                              : _error!,
+                                          detail: _frame == null
+                                              ? (_reconnecting
+                                                    ? '컴퓨터와 다시 연결하는 중'
+                                                    : '연결은 정상 · 화면만 받지 못했습니다')
+                                              : null,
+                                          onRefresh: _retryFrame,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              if (_tool == BrowserTool.direct)
+                                Positioned(
+                                  top: 6,
+                                  left: 12,
+                                  right: 12,
+                                  child: Opacity(
+                                    opacity: widget.frameIncludesOverlays
+                                        ? 0
+                                        : 1,
+                                    child: const _HumanBanner(
+                                      text: '직접 조작 중 · 에이전트는 기다립니다',
+                                    ),
+                                  ),
+                                ),
+                              if (_tool == BrowserTool.record &&
+                                  _record != null)
+                                Positioned(
+                                  top: 6,
+                                  left: 12,
+                                  right: 12,
+                                  child: Opacity(
+                                    opacity: widget.frameIncludesOverlays
+                                        ? 0
+                                        : 1,
+                                    child: _RecordBanner(
+                                      result: _record!,
+                                      paused: _recordPaused,
+                                      onPause: _pauseRecord,
+                                    ),
+                                  ),
+                                ),
+                              if (_desktop && _tool == BrowserTool.none)
+                                Positioned(
+                                  left: 12,
+                                  right: 12,
+                                  bottom: 12,
+                                  child: Opacity(
+                                    opacity: widget.frameIncludesOverlays
+                                        ? 0
+                                        : 1,
+                                    child: const _HumanBanner(
+                                      text: '컴퓨터 창 폭 1280px로 그립니다 · 두 손가락 확대',
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                      if (_tool == BrowserTool.sketch)
-                        _SketchControls(
-                          controller: _sketchText,
-                          color: _penColor,
-                          eraser: _eraser,
-                          onColor: (color) => setState(() {
-                            _penColor = color;
-                            _eraser = false;
-                          }),
-                          onPen: () => setState(() => _eraser = false),
-                          onEraser: () => setState(() => _eraser = true),
-                          onUndo: _strokes.isEmpty
-                              ? null
-                              : () => setState(() => _strokes.removeLast()),
-                          onSend: _sendSketch,
-                        )
-                      else if (_tool == BrowserTool.direct)
-                        _DirectControls(
-                          controller: _directInput,
-                          human: widget.humanRequest != null,
-                          canType: widget.state.supports('browser.type'),
-                          onType: _typeDirect,
-                          onBack: () => Navigator.of(context).pop(),
-                          onUnable: widget.humanRequest == null
-                              ? null
-                              : () => _answerHuman('unable'),
-                          onDone: widget.humanRequest == null
-                              ? null
-                              : () => _answerHuman('done'),
-                        )
-                      else if (_tool == BrowserTool.record)
-                        Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            8,
-                            0,
-                            8,
-                            irisSheetBottom(context),
-                          ),
-                          child: IrisSheetFrame(
-                            key: const Key('browser-record-sheet'),
-                            child: _RecordControls(
-                              controller: _recordNote,
-                              steps: _record?.steps ?? const [],
-                              location:
-                                  '${_host(tab)}${Uri.tryParse(tab.url)?.path ?? ''}',
-                              destination: agent?.name ?? '세션 없음',
-                              canFinish: widget.state.supports(
-                                'browser.record.finish',
-                              ),
-                              onCancel: () => setState(() {
-                                _invalidateElementHighlight();
-                                _tool = BrowserTool.none;
-                                _record = null;
-                              }),
-                              onFinish: _finishRecord,
-                            ),
-                          ),
-                        )
-                      else ...[
-                        if (_messageResult != null)
-                          _BrowserMessageResult(text: _messageResult!),
-                        if (agent?.can.message == true)
-                          IrisComposer(
-                            controller: _messageText,
-                            drafts: widget.state.composerDraftsFor(_agentRef),
-                            sending: _sendingMessage,
-                            stopping: false,
-                            working: false,
-                            workingLabel: '작업 중',
-                            onSend: _sendMessage,
-                            onRemoveDraft: (ref) => widget.state
-                                .removeComposerDraft(_agentRef, ref),
-                            onTap: _focusMessageComposer,
-                            includeBottomInset: false,
-                            composerKey: const Key('browser-composer'),
-                            inputBoxKey: const Key('browser-composer-box'),
-                            inputKey: const Key('browser-composer-input'),
-                            actionKey: const Key('browser-composer-action'),
-                          ),
-                        if (_pageFocus != null)
-                          _PageInputControls(
-                            focus: _pageFocus!,
-                            onText: _queuePageText,
-                            onKey: _sendPageKey,
-                            onPaste: _pastePageText,
-                            onCopy: _copyPageSelection,
-                            onClose: _closePageInput,
+                        if (_tool == BrowserTool.sketch)
+                          _SketchControls(
+                            controller: _sketchText,
+                            color: _penColor,
+                            eraser: _eraser,
+                            onColor: (color) => setState(() {
+                              _penColor = color;
+                              _eraser = false;
+                            }),
+                            onPen: () => setState(() => _eraser = false),
+                            onEraser: () => setState(() => _eraser = true),
+                            onUndo: _strokes.isEmpty
+                                ? null
+                                : () => setState(() => _strokes.removeLast()),
+                            onSend: _sendSketch,
                           )
-                        else
-                          _BrowserToolbar(
-                            selected: _tool,
-                            moreSelected: _moreSelected,
-                            canBack: widget.state.supports('browser.history'),
-                            canPick:
-                                agent?.can.message == true &&
-                                widget.state.supports('browser.element'),
-                            canRecord:
-                                agent?.can.message == true &&
-                                widget.state.supports('browser.record.start'),
-                            canSketch:
-                                agent?.can.message == true &&
-                                widget.state.supports('browser.sketch.send'),
-                            onBack: () => _history('back'),
-                            onPick: () {
-                              _closePageInput();
-                              _setTool(
-                                _tool == BrowserTool.pick
-                                    ? BrowserTool.none
-                                    : BrowserTool.pick,
-                              );
-                            },
-                            onRecord: _startRecord,
-                            onSketch: () => _setTool(BrowserTool.sketch),
-                            onMore: () => _openMore(tab),
-                          ),
+                        else if (_tool == BrowserTool.direct)
+                          _DirectControls(
+                            controller: _directInput,
+                            human: widget.humanRequest != null,
+                            canType: widget.state.supports('browser.type'),
+                            onType: _typeDirect,
+                            onBack: () => Navigator.of(context).pop(),
+                            onUnable: widget.humanRequest == null
+                                ? null
+                                : () => _answerHuman('unable'),
+                            onDone: widget.humanRequest == null
+                                ? null
+                                : () => _answerHuman('done'),
+                          )
+                        else if (_tool == BrowserTool.record)
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              8,
+                              0,
+                              8,
+                              irisSheetBottom(context),
+                            ),
+                            child: IrisSheetFrame(
+                              key: const Key('browser-record-sheet'),
+                              child: _RecordControls(
+                                controller: _recordNote,
+                                steps: _record?.steps ?? const [],
+                                location:
+                                    '${_host(tab)}${Uri.tryParse(tab.url)?.path ?? ''}',
+                                destination: agent?.name ?? '세션 없음',
+                                canFinish: widget.state.supports(
+                                  'browser.record.finish',
+                                ),
+                                onCancel: () => setState(() {
+                                  _invalidateElementHighlight();
+                                  _tool = BrowserTool.none;
+                                  _record = null;
+                                }),
+                                onFinish: _finishRecord,
+                              ),
+                            ),
+                          )
+                        else ...[
+                          if (_messageResult != null)
+                            _BrowserMessageResult(text: _messageResult!),
+                          if (agent?.can.message == true)
+                            IrisComposer(
+                              controller: _messageText,
+                              drafts: widget.state.composerDraftsFor(_agentRef),
+                              sending: _sendingMessage,
+                              stopping: false,
+                              working: false,
+                              workingLabel: '작업 중',
+                              onSend: _sendMessage,
+                              onRemoveDraft: (ref) => widget.state
+                                  .removeComposerDraft(_agentRef, ref),
+                              onTap: _focusMessageComposer,
+                              includeBottomInset: false,
+                              composerKey: const Key('browser-composer'),
+                              inputBoxKey: const Key('browser-composer-box'),
+                              inputKey: const Key('browser-composer-input'),
+                              actionKey: const Key('browser-composer-action'),
+                            ),
+                          if (_pageFocus != null)
+                            _PageInputControls(
+                              focus: _pageFocus!,
+                              onText: _queuePageText,
+                              onKey: _sendPageKey,
+                              onPaste: _pastePageText,
+                              onCopy: _copyPageSelection,
+                              onClose: _closePageInput,
+                            )
+                          else
+                            _BrowserToolbar(
+                              selected: _tool,
+                              moreSelected: _moreSelected,
+                              canBack: widget.state.supports('browser.history'),
+                              canPick:
+                                  agent?.can.message == true &&
+                                  widget.state.supports('browser.element'),
+                              canRecord:
+                                  agent?.can.message == true &&
+                                  widget.state.supports('browser.record.start'),
+                              canSketch:
+                                  agent?.can.message == true &&
+                                  widget.state.supports('browser.sketch.send'),
+                              onBack: () => _history('back'),
+                              onForward: () => _history('forward'),
+                              onPick: () {
+                                _closePageInput();
+                                _setTool(
+                                  _tool == BrowserTool.pick
+                                      ? BrowserTool.none
+                                      : BrowserTool.pick,
+                                );
+                              },
+                              onRecord: _startRecord,
+                              onSketch: () => _setTool(BrowserTool.sketch),
+                              onMore: () => _openMore(tab),
+                            ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                if (_result != null) Offstage(child: Text(_result!)),
-              ],
+                  if (_result != null) Offstage(child: Text(_result!)),
+                ],
+              ),
             ),
           ),
         );
@@ -744,7 +834,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ? error.message
             : error is ProtocolException
             ? error.message
-            : '컴퓨터과 연결이 끊겼습니다.',
+            : '컴퓨터와 연결이 끊겼습니다.',
       );
     }
   }
@@ -769,6 +859,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     int? dy,
   ]) async {
     if (action != 'move') {
+      AppLog.write('browser', 'mouse $action');
       _postClickTimer?.cancel();
       _postClickTimer = null;
     }
@@ -853,7 +944,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ? error.message
             : error is ProtocolException
             ? error.message
-            : '컴퓨터과 연결이 끊겼습니다.',
+            : '컴퓨터와 연결이 끊겼습니다.',
       );
     }
   }
@@ -899,7 +990,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ? error.message
             : error is ProtocolException
             ? error.message
-            : '컴퓨터과 연결이 끊겼습니다.',
+            : '컴퓨터와 연결이 끊겼습니다.',
       );
     }
   }
@@ -1111,8 +1202,84 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
   }
 
-  Future<void> _history(String action) =>
-      _action(() => widget.state.session.browserHistory(_tabRef, action));
+  Future<void> _history(String action) async {
+    if (_reloading) return;
+    if (action == 'reload') {
+      setState(() {
+        _reloading = true;
+        _error = null;
+      });
+    }
+    try {
+      await widget.state.session.browserHistory(_tabRef, action);
+      if (!mounted) return;
+      if (!widget.state.supports(browserFastFrameCapability)) await _watch();
+      if (action == 'reload' && _reloading) {
+        _frameRecovery?.cancel();
+        _frameRecovery = Timer(const Duration(seconds: 3), () {
+          if (!mounted || !_reloading) return;
+          setState(() {
+            _reloading = false;
+            _error = '새로고침 화면을 받지 못했습니다. 다시 시도하고 있습니다.';
+          });
+          unawaited(_watch());
+        });
+      }
+    } on RemoteFailure catch (error) {
+      if (mounted) {
+        setState(() {
+          _reloading = false;
+          _error = error.message;
+        });
+      }
+    } on ProtocolException catch (error) {
+      if (mounted) {
+        setState(() {
+          _reloading = false;
+          _error = error.message;
+        });
+      }
+    }
+  }
+
+  Future<bool> _sendWheel(_FramePoint point, int dx, int dy) async {
+    _postClickTimer?.cancel();
+    try {
+      if (widget.state.supports(browserWheelCapability)) {
+        await widget.state.session.browserWheel(
+          _tabRef,
+          x: point.x,
+          y: point.y,
+          width: point.width,
+          height: point.height,
+          dx: dx,
+          dy: dy,
+        );
+      } else if (dy != 0 && widget.state.supports('browser.mouse')) {
+        await widget.state.session.browserMouse(
+          _tabRef,
+          x: point.x,
+          y: point.y,
+          width: point.width,
+          height: point.height,
+          action: 'wheel',
+          dy: dy,
+        );
+      } else if (dy != 0 && widget.state.supports('browser.scroll')) {
+        await widget.state.session.browserScroll(_tabRef, dy);
+      }
+      return true;
+    } on Object catch (error) {
+      if (mounted) {
+        setState(
+          () => _result = error is RemoteFailure
+              ? error.message
+              : '스크롤을 전달하지 못했습니다.',
+        );
+      }
+      return false;
+    }
+  }
 
   Future<void> _bookmark(bool value) =>
       _action(() => widget.state.session.setBrowserBookmark(_tabRef, value));
@@ -1197,59 +1364,146 @@ class _BrowserScreenState extends State<BrowserScreen> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : '컴퓨터과 연결이 끊겼습니다.',
+              : '컴퓨터와 연결이 끊겼습니다.',
         );
       }
     }
   }
 
-  void _startStroke(DragStartDetails details) {
-    final point = details.localPosition;
-    if (_eraser) {
-      setState(
-        () => _strokes.removeWhere(
-          (stroke) => stroke.points.any(
-            (candidate) => (candidate - point).distance < 18,
-          ),
+  void _eraseAt(Offset point, Size imageSize) => setState(
+    () => _strokes.removeWhere(
+      (stroke) => stroke.points.any((candidate) {
+        final delta = candidate - point;
+        return Offset(
+              delta.dx * imageSize.width,
+              delta.dy * imageSize.height,
+            ).distance <
+            18;
+      }),
+    ),
+  );
+
+  void _onStroke(_StrokePhase phase, Offset point, Size imageSize) {
+    switch (phase) {
+      case _StrokePhase.start:
+        if (_eraser) {
+          _eraseAt(point, imageSize);
+        } else {
+          setState(() => _activeStroke = _Stroke(_penColor, [point]));
+        }
+      case _StrokePhase.update:
+        if (_eraser) {
+          _eraseAt(point, imageSize);
+        } else if (_activeStroke != null) {
+          setState(() => _activeStroke!.points.add(point));
+        }
+      case _StrokePhase.end:
+        final stroke = _activeStroke;
+        if (stroke == null) return;
+        setState(() {
+          _strokes.add(stroke);
+          _activeStroke = null;
+        });
+      case _StrokePhase.cancel:
+        if (_activeStroke != null) setState(() => _activeStroke = null);
+    }
+  }
+
+  // 스케치 모드의 위·아래 스크롤 버튼. 화면 높이의 5%씩 40ms 간격으로 이어 보내 부드럽게 움직임
+  static const _sketchScrollChunk = 0.05;
+  static const _sketchScrollTick = Duration(milliseconds: 40);
+
+  void _scrollSketchChunk(int direction) {
+    final frame = _frame;
+    if (frame == null) return;
+    unawaited(
+      _sendWheel(
+        _FramePoint(
+          x: frame.width / 2,
+          y: frame.height / 2,
+          width: frame.width,
+          height: frame.height,
         ),
-      );
+        0,
+        direction * (frame.height * _sketchScrollChunk).round(),
+      ),
+    );
+  }
+
+  // 한 번 누르면 화면 높이의 25%. 길게 눌러 연속으로 움직인 뒤 손을 뗄 때는 다시 움직이지 않음
+  void _scrollSketch(int direction) {
+    if (_sketchHeld) {
+      _sketchHeld = false;
       return;
     }
-    setState(() => _activeStroke = _Stroke(_penColor, [point]));
-  }
-
-  void _updateStroke(DragUpdateDetails details) {
-    if (_eraser) {
-      final point = details.localPosition;
-      setState(
-        () => _strokes.removeWhere(
-          (stroke) => stroke.points.any(
-            (candidate) => (candidate - point).distance < 18,
-          ),
-        ),
-      );
-    } else if (_activeStroke != null) {
-      setState(() => _activeStroke!.points.add(details.localPosition));
-    }
-  }
-
-  void _endStroke() {
-    if (_activeStroke == null) return;
-    setState(() {
-      _strokes.add(_activeStroke!);
-      _activeStroke = null;
+    _stopSketchScroll();
+    var sent = 0;
+    _sketchScrollTimer = Timer.periodic(_sketchScrollTick, (timer) {
+      _scrollSketchChunk(direction);
+      if (++sent >= 5) timer.cancel();
     });
+    _scrollSketchChunk(direction);
+  }
+
+  // 누르고 400ms가 지나면 떼기 전까지 계속 움직임
+  void _pressSketchScroll(int direction) {
+    _sketchHeld = false;
+    _sketchHoldTimer?.cancel();
+    _sketchHoldTimer = Timer(const Duration(milliseconds: 400), () {
+      _sketchHeld = true;
+      _holdSketchScroll(direction);
+    });
+  }
+
+  void _releaseSketchScroll() {
+    _sketchHoldTimer?.cancel();
+    _sketchHoldTimer = null;
+    _stopSketchScroll();
+  }
+
+  void _holdSketchScroll(int direction) {
+    _stopSketchScroll();
+    _sketchScrollTimer = Timer.periodic(
+      _sketchScrollTick,
+      (_) => _scrollSketchChunk(direction),
+    );
+  }
+
+  void _stopSketchScroll() {
+    _sketchScrollTimer?.cancel();
+    _sketchScrollTimer = null;
+  }
+
+  // 확대·이동과 관계없이 확대 전 화면 기준 좌표로 그려 서버에 보냄
+  Future<Uint8List?> _renderSketch() async {
+    final frame = _frame;
+    final surface = _frameSurfaceSize();
+    if (frame == null || surface == null) return null;
+    final base = browserFrameBaseRect(
+      surface,
+      Size(frame.width.toDouble(), frame.height.toDouble()),
+    );
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    _SketchPainter(_strokes, null, base, 1).paint(canvas, surface);
+    final image = await recorder.endRecording().toImage(
+      surface.width.round(),
+      surface.height.round(),
+    );
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data?.buffer.asUint8List();
+  }
+
+  Size? _frameSurfaceSize() {
+    final box = _frameKey.currentContext?.findRenderObject();
+    return box is RenderBox && box.hasSize ? box.size : null;
   }
 
   Future<void> _sendSketch() async {
     if (_sketchText.text.trim().isEmpty || _strokes.isEmpty) return;
     try {
-      final boundary =
-          _sketchKey.currentContext!.findRenderObject()!
-              as RenderRepaintBoundary;
-      final image = await boundary.toImage(pixelRatio: 1);
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      final bytes = data!.buffer.asUint8List();
+      final bytes = await _renderSketch();
+      if (bytes == null) return;
       if (bytes.length > 36 * 1024) {
         throw const ProtocolException('스케치가 너무 큽니다. 일부 선을 지우고 다시 보내세요.');
       }
@@ -1277,7 +1531,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
       session: widget.state.session,
       tab: tab,
       desktop: _desktop,
-      inputMode: _inputMode,
       onDesktop: (enabled) async {
         Navigator.of(context, rootNavigator: true).pop();
         await _action(
@@ -1301,17 +1554,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
           },
         );
       },
-      onInputMode: (mode) {
-        Navigator.of(sheetContext).pop();
-        setState(() => _inputMode = mode);
-      },
       onReload: () {
         Navigator.of(sheetContext).pop();
         _history('reload');
-      },
-      onForward: () {
-        Navigator.of(sheetContext).pop();
-        _history('forward');
       },
       onNewTab: () {
         Navigator.of(sheetContext).pop();
@@ -1401,25 +1646,35 @@ class _BrowserScreenState extends State<BrowserScreen> {
 class _AddressBar extends StatefulWidget {
   const _AddressBar({
     required this.controller,
+    required this.focusNode,
     required this.profile,
     required this.desktop,
+    required this.failed,
     required this.canNavigate,
     required this.onNavigate,
-    this.onBookmark,
+    required this.onBack,
+    this.onTerminal,
+    this.onReload,
+    this.reloading = false,
   });
   final TextEditingController controller;
+  final FocusNode focusNode;
   final String profile;
   final bool desktop;
+  final bool failed;
   final bool canNavigate;
   final VoidCallback onNavigate;
-  final VoidCallback? onBookmark;
+  final VoidCallback onBack;
+  final VoidCallback? onTerminal;
+  final VoidCallback? onReload;
+  final bool reloading;
 
   @override
   State<_AddressBar> createState() => _AddressBarState();
 }
 
 class _AddressBarState extends State<_AddressBar> {
-  final FocusNode _focus = FocusNode();
+  FocusNode get _focus => widget.focusNode;
 
   @override
   void initState() {
@@ -1429,112 +1684,228 @@ class _AddressBarState extends State<_AddressBar> {
 
   @override
   void dispose() {
-    _focus
-      ..removeListener(_focusChanged)
-      ..dispose();
+    _focus.removeListener(_focusChanged);
     super.dispose();
   }
 
   void _focusChanged() => setState(() {});
 
+  // 주소 줄 .abar. 높이 56, 주소 상자 46 반경 12
   @override
-  Widget build(BuildContext context) => SizedBox(
-    key: const Key('browser-address-area'),
-    height: 54,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-      child: Container(
-        key: const Key('browser-address'),
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: context.iris.level1,
-          borderRadius: BorderRadius.circular(13),
-        ),
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final label = widget.desktop ? '데스크톱' : widget.profile;
+    return SizedBox(
+      key: const Key('browser-address-area'),
+      height: 56,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Row(
           children: [
-            IrisIcon(
-              widget.desktop ? 'monitor' : 'lock-simple',
-              size: 15,
-              color: context.iris.foreground2,
+            _BarButton(
+              key: const Key('browser-back'),
+              icon: 'caret-left',
+              tooltip: '뒤로',
+              onPressed: widget.onBack,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             Expanded(
-              child: Stack(
-                alignment: Alignment.centerLeft,
-                children: [
-                  TextField(
-                    focusNode: _focus,
-                    controller: widget.controller,
-                    readOnly: !widget.canNavigate,
-                    maxLines: 1,
-                    onSubmitted: (_) {
-                      widget.onNavigate();
-                      _focus.unfocus();
-                    },
-                    onTapOutside: (_) => _focus.unfocus(),
-                    style: TextStyle(
-                      color: _focus.hasFocus
-                          ? context.iris.foreground
-                          : Colors.transparent,
-                      fontSize: 15,
-                    ),
-                    cursorColor: context.iris.foreground,
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      filled: false,
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  if (!_focus.hasFocus)
-                    IgnorePointer(child: _AddressText(widget.controller.text)),
-                ],
-              ),
-            ),
-            if (widget.onBookmark != null)
-              IconButton(
-                onPressed: widget.onBookmark,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(
-                  width: 34,
-                  height: 34,
+              child: Container(
+                key: const Key('browser-address'),
+                height: 46,
+                padding: const EdgeInsets.only(left: 12),
+                decoration: BoxDecoration(
+                  color: colors.level1,
+                  borderRadius: BorderRadius.circular(browserControlRadius),
                 ),
-                icon: const IrisIcon('bookmark-simple', size: 17),
-              ),
-            Container(
-              height: 28,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: context.iris.level2,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  if (!widget.desktop) ...[
-                    IrisIcon('user', size: 13, color: context.iris.foreground2),
-                    const SizedBox(width: 5),
-                  ],
-                  Text(
-                    widget.desktop ? '데스크톱' : widget.profile,
-                    style: TextStyle(
-                      color: widget.desktop
-                          ? context.iris.brand
-                          : context.iris.foreground2,
-                      fontSize: 13,
-                    ),
+                foregroundDecoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(browserControlRadius),
+                  border: Border.all(
+                    color: _focus.hasFocus
+                        ? irisSelectionColor(context)
+                        : colors.line2,
+                    width: _focus.hasFocus ? 1.5 : 1,
                   ),
-                ],
+                ),
+                child: Row(
+                  children: [
+                    IrisIcon(
+                      widget.failed
+                          ? 'warning-circle'
+                          : widget.desktop
+                          ? 'monitor'
+                          : 'lock-simple',
+                      size: 16,
+                      color: widget.failed ? colors.dangerText : colors.muted,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [
+                          TextField(
+                            focusNode: _focus,
+                            controller: widget.controller,
+                            readOnly: !widget.canNavigate,
+                            maxLines: 1,
+                            keyboardType: TextInputType.url,
+                            textInputAction: TextInputAction.go,
+                            onSubmitted: (_) {
+                              widget.onNavigate();
+                              _focus.unfocus();
+                            },
+                            onTapOutside: (_) => _focus.unfocus(),
+                            style: TextStyle(
+                              color: _focus.hasFocus
+                                  ? colors.foreground
+                                  : Colors.transparent,
+                              fontSize: 14,
+                            ),
+                            cursorColor: colors.foreground,
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              filled: false,
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          if (!_focus.hasFocus)
+                            IgnorePointer(
+                              child: _AddressText(widget.controller.text),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (label.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        key: const Key('browser-profile-tag'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(IrisRadius.small),
+                          border: Border.all(color: colors.line2),
+                        ),
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          style: IrisType.mono.copyWith(
+                            fontSize: 11,
+                            height: 1.4,
+                            fontWeight: FontWeight.w500,
+                            color: widget.desktop
+                                ? irisSelectionColor(context)
+                                : colors.muted,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (widget.onReload != null)
+                      IconButton(
+                        key: const Key('browser-reload'),
+                        tooltip: '새로고침',
+                        onPressed: widget.reloading ? null : widget.onReload,
+                        style: IconButton.styleFrom(
+                          fixedSize: const Size(44, 44),
+                          foregroundColor: colors.foreground2,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              browserControlRadius,
+                            ),
+                          ),
+                        ),
+                        icon: widget.reloading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const IrisIcon('arrow-clockwise', size: 20),
+                      )
+                    else
+                      const SizedBox(width: 8),
+                  ],
+                ),
               ),
             ),
+            if (widget.onTerminal != null) ...[
+              const SizedBox(width: 4),
+              _BarButton(
+                key: const Key('browser-terminal'),
+                icon: 'terminal-window',
+                tooltip: '터미널',
+                onPressed: widget.onTerminal!,
+              ),
+            ],
           ],
         ),
       ),
-    ),
-  );
+    );
+  }
+}
+
+// 아이콘 버튼 .ib. 44×44 반경 12
+class _BarButton extends StatelessWidget {
+  const _BarButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.selected = false,
+    this.flip = false,
+    this.width = 44,
+    super.key,
+  });
+
+  final String icon;
+  final bool flip;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final bool selected;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final selection = irisSelectionColor(context);
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        excludeSemantics: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: Container(
+            width: width,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? colors.tint2 : Colors.transparent,
+              borderRadius: BorderRadius.circular(browserControlRadius),
+            ),
+            child: Opacity(
+              opacity: onPressed == null ? 0.35 : 1,
+              child: Transform.flip(
+                flipX: flip,
+                child: IrisIcon(
+                  icon,
+                  size: 22,
+                  color: selected ? selection : colors.foreground2,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _AddressText extends StatelessWidget {
@@ -1545,42 +1916,24 @@ class _AddressText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final uri = Uri.tryParse(value);
-    final host = uri?.host.isNotEmpty == true ? uri!.host : value;
-    final path = uri?.host.isNotEmpty == true
+    final hasHost = uri?.host.isNotEmpty == true;
+    final host = hasHost ? uri!.host : value;
+    final path = hasHost
         ? '${uri!.path}${uri.hasQuery ? '?${uri.query}' : ''}'
         : '';
     return Text.rich(
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       TextSpan(
-        style: TextStyle(fontSize: 15, color: context.iris.foreground2),
+        style: TextStyle(fontSize: 14, color: context.iris.muted),
         children: [
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: SizedBox(
-              width: 66,
-              height: 18,
-              child: FittedBox(
-                fit: BoxFit.fill,
-                alignment: Alignment.centerLeft,
-                child: SizedBox(
-                  width: 70,
-                  height: 18,
-                  child: Text(
-                    host,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: TextStyle(
-                      color: context.iris.foreground,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
+          TextSpan(
+            text: host,
+            style: TextStyle(
+              color: context.iris.foreground,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const WidgetSpan(child: SizedBox(width: 8)),
           TextSpan(text: path),
         ],
       ),
@@ -1633,17 +1986,10 @@ class _FrameViewport {
   final double zoom;
   final Offset pan;
 
-  Rect get baseRect {
-    final scale = (size.width / frameWidth < size.height / frameHeight)
-        ? size.width / frameWidth
-        : size.height / frameHeight;
-    final shown = Size(frameWidth * scale, frameHeight * scale);
-    return Rect.fromCenter(
-      center: size.center(Offset.zero),
-      width: shown.width,
-      height: shown.height,
-    );
-  }
+  Rect get baseRect => browserFrameBaseRect(
+    size,
+    Size(frameWidth.toDouble(), frameHeight.toDouble()),
+  );
 
   Offset clampPan(Offset value, [double? atZoom]) {
     final rect = baseRect;
@@ -1701,6 +2047,7 @@ Offset browserCursorFollowPan({
   required double zoom,
   required Offset pan,
   required Offset cursor,
+  double gain = 0.45,
 }) {
   if (zoom <= 1 || size.isEmpty || frameSize.isEmpty) return pan;
   final viewport = _FrameViewport(
@@ -1725,14 +2072,22 @@ Offset browserCursorFollowPan({
     delta = Offset(delta.dx, size.height - marginY - local.dy);
   }
   if (delta == Offset.zero) return pan;
-  return viewport.clampPan(pan + delta * 0.45);
+  return viewport.clampPan(pan + delta * gain);
 }
+
+enum _StrokePhase { start, update, end, cancel }
+
+// 스케치 선 좌표는 화면이 아니라 이미지 기준 0~1 값이라 확대·이동·화면 크기 변화에도 내용 위에 붙어 있음
+typedef _StrokeCallback = void Function(
+  _StrokePhase phase,
+  Offset normalized,
+  Size imageSize,
+);
 
 class _FrameSurface extends StatefulWidget {
   const _FrameSurface({
     required this.frame,
     required this.referenceImage,
-    required this.error,
     required this.inputMode,
     required this.cursor,
     required this.zoom,
@@ -1742,14 +2097,21 @@ class _FrameSurface extends StatefulWidget {
     required this.onCursor,
     required this.onMouse,
     required this.onDirectTap,
-    required this.onDirectScroll,
+    required this.onScroll,
+    required this.canWheel,
     required this.onZoom,
     required this.onZoomEnd,
+    this.sketching = false,
+    this.onStroke,
+    this.imageOverlay,
     super.key,
   });
+  // 스케치 모드: 한 손가락은 선 긋기, 두 손가락은 확대·화면 이동만 하고 페이지 스크롤은 하지 않음
+  final bool sketching;
+  final _StrokeCallback? onStroke;
+  final Widget Function(Rect imageRect)? imageOverlay;
   final BrowserFrame? frame;
   final ui.Image? referenceImage;
-  final String? error;
   final BrowserInputMode inputMode;
   final Offset cursor;
   final double zoom;
@@ -1760,7 +2122,8 @@ class _FrameSurface extends StatefulWidget {
   final Future<void> Function(_FramePoint point, String action, [int? dy])
   onMouse;
   final void Function(_FramePoint point, String action) onDirectTap;
-  final ValueChanged<int> onDirectScroll;
+  final Future<bool> Function(_FramePoint point, int dx, int dy) onScroll;
+  final bool canWheel;
   final ValueChanged<double> onZoom;
   final VoidCallback onZoomEnd;
 
@@ -1768,11 +2131,16 @@ class _FrameSurface extends StatefulWidget {
   State<_FrameSurface> createState() => _FrameSurfaceState();
 }
 
-class _FrameSurfaceState extends State<_FrameSurface> {
+class _FrameSurfaceState extends State<_FrameSurface>
+    with SingleTickerProviderStateMixin {
   static const _moveThreshold = 6.0;
   static const _cursorSpeed = 1.35;
+  // 두 손가락이 이 시간 안에 움직임 없이 떨어지면 우클릭이다
+  static const _twoFingerTapMs = 320;
+  final Stopwatch _multiClock = Stopwatch();
   final Map<int, Offset> _pointers = {};
   final Set<int> _multiMovedPointers = {};
+  final Map<int, Offset> _multiStartPoints = {};
   late Offset _cursor;
   Offset _pan = Offset.zero;
   Offset _primaryDown = Offset.zero;
@@ -1782,8 +2150,19 @@ class _FrameSurfaceState extends State<_FrameSurface> {
   Offset _multiStartPan = Offset.zero;
   double _multiStartDistance = 1;
   double _multiStartZoom = 1;
-  double _directDragDy = 0;
-  double _wheelDy = 0;
+  bool _strokeActive = false;
+  Offset _pendingWheel = Offset.zero;
+  Offset _velocity = Offset.zero;
+  Duration? _lastMoveTime;
+  double _velocityInterval = .016;
+  late final Ticker _inertia;
+  Duration _lastTick = Duration.zero;
+  Timer? _wheelTimer;
+  // 응답을 기다리는 휠 요청 수, 둘까지 겹쳐 보내 왕복 지연이 스크롤을 막지 않게 한다
+  int _wheelsInFlight = 0;
+  _FramePoint? _wheelPoint;
+  Offset? _pressed;
+  Timer? _pressedTimer;
   bool _primaryMoved = false;
   bool _dragging = false;
   bool _multi = false;
@@ -1797,6 +2176,7 @@ class _FrameSurfaceState extends State<_FrameSurface> {
   void initState() {
     super.initState();
     _cursor = widget.cursor;
+    _inertia = createTicker(_tickInertia);
   }
 
   @override
@@ -1805,11 +2185,26 @@ class _FrameSurfaceState extends State<_FrameSurface> {
     if (widget.cursor != oldWidget.cursor && widget.cursor != _cursor) {
       _cursor = widget.cursor;
     }
+    if (widget.frame != oldWidget.frame) {
+      AppLog.write(
+        'browser',
+        'frame seq=${widget.frame?.seq} kb=${(widget.frame?.jpeg.length ?? 0) ~/ 1000}',
+      );
+    }
+    if (widget.frame?.tab != oldWidget.frame?.tab ||
+        widget.inputMode != oldWidget.inputMode) {
+      _inertia.stop();
+      _wheelTimer?.cancel();
+      _pendingWheel = Offset.zero;
+    }
     if (widget.zoom <= 1 && oldWidget.zoom > 1) _pan = Offset.zero;
   }
 
   @override
   void dispose() {
+    _inertia.dispose();
+    _wheelTimer?.cancel();
+    _pressedTimer?.cancel();
     _longPressTimer?.cancel();
     _singleTapTimer?.cancel();
     super.dispose();
@@ -1833,22 +2228,44 @@ class _FrameSurfaceState extends State<_FrameSurface> {
 
   double _distance(List<Offset> points) => (points[0] - points[1]).distance;
 
+  void _stroke(_StrokePhase phase, Offset local, _FrameViewport viewport) {
+    final rect = viewport.imageRect;
+    widget.onStroke?.call(
+      phase,
+      Offset(
+        ((local.dx - rect.left) / rect.width).clamp(0.0, 1.0),
+        ((local.dy - rect.top) / rect.height).clamp(0.0, 1.0),
+      ),
+      rect.size,
+    );
+  }
+
   void _beginMulti() {
     final points = _twoPointers;
     if (points.length < 2) return;
+    if (_strokeActive) {
+      _strokeActive = false;
+      widget.onStroke?.call(_StrokePhase.cancel, Offset.zero, Size.zero);
+    }
     _longPressTimer?.cancel();
     _singleTapTimer?.cancel();
     _multi = true;
+    _multiClock
+      ..reset()
+      ..start();
     _pinching = false;
     _scrolling = false;
     _multiMovedPointers.clear();
+    _multiStartPoints
+      ..clear()
+      ..addAll({for (final e in _pointers.entries.take(2)) e.key: e.value});
     _primaryMoved = true;
     _multiStartCenter = _center(points);
     _multiLastCenter = _multiStartCenter;
     _multiStartDistance = _distance(points).clamp(1, double.infinity);
     _multiStartZoom = widget.zoom;
     _multiStartPan = _pan;
-    _wheelDy = 0;
+    _velocity = Offset.zero;
   }
 
   void _startLongPress(Size size) {
@@ -1864,14 +2281,26 @@ class _FrameSurfaceState extends State<_FrameSurface> {
   }
 
   void _pointerDown(PointerDownEvent event, Size size) {
+    _inertia.stop();
+    _pressedTimer?.cancel();
+    setState(() => _pressed = event.localPosition);
     _pointers[event.pointer] = event.localPosition;
     if (_pointers.length == 1) {
       _primaryDown = event.localPosition;
       _primaryLast = event.localPosition;
       _primaryMoved = false;
-      _directDragDy = 0;
+      _velocity = Offset.zero;
+      _lastMoveTime = event.timeStamp;
       _suppressUntilAllUp = false;
-      _startLongPress(size);
+      if (widget.sketching) {
+        final viewport = _viewport(size);
+        if (viewport != null) {
+          _strokeActive = true;
+          _stroke(_StrokePhase.start, event.localPosition, viewport);
+        }
+      } else {
+        _startLongPress(size);
+      }
     } else if (_pointers.length == 2) {
       _beginMulti();
     }
@@ -1892,34 +2321,89 @@ class _FrameSurfaceState extends State<_FrameSurface> {
         if (_multiMovedPointers.length < 2) return;
         final distanceChange = (_distance(points) - _multiStartDistance).abs();
         final centerMove = (center - _multiStartCenter).distance;
-        if (distanceChange >= _moveThreshold &&
-            distanceChange > centerMove * 0.75) {
-          _pinching = true;
-        } else if (centerMove >= _moveThreshold) {
-          _scrolling = true;
-          _wheelDy = center.dy - _multiStartCenter.dy;
-          _multiLastCenter = center;
-          return;
-        } else {
-          return;
+        final moves = [
+          for (final e in _pointers.entries.take(2))
+            if (_multiStartPoints[e.key] != null)
+              e.value - _multiStartPoints[e.key]!,
+        ];
+        switch (classifyBrowserGesture(
+          distanceChange: distanceChange,
+          centerMove: centerMove,
+          travel: moves.length == 2
+              ? browserTravelCosine(moves[0], moves[1])
+              : null,
+        )) {
+          case BrowserGesture.pinch:
+            _pinching = true;
+            AppLog.write('browser', 'gesture pinch');
+          case BrowserGesture.scroll:
+            _scrolling = true;
+            AppLog.write('browser', 'gesture scroll');
+          case BrowserGesture.pending:
+            return;
         }
       }
       if (_pinching) {
         final zoom = (_multiStartZoom * ratio).clamp(1.0, 4.0);
         final base = viewport.baseRect;
-        final source =
-            (_multiStartCenter - base.center - _multiStartPan) /
-            _multiStartZoom;
-        final nextPan = center - base.center - source * zoom;
-        setState(() => _pan = viewport.clampPan(nextPan, zoom));
+        if (widget.sketching) {
+          // 스케치는 커서가 없어 두 손가락 가운데를 기준으로 확대하고 이동도 손가락을 따름
+          final source =
+              (_multiStartCenter - base.center - _multiStartPan) /
+              _multiStartZoom;
+          setState(
+            () => _pan = viewport.clampPan(
+              center - base.center - source * zoom,
+              zoom,
+            ),
+          );
+        } else {
+          // 확대 기준은 손가락 중심이 아니라 커서. 커서가 있던 화면 위치에 그대로 두고 화면 이동은 커서 따라가기로만 함
+          final offset = Offset(
+            (_cursor.dx - .5) * base.width,
+            (_cursor.dy - .5) * base.height,
+          );
+          final anchor =
+              base.center + _multiStartPan + offset * _multiStartZoom;
+          final nextPan = viewport.clampPan(
+            anchor - base.center - offset * zoom,
+            zoom,
+          );
+          setState(
+            () => _pan = browserCursorFollowPan(
+              size: size,
+              frameSize: Size(
+                widget.frame!.width.toDouble(),
+                widget.frame!.height.toDouble(),
+              ),
+              zoom: zoom,
+              pan: nextPan,
+              cursor: _cursor,
+              gain: 1,
+            ),
+          );
+        }
         widget.onZoom(zoom);
       } else if (_scrolling) {
-        _wheelDy += center.dy - _multiLastCenter.dy;
+        if (widget.sketching) {
+          setState(
+            () => _pan = viewport.clampPan(_pan + center - _multiLastCenter),
+          );
+        } else {
+          _scrollBy(center - _multiLastCenter, viewport, event.timeStamp);
+        }
       }
       _multiLastCenter = center;
       return;
     }
     if (_suppressUntilAllUp) return;
+    if (widget.sketching) {
+      _primaryLast = event.localPosition;
+      if (_strokeActive) {
+        _stroke(_StrokePhase.update, event.localPosition, viewport);
+      }
+      return;
+    }
     final delta = event.localPosition - _primaryLast;
     _primaryLast = event.localPosition;
     if ((event.localPosition - _primaryDown).distance >= _moveThreshold) {
@@ -1951,40 +2435,61 @@ class _FrameSurfaceState extends State<_FrameSurface> {
         _dragging ? 'drag' : 'move',
       );
     } else if (widget.canDirectScroll) {
-      _directDragDy += delta.dy;
+      var rest = delta;
+      if (widget.zoom > 1) {
+        final next = viewport.clampPan(_pan + delta);
+        rest = delta - (next - _pan);
+        setState(() => _pan = next);
+      }
+      _scrollBy(rest, viewport, event.timeStamp);
     }
   }
 
   void _pointerUp(PointerEvent event, Size size) {
+    _pressedTimer?.cancel();
+    _pressedTimer = Timer(const Duration(milliseconds: 150), () {
+      if (mounted) setState(() => _pressed = null);
+    });
     final wasMulti = _multi;
     _pointers.remove(event.pointer);
     _longPressTimer?.cancel();
     final viewport = _viewport(size);
+    if (widget.sketching && !wasMulti) {
+      if (_strokeActive && viewport != null) {
+        _strokeActive = false;
+        _stroke(
+          event is PointerCancelEvent ? _StrokePhase.cancel : _StrokePhase.end,
+          event.localPosition,
+          viewport,
+        );
+      }
+      if (_pointers.isEmpty) _suppressUntilAllUp = false;
+      return;
+    }
     if (wasMulti) {
       if (_pointers.length < 2) {
+        final twoFingerTap =
+            !_pinching &&
+            !_scrolling &&
+            !widget.sketching &&
+            event is! PointerCancelEvent &&
+            widget.inputMode == BrowserInputMode.trackpad &&
+            _multiClock.elapsedMilliseconds < _twoFingerTapMs;
         _multi = false;
         _suppressUntilAllUp = true;
+        if (twoFingerTap && viewport != null) {
+          unawaited(
+            widget.onMouse(viewport.normalizedPoint(_cursor), 'context'),
+          );
+        }
         if (_pinching) {
           widget.onZoomEnd();
-        } else if (viewport != null && _wheelDy.abs() >= _moveThreshold) {
-          final dy =
-              (-_wheelDy * widget.frame!.height / viewport.baseRect.height)
-                  .round()
-                  .clamp(-20000, 20000);
-          if (dy != 0) {
-            if (widget.inputMode == BrowserInputMode.trackpad) {
-              unawaited(
-                widget.onMouse(viewport.normalizedPoint(_cursor), 'wheel', dy),
-              );
-            } else if (widget.canDirectScroll) {
-              widget.onDirectScroll(dy);
-            }
-          }
+        } else if (_scrolling && event is! PointerCancelEvent) {
+          _startInertia();
         }
         _pinching = false;
         _scrolling = false;
         _multiMovedPointers.clear();
-        _wheelDy = 0;
       }
       if (_pointers.isEmpty) _suppressUntilAllUp = false;
       return;
@@ -1996,15 +2501,13 @@ class _FrameSurfaceState extends State<_FrameSurface> {
     }
     if (_primaryMoved) {
       if (widget.inputMode == BrowserInputMode.direct &&
-          widget.canDirectScroll &&
-          viewport != null &&
-          _directDragDy.abs() >= _moveThreshold) {
-        final dy =
-            (-_directDragDy * widget.frame!.height / viewport.baseRect.height)
-                .round()
-                .clamp(-20000, 20000);
-        if (dy != 0) widget.onDirectScroll(dy);
+          event is! PointerCancelEvent) {
+        _startInertia();
       }
+      return;
+    }
+    if (event is PointerCancelEvent) {
+      _inertia.stop();
       return;
     }
     if (_suppressUntilAllUp || viewport == null) return;
@@ -2034,6 +2537,89 @@ class _FrameSurfaceState extends State<_FrameSurface> {
         widget.onDirectTap(point, 'click');
       }
     });
+  }
+
+  void _scrollBy(
+    Offset delta,
+    _FrameViewport viewport,
+    Duration time, {
+    bool inertial = false,
+  }) {
+    if (!widget.canWheel && !widget.canDirectScroll) return;
+    final seconds = _lastMoveTime == null
+        ? 0.016
+        : (time - _lastMoveTime!).inMicroseconds / 1000000;
+    if (!inertial && seconds > 0 && seconds < 0.2) {
+      _velocityInterval = seconds;
+      _velocity = delta / seconds;
+    } else if (!inertial && seconds == 0) {
+      _velocity += delta / _velocityInterval;
+    }
+    if (_velocity.distance > 3000)
+      _velocity = _velocity / _velocity.distance * 3000;
+    _lastMoveTime = time;
+    _pendingWheel += Offset(
+      -delta.dx * viewport.frameWidth / viewport.imageRect.width,
+      -delta.dy * viewport.frameHeight / viewport.imageRect.height,
+    );
+    if (!widget.canWheel) _pendingWheel = Offset(0, _pendingWheel.dy);
+    _wheelPoint = widget.inputMode == BrowserInputMode.trackpad
+        ? viewport.normalizedPoint(_cursor)
+        : viewport.localToFrame(_primaryLast) ??
+              viewport.normalizedPoint(_cursor);
+    _scheduleWheel();
+  }
+
+  void _scheduleWheel() {
+    if (_wheelTimer != null ||
+        _wheelsInFlight >= 2 ||
+        _pendingWheel.distance < 1) {
+      return;
+    }
+    _wheelTimer = Timer(const Duration(milliseconds: 16), () {
+      _wheelTimer = null;
+      unawaited(_flushWheel());
+    });
+  }
+
+  Future<void> _flushWheel() async {
+    if (!mounted || _wheelPoint == null || _wheelsInFlight >= 2) return;
+    final dx = _pendingWheel.dx.round().clamp(-20000, 20000);
+    final dy = _pendingWheel.dy.round().clamp(-20000, 20000);
+    if (dx == 0 && dy == 0) return;
+    _pendingWheel -= Offset(dx.toDouble(), dy.toDouble());
+    _wheelsInFlight++;
+    final ok = await widget.onScroll(_wheelPoint!, dx, dy);
+    _wheelsInFlight--;
+    AppLog.write('browser', 'wheel dx=$dx dy=$dy ok=$ok');
+    if (!mounted) return;
+    if (!ok) {
+      _inertia.stop();
+      _pendingWheel = Offset.zero;
+    }
+    _scheduleWheel();
+  }
+
+  void _startInertia() {
+    if (_velocity.distance < 80) return;
+    _lastTick = Duration.zero;
+    _inertia.start();
+  }
+
+  void _tickInertia(Duration elapsed) {
+    final seconds = (elapsed - _lastTick).inMicroseconds / 1000000;
+    _lastTick = elapsed;
+    if (seconds <= 0) return;
+    _velocity = browserInertiaVelocity(_velocity, seconds);
+    final size = context.size;
+    final viewport = size == null ? null : _viewport(size);
+    if (viewport == null ||
+        _velocity.distance < 20 ||
+        elapsed.inMilliseconds > 1200) {
+      _inertia.stop();
+      return;
+    }
+    _scrollBy(_velocity * seconds, viewport, elapsed, inertial: true);
   }
 
   @override
@@ -2075,20 +2661,14 @@ class _FrameSurfaceState extends State<_FrameSurface> {
         child: ClipRect(
           child: ColoredBox(
             color: const Color(0xfff7f7f5),
-            child: widget.error != null
-                ? Center(
-                    child: Text(
-                      widget.error!,
-                      style: const TextStyle(color: Color(0xff555555)),
-                    ),
-                  )
-                : widget.frame == null
+            child: widget.frame == null
                 ? const Center(child: CircularProgressIndicator())
                 : Stack(
                     clipBehavior: Clip.hardEdge,
                     children: [
                       if (imageRect != null)
                         Positioned.fromRect(
+                          key: const Key('browser-frame-image'),
                           rect: imageRect,
                           child: widget.referenceImage != null
                               ? RawImage(
@@ -2102,6 +2682,12 @@ class _FrameSurfaceState extends State<_FrameSurface> {
                                   gaplessPlayback: true,
                                   filterQuality: FilterQuality.medium,
                                 ),
+                        ),
+                      if (widget.imageOverlay != null && imageRect != null)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: widget.imageOverlay!(imageRect),
+                          ),
                         ),
                       if (highlightRect != null && highlightLabel != null) ...[
                         Positioned.fromRect(
@@ -2169,13 +2755,33 @@ class _FrameSurfaceState extends State<_FrameSurface> {
                           ),
                         ),
                       ],
+                      if (_pressed != null)
+                        Positioned(
+                          left: _pressed!.dx - 12,
+                          top: _pressed!.dy - 12,
+                          child: IgnorePointer(
+                            child: Container(
+                              key: const Key('browser-touch-feedback'),
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: const Color(0x1f00AFF0),
+                                border: Border.all(
+                                  color: const Color(0x9900AFF0),
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       if (widget.inputMode == BrowserInputMode.trackpad &&
                           cursor != null)
                         Positioned(
                           key: const Key('browser-cursor'),
-                          left: cursor.dx - 1.3,
-                          top: cursor.dy - 1.3,
-                          width: 18,
+                          left: cursor.dx - _CursorPainter.tip.dx,
+                          top: cursor.dy - _CursorPainter.tip.dy,
+                          width: 22,
                           height: 22,
                           child: IgnorePointer(
                             child: Semantics(
@@ -2195,42 +2801,34 @@ class _FrameSurfaceState extends State<_FrameSurface> {
   );
 }
 
+// 커서 모양, 시안 cursor 아이콘(24 격자). 짙은 몸통에 흰 테두리
 class _CursorPainter extends CustomPainter {
   const _CursorPainter();
 
+  // 22 크기에서 화살 끝 위치
+  static const tip = Offset(5 * 22 / 24, 3.5 * 22 / 24);
+
   @override
   void paint(Canvas canvas, Size size) {
-    // 28×34 기준 모양을 받은 크기에 맞춰 축소
-    canvas.scale(size.width / 28, size.height / 34);
+    canvas.scale(size.width / 24, size.height / 24);
     final path = Path()
-      ..moveTo(3, 2)
-      ..lineTo(3, 26)
-      ..lineTo(9, 20)
-      ..lineTo(14, 31)
-      ..lineTo(20, 28)
-      ..lineTo(15, 18)
-      ..lineTo(24, 18)
+      ..moveTo(5, 3.5)
+      ..lineTo(18.5, 10.3)
+      ..lineTo(12.6, 12.2)
+      ..lineTo(10.7, 18.1)
       ..close();
     canvas.drawPath(
       path,
       Paint()
-        ..color = const Color(0xff111820)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 5
-        ..strokeJoin = StrokeJoin.round,
-    );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = Colors.white
+        ..color = const Color(0xff0A1F2C)
         ..style = PaintingStyle.fill,
     );
     canvas.drawPath(
       path,
       Paint()
-        ..color = const Color(0xff111820)
+        ..color = Colors.white
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2
+        ..strokeWidth = 1.6
         ..strokeJoin = StrokeJoin.round,
     );
   }
@@ -2239,26 +2837,267 @@ class _CursorPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+// 화면 위에 뜨는 알림 카드 .wait. 바탕 level1, 테두리 line2, 반경 14
+class _NoticeCard extends StatelessWidget {
+  const _NoticeCard({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: colors.level1,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow,
+            blurRadius: 30,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      foregroundDecoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.line2),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _NoticeSpinner extends StatelessWidget {
+  const _NoticeSpinner();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 18,
+    height: 18,
+    child: CircularProgressIndicator(
+      strokeWidth: 2.2,
+      color: context.iris.working,
+    ),
+  );
+}
+
 class _ConnectionNotice extends StatelessWidget {
   const _ConnectionNotice();
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Container(
-      key: const Key('browser-reconnecting'),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xe6111820),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0x66ffffff)),
-      ),
-      child: const Text(
-        '컴퓨터과 다시 연결하고 있습니다.',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
+  Widget build(BuildContext context) => _NoticeCard(
+    key: const Key('browser-reconnecting'),
+    child: Row(
+      children: [
+        const _NoticeSpinner(),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              '컴퓨터와 다시 연결하는 중',
+              style: TextStyle(
+                color: context.iris.foreground,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ),
         ),
+      ],
+    ),
+  );
+}
+
+// 화면 수신 오류 띠. 제목, 보조 줄, 새로 받기
+class _BrowserNotice extends StatelessWidget {
+  const _BrowserNotice({
+    required this.title,
+    required this.onRefresh,
+    this.detail,
+  });
+
+  final String title;
+  final String? detail;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return _NoticeCard(
+      key: const Key('browser-frame-notice'),
+      child: Row(
+        children: [
+          const _NoticeSpinner(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: colors.foreground,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+                ),
+                if (detail != null)
+                  Text(
+                    detail!,
+                    style: TextStyle(
+                      color: colors.muted,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          IrisButton(
+            key: const Key('browser-frame-refresh'),
+            label: '새로 받기',
+            height: 36,
+            expand: false,
+            tone: IrisButtonTone.ghost,
+            onPressed: onRefresh,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 화면을 못 받았을 때 프레임 자리를 채우는 오류 화면, 시안 .err
+class _BrowserErrorView extends StatelessWidget {
+  const _BrowserErrorView({
+    required this.message,
+    required this.onRetry,
+    required this.onEditAddress,
+    this.code,
+  });
+
+  final String message;
+  final String? code;
+  final VoidCallback onRetry;
+  final VoidCallback onEditAddress;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return ColoredBox(
+      key: const Key('browser-error-view'),
+      color: colors.level1,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: colors.dangerTint,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Center(
+                  child: IrisIcon('globe', size: 28, color: colors.dangerText),
+                ),
+              ),
+              Text(
+                '화면을 불러오지 못했습니다',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: colors.foreground,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: colors.foreground2,
+                  fontSize: 14,
+                  height: 1.6,
+                ),
+              ),
+              if (code != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.terminal,
+                    borderRadius: BorderRadius.circular(IrisRadius.small),
+                    border: Border.all(color: colors.separator),
+                  ),
+                  child: Text(
+                    code!,
+                    style: IrisType.mono.copyWith(
+                      fontSize: 12.5,
+                      color: colors.muted,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  IrisButton(
+                    key: const Key('browser-error-address'),
+                    label: '주소 수정',
+                    icon: 'pencil-simple',
+                    onPressed: onEditAddress,
+                  ),
+                  const SizedBox(width: 8),
+                  IrisButton(
+                    key: const Key('browser-error-retry'),
+                    label: '다시 시도',
+                    icon: 'arrow-clockwise',
+                    tone: IrisButtonTone.primary,
+                    onPressed: onRetry,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// 확대 배율 칩 .chipf.z
+class _ZoomChip extends StatelessWidget {
+  const _ZoomChip({required this.zoom});
+
+  final double zoom;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('browser-zoom-chip'),
+    height: 32,
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: const Color(0xd1081018),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Text(
+      '${(zoom * 100).round()}%',
+      style: IrisType.mono.copyWith(
+        color: const Color(0xffEAF4FA),
+        fontSize: 12.5,
+        fontWeight: FontWeight.w500,
       ),
     ),
   );
@@ -2282,6 +3121,7 @@ class _BrowserMessageResult extends StatelessWidget {
   );
 }
 
+// 하단 도구 .tbar. 높이 56, 아이콘 버튼 52×44, 균등 간격
 class _BrowserToolbar extends StatelessWidget {
   const _BrowserToolbar({
     required this.selected,
@@ -2291,6 +3131,7 @@ class _BrowserToolbar extends StatelessWidget {
     required this.canRecord,
     required this.canSketch,
     required this.onBack,
+    required this.onForward,
     required this.onPick,
     required this.onRecord,
     required this.onSketch,
@@ -2303,6 +3144,7 @@ class _BrowserToolbar extends StatelessWidget {
   final bool canRecord;
   final bool canSketch;
   final VoidCallback onBack;
+  final VoidCallback onForward;
   final VoidCallback onPick;
   final VoidCallback onRecord;
   final VoidCallback onSketch;
@@ -2311,80 +3153,71 @@ class _BrowserToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final actions = <Widget>[
-      if (canBack) _ToolButton(icon: 'arrow-left', label: '뒤로', onTap: onBack),
+      if (canBack) ...[
+        _BarButton(
+          key: const Key('browser-tool-back'),
+          icon: 'arrow-left',
+          tooltip: '뒤로',
+          width: 52,
+          onPressed: onBack,
+        ),
+        _BarButton(
+          key: const Key('browser-tool-forward'),
+          icon: 'arrow-left',
+          flip: true,
+          tooltip: '앞으로',
+          width: 52,
+          onPressed: onForward,
+        ),
+      ],
       if (canPick)
-        _ToolButton(
+        _BarButton(
+          key: const Key('browser-tool-pick'),
           icon: 'cursor-click',
-          label: '요소 선택',
+          tooltip: '요소 선택',
+          width: 52,
           selected: selected == BrowserTool.pick,
-          onTap: onPick,
+          onPressed: onPick,
         ),
       if (canRecord)
-        _ToolButton(icon: 'record', label: '조작 기록', onTap: onRecord),
+        _BarButton(
+          key: const Key('browser-tool-record'),
+          icon: 'record',
+          tooltip: '조작 기록',
+          width: 52,
+          onPressed: onRecord,
+        ),
       if (canSketch)
-        _ToolButton(icon: 'scribble-loop', label: '스케치', onTap: onSketch),
-      _ToolButton(
+        _BarButton(
+          key: const Key('browser-tool-sketch'),
+          icon: 'scribble-loop',
+          tooltip: '스케치',
+          width: 52,
+          onPressed: onSketch,
+        ),
+      _BarButton(
+        key: const Key('browser-tool-more'),
         icon: 'dots-three',
-        label: '더보기',
+        tooltip: '더보기',
+        width: 52,
         selected: moreSelected,
-        onTap: onMore,
+        onPressed: onMore,
       ),
     ];
     return Container(
       key: const Key('browser-toolbar'),
-      height: 60 + irisBottomInset(context),
-      padding: EdgeInsets.fromLTRB(8, 6, 8, irisBottomInset(context)),
+      height: 56 + irisBottomInset(context),
+      padding: EdgeInsets.only(bottom: irisBottomInset(context)),
       decoration: BoxDecoration(
-        color: context.iris.background,
+        color: context.iris.level1,
         border: Border(top: BorderSide(color: context.iris.separator)),
       ),
       child: Row(
-        children: [for (final action in actions) Expanded(child: action)],
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: actions,
       ),
     );
   }
-}
-
-class _ToolButton extends StatelessWidget {
-  const _ToolButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.selected = false,
-  });
-  final String icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) => TextButton(
-    onPressed: onTap,
-    style: ButtonStyle(
-      padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-      foregroundColor: WidgetStatePropertyAll(
-        selected ? context.iris.brand : context.iris.foreground2,
-      ),
-      shape: WidgetStatePropertyAll(
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-    ),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        IrisIcon(icon, size: 21),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            color: selected ? context.iris.brand : context.iris.foreground2,
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    ),
-  );
 }
 
 class _PageInputControls extends StatefulWidget {
@@ -2483,9 +3316,9 @@ class _PageInputControlsState extends State<_PageInputControls>
   Widget build(BuildContext context) => TextFieldTapRegion(
     child: Container(
       key: const Key('browser-page-input-controls'),
-      padding: EdgeInsets.fromLTRB(8, 7, 8, irisSheetBottom(context) + 7),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, irisSheetBottom(context) + 8),
       decoration: BoxDecoration(
-        color: context.iris.level1,
+        color: context.iris.background,
         border: Border(top: BorderSide(color: context.iris.separator)),
       ),
       child: Column(
@@ -2512,7 +3345,7 @@ class _PageInputControlsState extends State<_PageInputControls>
             ),
           ),
           SizedBox(
-            height: 38,
+            height: 36,
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
@@ -2548,6 +3381,7 @@ class _PageInputControlsState extends State<_PageInputControls>
   );
 }
 
+// 입력 키 칩, 시안 .chip. 높이 36 알약
 class _PageKey extends StatelessWidget {
   const _PageKey({required this.label, required this.onTap, super.key});
 
@@ -2558,16 +3392,30 @@ class _PageKey extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(right: 6),
     child: ExcludeFocus(
-      child: TextButton(
-        onPressed: onTap,
-        style: ButtonStyle(
-          padding: const WidgetStatePropertyAll(
-            EdgeInsets.symmetric(horizontal: 12),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: context.iris.level2,
+            borderRadius: BorderRadius.circular(IrisRadius.pill),
           ),
-          backgroundColor: WidgetStatePropertyAll(context.iris.level2),
-          foregroundColor: WidgetStatePropertyAll(context.iris.foreground),
+          foregroundDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(IrisRadius.pill),
+            border: Border.all(color: context.iris.separator),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: context.iris.foreground2,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ),
-        child: Text(label),
       ),
     ),
   );
@@ -2764,7 +3612,7 @@ class _BrowserElementSheetState extends State<BrowserElementSheet> {
               ? error.message
               : error is ProtocolException
               ? error.message
-              : '컴퓨터과 연결이 끊겼습니다.',
+              : '컴퓨터와 연결이 끊겼습니다.',
         );
       }
     } finally {
@@ -2778,12 +3626,9 @@ class BrowserMoreSheet extends StatefulWidget {
     required this.session,
     required this.tab,
     required this.desktop,
-    required this.inputMode,
     required this.onDesktop,
     required this.onDirect,
-    required this.onInputMode,
     required this.onReload,
-    required this.onForward,
     required this.onNewTab,
     required this.onTranslate,
     required this.onBookmark,
@@ -2797,12 +3642,9 @@ class BrowserMoreSheet extends StatefulWidget {
   final ActiveRemoteSession session;
   final BrowserTab tab;
   final bool desktop;
-  final BrowserInputMode inputMode;
   final ValueChanged<bool> onDesktop;
   final VoidCallback onDirect;
-  final ValueChanged<BrowserInputMode> onInputMode;
   final VoidCallback onReload;
-  final VoidCallback onForward;
   final VoidCallback onNewTab;
   final VoidCallback onTranslate;
   final VoidCallback onBookmark;
@@ -2956,21 +3798,6 @@ class _BrowserMoreSheetState extends State<BrowserMoreSheet> {
         _MoreTool(icon: 'translate', label: '번역', onTap: widget.onTranslate),
       if (widget.session.supports('browser.direct'))
         _MoreTool(icon: 'user', label: '직접 조작', onTap: widget.onDirect),
-      if (widget.session.supports('browser.mouse') &&
-          widget.session.supports('browser.pointer'))
-        _MoreTool(
-          icon: widget.inputMode == BrowserInputMode.trackpad
-              ? 'cursor-click'
-              : 'hand-tap',
-          label: widget.inputMode == BrowserInputMode.trackpad
-              ? '직접 누르기'
-              : '터치패드',
-          onTap: () => widget.onInputMode(
-            widget.inputMode == BrowserInputMode.trackpad
-                ? BrowserInputMode.direct
-                : BrowserInputMode.trackpad,
-          ),
-        ),
       if (widget.session.supports('browser.history'))
         _MoreTool(
           icon: 'arrow-clockwise',
@@ -2987,13 +3814,6 @@ class _BrowserMoreSheetState extends State<BrowserMoreSheet> {
           label: '오른쪽 클릭',
           onTap: widget.onContext!,
         ),
-      if (widget.session.supports('browser.history'))
-        _MoreTool(
-          icon: 'arrow-left',
-          label: '앞으로',
-          flip: true,
-          onTap: widget.onForward,
-        ),
     ];
     return SizedBox(
       key: const Key('browser-more-sheet'),
@@ -3002,16 +3822,9 @@ class _BrowserMoreSheetState extends State<BrowserMoreSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const IrisSheetGrabber(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 14, 4, 10),
-            child: Text(
-              '도구',
-              style: TextStyle(
-                color: context.iris.muted,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+          const IrisSheetTitle(
+            '도구',
+            padding: EdgeInsets.fromLTRB(4, 14, 4, 10),
           ),
           GridView.count(
             shrinkWrap: true,
@@ -3026,7 +3839,7 @@ class _BrowserMoreSheetState extends State<BrowserMoreSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 18, 4, 10),
               child: Text(
-                '프로필 · 쿠키와 로그인이 따로 저장됩니다',
+                '프로필 · 쿠키와 로그인을 따로 저장',
                 style: TextStyle(
                   color: context.iris.muted,
                   fontSize: 13,
@@ -3189,58 +4002,60 @@ class _ChromeImportRow extends StatelessWidget {
   );
 }
 
+// 더보기 도구 칸. 선택되면 선택색 테두리 1.5
 class _MoreTool extends StatelessWidget {
   const _MoreTool({
     required this.icon,
     required this.label,
     required this.onTap,
     this.selected = false,
-    this.flip = false,
   });
   final String icon;
   final String label;
   final VoidCallback onTap;
   final bool selected;
-  final bool flip;
   @override
-  Widget build(BuildContext context) => TextButton(
-    onPressed: onTap,
-    style: ButtonStyle(
-      padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-      backgroundColor: WidgetStatePropertyAll(
-        selected
-            ? context.iris.brand.withValues(alpha: 0.12)
-            : context.iris.level2,
-      ),
-      foregroundColor: WidgetStatePropertyAll(
-        selected ? context.iris.brand : context.iris.foreground2,
-      ),
-      shape: WidgetStatePropertyAll(
-        RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: selected
-              ? BorderSide(color: context.iris.brand, width: 1.5)
-              : BorderSide.none,
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final selection = irisSelectionColor(context);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? colors.tint2 : colors.level2,
+          borderRadius: BorderRadius.circular(browserCardRadius),
         ),
-      ),
-    ),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Transform.flip(flipX: flip, child: IrisIcon(icon, size: 22)),
-        const SizedBox(height: 7),
-        Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: selected ? context.iris.brand : context.iris.foreground2,
-            fontSize: 12.5,
-            fontWeight: FontWeight.w400,
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(browserCardRadius),
+          border: Border.all(
+            color: selected ? selection : colors.separator,
+            width: selected ? 1.5 : 1,
           ),
         ),
-      ],
-    ),
-  );
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IrisIcon(
+              icon,
+              size: 22,
+              color: selected ? selection : colors.foreground2,
+            ),
+            const SizedBox(height: 7),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: selected ? colors.foreground : colors.foreground2,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _HumanBanner extends StatelessWidget {
@@ -3677,141 +4492,222 @@ class _SketchControls extends StatelessWidget {
   final VoidCallback? onUndo;
   final VoidCallback onSend;
   @override
-  Widget build(BuildContext context) => SizedBox(
-    key: const Key('browser-sketch-controls'),
-    height: 164,
-    child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Container(
-            key: const Key('browser-pens'),
-            height: 52,
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-            decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xff65737b)
-                  : const Color(0xffeef3f6),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Row(
-              children: [
-                for (final value in const [
-                  Color(0xffff7a72),
-                  Color(0xff5cc8f5),
-                  Color(0xfff9f871),
-                ])
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: InkWell(
-                      onTap: () => onColor(value),
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: !eraser && color == value
-                              ? Border.all(
-                                  color: context.iris.foreground,
-                                  width: 2,
-                                )
-                              : null,
-                        ),
-                        alignment: Alignment.center,
+  Widget build(BuildContext context) => Transform.translate(
+    // 키보드가 올라오면 화면 크기는 그대로 두고 이 영역만 키보드 위로 올림
+    offset: Offset(
+      0,
+      -(MediaQuery.viewInsetsOf(context).bottom - irisBottomInset(context))
+          .clamp(0.0, double.infinity),
+    ),
+    child: SizedBox(
+      key: const Key('browser-sketch-controls'),
+      // 펜 막대 52 + 간격 24 + 입력줄 58, 아래 여백은 기기 제스처 막대만큼 더함
+      height: 134 + irisBottomInset(context),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Container(
+              key: const Key('browser-pens'),
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xff65737b)
+                    : const Color(0xffeef3f6),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Row(
+                children: [
+                  for (final value in const [
+                    Color(0xffff7a72),
+                    Color(0xff5cc8f5),
+                    Color(0xfff9f871),
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: InkWell(
+                        onTap: () => onColor(value),
+                        borderRadius: BorderRadius.circular(20),
                         child: Container(
-                          width: 20,
-                          height: 20,
+                          width: 40,
+                          height: 40,
                           decoration: BoxDecoration(
-                            color: value,
                             shape: BoxShape.circle,
+                            border: !eraser && color == value
+                                ? Border.all(
+                                    color: context.iris.foreground,
+                                    width: 2,
+                                  )
+                                : null,
+                          ),
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: BoxDecoration(
+                              color: value,
+                              shape: BoxShape.circle,
+                            ),
                           ),
                         ),
                       ),
                     ),
+                  Container(
+                    width: 1,
+                    height: 24,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    color: context.iris.separator,
                   ),
-                Container(
-                  width: 1,
-                  height: 24,
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  color: context.iris.separator,
+                  IrisRoundButton(
+                    icon: 'pen-nib',
+                    backgroundColor: !eraser
+                        ? context.iris.level3
+                        : Colors.transparent,
+                    onPressed: onPen,
+                  ),
+                  IrisRoundButton(
+                    icon: 'eraser',
+                    backgroundColor: eraser
+                        ? context.iris.level3
+                        : Colors.transparent,
+                    onPressed: onEraser,
+                  ),
+                  const Spacer(),
+                  IrisRoundButton(
+                    icon: 'arrow-u-up-left',
+                    backgroundColor: Colors.transparent,
+                    onPressed: onUndo,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Container(
+            key: const Key('browser-sketch-composer'),
+            height: 58 + irisBottomInset(context),
+            padding: EdgeInsets.fromLTRB(12, 10, 12, irisBottomInset(context)),
+            color: context.iris.background,
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: TextField(
+                      key: const Key('browser-sketch-input'),
+                      controller: controller,
+                      maxLength: 2000,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        height: 1.2,
+                        letterSpacing: -0.17,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: '그림과 함께 보낼 글',
+                        counterText: '',
+                        isDense: true,
+                        filled: true,
+                        fillColor: context.iris.level1,
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(color: context.iris.separator),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(color: context.iris.separator),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
+                const SizedBox(width: 8),
                 IrisRoundButton(
-                  icon: 'pen-nib',
-                  backgroundColor: !eraser
-                      ? context.iris.level3
-                      : Colors.transparent,
-                  onPressed: onPen,
-                ),
-                IrisRoundButton(
-                  icon: 'eraser',
-                  backgroundColor: eraser
-                      ? context.iris.level3
-                      : Colors.transparent,
-                  onPressed: onEraser,
-                ),
-                const Spacer(),
-                IrisRoundButton(
-                  icon: 'arrow-u-up-left',
-                  backgroundColor: Colors.transparent,
-                  onPressed: onUndo,
+                  icon: 'arrow-up',
+                  size: 48,
+                  backgroundColor: context.iris.brand,
+                  foregroundColor: context.iris.onBrand,
+                  onPressed: onSend,
                 ),
               ],
             ),
           ),
-        ),
-        const SizedBox(height: 24),
-        Container(
-          key: const Key('browser-sketch-composer'),
-          height: 58 + irisBottomInset(context),
-          padding: EdgeInsets.fromLTRB(12, 10, 12, irisBottomInset(context)),
-          color: context.iris.background,
-          child: Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 48,
-                  child: TextField(
-                    key: const Key('browser-sketch-input'),
-                    controller: controller,
-                    maxLength: 2000,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      height: 1.2,
-                      letterSpacing: -0.17,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: '그림과 함께 보낼 글',
-                      counterText: '',
-                      isDense: true,
-                      filled: true,
-                      fillColor: context.iris.level1,
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide(color: context.iris.separator),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide(color: context.iris.separator),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IrisRoundButton(
-                icon: 'arrow-up',
-                size: 48,
-                backgroundColor: context.iris.brand,
-                foregroundColor: context.iris.onBrand,
-                onPressed: onSend,
-              ),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
+}
+
+// 스케치 모드에서 페이지를 스크롤하는 버튼. 손가락 스크롤은 막고 이 버튼만 씀
+class _SketchScrollButtons extends StatelessWidget {
+  const _SketchScrollButtons({
+    required this.onUp,
+    required this.onDown,
+    required this.onPress,
+    required this.onRelease,
+  });
+  final VoidCallback onUp;
+  final VoidCallback onDown;
+  final ValueChanged<int> onPress;
+  final VoidCallback onRelease;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    Widget button(
+      Key key,
+      String icon,
+      String label,
+      int direction,
+      VoidCallback onTap,
+    ) => Listener(
+      onPointerDown: (_) => onPress(direction),
+      onPointerUp: (_) => onRelease(),
+      onPointerCancel: (_) => onRelease(),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: colors.shadowRing),
+          boxShadow: [
+            BoxShadow(
+              color: colors.shadow,
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: IrisRoundButton(
+          key: key,
+          icon: icon,
+          size: 44,
+          tooltip: label,
+          backgroundColor: colors.level1.withValues(alpha: .94),
+          onPressed: onTap,
+        ),
+      ),
+    );
+    return Column(
+      key: const Key('browser-sketch-scroll'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        button(
+          const Key('browser-sketch-scroll-up'),
+          'arrow-up',
+          '위로 스크롤',
+          -1,
+          onUp,
+        ),
+        const SizedBox(height: 8),
+        button(
+          const Key('browser-sketch-scroll-down'),
+          'arrow-down',
+          '아래로 스크롤',
+          1,
+          onDown,
+        ),
+      ],
+    );
+  }
 }
 
 class _Stroke {
@@ -3821,23 +4717,33 @@ class _Stroke {
 }
 
 class _SketchPainter extends CustomPainter {
-  const _SketchPainter(this.strokes, this.active);
+  const _SketchPainter(this.strokes, this.active, this.imageRect, this.zoom);
   final List<_Stroke> strokes;
   final _Stroke? active;
+  // 선 좌표 0~1을 이 사각형 안으로 옮겨 그림. 확대 중에는 선 굵기도 같은 비율
+  final Rect imageRect;
+  final double zoom;
+
+  Offset _local(Offset point) => Offset(
+    imageRect.left + point.dx * imageRect.width,
+    imageRect.top + point.dy * imageRect.height,
+  );
+
   @override
   void paint(Canvas canvas, Size size) {
     for (final stroke in [...strokes, ?active]) {
       if (stroke.points.isEmpty) continue;
       final paint = Paint()
         ..color = stroke.color
-        ..strokeWidth = 4
+        ..strokeWidth = 4 * zoom
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
-      final path = Path()
-        ..moveTo(stroke.points.first.dx, stroke.points.first.dy);
+      final first = _local(stroke.points.first);
+      final path = Path()..moveTo(first.dx, first.dy);
       for (final point in stroke.points.skip(1)) {
-        path.lineTo(point.dx, point.dy);
+        final local = _local(point);
+        path.lineTo(local.dx, local.dy);
       }
       canvas.drawPath(path, paint);
     }

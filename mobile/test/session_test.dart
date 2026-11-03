@@ -134,6 +134,21 @@ void main() {
     expect(session.disconnectReason?.message, contains('접속 PIN'));
   });
 
+  test('기기 삭제 요청은 device.unregister를 보내고 완료 응답을 받는다', () async {
+    final connection = _FakeConnection();
+    final session = ActiveRemoteSession.attach(
+      capabilities: const ['ping'],
+      connection: connection,
+      pingInterval: const Duration(days: 1),
+    );
+    final result = session.unregisterDevice();
+    final sent = await connection.nextSent();
+    final rid = sent['rid']! as String;
+    expect(sent, {'type': 'device.unregister', 'rid': rid});
+    connection.add({'type': 'remote.action.result', 'rid': rid, 'result': 'done'});
+    expect((await result).result, 'done');
+  });
+
   test('앱으로 돌아오면 남아 있는 소켓도 전면 ping으로 바로 확인한다', () async {
     final connection = _FakeConnection();
     final session = ActiveRemoteSession.attach(
@@ -210,6 +225,34 @@ void main() {
     expect(session.disconnectReason?.message, contains('접속 PIN'));
   });
 
+  test('재접속 토큰이 바뀔 때마다 저장하고 연결을 끝내면 지운다', () async {
+    final first = _FakeConnection();
+    final second = _FakeConnection();
+    final saved = <String?>[];
+    final session = ActiveRemoteSession.attach(
+      capabilities: const ['watch'],
+      connection: first,
+      pingInterval: const Duration(days: 1),
+      resumeToken: 'a' * 43,
+      onResumeToken: (token) async => saved.add(token),
+      resume: (_) async => ResumedRemoteConnection(
+        connection: second,
+        capabilities: const Capabilities(macName: 'Mac', requests: ['watch']),
+        resumeToken: 'b' * 43,
+      ),
+    );
+    session.setForeground(false);
+    first.fail(const PinnedClientException('connection-closed'));
+    await Future<void>.delayed(Duration.zero);
+    session.setForeground(true);
+    for (var index = 0; index < 10 && saved.isEmpty; index++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(saved, ['b' * 43]);
+    await session.disconnect();
+    expect(saved, ['b' * 43, null]);
+  });
+
   test('대화 기록은 기본 요청보다 긴 한도를 쓰고 시간 초과 대상을 밝힌다', () async {
     final connection = _FakeConnection();
     final session = ActiveRemoteSession.attach(
@@ -244,7 +287,7 @@ void main() {
       'unavailable': '해당 기능 상태를 확인',
       'browser-controller-unavailable': '브라우저를 연 뒤',
       'browser-tab-unavailable': '해당 스페이스의 브라우저 창을 연 뒤',
-      'browser-frame-unavailable': '해당 탭을 Mac에서 연 뒤',
+      'browser-frame-unavailable': '해당 탭을 컴퓨터에서 연 뒤',
       'browser-command-unavailable': '페이지 로딩 상태를 확인',
     };
     for (final entry in expected.entries) {
@@ -275,7 +318,7 @@ void main() {
     }
   });
 
-  test('요청이 몰려도 1초에 9개까지만 보내 서버 속도 제한으로 끊기지 않는다', () async {
+  test('요청이 몰려도 1초에 36개까지만 보내 서버 속도 제한으로 끊기지 않는다', () async {
     final connection = _CountingConnection();
     final session = ActiveRemoteSession.attach(
       capabilities: const ['transcript.page'],
@@ -284,16 +327,16 @@ void main() {
       pingInterval: const Duration(days: 1),
     );
     final pending = [
-      for (var index = 0; index < 12; index++)
+      for (var index = 0; index < 40; index++)
         session.transcriptPage('a' * 32).catchError((_) => throw 0),
     ];
     for (final item in pending) {
       unawaited(item.then((_) {}, onError: (_) {}));
     }
     await Future<void>.delayed(const Duration(milliseconds: 300));
-    expect(connection.sent.length, 9);
+    expect(connection.sent.length, 36);
     await Future<void>.delayed(const Duration(milliseconds: 1000));
-    expect(connection.sent.length, 12);
+    expect(connection.sent.length, 40);
     await session.disconnect();
   });
 

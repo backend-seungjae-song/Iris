@@ -29,10 +29,13 @@ export function createQuestionHookInstaller(options = {}) {
   const command = windows
     ? `${asNode ? "$env:ELECTRON_RUN_AS_NODE='1'; " : ""}& ${[nodePath, hookPath, socketPath].map(powershellQuote).join(" ")}; exit $LASTEXITCODE`
     : `${asNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${[nodePath, hookPath, socketPath].map(shellQuote).join(" ")}`;
-  const hook = { type: "command", command, timeout: 600, ...(windows ? { shell: "powershell" } : {}) };
+  const hook = { type: "command", command, timeout: 1, ...(windows ? { shell: "powershell" } : {}) };
 
-  function isIrisGroup(group) {
-    return group?.matcher === "AskUserQuestion"
+  // 같은 스크립트를 두 이벤트에 등록한다: PreToolUse 는 질문 본문, PermissionRequest 는 모든 승인 화면의 도구 이름·대상
+  const SLOTS = [{ event: "PreToolUse", matcher: "AskUserQuestion" }, { event: "PermissionRequest", matcher: undefined }];
+
+  function isIrisGroup(group, slot) {
+    return group?.matcher === slot.matcher
       && Array.isArray(group.hooks)
       && group.hooks.some((hook) => hook?.type === "command" && hook.command === command);
   }
@@ -52,8 +55,8 @@ export function createQuestionHookInstaller(options = {}) {
   async function isInstalled() {
     const loaded = await readSettings();
     if (!loaded.ok) return false;
-    return Array.isArray(loaded.value.hooks?.PreToolUse)
-      && loaded.value.hooks.PreToolUse.some(isIrisGroup);
+    return SLOTS.every(slot => Array.isArray(loaded.value.hooks?.[slot.event])
+      && loaded.value.hooks[slot.event].some(group => isIrisGroup(group, slot) && group.hooks.every(item => item.command !== command || item.timeout === hook.timeout)));
   }
 
   async function save(value, raw) {
@@ -81,12 +84,14 @@ export function createQuestionHookInstaller(options = {}) {
     if (!loaded.ok) return loaded;
     const settings = structuredClone(loaded.value);
     settings.hooks ||= {};
-    const groups = Array.isArray(settings.hooks.PreToolUse) ? settings.hooks.PreToolUse : [];
-    if (groups.some(isIrisGroup)) return { ok: true, installed: true, unchanged: true };
-    settings.hooks.PreToolUse = [...groups, {
-      matcher: "AskUserQuestion",
-      hooks: [hook],
-    }];
+    if (await isInstalled()) return { ok: true, installed: true, unchanged: true };
+    for (const slot of SLOTS) {
+      const groups = Array.isArray(settings.hooks[slot.event]) ? settings.hooks[slot.event] : [];
+      if (groups.some(group => isIrisGroup(group, slot))) {
+        settings.hooks[slot.event] = groups.map(group => !isIrisGroup(group, slot) ? group : { ...group,
+          hooks: group.hooks.map(item => item.command === command ? { ...item, timeout: hook.timeout } : item) });
+      } else settings.hooks[slot.event] = [...groups, { ...(slot.matcher ? { matcher: slot.matcher } : {}), hooks: [hook] }];
+    }
     try {
       await save(settings, loaded.raw);
       return { ok: true, installed: true };
@@ -99,16 +104,21 @@ export function createQuestionHookInstaller(options = {}) {
     const loaded = await readSettings();
     if (!loaded.ok) return loaded;
     const settings = structuredClone(loaded.value);
-    const groups = Array.isArray(settings.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
-    if (!groups.some(isIrisGroup)) return { ok: true, installed: false, unchanged: true };
-    // 같은 그룹에 사용자가 넣은 다른 hook 보존
-    const kept = groups.flatMap((group) => {
-      if (!isIrisGroup(group)) return [group];
-      const hooks = group.hooks.filter((hook) => !(hook?.type === "command" && hook.command === command));
-      return hooks.length ? [{ ...group, hooks }] : [];
-    });
-    if (kept.length) settings.hooks.PreToolUse = kept;
-    else delete settings.hooks.PreToolUse;
+    let found = false;
+    for (const slot of SLOTS) {
+      const groups = Array.isArray(settings.hooks?.[slot.event]) ? settings.hooks[slot.event] : [];
+      if (!groups.some(group => isIrisGroup(group, slot))) continue;
+      found = true;
+      // 같은 그룹에 사용자가 넣은 다른 hook 보존
+      const kept = groups.flatMap((group) => {
+        if (!isIrisGroup(group, slot)) return [group];
+        const hooks = group.hooks.filter((item) => !(item?.type === "command" && item.command === command));
+        return hooks.length ? [{ ...group, hooks }] : [];
+      });
+      if (kept.length) settings.hooks[slot.event] = kept;
+      else delete settings.hooks[slot.event];
+    }
+    if (!found) return { ok: true, installed: false, unchanged: true };
     if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
     try {
       await save(settings, loaded.raw);

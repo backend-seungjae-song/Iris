@@ -1,0 +1,120 @@
+/* 북마크 관리 화면: 구역별 목록 + 줄마다 계정 드롭다운 */
+/* 이 이름을 만드는 곳: bookmarks/manager.js · bookmarks/manager-view.js */
+/* 넓은 폭 화면(rail 의 layout full). 머리 줄·버튼·체크칸 크기는 계정 화면(06-accounts.css)과 맞춤 */
+
+/* 이 화면의 폭. 배치 규칙 자체는 03-feature-modes.css 가 갖는다. */
+.bookmarkmgr-panel { width:300px; background:var(--surface); position:relative; }
+
+/* ---- 머리 ---- */
+.bkm-head { height:36px; flex:none; display:flex; align-items:center; gap:10px; padding:0 10px 0 16px;
+  background:var(--chrome); border-bottom:1px solid var(--line); }
+.bkm-head h1 { margin:0; font:600 var(--fs-h)/1 var(--sans); letter-spacing:-.01em; }
+.bkm-sum { color:var(--muted); font-size:var(--fs-s); }
+.bkm-sum b { color:var(--fg-2); font:600 var(--fs-s)/1 var(--mono); }
+.bkm-sp { flex:1; }
+
+/* 거르기: 붙어 있는 세 단추 */
+.bkm-seg { display:inline-flex; height:24px; padding:2px; gap:2px; border-radius:var(--r-s); background:var(--raised); border:1px solid var(--line); }
+.bkm-seg button { padding:0 9px; border:0; border-radius:3px; background:none; color:var(--muted); font:inherit; font-size:var(--fs-s); cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease); }
+.bkm-seg button:hover { color:var(--fg); }
+.bkm-seg button[aria-checked="true"] { background:var(--select); color:var(--select-fg); }
+.bkm-seg button:active { transform:scale(.97); }
+
+.bkm-search { display:flex; align-items:center; gap:6px; height:24px; width:220px; padding:0 6px 0 8px;
+  border:1px solid var(--line-strong); border-radius:var(--r-s); background:var(--raised); color:var(--faint); }
+.bkm-search:focus-within { border-color:var(--focus); }
+.bkm-search svg.i { width:12px; height:12px; flex:none; }
+.bkm-search input { flex:1; min-width:0; height:100%; padding:0; border:0; outline:none; background:none; color:var(--fg); font:inherit; font-size:var(--fs); }
+.bkm-search input::placeholder { color:var(--faint); }
+.bkm-search input::-webkit-search-cancel-button { display:none; }
+.bkm-search input:focus-visible { box-shadow:none; }
+.bkm-search kbd { font:500 var(--fs-xs)/16px var(--mono); padding:0 5px; border-radius:3px; border:1px solid var(--line); color:var(--faint); }
+.bkm-search:focus-within kbd { visibility:hidden; }
+
+/* ---- 본문 ---- */
+.bkm-body { flex:1; min-height:0; overflow-y:auto; }
+.bkm-main { max-width:920px; padding:16px 16px 96px; }
+.bkm-why { margin:0 0 16px; color:var(--muted); font-size:var(--fs-s); max-width:640px; line-height:1.55; }
+.bkm-why b { color:var(--fg-2); font-weight:600; }
+
+.bkm-sec + .bkm-sec { margin-top:20px; }
+/* 구역 이름은 목록을 내려도 위에 남는다 */
+.bkm-shead { position:sticky; top:-16px; z-index:1; display:flex; align-items:baseline; gap:8px; height:30px; padding-top:6px;
+  background:var(--surface); }
+.bkm-shead h2 { margin:0; font:600 var(--fs-s)/1 var(--sans); color:var(--fg-2); }
+.bkm-ssub { font:400 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+.bkm-cnt { font:500 var(--fs-xs)/1 var(--mono); color:var(--faint); }
+
+.bkm-list { border:1px solid var(--line); border-radius:var(--r); overflow:hidden; }
+.bkm-folder { display:flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 40px; border-top:1px solid var(--line);
+  background:var(--chrome); color:var(--muted); font-size:var(--fs-xs); font-weight:600; }
+.bkm-list > .bkm-folder:first-child { border-top:0; }
+.bkm-folder svg.i { width:12px; height:12px; }
+
+.bkm-row { display:grid; grid-template-columns:20px 22px minmax(0, 1fr) 240px 28px; align-items:center; gap:10px;
+  min-height:44px; padding:4px 8px 4px 12px; border-top:1px solid var(--line); }
+.bkm-list > .bkm-row:first-child { border-top:0; }
+.bkm-row.in-folder { padding-left:24px; }
+.bkm-row:hover { background:var(--hover); }
+.bkm-row.on { background:rgb(var(--pal-babyblue-rgb) / .07); }
+/* 방금 바꾼 줄을 잠깐 표시(설정 「링크 열기」의 lk-fresh 와 같은 색·시간) */
+.bkm-row.bkm-fresh { animation:bkm-fresh 900ms cubic-bezier(.23, 1, .32, 1); }
+@keyframes bkm-fresh { from { background:rgb(var(--pal-yellow-pop-rgb) / .14); } to { background:transparent; } }
+
+.bkm-av { width:22px; height:22px; border-radius:6px; display:grid; place-items:center;
+  background:rgb(var(--pal-babyblue-rgb) / .1); color:var(--fg-2); font:600 11px/1 var(--sans); }
+
+.bkm-tx { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.bkm-title { align-self:flex-start; max-width:100%; padding:0; border:0; background:none; color:var(--fg); font:inherit; font-size:var(--fs);
+  text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:text; border-radius:3px; }
+.bkm-title:hover { text-decoration:underline; text-decoration-color:var(--line-strong); text-underline-offset:3px; }
+.bkm-rename { height:22px; padding:0 6px; margin-left:-7px; border:1px solid var(--focus); border-radius:var(--r-s); background:var(--raised);
+  color:var(--fg); font:inherit; font-size:var(--fs); outline:none; min-width:0; }
+.bkm-rename:focus-visible { box-shadow:none; }
+.bkm-url { font:400 var(--fs-xs)/1.3 var(--mono); color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.bkm-acct { min-width:0; }
+.bkm-dd { width:100%; }
+.bkm-dd .cc-dd-trigger { width:100%; }
+
+.bkm-del { width:28px; height:28px; padding:0; display:grid; place-items:center; border:0; border-radius:var(--r-s); background:none;
+  color:var(--faint); cursor:pointer; opacity:0; }
+.bkm-row:hover .bkm-del, .bkm-del:focus-visible { opacity:1; }
+.bkm-del:hover { background:color-mix(in srgb, var(--pal-danger) 14%, transparent); color:var(--pal-danger); }
+.bkm-del:active { transform:scale(.94); }
+.bkm-del svg.i { width:13px; height:13px; }
+
+/* 체크칸. 실제 입력은 키보드·스크린리더용으로 두고 옆의 칸이 상태를 그린다(계정 화면과 같은 모양) */
+.bkm-ck { position:relative; display:grid; place-items:center; width:20px; height:28px; cursor:pointer; }
+.bkm-ck input { position:absolute; width:1px; height:1px; margin:0; opacity:0; pointer-events:none; }
+.bkm-box { width:14px; height:14px; border:1px solid var(--line-strong); border-radius:3px; display:grid; place-items:center; background:var(--raised); }
+.bkm-box svg.i { width:10px; height:10px; stroke-width:2.2; visibility:hidden; }
+.bkm-ck input:checked + .bkm-box { background:var(--accent); border-color:transparent; color:var(--pal-ink); }
+.bkm-ck input:checked + .bkm-box svg.i { visibility:visible; }
+.bkm-ck input:focus-visible + .bkm-box { border-color:var(--focus); }
+/* 고른 것이 없을 때는 칸을 흐리게. 마우스를 올리면 보인다 */
+.bkm-row:not(.on):not(:hover) .bkm-ck input:not(:focus-visible) + .bkm-box { opacity:.45; }
+
+.bkm-empty { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:28px 20px; border:1px dashed var(--line-strong);
+  border-radius:var(--r); color:var(--muted); font-size:var(--fs-s); }
+.bkm-empty b { color:var(--fg-2); font-weight:600; font-size:var(--fs); }
+
+.bkm-btn { height:24px; padding:0 10px; display:inline-flex; align-items:center; gap:6px; flex:none;
+  border:1px solid var(--line-strong); border-radius:var(--r-s); background:none; color:var(--fg-2);
+  font:inherit; font-size:var(--fs-s); white-space:nowrap; cursor:pointer; }
+.bkm-btn:hover { background:var(--hover); color:var(--fg); }
+.bkm-btn:active { transform:scale(.97); }
+.bkm-btn.ghost { border-color:transparent; color:var(--muted); }
+.bkm-btn.ghost:hover { color:var(--fg); }
+
+/* ---- 아래에 뜨는 막대: 되돌리기 · 여러 개 고름. 둘 다 뜨면 위아래로 쌓임. 자주 뜨므로 움직임 없이 바로 ---- */
+.bkm-float { position:absolute; left:50%; bottom:16px; z-index:3; transform:translateX(-50%);
+  display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none; }
+.bkm-bulk, .bkm-undo { pointer-events:auto; display:flex; align-items:center; gap:10px; min-height:40px; padding:6px 8px 6px 14px;
+  border:1px solid var(--line-strong); border-radius:var(--r); background:var(--raised); box-shadow:var(--menu-shadow);
+  font-size:var(--fs-s); color:var(--fg-2); white-space:nowrap; }
+.bkm-bulk[hidden], .bkm-undo[hidden] { display:none; }
+.bkm-bn b, .bkm-undo b { color:var(--fg); font-weight:600; }
+.bkm-bl { color:var(--muted); }
+.bkm-bdd { width:180px; }

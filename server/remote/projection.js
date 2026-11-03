@@ -132,3 +132,7 @@ export function projectAnswerResult(rid, result) {
 export function projectFeature(value) {
   return checked(value, isOperationProjection);
 }
+
+export function projectTerminalQuestions(questions) {
+  return checked({ type: "terminal.questions", questions: questions.map(projectRequest) }, isOperationProjection);
+}

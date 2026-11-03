@@ -146,8 +146,11 @@ function card(item) {
   }
   if (item.expired) card.append(el("small", "iris-notice-expired", "만료됨"));
   const actions = el("div", "iris-notice-actions");
-  if (item.go && !item.expired) addButton(actions, item.went ? "그 탭에 있음" : item.go.label, () => {
-    item.go.run(); item.went = true; item.onGo?.(); render();
+  // run 이 false 면 대상이 없어 옮기지 않은 것. 다른 탭으로 보내지 않고 단추를 사유로 바꿈
+  if (item.go && !item.expired && item.goGone) addButton(actions, "탭이 닫혀 이동할 수 없음", () => {}).disabled = true;
+  else if (item.go && !item.expired) addButton(actions, item.went ? "그 탭에 있음" : item.go.label, () => {
+    if (item.go.run() === false) { item.goGone = true; render(); return; }
+    item.went = true; item.onGo?.(); render();
   });
   if (wait && item.kind !== "waiting" && !item.expired) {
     const choices = item.kind === "approve" ? [item.approveLabel || "승인", item.denyLabel || "취소"]
@@ -165,7 +168,7 @@ function card(item) {
     });
   }
   if (actions.childElementCount) card.append(actions);
-  if (!wait && item.kind !== "progress") {
+  if (!wait && item.kind !== "progress" && item.duration) {
     // 줄어드는 모양은 CSS 애니메이션(남은 시간 동안 한 번에). 인라인 값은 모션을 끈 때의 0.2초 단위 표시
     const life = el("span", "iris-notice-life");
     const left = Math.max(0, item.remaining / item.duration);
@@ -198,7 +201,7 @@ export function pushNotice(input) {
   const id = String(input.id || (key && keyed.get(key)) || `notice-${++sequence}`);
   const old = active.get(id);
   const kind = input.kind || input.level || old?.kind || "info";
-  const duration = DURATION[kind] || 0;
+  const duration = input.sticky || old?.sticky ? 0 : DURATION[kind] || 0;
   const item = { ...old, ...input, id, kind, duration,
     remaining: duration,
     deadline: Object.hasOwn(input, "deadline") ? input.deadline : old?.deadline ?? null };
@@ -212,7 +215,7 @@ export function updateNotice(id, patch) {
   const old = active.get(String(id));
   if (!old) return false;
   const kind = patch.kind || patch.level || old.kind;
-  const duration = DURATION[kind] || 0;
+  const duration = old.sticky ? 0 : DURATION[kind] || 0;
   active.set(String(id), { ...old, ...patch, kind, duration, remaining: kind !== old.kind ? duration : old.remaining });
   render();
   return true;

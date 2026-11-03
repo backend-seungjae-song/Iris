@@ -1,14 +1,14 @@
 // Google 로그인 호스트에서만 wire/navigator UA를 Firefox 140으로 맞춘다.
 // 쿠키나 저장소는 만지지 않는다. webContents 탐색과 auth/device UA에 필요한 최소 CDP override만 소유한다.
 
-const GOOGLE_AUTH_HOSTS = new Set(["accounts.google.com", "accounts.youtube.com"]);
+const { pinWhileAttached } = require("./debugger-pin.cjs");
+const GOOGLE_AUTH_HOSTS = Object.freeze(["accounts.google.com", "accounts.youtube.com"]);
 const states = new WeakMap();
-const statesById = new Map();
 
 function isGoogleAuthUrl(raw) {
   try {
     const url = new URL(String(raw));
-    return url.protocol === "https:" && GOOGLE_AUTH_HOSTS.has(url.hostname.toLowerCase());
+    return url.protocol === "https:" && GOOGLE_AUTH_HOSTS.includes(url.hostname.toLowerCase());
   } catch {
     return false;
   }
@@ -23,68 +23,25 @@ function googleAuthUserAgent() {
   return `Mozilla/5.0 (${platform}; rv:140.0) Gecko/20100101 Firefox/140.0`;
 }
 
-function headerCarriesUserAgent(value, wanted) {
-  return (Array.isArray(value) ? value : [value]).some((item) => String(item || "") === wanted);
-}
-
-// auth 문서가 다른 origin의 스크립트/이미지를 요청할 때도 WebContents UA가 Firefox로 나간다.
-// 그 경우 목적지 host만 보고 Chrome client hints를 복원하면 한 요청 안에서 정체가 갈라진다.
-function setAllUserAgentHeaders(headers, keys, value) {
-  if (keys.length === 0) headers["User-Agent"] = value;
-  else for (const key of keys) headers[key] = Array.isArray(headers[key]) ? [value] : value;
-}
-
-function requestWebContents(context) {
-  return context && (context.webContents || statesById.get(Number(context.webContentsId))?.wc);
-}
-
-function requestHasAuthIdentity(context) {
-  const wc = requestWebContents(context);
-  if (!wc) return false;
-  const state = states.get(wc);
-  const operation = state && latestCdpOperation(state);
+// 탭의 현재 정체. 인증 문서를 떠나는 첫 main-frame 요청의 UA 를 정하는 규칙(google-auth-rules.cjs)이 사용
+function hasAuthIdentity(state) {
+  const operation = latestCdpOperation(state);
   if (operation) return operation.userAgent === googleAuthUserAgent();
-  try { return wc.getUserAgent() === googleAuthUserAgent(); } catch { return false; }
+  try { return state.wc.getUserAgent() === googleAuthUserAgent(); } catch { return false; }
 }
 
-function requestBaseUserAgent(context) {
-  const wc = requestWebContents(context);
-  if (!wc) return null;
-  const state = states.get(wc);
-  if (state?.devicePayload?.userAgent) return state.devicePayload.userAgent;
-  return sessionUserAgent(wc) || null;
+function baseUserAgent(state) {
+  return state.devicePayload?.userAgent || sessionUserAgent(state.wc) || null;
 }
 
-function rewriteGoogleAuthHeaders(headers, rawUrl, context) {
-  if (!headers || typeof headers !== "object") return false;
-  const firefox = googleAuthUserAgent();
-  const userAgentKeys = Object.keys(headers).filter((key) => key.toLowerCase() === "user-agent");
-  const authHost = isGoogleAuthUrl(rawUrl);
-  const carriedFirefox = userAgentKeys.some((key) => headerCarriesUserAgent(headers[key], firefox));
-  const authDocument = carriedFirefox || requestHasAuthIdentity(context);
-  // ordinary 문서 안의 Google iframe/XHR는 그 문서의 native navigator 정체를 쓴다. URL만 보고
-  // Firefox wire UA를 만들면 frame JS와 일치하지 않는다. 실제 Electron context가 있을 때는 mainFrame
-  // 또는 이미 Firefox를 싣는 auth 문서의 요청만 바꾼다.
-  if (context?.resourceType && context.resourceType !== "mainFrame" && !authDocument) return false;
-  if (!authHost && !authDocument) return false;
-  // 인증 호스트로 가는 main-frame 요청은 CDP override 가 아직 확인되지 않았어도 첫 요청부터 Firefox 로
-  // 보낸다. 첫 요청이 Chrome 으로 나가면 Google 이 그 세션을 Chrome 으로 시작해 이후 정체가 갈라진다.
-
-  // did-start-navigation은 첫 main-frame request보다 늦다. auth 문서가 일반 host로 떠나는 첫
-  // request는 wire hook에서 session/device base로 먼저 되돌려야 첫 요청만 Firefox가 되지 않는다.
-  if (!authHost && context?.resourceType === "mainFrame") {
-    const base = requestBaseUserAgent(context);
-    if (base) {
-      setAllUserAgentHeaders(headers, userAgentKeys, base);
-      return true;
-    }
-  }
-
-  setAllUserAgentHeaders(headers, userAgentKeys, firefox);
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase().startsWith("sec-ch-ua")) delete headers[key];
-  }
-  return true;
+const identityListeners = new Set();
+function onIdentityChange(listener) {
+  identityListeners.add(listener);
+  return () => identityListeners.delete(listener);
+}
+function notifyIdentity(state, removed = false) {
+  const identity = removed || state.disposed ? null : { firefox: hasAuthIdentity(state), base: baseUserAgent(state) };
+  for (const listener of identityListeners) { try { listener(state.wc, identity); } catch {} }
 }
 
 function clonePayload(payload) {
@@ -125,6 +82,7 @@ function ensureIdentityDebugger(state) {
   if (canSendOverCdp(wc)) return true;
   try {
     wc.debugger.attach("1.3");
+    pinWhileAttached(wc.debugger);
     const ready = canSendOverCdp(wc);
     if (ready) state.ownsDebugger = true;
     return ready;
@@ -153,6 +111,7 @@ function settleCdpOperation(state, operation, succeeded) {
   if (succeeded && operation.sequence > (state.cdp.confirmed?.sequence ?? -1)) {
     state.cdp.confirmed = operation;
   }
+  notifyIdentity(state);
 }
 
 function sendTrackedOverride(state, send, payload) {
@@ -162,6 +121,7 @@ function sendTrackedOverride(state, send, payload) {
     userAgent: payload.userAgent,
   };
   state.cdp.pending.push(operation);
+  notifyIdentity(state);
   let sent;
   try { sent = send("Emulation.setUserAgentOverride", payload); }
   catch (error) {
@@ -184,6 +144,7 @@ function resetStandingCdpState(state) {
   state.cdp.epoch += 1;
   state.cdp.confirmed = null;
   state.cdp.pending = [];
+  notifyIdentity(state);
 }
 
 function applyNavigationIdentity(state, url) {
@@ -303,7 +264,7 @@ function makeState(wc) {
     try { wc.off("destroyed", onDestroyed); } catch {}
     try { wc.debugger.off("detach", onDebuggerDetach); } catch {}
     if (states.get(wc) === state) states.delete(wc);
-    if (statesById.get(wc.id) === state) statesById.delete(wc.id);
+    notifyIdentity(state, true);
   };
   const onDestroyed = () => cleanup(true);
   state.dispose = () => cleanup(false);
@@ -315,7 +276,6 @@ function makeState(wc) {
   wc.once("destroyed", onDestroyed);
   try { wc.debugger.on("detach", onDebuggerDetach); } catch {}
   states.set(wc, state);
-  statesById.set(wc.id, state);
   return state;
 }
 
@@ -345,21 +305,23 @@ function sendDeviceUserAgentOverride(wc, send, basePayload) {
   if (typeof send !== "function") return Promise.reject(new TypeError("CDP send가 필요합니다."));
   const state = stateFor(wc);
   state.devicePayload = clonePayload(basePayload);
+  notifyIdentity(state);
   const payload = payloadForUrl(state.devicePayload, currentNavigationUrl(state));
   return sendTrackedOverride(state, send, payload);
 }
 
 function clearDeviceUserAgentOverride(wc) {
   const state = states.get(wc);
-  if (state) state.devicePayload = null;
+  if (state) { state.devicePayload = null; notifyIdentity(state); }
 }
 
 module.exports = {
+  GOOGLE_AUTH_HOSTS,
   attachGoogleAuthUserAgent,
   clearDeviceUserAgentOverride,
   googleAuthUserAgent,
   identityOwnsDebugger,
   isGoogleAuthUrl,
-  rewriteGoogleAuthHeaders,
+  onIdentityChange,
   sendDeviceUserAgentOverride,
 };

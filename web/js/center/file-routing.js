@@ -31,6 +31,7 @@ import {
   addTab, ensureTabSpace, getCenterSpace, getTabs, setActiveTab, setCenterSpace,
 } from "./tab-store.js";
 import { boundSpace, bsMutate, getBrowserState } from "../browser/state.js";
+import { matchLinkRule } from "../browser/link-rules.js";
 import { spaceRootFor } from "./file-palette.js";
 
 let $, showToast, acHost, terminalBarePathToken, agentByPane;
@@ -230,7 +231,9 @@ export function openInSpaceBrowser(url) {
       $("#center").classList.add("mobile-show"); $("#sidebar").classList.remove("mobile-open");
     }
   }
-  newBrowserTab(url);
+  // 설정 「링크 열기」의 링크별 계정 규칙. 맞는 규칙이 없으면 스페이스 기본 계정(newBrowserTab)
+  const rule = matchLinkRule(url, getBrowserState().linkProfileRules);
+  newBrowserTab(url, rule ? { profile: rule.profile } : undefined);
 }
 
 export const wantsReveal = (ev) => !!(ev && ev.shiftKey && (ev.metaKey || ev.ctrlKey));

@@ -77,7 +77,30 @@ function checkAllowed(p) {
         typeof marker.owner !== "string" || !marker.owner) throw new Error("unknown QA writer marker");
   }
 }
+// 같은 프로세스가 이미 쓰는 회차는 표시를 다시 만들지 않고 참조 수만 올림. 보고서 장면 하나마다 표시를 만들고 지우며 fsync 를 반복해 보고서 하나에 1분이 걸린 사례
+// 마지막 해제에서만 실제 표시를 지우므로 겹친 사용 중에도 표시가 계속 남음
+const shared = new Map();
 function acquireRun(rid, owner) {
+  const key = artifactDir("qa") + "\0" + runName(rid);
+  let entry = shared.get(key);
+  if (!entry) {
+    const lease = acquireRunOnce(rid, owner);
+    entry = { lease, count: 0 };
+    shared.set(key, entry);
+  }
+  entry.count += 1;
+  let done = false, last = false;
+  return { runId: entry.lease.runId, root: entry.lease.root, release() {
+    // 실제 해제를 맡은 쪽은 실패 뒤 다시 부르면 다시 시도함(원래 해제 계약)
+    if (done) return last ? entry.lease.release() : { released: true };
+    done = true;
+    if (--entry.count > 0) return { released: true, shared: true };
+    last = true;
+    if (shared.get(key) === entry) shared.delete(key);
+    return entry.lease.release();
+  } };
+}
+function acquireRunOnce(rid, owner) {
   return admission((c) => {
     if (String(rid).toLowerCase().startsWith(".expired-")) throw new Error("QA quarantine is read-only");
     const p = runControl(c, rid); checkAllowed(p);

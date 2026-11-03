@@ -59,7 +59,7 @@ export function createRemoteFeatures(options) {
 
   const browserStateNames = ["browser.tabs", "browser.tab.new", "browser.profiles", "browser.profile.set",
     "browser.bookmarks", "browser.bookmark.set", "browser.sketch.send", "browser.draft.remove", "browser.direct"];
-  const browserInteractiveNames = ["browser.frame.watch", "browser.pointer", "browser.mouse", "browser.type", "browser.key",
+  const browserInteractiveNames = ["browser.frame.fast", "browser.wheel", "browser.frame.watch", "browser.pointer", "browser.mouse", "browser.type", "browser.key",
     "browser.scroll", "browser.history", "browser.navigate", "browser.element", "browser.element.hover",
     "browser.element.pick", "browser.element.send", "browser.focus", "browser.dialog",
     "browser.record.start", "browser.record.pause", "browser.record.finish", "browser.desktop", "browser.translate"];

@@ -9,7 +9,9 @@ import { once } from "node:events";
 import guard from "../server/qa-expiry-guard.cjs";
 import { handleQaSessionCmd, recordFrame, runFor, noteRunAccepted, noteRunEvent } from "../server/qa-journal.js";
 import { buildReport } from "../bin/mcp/report.mjs";
-import { runBrowserCmdResilient } from "../server/browser-commands.js";
+import {
+  createHostIdentityAuthority, createMcpHostDispatcher, createMcpHostHandlers,
+} from "../server/mcp-host/index.js";
 
 const helper = new URL("../server/qa-expiry-guard.cjs", import.meta.url).pathname;
 const report = new URL("../bin/mcp/report.mjs", import.meta.url).href;
@@ -35,6 +37,24 @@ function child(f, code) {
 }
 async function message(p) {
   return await Promise.race([once(p, "message").then(([m]) => m), once(p, "exit").then(([rc]) => { throw new Error("fixture child exit " + rc + ": " + p.errors()); })]);
+}
+let hostSequence = 0;
+function journalHost(session, run) {
+  const workerGeneration = `qa-expiry:${++hostSequence}`;
+  const key = `qa-expiry-key-${hostSequence}`;
+  const identityAuthority = createHostIdentityAuthority();
+  identityAuthority.allowSession(session);
+  identityAuthority.bindRun({ session, run, key });
+  const host = createMcpHostDispatcher({ workerGeneration, identityAuthority,
+    handlers: createMcpHostHandlers() });
+  return async (operation, input) => {
+    const n = ++hostSequence;
+    const response = await host.dispatch({ protocol: 1, type: "host.request", requestId: `qa-expiry-${n}`,
+      workerGeneration, commandId: `qa-expiry-command-${n}`, callId: n, operation,
+      identity: { session, run, key }, input });
+    assert.equal(response.ok, true, JSON.stringify(response));
+    return response.output;
+  };
 }
 
 test("durable active writer across processes blocks isolation until release", async (t) => {
@@ -186,6 +206,9 @@ test("fsync and receipt failure preserve original or isolated content and hold a
 test("actual browser command keeps its lease through end handler and final completion", async (t) => {
   const f = fixture(t);
   handleQaSessionCmd("run", { action: "begin", runId: f.rid }, "fixture");
+  const call = journalHost("fixture", f.rid);
+  const accepted = await call("journal.accept",
+    { command: "run", args: { action: "end", runId: f.rid, force: true } });
   const append = fs.appendFileSync;
   let observed = false;
   try {
@@ -193,9 +216,12 @@ test("actual browser command keeps its lease through end handler and final compl
       if (String(data).includes('"kind":"run_end"')) { observed = true; assert.throws(() => guard.expiry(f.args()), /in use/); }
       return append(file, data, ...rest);
     };
-    const result = await runBrowserCmdResilient("run", { action: "end", runId: f.rid, force: true }, "fixture", f.rid);
+    const result = await call("journal.sessionCommand",
+      { command: "run", args: { action: "end", runId: f.rid, force: true } });
     assert.equal(result.ok, true);
+    await call("journal.complete", { runToken: accepted.runToken, result, tries: 1 });
   } finally { fs.appendFileSync = append; }
+  await call("journal.release", { runToken: accepted.runToken });
   assert.equal(observed, true);
   assert.equal(guard.expiry(f.args()).phase, "isolated");
 });
@@ -256,6 +282,9 @@ test("report copy failure fallback guards actual thumbnail writes in the source 
 test("successful journal response survives release contention and bounded retry frees marker", async (t) => {
   const f = fixture(t);
   handleQaSessionCmd("run", { action: "begin", runId: f.rid }, "fixture");
+  const call = journalHost("fixture", f.rid);
+  const accepted = await call("journal.accept",
+    { command: "journal", args: { event: { kind: "observation", source: "server" } } });
   const lock = path.join(f.state, "qa-expiry-control", "admission"), held = path.join(f.state, "held");
   const peer = child(f, `import fs from "node:fs"; process.send("ready"); process.once("message", () => {
     fs.mkdirSync(${JSON.stringify(lock)}); fs.writeFileSync(${JSON.stringify(held)}, "held");
@@ -273,9 +302,12 @@ test("successful journal response survives release contention and bounded retry 
       }
       return result;
     };
-    const result = await runBrowserCmdResilient("journal", { event: { kind: "observation", source: "server" } }, "fixture", f.rid);
+    const result = await call("journal.sessionCommand",
+      { command: "journal", args: { event: { kind: "observation", source: "server" } } });
     assert.equal(result.ok, true);
-    assert.equal(fs.readdirSync(control(f)).filter((n) => n.startsWith("use-")).length, 2);
+    await call("journal.complete", { runToken: accepted.runToken, result, tries: 1 });
+    await call("journal.release", { runToken: accepted.runToken });
+    assert.equal(fs.readdirSync(control(f)).filter((n) => n.startsWith("use-")).length, 1);
   } finally { fs.appendFileSync = append; }
   await exited;
   const deadline = Date.now() + 2000;
@@ -302,4 +334,16 @@ test("unresolved release retains marker and emits failure without replacing succ
   assert.throws(() => guard.expiry(f.args()), /in use/);
   assert.equal(use.release().released, true);
   assert.equal(guard.expiry(f.args()).phase, "isolated");
+});
+
+test("same process reuses one usage marker for overlapping uses and removes it on the last release", (t) => {
+  const f = fixture(t);
+  const markers = () => fs.readdirSync(control(f)).filter((n) => n.startsWith("use-")).length;
+  const outer = guard.acquireRun(f.rid, "fixture-outer"), inner = guard.acquireRun(f.rid, "fixture-inner");
+  assert.equal(markers(), 1);
+  assert.equal(inner.release().shared, true);
+  assert.equal(markers(), 1);
+  assert.throws(() => guard.expiry(f.args()), /in use/);
+  assert.equal(outer.release().released, true);
+  assert.equal(markers(), 0);
 });

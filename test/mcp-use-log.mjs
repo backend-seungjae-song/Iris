@@ -27,6 +27,8 @@ test("호출마다 쓰임새와 결과를 남기고 페이지 글은 남기지 �
     assert.equal(thenRow.ok, true);
     assert.equal(missRow.miss, true);
     assert.deepEqual(missRow.candidates, ["e4", "e5"]);
+    assert.equal(missRow.missKind, "selector");
+    assert.equal(missRow.missVersion, 2, "수정 전 판본 프로세스의 행과 구분");
     assert.equal(missRow.ok, false);
     assert.deepEqual(untilRow.until, ["selector"]);
     assert.equal(untilRow.met, true);

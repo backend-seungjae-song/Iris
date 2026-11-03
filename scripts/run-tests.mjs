@@ -19,9 +19,14 @@ const LIVE_ONLY = {};
 const SLOW = new Set(["state-lock-handover.mjs", "port-busy-wait.mjs", "shutdown-flush-live.mjs"]);  // 서버를 띄웠다 내린다
 const only = process.argv.includes("--fast") ? (f) => !SLOW.has(f) : () => true;
 
+// 설치 앱 서버·worker 의 실행 식별값 · Iris 터미널이나 앱이 띄운 셸에서 돌려도 결과가 같게 뺌 (필요한 검사는 직접 설정)
+const APP_RUNTIME_ENV = ["IRIS_BUNDLE_ID", "IRIS_MAIN_PID", "IRIS_SERVER_ROOT", "IRIS_APP_PATH",
+  "IRIS_MCP_WORKER_DEPLOY_ID", "IRIS_MCP_WORKER_GENERATION", "IRIS_MCP_WORKER_TOKEN", "IRIS_QA_LEGACY_REVISION"];
+const testEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !APP_RUNTIME_ENV.includes(key)));
+
 const run = (label, cmd, args) => {
   const t0 = Date.now();
-  const r = spawnSync(cmd, args, { cwd: ROOT, stdio: "pipe", encoding: "utf8" });
+  const r = spawnSync(cmd, args, { cwd: ROOT, stdio: "pipe", encoding: "utf8", env: testEnv });
   const ms = Date.now() - t0;
   const ok = r.status === 0;
   console.log(`  ${ok ? "ok  " : "FAIL"} ${label.padEnd(34)} ${(ms / 1000).toFixed(1)}s`);

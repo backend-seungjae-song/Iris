@@ -45,13 +45,11 @@ fs.chmodSync(fake, 0o755);
 process.env.IRIS_IDB = fake;
 process.env.IRIS_STATE_DIR = path.join(dir, "state");
 
-test("조작 뒤 잠깐 떴다 사라진 알림만 장부에 싣고 다음 앱 도구 결과에 얹는다", async () => {
+test("조작 뒤 잠깐 떴다 사라진 알림만 다음 앱 도구 결과에 얹는다", async () => {
   const { createAppSurface } = await import("../bin/mcp/app.mjs");
-  const journaled = [];
   const surface = createAppSurface({
     currentSession: async () => "s",
-    journal: async (ev) => { journaled.push(ev); return { shot: ev.shot, call_id: "c1" }; },
-    addReceipt: () => ({ id: "r1" }),
+    journal: async () => { throw new Error("일반 앱 도구는 QA 장부에 기록하지 않는다"); },
     call: async (cmd) => cmd === "app-targets-get" ? { ok: true, data: { devices: [UDID] } }
       : cmd === "app-devices" ? { ok: true, data: { tabs: [{ udid: UDID, name: "iPhone", mine: true }] } }
       : { ok: true, data: {} },
@@ -65,11 +63,9 @@ test("조작 뒤 잠깐 떴다 사라진 알림만 장부에 싣고 다음 앱 �
   }
   // 다음 조작이 감시를 끝낸다. 그 결과에 앞선 감시가 찾은 알림이 함께 온다.
   const next = await tool("app_tap").run({ x: 20, y: 20 });
-  const moments = journaled.filter((e) => e.source === "moment");
-  assert.equal(moments.length, 2, "잇따라 뜬 알림 둘 다 실린다 — 글자 변화와 화면 전환 묶음은 빠진다");
-  assert.match(moments[0].caption, /오늘 출석하기 완료!/);
-  assert.match(moments[1].caption, /포인트 획득 완료!/);
-  assert.ok(moments[0].shot && fs.existsSync(moments[0].shot), "뜬 순간의 장면이 있다");
   assert.equal(next.data.moments.length, 2);
-  assert.equal(next.data.moments[0].journaled, true);
+  assert.match(next.data.moments[0].text, /오늘 출석하기 완료!/);
+  assert.match(next.data.moments[1].text, /포인트 획득 완료!/);
+  assert.ok(next.data.moments[0].shot && fs.existsSync(next.data.moments[0].shot), "뜬 순간의 장면이 있다");
+  assert.equal(next.data.moments[0].journaled, undefined);
 });

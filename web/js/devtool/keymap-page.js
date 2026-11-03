@@ -26,31 +26,59 @@ import {
   bindingFromEvent, findConflicts, formatBinding, resolvedKeymap, sameBinding, shortcutLabel,
 } from "../core/keymap.js";
 import { artifactsClick, artifactsModel, enterArtifacts, initArtifacts } from "./artifacts-page.js";
-import { optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
+import { linkAddState, linkHintMarkup, optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
+import { createDropdown } from "../core/dropdown.js";
+import { parseLinkPattern } from "../browser/link-rules.js";
 import { CAPABILITIES } from "../core/capabilities.js";
 import { callHook } from "../core/hooks.js";
 import { motionOn, setMotion } from "../core/motion.js";
 
 let $ = null, wsSend = null, showToast = null, getSecurityToggles = null, setSecurityToggle = null, clearSiteRecords = null;
 let getRailScreens = null, setRailScreen = null, enableCapability = null, refreshRail = null;
-let getSwitcher = null, pickWindow = null, unpickWindow = null, moveWindow = null;
+let getSwitcher = null, pickWindow = null, unpickWindow = null, moveWindow = null, groupWindow = null;
+const swSelected = new Set();   // 창 전환 순서 목록에서 묶으려고 고른 창의 pickKey
 let refreshWindows = null, reloadWindows = null, openPermissions = null, setGlobalPriority = null;
+let getLinkRules = null, setLinkRules = null;
 let recording = null;   // 지금 새 조합을 기다리는 항목 id
 let query = "";
 let section = SETTINGS_SECTIONS[0].id;   // 왼쪽에서 고른 분류
 let presetView = "full";                 // 편의 기능 목록 보기(전부·최소·개발자). 설정은 안 바꿈
 let seenListRevision = null;
+let links = null;                         // 링크 열기 분류의 조회 결과. 분류에 들어올 때마다 다시 조회
+// 링크별 계정 규칙 입력 상태. 규칙 자체는 브라우저 상태(서버)가 소유
+let lkDraft = "";
+let lkDraftAccount = null;   // null: 아직 안 고름(첫 비기본 계정)
+let lkUndo = null;           // { rule, timer } 방금 지운 규칙
+let lkFresh = null;          // 방금 추가·변경한 규칙 주소(줄 강조)
+let lkSeen = "";             // 마지막으로 그린 규칙·계정 서명
+const lkDropdowns = [];
+
+// 창 전환 단추가 가리키는 창의 host 용 { id } 또는 { key }
+// 단추에 data-ref-* 가 없으면 그 줄의 스위치 기준. 지금 목록에 없는 창이면 null
+function switcherRef(button) {
+  const model = (getSwitcher && getSwitcher()) || {};
+  const windows = Array.isArray(model.windows) ? model.windows : [];
+  const own = button.hasAttribute("data-ref-key") || button.hasAttribute("data-ref-id") ? button : null;
+  const source = own || button.closest(".km-sw-row")?.querySelector("[data-sw-pick], [data-sw-key]");
+  if (!source) return null;
+  const hasKey = own ? own.hasAttribute("data-ref-key") : source.hasAttribute("data-sw-key");
+  const value = own ? (hasKey ? own.dataset.refKey : own.dataset.refId) : (hasKey ? source.dataset.swKey : source.dataset.swPick);
+  const win = windows.find((item) => hasKey ? String(item.pickKey) === value : String(item.id) === value);
+  if (!win) return null;
+  return hasKey ? { key: win.pickKey } : { id: win.id };
+}
 
 export function initKeymapPage(deps) {
   ({
     $, wsSend, showToast, getSecurityToggles, setSecurityToggle, clearSiteRecords, getRailScreens, setRailScreen,
-    getSwitcher, pickWindow, unpickWindow, moveWindow, refreshWindows, reloadWindows, openPermissions, setGlobalPriority,
-    enableCapability, refreshRail,
+    getSwitcher, pickWindow, unpickWindow, moveWindow, groupWindow, refreshWindows, reloadWindows, openPermissions,
+    setGlobalPriority, enableCapability, refreshRail, getLinkRules, setLinkRules,
   } = deps);
   const root = $("#km-panel");
   if (!root) return;
 
   root.addEventListener("input", (e) => {
+    if (e.target.matches("#lk-pattern")) { lkDraft = e.target.value; updateLinkHint(); return; }
     if (!e.target.matches("#km-search")) return;
     // 화면을 다시 그리면 입력칸 값이 query 로 바뀐다. 여기서 trim 하면 친 공백이 바로 지워진다
     query = String(e.target.value || "").toLowerCase();
@@ -80,22 +108,60 @@ export function initKeymapPage(deps) {
       renderKeymapPage();
       if (enteringWindows) void requestFreshWindowList();
       if (next === "artifacts") enterArtifacts();
+      if (next === "links") void refreshLinks();
       return;
     }
+    if (e.target.closest("#lk-refresh")) { void refreshLinks(); return; }
+    if (e.target.closest("#lk-add")) { addLinkRule(); return; }
+    if (e.target.closest("#lk-undo")) { undoLinkRule(); return; }
+    const whole = e.target.closest("[data-lk-whole]");
+    if (whole) { lkDraft = whole.dataset.lkWhole; const inp = root.querySelector("#lk-pattern"); if (inp) { inp.value = lkDraft; inp.focus(); } updateLinkHint(); return; }
+    const del = e.target.closest("[data-lk-del]");
+    if (del) { deleteLinkRule(del.dataset.lkDel); return; }
+    const linkTargetBtn = e.target.closest("[data-link-target]");
+    if (linkTargetBtn) { void chooseLinkTarget(linkTargetBtn.dataset.linkTarget); return; }
+    const linkApp = e.target.closest("[data-link-app]");
+    if (linkApp) { void chooseLinkApp(linkApp.dataset.linkApp); return; }
     const windowMove = e.target.closest("[data-sw-move]");
     if (windowMove) {
       const dir = Number(windowMove.dataset.swMove);
-      const ref = windowMove.closest(".km-sw-row")?.querySelector("[data-sw-pick], [data-sw-key]");
-      const model = (getSwitcher && getSwitcher()) || {};
-      const windows = Array.isArray(model.windows) ? model.windows : [];
-      const hasKey = ref?.hasAttribute("data-sw-key") === true;
-      const value = hasKey ? ref.dataset.swKey : ref?.dataset.swPick;
-      const win = windows.find((item) => hasKey
-        ? String(item.pickKey) === value
-        : String(item.id) === value);
-      if (!win || (dir !== -1 && dir !== 1)) return;
-      const action = moveWindow && moveWindow(hasKey ? { key: win.pickKey } : { id: win.id }, dir);
+      const ref = switcherRef(windowMove);
+      if (!ref || (dir !== -1 && dir !== 1)) return;
+      const unit = windowMove.dataset.swUnit === "stop" ? "stop" : undefined;
+      const action = moveWindow && moveWindow(ref, dir, unit);
       Promise.resolve(action).then(() => renderKeymapPage());
+      return;
+    }
+    const selectBox = e.target.closest("[data-sw-sel]");
+    if (selectBox) {
+      const key = selectBox.dataset.swSel;
+      if (selectBox.checked) swSelected.add(key);
+      else swSelected.delete(key);
+      renderKeymapPage();
+      // 다시 그리면 체크 칸이 새로 만들어져 키보드 포커스가 사라진다
+      root.querySelector(`[data-sw-sel="${CSS.escape(key)}"]`)?.focus();
+      return;
+    }
+    if (e.target.closest("[data-sw-sel-clear]")) {
+      swSelected.clear();
+      renderKeymapPage();
+      return;
+    }
+    const selectionAction = e.target.closest("[data-sw-sel-group], [data-sw-sel-leave]");
+    if (selectionAction) {
+      const op = selectionAction.hasAttribute("data-sw-sel-group") ? "group" : "leave";
+      const keys = [...swSelected];
+      Promise.resolve(groupWindow && groupWindow(op, { keys })).then(() => {
+        swSelected.clear();
+        renderKeymapPage();
+      });
+      return;
+    }
+    const ungroupButton = e.target.closest("[data-sw-ungroup]");
+    if (ungroupButton) {
+      const ref = switcherRef(ungroupButton);
+      if (!ref) return;
+      Promise.resolve(groupWindow && groupWindow("ungroup", ref)).then(() => renderKeymapPage());
       return;
     }
     const windowPick = e.target.closest("[data-sw-pick], [data-sw-key]");
@@ -184,6 +250,165 @@ export function initKeymapPage(deps) {
     wsSend({ type: "keymap-set", id, binding: b });
     renderKeymapPage();
   }, true);
+  // 주소 입력칸: Enter 추가, Esc 비우기
+  root.addEventListener("keydown", (e) => {
+    if (!e.target.matches("#lk-pattern") || e.isComposing) return;
+    if (e.key === "Enter") { e.preventDefault(); addLinkRule(); return; }
+    if (e.key === "Escape" && lkDraft) { e.preventDefault(); e.stopPropagation(); lkDraft = ""; e.target.value = ""; updateLinkHint(); }
+  });
+  // macOS 확인 창에서 고른 뒤 Iris 로 돌아오면 바뀐 기본값을 다시 조회
+  window.addEventListener("focus", () => { if (section === "links") void refreshLinks(); });
+}
+
+// ── 링크별 계정 규칙 ──────────────────────────────────────────────
+function lkServer() {
+  const raw = (getLinkRules && getLinkRules()) || {};
+  return { rules: Array.isArray(raw.rules) ? raw.rules : [], accounts: Array.isArray(raw.accounts) ? raw.accounts : [] };
+}
+// 보낸 규칙은 서버 방송이 올 때까지 이것으로 그림(bsMutate 는 보내기만 함)
+function lkData() {
+  const server = lkServer();
+  return pendingRules ? { ...server, rules: pendingRules.rules } : server;
+}
+function lkAccount(accounts) {
+  if (lkDraftAccount != null && accounts.some((a) => a.id === lkDraftAccount)) return lkDraftAccount;
+  const first = accounts.find((a) => a.id !== "") || accounts[0];
+  return first ? first.id : "";
+}
+function lkModel() {
+  const { rules, accounts } = lkData();
+  return { rules, accounts, draft: lkDraft, draftAccount: lkAccount(accounts), undo: lkUndo && lkUndo.rule, fresh: lkFresh };
+}
+function lkSignature() { const { rules, accounts } = lkData(); return JSON.stringify([rules, accounts.map((a) => [a.id, a.name])]); }
+
+// 입력할 때는 다시 그리지 않고 안내 줄과 추가 버튼만 고침(입력칸 글자·커서 유지)
+function updateLinkHint() {
+  const body = $ && $("#km-body");
+  if (!body) return;
+  const m = lkModel();
+  const hint = body.querySelector("#lk-hint");
+  if (hint) hint.innerHTML = linkHintMarkup(m);
+  const btn = body.querySelector("#lk-add");
+  if (btn) { const st = linkAddState(m); btn.disabled = st.disabled; btn.textContent = st.label; }
+}
+
+function commitLinkRules(rules, fresh) {
+  if (!setLinkRules) return;
+  lkFresh = fresh || null;
+  setLinkRules(rules);
+  renderKeymapPage();   // 서버 방송 전에도 바로 보이게. 방송이 오면 같은 값으로 다시 그림
+}
+
+function addLinkRule() {
+  const p = parseLinkPattern(lkDraft);
+  const { rules, accounts } = lkData();
+  if (!p.ok) { updateLinkHint(); return; }
+  const profile = lkAccount(accounts);
+  const next = rules.filter((r) => r.pattern !== p.pattern).concat([{ pattern: p.pattern, profile }]);
+  lkDraft = "";
+  pendingRules = { rules: next, at: Date.now() };
+  commitLinkRules(next, p.pattern);
+  const inp = $("#km-body") && $("#km-body").querySelector("#lk-pattern");
+  if (inp) inp.focus();   // 이어서 다음 규칙 입력
+}
+
+function deleteLinkRule(pattern) {
+  const { rules } = lkData();
+  const rule = rules.find((r) => r.pattern === pattern);
+  if (!rule) return;
+  if (lkUndo) clearTimeout(lkUndo.timer);
+  // 되돌리기 안내는 8초. 다른 규칙을 바꾸면 그대로 둠(그 규칙만 되돌림)
+  lkUndo = { rule, timer: setTimeout(() => { lkUndo = null; renderKeymapPage(); }, 8000) };
+  const next = rules.filter((r) => r.pattern !== pattern);
+  pendingRules = { rules: next, at: Date.now() };
+  commitLinkRules(next, null);
+}
+
+function undoLinkRule() {
+  if (!lkUndo) return;
+  clearTimeout(lkUndo.timer);
+  const { rule } = lkUndo;
+  lkUndo = null;
+  const { rules } = lkData();
+  const next = rules.filter((r) => r.pattern !== rule.pattern).concat([rule]);
+  pendingRules = { rules: next, at: Date.now() };
+  commitLinkRules(next, rule.pattern);
+}
+
+function changeLinkRuleAccount(pattern, profile) {
+  const { rules } = lkData();
+  const next = rules.map((r) => (r.pattern === pattern ? { pattern, profile } : r));
+  pendingRules = { rules: next, at: Date.now() };
+  commitLinkRules(next, pattern);
+}
+
+// 서버 방송 전의 규칙 { rules, at }. 방송이 같은 값을 주거나 2초가 지나면 버리고 서버 값으로(거절된 경우 포함)
+let pendingRules = null;
+
+function mountLinkDropdowns(body) {
+  while (lkDropdowns.length) { try { lkDropdowns.pop().destroy(); } catch {} }
+  const { rules, accounts } = lkData();
+  const items = accounts.map((a) => ({ value: a.id, label: a.name }));
+  for (const slot of body.querySelectorAll("[data-lk-acct]")) {
+    const pattern = slot.dataset.lkAcct;
+    const rule = pattern ? rules.find((r) => r.pattern === pattern) : null;
+    const dd = createDropdown({
+      items, value: rule ? rule.profile : lkAccount(accounts), className: "lk-dd",
+      ariaLabel: slot.getAttribute("aria-label") || "열 계정",
+      onChange: (value) => {
+        if (!pattern) { lkDraftAccount = value; updateLinkHint(); return; }
+        changeLinkRuleAccount(pattern, value);
+      },
+    });
+    slot.appendChild(dd.el);
+    lkDropdowns.push(dd);
+  }
+}
+
+// 브라우저 상태가 바뀔 때 main 이 부름. 규칙·계정이 실제로 바뀌었을 때만 다시 그림(입력 중 화면 유지)
+export function linkRulesChanged() {
+  if (pendingRules && (JSON.stringify(lkServer().rules) === JSON.stringify(pendingRules.rules) || Date.now() - pendingRules.at > 2000)) pendingRules = null;
+  if (section !== "links") return;
+  const sig = lkSignature();
+  if (sig === lkSeen) return;
+  renderKeymapPage();
+}
+
+async function refreshLinks() {
+  const host = window.acHost && window.acHost.defaultBrowser;
+  if (!host) { links = { ok: false, error: "설치한 Iris 앱에서만 바꿀 수 있습니다." }; renderKeymapPage(); return; }
+  const requested = !!(links && links.requested);
+  if (!links || !links.ok) { links = { loading: true }; renderKeymapPage(); }
+  let next;
+  try { next = await host.status(); } catch (error) { next = { ok: false, error: String(error && error.message || error) }; }
+  if (next && next.ok) next = { ...next, target: await readLinkTarget() };
+  // 요청한 앱이 아직 기본값이 아니면 확인 창 안내 유지
+  links = next && next.ok ? { ...next, requested: requested && next.current !== links.requestedId, requestedId: links.requestedId } : next;
+  renderKeymapPage();
+}
+
+async function readLinkTarget(value) {
+  try { return (await window.acHost.linkTarget(value)) || "shared"; } catch { return "shared"; }
+}
+
+async function chooseLinkTarget(value) {
+  if (!window.acHost || !window.acHost.linkTarget || (value !== "shared" && value !== "session")) return;
+  const saved = await readLinkTarget(value);
+  if (links && links.ok) links = { ...links, target: saved };
+  renderKeymapPage();
+}
+
+async function chooseLinkApp(id) {
+  const host = window.acHost && window.acHost.defaultBrowser;
+  if (!host) return;
+  let r;
+  try { r = await host.choose(id); } catch (error) { r = { ok: false, error: String(error && error.message || error) }; }
+  if (!r || !r.ok) {
+    showToast && showToast("기본 브라우저를 바꾸지 못했습니다", { level: "err", detail: (r && r.error) || "" });
+    return;
+  }
+  if (r.requested && links && links.ok) links = { ...links, requested: true, requestedId: id };
+  await refreshLinks();
 }
 
 // 확인하면 true. 바깥을 누르거나 Esc 를 누르면 취소다.
@@ -220,6 +445,7 @@ export function enterKeymapPage() {
   renderKeymapPage();
   if (section === "windows") void requestFreshWindowList();
   if (section === "artifacts") enterArtifacts();
+  if (section === "links") void refreshLinks();
 }
 
 // 새로 열거: 화면 진입·분류 전환·「다시 읽기」에서만 AX를 다시 조회한다.
@@ -258,6 +484,7 @@ export function renderKeymapPage() {
   if (Array.isArray(featureRows)) items.push(...featureRows);
   // 화면은 settings-view 가 그린다. 앱을 켜지 않는 사본과 검사가 같은 함수를 부를 수 있어야
   // 배치를 두 벌로 적지 않는다.
+  const lkFocus = !!(document.activeElement && document.activeElement.id === "lk-pattern");
   body.innerHTML = settingsMarkup({
     section, query, items, recording,
     changed: all.filter((x) => x.changed).length,
@@ -266,11 +493,27 @@ export function renderKeymapPage() {
     screens: (getRailScreens && getRailScreens()) || [],
     presetView, presetMembers: presetMembers(presetView),
     motion: motionOn(),
-    switcher,
+    switcher: switcherWithSelection(switcher),
     artifacts: artifactsModel(),
+    links,
+    linkRules: section === "links" ? lkModel() : null,
   });
+  if (section === "links") {
+    lkSeen = lkSignature();
+    lkFresh = null;   // 강조는 한 번만
+    mountLinkDropdowns(body);
+    if (lkFocus) { const lk = body.querySelector("#lk-pattern"); if (lk) { lk.focus(); lk.setSelectionRange(lk.value.length, lk.value.length); } }
+  }
   const inp = body.querySelector("#km-search");
   if (inp && query) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+}
+
+// 고른 창 목록에서 빠진 창은 선택에서도 지운다
+function switcherWithSelection(switcher) {
+  if (!switcher) return switcher;
+  const keys = new Set((Array.isArray(switcher.picked) ? switcher.picked : []).map((item) => item && item.pickKey));
+  for (const key of [...swSelected]) if (!keys.has(key)) swSelected.delete(key);
+  return { ...switcher, selected: [...swSelected] };
 }
 
 function esc(s) {

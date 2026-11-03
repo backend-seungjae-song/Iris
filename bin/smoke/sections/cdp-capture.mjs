@@ -369,7 +369,7 @@ export default async function run() {
       if (noLogin !== null) throw new Error("로그인 칸이 없는데 로그인 힌트를 만든다");
 
       const human = await humanHint(async () => ({ result: { value: ["결제 창", "캡차"] } }));
-      if (!human || !human.includes("결제 창 · 캡차") || !human.includes("browser_ask_user")) {
+      if (!human || !human.includes("결제 창 · 캡차") || !human.includes("이 세션 대화에서 사용자에게")) {
         throw new Error("사람 개입 힌트를 숨긴다");
       }
       const noHuman = await humanHint(async () => ({ result: { value: [] } }));

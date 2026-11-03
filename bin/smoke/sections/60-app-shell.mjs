@@ -583,8 +583,10 @@ check("브라우저 API를 위장하는 스크립트를 주입하지 않는다",
   return !/ANTI_DETECTION_SCRIPT|antiDetectionScript/.test(scripts)
     && !/Permissions\.prototype\.query\s*=|Object\.defineProperty\(navigator/.test(hard);
 });
-check("일반 Client Hints는 엔진이 소유하고 Google 예외만 공통 담당 모듈에 맡긴다", () =>
-  /rewriteGoogleAuthHeaders\(details\.requestHeaders, details\.url, details\)/.test(hard)
+// 브라우저 세션에 session.webRequest 리스너가 있으면 Electron 이 확장의 차단 규칙·webRequest 를 통째로 건너뛴다
+check("일반 Client Hints는 엔진이 소유하고 Google 예외는 세션 리스너 없이 내부 확장 규칙에 맡긴다", () =>
+  /googleAuthRules\(\)\.load\(sess\)/.test(hard)
+  && !/webRequest\s*\.\s*on[A-Z]/.test(hard)
   && !/Google Chrome|sec-ch-ua-mobile/.test(hard));
 
 function servedWebAppOk(fetchSource, base = new URL("http://127.0.0.1:4271/")) {
@@ -721,7 +723,7 @@ const arc = read("server/archive.js");
 // 복원 키가 없는 세션을 보관하면 그대로 사라지므로, 그 경계가 이 기능의 안전장치다.
 check("열쇠 없는 세션은 접지 않는다", () => /sessionUuid/.test(archiveHandlers) && /되살릴 수 없습니다/.test(archiveHandlers));
 check("모르는 종류는 접지 않는다", () => /agentArgv\(agentKind\)/.test(arc) && /canResume/.test(archiveHandlers) && /BASE_ARGV\.get/.test(read("server/agent-launch.js")));
-check("claude·codex 재개 명령을 안다", () => /"claude", "--resume"/.test(read("server/agent-launch.js")) && /"codex", "--no-daemon", "resume"/.test(read("server/agent-launch.js")));
+check("claude·codex 재개 명령을 안다", () => /"claude", "--resume"/.test(read("server/agent-launch.js")) && /"codex", "resume"/.test(read("server/agent-launch.js")));
 check("보관은 로컬만(AC5)", () => {
   const handler = fnBody(archiveHandlers, "handleArchive");
   return /!ws\._local/.test(handler);
@@ -870,8 +872,8 @@ check("세션 없는 탭도 저장·복구한다", () => /tabs: Array\.isArray\(
 // herdr는 실경로(/private/tmp/…)를, 사용자·저장값은 심링크 경로(/tmp/…)를 준다. 같은 폴더를 놓치면
 // 살아 있는 스페이스를 못 알아보고 중복으로 만든다.
 check("폴더 비교는 심링크를 푼다", () => /fs\.realpathSync\(path\.resolve\(p\)\)/.test(archiveHandlers));
-check("폴더가 다르면 옮긴 뒤 잇는다", () => /cd \$\{shq\(e\.cwd\)\}/.test(archiveHandlers));
-check("셸에 넘기는 값은 인용한다", () => /function shq\(/.test(archiveHandlers) && /argv\.map\(shq\)/.test(archiveHandlers));
+check("폴더가 다르면 옮긴 뒤 잇는다", () => /shellCommand\(\["cd", "--", e\.cwd\]\)/.test(archiveHandlers));
+check("셸에 넘기는 값은 인용한다", () => /\+ shellCommand\(argv\)/.test(archiveHandlers));
 check("보관함 페이지가 있다", () => /data-rail="archive"/.test(web) && /id="ar-body"/.test(screenMarkup));
 
 // 스타일을 여러 파일로 가를 때 규칙 하나가 파일 경계를 넘으면, 이어붙인 결과는 원본과 똑같은데

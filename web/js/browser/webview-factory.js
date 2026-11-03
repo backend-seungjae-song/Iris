@@ -26,8 +26,9 @@ import { callHook } from "../core/hooks.js";
 import { pushHistory, syncBookmarkStar } from "./bookmarks.js";
 import { findRetarget } from "./find-in-page.js";
 import {
-  closeProfileMenu, partitionFor, profileIdForStored, profileOfTab, updateProfileBtn,
+  closeProfileMenu, partitionFor, profileIdForStored, profileOfTab, switchTabAccount, updateProfileBtn,
 } from "./profiles.js";
+import { linkRuleForPageTab } from "./link-rules.js";
 import { boundSpace, bsMutate, getBrowserState } from "./state.js";
 import { renderBmTabs, syncAiGlow } from "./tabs.js";
 import {
@@ -36,7 +37,7 @@ import {
 } from "./webview-store.js";
 import {
   activeBrowserId, activeWv, markWebviewUsed, normalizeUrl, renderTabDialog,
-  scheduleWebviewThrottling, setTabStatus, syncNavButtons, wakeWebview,
+  scheduleWebviewThrottling, setTabStatus, syncNavButtons, syncQaWebviewPlacement, wakeWebview,
 } from "./webview.js";
 import { takeReopenedBrowserHistory } from "../center/closed-tabs.js";
 import { consoleSpace, openDroppedLocal } from "../center/file-routing.js";
@@ -53,6 +54,7 @@ export function initWebviewFactory(deps) {
   ({
     wsSend, BROWSER_MODE, BOUND_SPACE, bNote, urlInput, wvStack, isNewTab, showToast, blog, acHost,
   } = deps);
+  try { if (acHost && typeof acHost.onLinkAccount === "function") acHost.onLinkAccount(reopenInRuleAccount); } catch {}
 }
 
 function showNavigationFeedback(rec) {
@@ -81,10 +83,19 @@ export function autofillBlocked(tabId) {
   return document.body.classList.contains("ai-busy");
 }
 
-export function createWebview(tabId, profileOverride, initialUrl) {
+// 입력칸에 글이 남은 프레임 모음. 프레임마다 따로 알려 와서 하나라도 남으면 그 탭은 입력 중
+function noteDraftFrame(rec, tabId, frameId, dirty) {
+  const key = Array.isArray(frameId) ? frameId.join(":") : String(frameId);
+  if (!rec.draftFrames) rec.draftFrames = new Set();
+  if (dirty) rec.draftFrames.add(key); else rec.draftFrames.delete(key);
+  setTabStatus(tabId, { formDirty: rec.draftFrames.size > 0 });
+}
+
+// sleptHistory: 재운 탭의 방문 기록. 닫은 탭 복원 기록과 같은 형식
+export function createWebview(tabId, profileOverride, initialUrl, sleptHistory = null) {
   if (getWebview(tabId)) return getWebview(tabId);
   removeDiscardedWebview(tabId);
-  const reopenedHistory = takeReopenedBrowserHistory(tabId);
+  const reopenedHistory = sleptHistory || takeReopenedBrowserHistory(tabId);
   const el = document.createElement("webview");
   // 탭별 구글 프로필 = 탭별 세션 파티션. "기본"은 기존 persist:acbrowser(하위호환·공유), 그 외는
   // persist:acprof:<stable-id> 독립 세션이다. 빈 기본 id도 명시 override일 수 있어 undefined만 구분한다.
@@ -120,9 +131,11 @@ export function createWebview(tabId, profileOverride, initialUrl) {
   if (reopenedHistory && initialUrl) rec.url = initialUrl;
   if (initialUrl) beginNavigation(rec, initialUrl);
   registerWebview(tabId, rec);
+  syncQaWebviewPlacement();
   recordWebviewUse(tabId, Date.now());
   const status = getWebviewStatus(tabId);
   if (status && status.sleeping) status.sleeping = false;
+  if (status && status.formDirty) status.formDirty = false;   // 이전 webview 의 입력 상태 초기화
   // 탭 앞머리 표시(크롬과 같은 자리): 파비콘·불러오는 중·소리.
   el.addEventListener("page-favicon-updated", (e) => {
     const ic = (e.favicons || []).find((u) => /^https?:|^data:/i.test(u));
@@ -131,8 +144,21 @@ export function createWebview(tabId, profileOverride, initialUrl) {
   el.addEventListener("did-start-loading", () => setTabStatus(tabId, { loading: true }));
   el.addEventListener("did-stop-loading", () => setTabStatus(tabId, { loading: false }));
   // 다른 사이트로 가면 이전 파비콘이 남아 잘못된 아이콘이 붙으므로, 이동 시작 때 지운다.
+  // 설정 「링크 열기」 계정 규칙: 열린 탭이 다른 규칙 주소로 가면(주소창·북마크·링크·리디렉트) 같은 탭을 규칙 계정으로 다시 엶.
+  // 첫 이동(탭 생성·복원)은 여는 쪽이 계정을 정했으므로 보지 않음. 같은 규칙 안 이동은 계정 유지
+  const switchForRule = (url) => {
+    if (rec.keepAccountOnce) { rec.keepAccountOnce = false; return false; }
+    if (!rec.navs || historyToken || historyRestoring || rec.restoring) return false;
+    const want = ruleAccountFor(rec, url);
+    if (!want) return false;
+    const sp = spaceOfTabId(tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace());
+    // 이 webview 의 이벤트 처리 중에 webview 를 지우지 않도록 다음 틱에
+    setTimeout(() => { if (getWebview(tabId) === rec) switchTabAccount(tabId, want, url, sp); }, 0);
+    return true;
+  };
   el.addEventListener("did-start-navigation", (e) => { if (!e.isMainFrame) return;
     if ((historyToken || historyRestoring) && e.url === "about:blank") return;
+    if (switchForRule(e.url)) return;
     setTabStatus(tabId, { icon: "" });
     beginNavigation(rec, e.url);
     // 새로 가는 중이면 이전 실패 문구는 사실이 아니다. 지우지 않으면 성공한 화면 위에
@@ -145,6 +171,7 @@ export function createWebview(tabId, profileOverride, initialUrl) {
   });
   el.addEventListener("did-redirect-navigation", (e) => {
     if (!e.isMainFrame) return;
+    if (switchForRule(e.url)) return;
     beginNavigation(rec, e.url);
     showNavigationFeedback(rec);
   });
@@ -183,6 +210,8 @@ export function createWebview(tabId, profileOverride, initialUrl) {
     scheduleWebviewThrottling();
   });
   el.addEventListener("did-navigate", (e) => {
+    // 새 문서로 바뀌면 이전 문서의 입력칸도 없어짐. 그 문서의 프레임 보고 전부 초기화
+    if (rec.draftFrames && rec.draftFrames.size) { rec.draftFrames.clear(); setTabStatus(tabId, { formDirty: false }); }
     if ((historyToken || historyRestoring) && e.url === "about:blank") return;
     callHook("challenge.navigation", rec, { phase: "commit", url: e.url, isMainFrame: true });
     const mirrored = callHook("mirror.navigation", rec, { phase: "commit", url: e.url, isMainFrame: true }) === true;
@@ -253,6 +282,12 @@ export function createWebview(tabId, profileOverride, initialUrl) {
     setLoadFailure(tabId, failure);
     showNavigationFeedback(rec);
   });
+  // 페이지 프로세스가 죽으면 화면이 빈 채로 남아 무슨 일인지 알 수 없다. 로드 실패와 같은 자리에 알린다.
+  el.addEventListener("render-process-gone", (e) => {
+    blog("render-process-gone", e.details && e.details.reason);
+    setLoadFailure(tabId, "페이지가 비정상 종료됐습니다. 새로고침하면 다시 엽니다.");
+    showNavigationFeedback(rec);
+  });
   const applyTitle = (title) => { rec.title = title || ""; reportTabWc(rec, tabId); const tab = curTabs().find((x) => x.id === tabId);
     const navSpName = spaceOfTabId(tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace());
     const state = getBrowserState();
@@ -278,6 +313,7 @@ export function createWebview(tabId, profileOverride, initialUrl) {
       callHook("record.push", ev); return;
     }
     if (e.channel === "ac-user-activity") { markWebviewUsed(tabId); return; }
+    if (e.channel === "ac-form-dirty") { noteDraftFrame(rec, tabId, e.frameId, e.args && e.args[0] === true); return; }
     if (e.channel === "ac-guest-pointerdown") { closeProfileMenu(); if (typeof hideCtxMenu === "function") hideCtxMenu(); return; }
     // 패스키·보안키 상태를 알리고, 네이티브 인증기가 없는 실행 환경에는 Chrome 경로를 제공한다.
     if (e.channel === "ac-webauthn") { callHook("handoff.webauthnNotice", e.args && e.args[0], rec && rec.url, part, el, rec); return; }
@@ -335,6 +371,39 @@ export function createWebview(tabId, profileOverride, initialUrl) {
   return rec;
 }
 
+// 이 탭이 url 로 가면 써야 할 규칙 계정(설정 「링크 열기」). 규칙 없음·같은 규칙 안·이미 그 계정이면 null
+function ruleAccountFor(rec, url) {
+  const rule = linkRuleForPageTab(url, rec.url, getBrowserState().linkProfileRules);
+  if (!rule) return null;
+  const want = profileIdForStored(rule.profile);
+  return want === profileOfTab(rec.tabId) ? null : want;
+}
+
+// 앱 본체(main)에 넘기는 계정 규칙 사본. 페이지 안 링크·리디렉트를 요청 전에 막는 판정에 씀
+let sentLinkAccountRules = "";
+export function syncLinkAccountRules() {
+  if (!acHost || typeof acHost.setLinkAccountRules !== "function") return;
+  const list = [];
+  for (const r of getBrowserState().linkProfileRules || []) {
+    try { if (r && typeof r.pattern === "string") list.push({ pattern: r.pattern, partition: partitionFor(r.profile) }); } catch {}
+  }
+  const key = JSON.stringify(list);
+  if (key === sentLinkAccountRules) return;
+  sentLinkAccountRules = key;
+  try { acHost.setLinkAccountRules(list); } catch {}
+}
+// main 이 막은 이동. 규칙 계정으로 다시 엶. 판정이 갈리면(규칙이 막 바뀜 등) 원래 계정으로 그대로 엶
+function reopenInRuleAccount(m) {
+  if (!m || typeof m.url !== "string" || !/^https?:/i.test(m.url)) return;
+  const hit = getWebviewEntries().find(([, r]) => r && r.wc === m.wcId);
+  if (!hit) return;
+  const [tabId, rec] = hit;
+  const want = ruleAccountFor(rec, m.url);
+  if (want) { switchTabAccount(tabId, want, m.url, spaceOfTabId(tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace())); return; }
+  rec.keepAccountOnce = true;
+  navigateOn(rec, m.url);
+}
+
 export function navigateOn(rec, u) {
   if (!u || !rec) return;
   beginNavigation(rec, u);
@@ -343,7 +412,24 @@ export function navigateOn(rec, u) {
   Promise.resolve().then(() => rec.el.loadURL(u)).catch((err) => blog("loadURL err", String(err && err.message || err)));
 }
 
-export function navigate(u) { const rec = activeWv(); if (!rec) { bNote.textContent = "브라우저 탭을 먼저 열어주세요."; return; } bNote.textContent = "여는 중… " + u; navigateOn(rec, u); }
+// opts.profile: 이 이동에 쓸 계정(설정의 북마크 관리에서 계정을 정한 북마크). 링크 규칙보다 먼저
+export function navigate(u, opts) {
+  const rec = activeWv(); if (!rec) { bNote.textContent = "브라우저 탭을 먼저 열어주세요."; return; }
+  bNote.textContent = "여는 중… " + u;
+  if (opts && typeof opts.profile === "string") {
+    const want = profileIdForStored(opts.profile);
+    if (want !== profileOfTab(rec.tabId)) {
+      switchTabAccount(rec.tabId, want, u, spaceOfTabId(rec.tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace()));
+      return;
+    }
+    rec.keepAccountOnce = true; // 이미 그 계정이면 이번 이동은 규칙으로 바꾸지 않음
+  } else {
+    // 규칙 계정이 다르면 불러오기 전에 바꿈. 불러온 뒤 바꾸면 첫 요청이 원래 계정으로 나감
+    const want = ruleAccountFor(rec, u);
+    if (want) { switchTabAccount(rec.tabId, want, u, spaceOfTabId(rec.tabId) || (BROWSER_MODE ? boundSpace() : getCenterSpace())); return; }
+  }
+  navigateOn(rec, u);
+}
 export function goUrl() { navigate(normalizeUrl(urlInput.value)); }
 
 // 정상 세션을 보존할지는 native의 출처 기록이 판단한다. 화면은 실제 적용 성공 뒤에만 갱신한다.
@@ -381,6 +467,7 @@ export function updateActiveWebview() {
   findRetarget();   // 이전 탭의 노란 강조와 개수를 지운다. 지우지 않으면 다른 페이지 위에 남아 잘못된 값을 표시한다
   if (id && !getWebview(id)) wakeWebview(id);
   for (const [tid, rec] of getWebviewEntries()) rec.el.classList.toggle("active", tid === id);
+  syncQaWebviewPlacement();
   callHook("mirror.activeTab", id);
   const active = id && getWebview(id);
   if (active) {

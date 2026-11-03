@@ -4,7 +4,7 @@ const { createHash } = require("node:crypto");
 const GOOGLE_AUTH = new Set(["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID"]);
 function cookieKey(c) { return JSON.stringify([c.domain, c.path || "/", c.name]); }
 function cookieFingerprint(cookies, attributes = true) {
-  const rows = cookies.map((c) => [cookieKey(c), String(c.value || ""), ...(attributes ? [!!c.secure, !!c.httpOnly, c.sameSite || "unspecified", Math.floor(Number(c.expirationDate) || 0)] : [])]).sort((a, b) => a[0].localeCompare(b[0]));
+  const rows = cookies.map((c) => [cookieKey(c), String(c.value || ""), ...(attributes ? [!!c.secure, !!c.httpOnly, c.sameSite || "unspecified", Math.floor(Number(c.expirationDate) || 0)] : [])]).sort((a, b) => a[0].localeCompare(b[0]) || JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
 }
 function loginCookies(cookies, base) {

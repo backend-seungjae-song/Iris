@@ -10,18 +10,31 @@ import io.flutter.plugin.common.MethodChannel
 
 class KeepAliveChannel(private val activity: MainActivity) : MethodChannel.MethodCallHandler {
     private val permissionRequestCode = 4102
+    private lateinit var channel: MethodChannel
+    private var responsesReady = false
     private var pendingStart: MethodChannel.Result? = null
 
     fun register(messenger: BinaryMessenger) {
-        MethodChannel(messenger, "iris.remote/keepalive").setMethodCallHandler(this)
+        channel = MethodChannel(messenger, "iris.remote/keepalive")
+        channel.setMethodCallHandler(this)
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "takeOpenResponses" -> {
+                responsesReady = true
+                result.success(activity.takeOpenResponses())
+            }
             "start" -> start(result)
             "update" -> update(call, result)
-            "stop" -> stop(call, result)
+            "stop" -> stop(result)
             else -> result.notImplemented()
+        }
+    }
+
+    fun openResponses() {
+        if (responsesReady && activity.takeOpenResponses()) {
+            channel.invokeMethod("openResponses", null)
         }
     }
 
@@ -77,7 +90,8 @@ class KeepAliveChannel(private val activity: MainActivity) : MethodChannel.Metho
             activity.startService(
                 Intent(activity, KeepAliveService::class.java)
                     .setAction(KeepAliveService.ACTION_UPDATE)
-                    .putExtra(KeepAliveService.EXTRA_REQUEST_COUNT, requestCount),
+                    .putExtra(KeepAliveService.EXTRA_REQUEST_COUNT, requestCount)
+                    .putExtra(KeepAliveService.EXTRA_ALERT, call.argument<Boolean>("alert") ?: false),
             )
             result.success(null)
         } catch (error: Exception) {
@@ -85,13 +99,11 @@ class KeepAliveChannel(private val activity: MainActivity) : MethodChannel.Metho
         }
     }
 
-    private fun stop(call: MethodCall, result: MethodChannel.Result) {
-        val disconnected = call.argument<Boolean>("disconnected") ?: false
+    private fun stop(result: MethodChannel.Result) {
         try {
             activity.startService(
                 Intent(activity, KeepAliveService::class.java)
-                    .setAction(KeepAliveService.ACTION_STOP)
-                    .putExtra(KeepAliveService.EXTRA_DISCONNECTED, disconnected),
+                    .setAction(KeepAliveService.ACTION_STOP),
             )
             result.success(null)
         } catch (error: Exception) {

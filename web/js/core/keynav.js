@@ -1,3 +1,4 @@
+import { paneLayout } from "../center/pane-store.js";
 import { isHostWindows } from "./host-path.js";
 // Iris 전역 키보드 내비게이션과 브라우저·메모·herdr 단축키를 한 순서로 등록한다.
 //
@@ -23,7 +24,7 @@ import { isHostWindows } from "./host-path.js";
 //   현재 목록 확인: node bin/importers.mjs web/js/core/keynav.js
 
 import { bmActiveId, bmTabs, boundSpace, bsMutate } from "../browser/state.js";
-import { activeWv } from "../browser/webview.js";
+import { activeBrowserId, activeWv, reloadActiveTab } from "../browser/webview.js";
 import { reopenLastClosed } from "../center/closed-tabs.js";
 import { closeActiveTab, closeTabs } from "../center/tab-close.js";
 import { getActiveTabId, getCenterSpace } from "../center/tab-store.js";
@@ -191,24 +192,24 @@ export function initKeynav(deps) {
     // Windows에서는 Ctrl+Shift+W를 pane 닫기에 사용한다. Ctrl+W는 셸의 단어 삭제를 보존한다.
     if (isHostWindows() && e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && k === "w" && !BROWSER_MODE) { e.preventDefault(); if (!e.repeat) closeCurrentHerdrPane(); return; }
     // ctrl+w=브라우저·센터 탭 닫기. 터미널 포커스 시엔 ctrl+w=셸 단어삭제라 양보.
-    if (e.ctrlKey && !e.metaKey && (!isHostWindows() || !e.shiftKey) && !e.altKey && k === "w" && !(getTerminal() && getTerminal().contains(document.activeElement))) { e.preventDefault(); const space = getCenterSpace(); const t = curTabs().find((tab) => tab.id === getActiveTabId(space)); if (BROWSER_MODE) closeActiveTab(); else if (t) closeTabs([{ space, tabId: t.id, tabRef: t }]); return; }
+    if (e.ctrlKey && !e.metaKey && (!isHostWindows() || !e.shiftKey) && !e.altKey && k === "w" && !(getTerminal() && getTerminal().contains(document.activeElement))) { e.preventDefault(); const space = getCenterSpace(); const t = curTabs().find((tab) => tab.id === getActiveTabId(space)); if (BROWSER_MODE) closeActiveTab(); else if (t) closeTabs([{ space, tabId: t.id, tabRef: t, pane: paneLayout(space)?.focus || 0 }]); return; }
     // ⌘⇧E 요소선택과 ⌘⇧D 분리는 아래 capture 단계 핸들러가 전담하며, 포커스 위치와 무관하게 동작한다.
     // cmd+s / ctrl+s = 파일 저장 (편집 중인 파일)
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && k === "s" && !(isHostWindows() && getTerminal()?.contains(document.activeElement))) { e.preventDefault(); saveActiveFile(); return; }
     // 브라우저 리로드: ⌘R 리로드 · ⌘⇧R 강제 리로드. 분리 브라우저 창(BROWSER_MODE), 또는 메인 창에서
     // 브라우저 탭이 활성(도킹)이고 키 포커스가 터미널에 있지 않을 때 적용. 터미널 포커스(에이전트 작업)
-    // 시엔 아래 이름변경으로 양보한다. activeWv()는 활성 센터 탭만 보므로 실제 포커스로 다시 판정한다.
+    // 시엔 아래 이름변경으로 양보한다.
+    const browserFocused = BROWSER_MODE || curTabs().some((t) => t.id === getActiveTabId(getCenterSpace()) && t.kind === "browser");
     const termFocused = !BROWSER_MODE && !!(getTerminal() && getTerminal().contains(document.activeElement));
-    if (isHostWindows() && e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !termFocused && (BROWSER_MODE || activeWv())) {
-      e.preventDefault(); const r = activeWv(); try { if (r) r.el.reload(); } catch {} return;
+    if (isHostWindows() && e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !termFocused && browserFocused && activeBrowserId()) {
+      e.preventDefault(); reloadActiveTab(); return;
     }
     // 창 기준 분기: 브라우저 창은 ⌘R 리로드 / ⌘⇧R 강제 리로드.
     // 메인 창은 ⌘⇧R이 앱 강제 재로딩이므로 여기서 잡지 않고 아래로 흘린다. 메인 창의 ⌘R만
     // 도킹된 브라우저 탭이 활성이고 터미널 포커스가 아닐 때 페이지 리로드로 쓴다.
-    const wantPageReload = (BROWSER_MODE && (!isHostWindows() || !e.shiftKey)) || (!e.shiftKey && !termFocused && activeWv());
+    const wantPageReload = (BROWSER_MODE && (!isHostWindows() || !e.shiftKey)) || (!e.shiftKey && !termFocused && browserFocused && activeBrowserId());
     if (((e.metaKey && !e.ctrlKey) || (isHostWindows() && e.ctrlKey && !e.metaKey && !e.shiftKey)) && !e.altKey && k === "r" && wantPageReload) {
-      e.preventDefault(); const r = activeWv();
-      try { if (r) { e.shiftKey ? r.el.reloadIgnoringCache() : r.el.reload(); } } catch {}
+      e.preventDefault(); reloadActiveTab(e.shiftKey);
       return;
     }
     // 메인 창 ⌘⇧R = 앱 강제 재로딩. 브라우저 창·webview 활성일 땐 위에서 이미 페이지 강제 리로드로 처리됐다.

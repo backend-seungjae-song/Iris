@@ -19,6 +19,16 @@ class ConnectionKey {
 
   Future<String> publicKey() => _invokeString('publicKey');
 
+  // 이 기기에 현재 버전 연결 키가 있는지. 이전 버전 키는 지워짐
+  Future<bool> hasKey() async {
+    try {
+      return await _channel.invokeMethod<bool>('hasKey') ?? false;
+    } on PlatformException catch (error) {
+      throw ConnectionKeyException(error.code, error.message);
+    }
+  }
+
+  // 새 키는 잠금 해제를 요구하지 않아 즉시 끝남. 이전 호출부와의 호환용
   Future<void> unlock() => _invokeVoid('unlock');
 
   Future<String> sign(Uint8List bytes) =>

@@ -5,15 +5,15 @@ import { REMOTE_RPC_VERSION } from "./contract/ipc.js";
 import { resetTokenBucket, takeToken } from "./contract/rate-limit.js";
 
 const CHALLENGE_MS = 60_000;
-const DEFAULT_IDLE_MS = 30 * 60_000;
+const DEFAULT_IDLE_MS = 10 * 60_000;
 const FAILURE_WINDOW_MS = 10 * 60_000;
 const BLOCK_MS = 30 * 60_000;
 const TOTAL_SESSION_LIMIT = 6;
 const DEVICE_SESSION_LIMIT = 2;
-const REQUEST_RATE = 10;
-const REQUEST_BURST = 20;
+const REQUEST_RATE = 40;
+const REQUEST_BURST = 60;
 // 대화 화면 하나가 여는 요청(기록 구독·첫 페이지·PR·변경 파일·브라우저 목록)과 긴 브라우저 요청이 함께 들어가는 수
-const INFLIGHT_LIMIT = 8;
+const INFLIGHT_LIMIT = 16;
 
 function sameImpact(session, impact) {
   if (impact.scope === "all") return true;
@@ -65,7 +65,22 @@ export function createConnectionAuth(options) {
   const onExpire = options.onExpire || (() => {});
   const onThrottle = options.onThrottle || (() => {});
   const records = new Map();
-  const resumeTokens = new Map();
+  const resumeStore = options.resumeStore || null;
+  // 토큰 목록이 바뀔 때마다 저장을 예약한다(저장소가 마지막 상태만 한 번 기록)
+  const resumeTokens = new (class extends Map {
+    set(key, value) { super.set(key, value); persistTokens(); return this; }
+    delete(key) { const removed = super.delete(key); if (removed) persistTokens(); return removed; }
+  })();
+  function persistTokens() { resumeStore?.save(() => [...resumeTokens]); }
+  // 저장된 토큰은 PIN 기한 설정을 읽은 뒤에 불러온다(서버가 시작할 때 한 번)
+  let restored = false;
+  function restoreResumeTokens() {
+    if (!resumeStore || restored) return;
+    restored = true;
+    const value = getIdleMs();
+    const maximumAge = Number.isSafeInteger(value) && value >= 60_000 ? value : DEFAULT_IDLE_MS;
+    for (const [key, token] of resumeStore.load(maximumAge, now())) Map.prototype.set.call(resumeTokens, key, token);
+  }
   const failures = new Map();
   const blocks = new Map();
 
@@ -134,7 +149,8 @@ export function createConnectionAuth(options) {
   function pruneTokens(timestamp = now()) {
     const maximumAge = idleMs();
     for (const [key, token] of resumeTokens) {
-      if (timestamp - token.lastActivityAt >= maximumAge || !getDevice(token.deviceId)) {
+      const elapsed = timestamp - token.lastActivityAt;
+      if (elapsed < 0 || elapsed >= maximumAge || !getDevice(token.deviceId)) {
         resumeTokens.delete(key);
       }
     }
@@ -223,7 +239,8 @@ export function createConnectionAuth(options) {
     if (typeof response.resumeToken === "string") {
       const key = resumeKey(response.resumeToken);
       const token = resumeTokens.get(key);
-      if (token && token.deviceId === device.deviceId && timestamp - token.lastActivityAt < idleMs()) {
+      const elapsed = token ? timestamp - token.lastActivityAt : -1;
+      if (token && token.deviceId === device.deviceId && elapsed >= 0 && elapsed < idleMs()) {
         resumeTokens.delete(key);
         const replacedConnIds = [];
         for (const record of [...records.values()]) {
@@ -322,6 +339,7 @@ export function createConnectionAuth(options) {
     record.lastActivityAt = timestamp;
     const token = resumeTokens.get(record.resumeKey);
     if (token) token.lastActivityAt = timestamp;
+    if (token) persistTokens();
     schedule(record, "idleTimer", idleMs(), "idle-timeout");
   }
 
@@ -360,6 +378,8 @@ export function createConnectionAuth(options) {
     for (const [key, token] of resumeTokens) {
       if (impact.scope === "all" || impact.deviceId === token.deviceId) resumeTokens.delete(key);
     }
+    // 폐기는 저장을 미루지 않는다: 재시작 뒤 이전 토큰이 되살아나면 안 됨
+    resumeStore?.flushSync();
     return removed;
   }
 
@@ -402,6 +422,8 @@ export function createConnectionAuth(options) {
     invalidate,
     refreshExpiry,
     pruneExpiredTokens: () => pruneTokens(),
+    restoreResumeTokens,
+    flushResumeTokens: () => resumeStore?.flushSync?.({ final: true }),
     activeBlocks,
     status: () => ({
       challenges: [...records.values()].filter((record) => record.phase !== "session").length,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { initCapability, panelHtml } from "../web/js/remote/boot.js";
+import { initCapability, panelHtml, requestPinIdle } from "../web/js/remote/boot.js";
 
 function element() {
   const classes = new Set();
@@ -191,33 +191,21 @@ test("Mac 화면은 일치하는 숫자 PIN만 보내고 입력값을 곧바로 
   }
 });
 
-test("Mac 화면은 PIN 기한 10·20·30·60분을 표시하고 변경 요청을 보낸다", () => {
+test("Mac 화면은 PIN 기한 10·20·30·60분만 변경 요청으로 보낸다", () => {
   assert.match(panelHtml, /PIN 다시 확인/);
-  for (const minutes of [10, 20, 30, 60]) {
-    assert.match(panelHtml, new RegExp(`value="${minutes}"`));
-  }
+  assert.match(panelHtml, /id="remote-pin-idle"/);
   const previousDocument = globalThis.document;
-  const handlers = new Map();
-  const select = {
-    ...element(), value: "30",
-    addEventListener(type, handler) { handlers.set(type, handler); },
-    change() { handlers.get("change")?.({ currentTarget: this }); },
-  };
-  const elements = new Map([
-    ["remote-body", element()], ["remote-status", element()], ["remote-detail", element()],
-    ["remote-action", element()], ["remote-pin-idle", select],
-  ]);
-  globalThis.document = { getElementById: (id) => elements.get(id) || null };
+  globalThis.document = { getElementById: () => null };
   const sent = [];
   try {
-    const capability = initCapability({ wsSend: (message) => sent.push(message) });
-    capability.ws["remote.state"]({
-      type: "remote.state", status: "on", pinConfigured: true, pinIdleMinutes: 20,
-    });
-    assert.equal(select.value, "20");
-    select.value = "60";
-    select.change();
-    assert.deepEqual(sent.at(-1), { type: "remote.pin-idle.set", minutes: 60 });
+    initCapability({ wsSend: (message) => sent.push(message) });
+    for (const minutes of [10, 20, 30, 60]) {
+      assert.equal(requestPinIdle(minutes), true);
+      assert.deepEqual(sent.at(-1), { type: "remote.pin-idle.set", minutes });
+    }
+    const count = sent.length;
+    assert.equal(requestPinIdle(15), false);
+    assert.equal(sent.length, count);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -267,8 +255,9 @@ test("PIN이 없으면 현재 안내 단계 안에서 저장하고 다음 단계
       type: "remote.state", status: "off", busy: false, pinConfigured: true, devices: [],
     });
     steps = elements.get("remote-steps").children;
-    assert.equal(steps[0].dataset.state, "done");
-    assert.equal(steps[1].dataset.state, "current");
+    assert.equal(steps.length, 3);
+    assert.equal(steps[0].dataset.state, "current");
+    assert.ok(!steps.some((step) => step.dataset.state === "done"));
     assert.equal(elements.get("remote-pin-card").hidden, false);
     assert.ok(elements.get("remote-pin-card").children.includes(elements.get("remote-pin-form")));
   } finally {
@@ -327,6 +316,79 @@ test("원격 화면을 열지 않아도 연결 뒤 PIN 중단 상태를 요청�
     });
     await new Promise((resolve) => setTimeout(resolve, 5));
     assert.deepEqual(sent, [{ type: "remote.status" }]);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+function paneNodes() {
+  function node() {
+    return {
+      ...element(), children: [], value: "",
+      append(...values) { this.children.push(...values); },
+      replaceChildren(...values) { this.children = values; },
+      setAttribute() {},
+    };
+  }
+  const ids = [
+    "remote-body", "remote-status", "remote-detail", "remote-action", "remote-feedback", "remote-guide",
+    "remote-steps", "remote-progress", "remote-subtitle", "remote-status-card", "remote-pin-card",
+    "remote-pin-form", "remote-devices", "remote-device-list", "remote-device-note", "remote-pair-start",
+    "remote-pair-card", "remote-pair-scan", "remote-pair-code", "remote-health", "remote-health-title",
+    "remote-health-detail", "remote-health-action",
+  ];
+  const elements = new Map(ids.map((id) => [id, node()]));
+  return { elements, document: { getElementById: (id) => elements.get(id) || null, createElement: () => node() } };
+}
+
+test("기기가 없으면 연결 순서만 보이고 등록 단계에 기기 추가 버튼이 있다", () => {
+  const previousDocument = globalThis.document;
+  const { elements, document } = paneNodes();
+  globalThis.document = document;
+  try {
+    const capability = initCapability({ wsSend() {} });
+    capability.ws["remote.tailscale"]({ type: "remote.tailscale", phase: "running", phones: [] });
+    capability.ws["remote.state"]({
+      type: "remote.state", status: "on", busy: false, pinConfigured: true, devices: [], listener: { address: "100.64.1.2", port: 4291 },
+    });
+    assert.equal(elements.get("remote-body").dataset.mode, "setup");
+    assert.equal(elements.get("remote-guide").hidden, false);
+    const steps = elements.get("remote-steps").children;
+    assert.equal(steps.length, 1);
+    assert.equal(elements.get("remote-progress").textContent, "3/4");
+    assert.ok(steps[0].children.some((child) => child.dataset?.guideAction === "pair"));
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("설정이 끝나면 관리 화면이 되고 원격이 꺼져 있어도 삭제는 되며 추가 버튼은 꺼진다", () => {
+  const previousDocument = globalThis.document;
+  const { elements, document } = paneNodes();
+  globalThis.document = document;
+  try {
+    const capability = initCapability({ wsSend() {} });
+    capability.ws["remote.tailscale"]({ type: "remote.tailscale", phase: "daemon-off" });
+    capability.ws["remote.state"]({
+      type: "remote.state", status: "off", busy: false, pinConfigured: true,
+      devices: [{ deviceId: "1".repeat(32), name: "폰", addedAt: 1 }],
+    });
+    assert.equal(elements.get("remote-body").dataset.mode, "manage");
+    assert.equal(elements.get("remote-guide").hidden, true);
+    assert.equal(elements.get("remote-device-list").children.length, 1);
+    assert.equal(elements.get("remote-pair-start").disabled, true);
+    assert.equal(elements.get("remote-device-note").hidden, false);
+    assert.equal(elements.get("remote-health").hidden, false);
+    assert.equal(elements.get("remote-health-title").textContent, "Tailscale 꺼짐");
+    capability.ws["remote.state"]({
+      type: "remote.state", status: "on", busy: false, pinConfigured: true, listener: { address: "100.64.1.2", port: 4291 },
+      devices: [{ deviceId: "1".repeat(32), name: "폰", addedAt: 1 }],
+    });
+    assert.equal(elements.get("remote-pair-start").disabled, false);
+    capability.ws["remote.state"]({
+      type: "remote.state", status: "on", busy: false, pinConfigured: true, devices: [],
+    });
+    assert.equal(elements.get("remote-body").dataset.mode, "setup");
   } finally {
     globalThis.document = previousDocument;
   }

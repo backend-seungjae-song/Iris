@@ -77,8 +77,10 @@ function historyMatches(target, expected) {
       index: target.navigationHistory.getActiveIndex(),
     });
     if (!actual || actual.index !== expected.index || actual.entries.length !== expected.entries.length) return false;
+    // 현재 페이지 pageState 는 비교 제외. 복원한 문서를 불러오면서 Chromium 이 다시 써서 늘 달라지고,
+    // 다르다고 새로 불러오면 그 페이지의 스크롤·입력값이 사라짐
     return actual.entries.every((entry, index) => entry.url === expected.entries[index].url
-      && (entry.pageState || "") === (expected.entries[index].pageState || ""));
+      && (index === expected.index || (entry.pageState || "") === (expected.entries[index].pageState || "")));
   } catch { return false; }
 }
 

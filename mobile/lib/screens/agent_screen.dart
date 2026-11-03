@@ -2,18 +2,25 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:iris_remote/design/buttons.dart';
+import 'package:iris_remote/design/chat_tools.dart';
 import 'package:iris_remote/design/composer.dart';
 import 'package:iris_remote/design/icon.dart';
 import 'package:iris_remote/design/markdown_text.dart';
 import 'package:iris_remote/design/pasted_context.dart';
 import 'package:iris_remote/design/session_header.dart';
+import 'package:iris_remote/design/status_chip.dart';
+import 'package:iris_remote/design/status_glyph.dart';
 import 'package:iris_remote/design/tokens.dart';
 import 'package:iris_remote/format/result_text.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
 import 'package:iris_remote/screens/browser_screen.dart';
+import 'package:iris_remote/screens/conversation_request_card.dart';
+import 'package:iris_remote/screens/response_host.dart';
 import 'package:iris_remote/screens/source_control_screen.dart';
+import 'package:iris_remote/screens/terminal_question_screen.dart';
 import 'package:iris_remote/screens/terminal_screen.dart';
+import 'package:iris_remote/screens/terminal_question_card.dart';
 import 'package:iris_remote/state/remote_state.dart';
 
 class AgentScreen extends StatefulWidget {
@@ -68,35 +75,32 @@ class _AgentScreenState extends State<AgentScreen> {
   }
 
   Future<void> _openBrowser() async {
-    if (widget.state.browserTabs.isEmpty) {
-      await widget.state.refreshBrowserTabs();
-    }
+    final tab = await _browserTabForAgent();
     if (!mounted) return;
-    final agent = widget.state.agent(_agentRef);
-    if (agent == null) return;
-    BrowserTab? tab;
-    for (final candidate in widget.state.browserTabs) {
-      final space = widget.state.browserSpace(candidate.space);
-      if ((candidate.space == agent.spaceRef || space?.name == agent.space) &&
-          (tab == null || candidate.active)) {
-        tab = candidate;
-      }
-    }
-    final sessionTabs = widget.state.browserTabs.where(
-      (item) =>
-          item.space == agent.spaceRef && item.sessions.contains(agent.ref),
-    );
-    if (sessionTabs.isNotEmpty) {
-      tab =
-          sessionTabs.where((item) => item.active).firstOrNull ??
-          sessionTabs.first;
-    }
     if (tab == null) {
-      setState(() => _result = widget.state.browserError ?? '브라우저 탭이 없습니다.');
+      setState(() => _result = '이 스페이스에 브라우저 탭이 없습니다');
       return;
     }
     await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(builder: (_) => _browserRoute(tab!.ref)),
+      MaterialPageRoute<bool>(builder: (_) => _browserRoute(tab.ref)),
+    );
+  }
+
+  Future<BrowserTab?> _browserTabForAgent() async {
+    final tab = await widget.state.browserTabForAgent(_agentRef);
+    return mounted ? tab : null;
+  }
+
+  Future<void> _openBrowserFromTerminal() async {
+    final tab = await _browserTabForAgent();
+    if (!mounted) return;
+    if (tab == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('이 스페이스에 브라우저 탭이 없습니다')));
+      return;
+    }
+    await Navigator.of(context).pushReplacement<bool, void>(
+      MaterialPageRoute<bool>(builder: (_) => _browserRoute(tab.ref)),
     );
   }
 
@@ -112,14 +116,8 @@ class _AgentScreenState extends State<AgentScreen> {
   Widget _terminalRoute() => TerminalScreen(
     state: widget.state,
     agentRef: _agentRef,
-    onOpenBrowser: () {
-      final tab = widget.state.browserTabs.firstOrNull;
-      if (tab != null) {
-        Navigator.of(context).pushReplacement<bool, void>(
-          MaterialPageRoute<bool>(builder: (_) => _browserRoute(tab.ref)),
-        );
-      }
-    },
+    onOpenBrowser: () => unawaited(_openBrowserFromTerminal()),
+    onOpenChat: () => Navigator.of(context).pop(),
   );
 
   Future<bool> _send(String text) async {
@@ -136,6 +134,29 @@ class _AgentScreenState extends State<AgentScreen> {
       if (mounted) setState(() => _result = error.message);
     }
     return false;
+  }
+
+  // 이 대화의 대기 요청을 전체 응답 화면으로 열기. 다른 에이전트의 요청에서 거절했으면 그 대화로 이동
+  Future<void> _openRequest(RemoteAgent agent, RemoteRequest request) async {
+    final denied = await showResponseHost(
+      context: context,
+      state: widget.state,
+      request: request,
+      agentName: agent.name,
+      agentKind: agent.kind,
+      space: agent.space,
+    );
+    if (denied != null && denied != agent.ref && mounted) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => AgentScreen(
+            state: widget.state,
+            agentRef: denied,
+            focusComposer: true,
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _stop() async {
@@ -222,6 +243,35 @@ class _AgentScreenState extends State<AgentScreen> {
                 .where((other) => other.space == agent.space)
                 .toList(growable: false),
             transcript: widget.state.transcript,
+            terminalFallback:
+                agent.status == 'blocked' &&
+                !agent.question &&
+                !widget.state.requests.any((r) => r.agent == agent.ref),
+            promptSession: widget.state.supports('terminal.select')
+                ? widget.state.session
+                : null,
+            terminalQuestions:
+                widget.state.supports('terminal.watch') &&
+                    widget.state.supports('terminal.key')
+                ? widget.state.terminalQuestions
+                      .where((q) => q.agent == agent.ref)
+                      .toList()
+                : const [],
+            requests: [
+              for (final request in widget.state.requests)
+                if (request.agent == agent.ref) request,
+            ],
+            onOpenRequest: (request) => _openRequest(agent, request),
+            onAnswerTerminalQuestion: widget.state.supports('terminal.watch')
+                ? (_) => showTerminalQuestion(
+                    context: context,
+                    state: widget.state,
+                    agent: agent,
+                    onTerminal: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(builder: (_) => _terminalRoute()),
+                    ),
+                  )
+                : null,
             loading: widget.state.loadingTranscript,
             loadingEarlier: widget.state.loadingEarlier,
             hasEarlier: widget.state.hasEarlier,
@@ -290,6 +340,12 @@ class AgentSessionView extends StatefulWidget {
     required this.onSelectAgent,
     required this.onSend,
     required this.canMessage,
+    this.terminalQuestions = const [],
+    this.requests = const [],
+    this.onOpenRequest,
+    this.onAnswerTerminalQuestion,
+    this.promptSession,
+    this.terminalFallback = false,
     this.onLoadEarlier,
     this.onRetry,
     this.onStop,
@@ -309,13 +365,19 @@ class AgentSessionView extends StatefulWidget {
     this.workingLabel = '작업 중',
     this.autofocusComposer = false,
     this.githubFailed = false,
-    this.showDeliveryStatus = true,
     super.key,
   });
 
   final RemoteAgent agent;
   final List<RemoteAgent> spaceAgents;
   final List<TranscriptItem> transcript;
+  final ActiveRemoteSession? promptSession;
+  final bool terminalFallback;
+  final List<RemoteRequest> terminalQuestions;
+  // 이 에이전트의 대기 중 일반 승인·질문·사람 차례 요청
+  final List<RemoteRequest> requests;
+  final ValueChanged<RemoteRequest>? onOpenRequest;
+  final ValueChanged<RemoteRequest>? onAnswerTerminalQuestion;
   final VoidCallback onBack;
   final ValueChanged<RemoteAgent> onSelectAgent;
   final Future<bool> Function(String text) onSend;
@@ -339,7 +401,6 @@ class AgentSessionView extends StatefulWidget {
   final String workingLabel;
   final bool autofocusComposer;
   final bool githubFailed;
-  final bool showDeliveryStatus;
 
   @override
   State<AgentSessionView> createState() => _AgentSessionViewState();
@@ -354,6 +415,13 @@ class _AgentSessionViewState extends State<AgentSessionView> {
   bool _showScrollToBottom = false;
   bool _scrollUpdateScheduled = false;
   int _lastTranscriptCount = 0;
+  // 위로 올라가 있는 동안 새로 들어온 항목 수
+  int _unseen = 0;
+
+  int get _itemCount =>
+      widget.transcript.length +
+      widget.terminalQuestions.length +
+      widget.requests.length;
 
   @override
   void initState() {
@@ -374,6 +442,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       _initialScrollDone = false;
       _lastTranscriptCount = 0;
       _showScrollToBottom = false;
+      _unseen = 0;
     }
     if (_messageController.text != widget.composerText) {
       _messageController.value = TextEditingValue(
@@ -381,7 +450,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
         selection: TextSelection.collapsed(offset: widget.composerText.length),
       );
     }
-    final count = widget.transcript.length;
+    final count = _itemCount;
     final nearBottom =
         !_scrollController.hasClients ||
         _scrollController.position.maxScrollExtent - _scrollController.offset <
@@ -392,6 +461,9 @@ class _AgentSessionViewState extends State<AgentSessionView> {
     } else if (count > _lastTranscriptCount && nearBottom) {
       _scrollToBottom();
     } else {
+      if (count > _lastTranscriptCount && _lastTranscriptCount > 0) {
+        _unseen += count - _lastTranscriptCount;
+      }
       _scheduleScrollVisibilityUpdate();
     }
     _lastTranscriptCount = count;
@@ -409,11 +481,19 @@ class _AgentSessionViewState extends State<AgentSessionView> {
   void _messageChanged() =>
       widget.onComposerTextChanged?.call(_messageController.text);
 
-  void _scrollToBottom() {
+  // 줄 높이가 제각각이면 한 번에 끝까지 못 가므로 맨 아래에 닿을 때까지 몇 프레임 반복
+  void _scrollToBottom([int pass = 0]) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       _scheduleScrollVisibilityUpdate();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        final position = _scrollController.position;
+        if (pass < 5 && position.maxScrollExtent - position.pixels > 1) {
+          _scrollToBottom(pass + 1);
+        }
+      });
     });
   }
 
@@ -436,8 +516,11 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       _scrollUpdateScheduled = false;
       if (!mounted || !_scrollController.hasClients) return;
       final show = _scrollController.position.extentAfter > 24;
-      if (show != _showScrollToBottom) {
-        setState(() => _showScrollToBottom = show);
+      if (show != _showScrollToBottom || (!show && _unseen != 0)) {
+        setState(() {
+          _showScrollToBottom = show;
+          if (!show) _unseen = 0;
+        });
       }
     });
   }
@@ -479,8 +562,141 @@ class _AgentSessionViewState extends State<AgentSessionView> {
     if (mounted) setState(() => _stopping = false);
   }
 
+  String? get _kindLabel => switch (widget.agent.kind) {
+    'claude' => 'Claude',
+    'codex' => 'Codex',
+    'terminal' => '터미널',
+    _ => null,
+  };
+
+  // 본문 목록. 항목 사이 간격 14
+  List<Widget> _items(BuildContext context) {
+    final out = <Widget>[];
+    void add(Widget child) {
+      if (out.isNotEmpty) out.add(const SizedBox(height: 14));
+      out.add(child);
+    }
+
+    final working = widget.agent.status == 'working';
+    final items = widget.transcript;
+    DateTime? lastDay;
+    var index = 0;
+    while (index < items.length) {
+      final item = items[index];
+      final time = _itemTime(item);
+      if (time != null &&
+          (lastDay == null ||
+              lastDay.year != time.year ||
+              lastDay.month != time.month ||
+              lastDay.day != time.day)) {
+        lastDay = time;
+        add(_DayLabel(time));
+      }
+      if (item.role == 'tool') {
+        var end = index;
+        while (end < items.length && items[end].role == 'tool') {
+          end++;
+        }
+        final group = items.sublist(index, end);
+        final rows = buildToolRows(group);
+        final last = end == items.length;
+        add(
+          IrisToolTable(
+            key: ValueKey(Object.hash(group.first.at, group.first.text)),
+            rows: rows,
+            live: working && last,
+          ),
+        );
+        if (working && last && rows.isNotEmpty && rows.last.pending) {
+          add(_WorkingLine(label: rows.last.pendingLabel));
+        }
+        index = end;
+        continue;
+      }
+      if (item.role == 'user') {
+        add(_UserBubble(item: item, time: time));
+      } else {
+        final first = index == 0 || items[index - 1].role != 'assistant';
+        add(
+          _AssistantBlock(
+            item: item,
+            who: first ? (_kindLabel ?? widget.agent.name) : null,
+          ),
+        );
+      }
+      index++;
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final working = widget.onStop != null;
+    final waiting =
+        !working && (widget.agent.question || widget.agent.status == 'blocked');
+    final cards = <Widget>[
+      if (widget.onOpenRequest != null)
+        for (final request in widget.requests)
+          ConversationRequestCard(
+            request: request,
+            onOpen: () => widget.onOpenRequest!(request),
+          ),
+      if (widget.onTerminal != null)
+        for (final question in widget.terminalQuestions)
+          TerminalQuestionCard(
+            request: question,
+            session: widget.promptSession,
+            agentName: widget.agent.name,
+            onOpen: widget.onTerminal!,
+            onAnswer: widget.onAnswerTerminalQuestion == null
+                ? null
+                : () => widget.onAnswerTerminalQuestion!(question),
+          ),
+      if (widget.terminalFallback &&
+          widget.terminalQuestions.isEmpty &&
+          widget.onTerminal != null)
+        _QuestionFallbackCard(onTerminal: widget.onTerminal!),
+    ];
+    final body = <Widget>[
+      if (widget.loadingEarlier)
+        const Padding(
+          padding: EdgeInsets.all(12),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      if (widget.loading)
+        const Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: CircularProgressIndicator()),
+        )
+      else if (widget.transcript.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 48),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.error ?? '대화 기록이 없습니다.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.iris.muted),
+              ),
+              if (widget.error != null && widget.onRetry != null) ...[
+                const SizedBox(height: 16),
+                IrisButton(
+                  key: const Key('transcript-retry'),
+                  label: '다시 시도',
+                  onPressed: widget.onRetry,
+                  height: 36,
+                  width: 112,
+                  expand: false,
+                ),
+              ],
+            ],
+          ),
+        )
+      else
+        ..._items(context),
+      for (final card in cards) ...[const SizedBox(height: 14), card],
+    ];
     return Scaffold(
       body: SafeArea(
         bottom: false,
@@ -489,6 +705,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
             _SessionHeader(
               agent: widget.agent,
               agents: widget.spaceAgents,
+              kindLabel: _kindLabel,
               onBack: widget.onBack,
               onSelectAgent: widget.onSelectAgent,
               onTerminal: widget.onTerminal,
@@ -508,64 +725,17 @@ class _AgentSessionViewState extends State<AgentSessionView> {
                       child: ListView(
                         key: const Key('session-chat'),
                         controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                        children: [
-                          if (widget.loadingEarlier)
-                            const Padding(
-                              padding: EdgeInsets.all(12),
-                              child: Center(child: CircularProgressIndicator()),
-                            ),
-                          if (widget.loading)
-                            const Padding(
-                              padding: EdgeInsets.all(32),
-                              child: Center(child: CircularProgressIndicator()),
-                            )
-                          else if (widget.transcript.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 48),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    widget.error ?? '대화 기록이 없습니다.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(color: context.iris.muted),
-                                  ),
-                                  if (widget.error != null &&
-                                      widget.onRetry != null) ...[
-                                    const SizedBox(height: 16),
-                                    IrisButton(
-                                      key: const Key('transcript-retry'),
-                                      label: '다시 시도',
-                                      onPressed: widget.onRetry,
-                                      height: 36,
-                                      width: 112,
-                                      expand: false,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            )
-                          else
-                            for (final item in widget.transcript)
-                              _TranscriptItemView(
-                                item: item,
-                                showDeliveryStatus: widget.showDeliveryStatus,
-                              ),
-                        ],
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        children: body,
                       ),
                     ),
                   ),
                   if (_showScrollToBottom)
                     Positioned(
-                      top: 12,
                       right: 16,
-                      child: IrisRoundButton(
-                        key: const Key('session-scroll-bottom'),
-                        icon: 'caret-down',
-                        tooltip: '맨 아래로',
-                        backgroundColor: context.iris.level2,
-                        foregroundColor: context.iris.foreground,
+                      bottom: 12,
+                      child: _ScrollBottomButton(
+                        count: _unseen,
                         onPressed: () => unawaited(_animateToBottom()),
                       ),
                     ),
@@ -574,7 +744,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
             ),
             if (widget.actionResult != null)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
@@ -588,9 +758,11 @@ class _AgentSessionViewState extends State<AgentSessionView> {
               drafts: widget.drafts,
               sending: _sending,
               stopping: _stopping,
-              working: widget.onStop != null,
+              working: working,
               workingLabel: widget.workingLabel,
               modelLabel: widget.modelLabel,
+              blockedLabel: waiting ? '질문 대기 중 · 답하면 이어서 진행' : null,
+              hintText: waiting ? '답 대신 메시지 보내기' : '메시지 보내기',
               onSend: _send,
               onRemoveDraft: widget.onRemoveDraft,
               onStop: widget.onStop == null ? null : _stop,
@@ -603,10 +775,51 @@ class _AgentSessionViewState extends State<AgentSessionView> {
   }
 }
 
+// at 은 밀리초 기준. 초 단위 값도 받는다
+DateTime? _itemTime(TranscriptItem item) {
+  final at = item.at;
+  if (at == null) return null;
+  return DateTime.fromMillisecondsSinceEpoch(
+    at < 100000000000 ? at * 1000 : at,
+  );
+}
+
+String _clock(DateTime time) =>
+    '${time.hour}:${time.minute.toString().padLeft(2, '0')}';
+
+class _DayLabel extends StatelessWidget {
+  const _DayLabel(this.time);
+
+  final DateTime time;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(time.year, time.month, time.day);
+    final label = switch (today.difference(day).inDays) {
+      0 => '오늘',
+      1 => '어제',
+      _ => '${time.month}월 ${time.day}일',
+    };
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Text(
+          '$label ${_clock(time)}',
+          key: const Key('session-day'),
+          style: TextStyle(color: context.iris.muted, fontSize: 12),
+        ),
+      ),
+    );
+  }
+}
+
 class _SessionHeader extends StatelessWidget {
   const _SessionHeader({
     required this.agent,
     required this.agents,
+    required this.kindLabel,
     required this.onBack,
     required this.onSelectAgent,
     this.onTerminal,
@@ -617,6 +830,7 @@ class _SessionHeader extends StatelessWidget {
 
   final RemoteAgent agent;
   final List<RemoteAgent> agents;
+  final String? kindLabel;
   final VoidCallback onBack;
   final ValueChanged<RemoteAgent> onSelectAgent;
   final VoidCallback? onTerminal;
@@ -631,6 +845,8 @@ class _SessionHeader extends StatelessWidget {
       subtitle: agent.space,
       agentKind: agent.kind,
       mode: SessionMode.chat,
+      status: agent.question ? 'question' : agent.status,
+      kindLabel: kindLabel,
       tabs: [
         for (final other in agents)
           IrisAgentTab(
@@ -651,261 +867,273 @@ class _SessionHeader extends StatelessWidget {
   }
 }
 
-class _TranscriptItemView extends StatelessWidget {
-  const _TranscriptItemView({
-    required this.item,
-    required this.showDeliveryStatus,
-  });
+class _ScrollBottomButton extends StatelessWidget {
+  const _ScrollBottomButton({required this.count, required this.onPressed});
 
-  final TranscriptItem item;
-  final bool showDeliveryStatus;
+  final int count;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    if (item.role == 'user') {
-      final style = IrisType.body.copyWith(height: 1.45);
-      final pasted = parsePastedMessage(item.text);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Container(
-            key: const Key('session-user-message'),
-            constraints: const BoxConstraints(maxWidth: 297.4),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-            decoration: BoxDecoration(
-              color: context.iris.level2,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(22),
-                topRight: Radius.circular(22),
-                bottomLeft: Radius.circular(22),
-                bottomRight: Radius.circular(6),
-              ),
-            ),
-            child: pasted == null
-                ? IrisMarkdown(
-                    item.text,
-                    key: const Key('session-user-markdown'),
-                    baseStyle: style,
-                    compact: true,
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (pasted.text.isNotEmpty) ...[
-                        IrisMarkdown(
-                          pasted.text,
-                          key: const Key('session-user-markdown'),
-                          baseStyle: style,
-                          compact: true,
-                        ),
-                        const SizedBox(height: 9),
-                      ],
-                      for (final block in pasted.blocks) ...[
-                        PastedContextChip(
-                          key: const Key('transcript-pasted-context'),
-                          kind: block.kind,
-                          summary: block.summary,
-                          onPressed: () => showPastedContext(
-                            context: context,
-                            kind: block.kind,
-                            summary: block.summary,
-                            content: block.content,
-                          ),
-                        ),
-                        if (block != pasted.blocks.last)
-                          const SizedBox(height: 7),
-                      ],
-                    ],
-                  ),
-          ),
-          if (showDeliveryStatus) ...[
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 16,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IrisIcon('check', size: 13, color: context.iris.faint),
-                    const SizedBox(width: 4),
-                    Text(
-                      '전달됨',
-                      style: TextStyle(
-                        color: context.iris.faint,
-                        fontSize: 12.5,
-                        height: 16 / 12.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-        ],
-      );
-    }
-    if (item.role == 'tool') {
-      return _ToolTranscriptCard(item: item);
-    }
-    return Padding(
-      padding: const EdgeInsets.only(right: 16, bottom: 16.7),
-      child: IrisMarkdown(
-        item.text,
-        key: const Key('session-assistant-message'),
-        baseStyle: IrisType.body,
-      ),
-    );
-  }
-}
-
-class _ToolTranscriptCard extends StatefulWidget {
-  const _ToolTranscriptCard({required this.item});
-
-  final TranscriptItem item;
-
-  @override
-  State<_ToolTranscriptCard> createState() => _ToolTranscriptCardState();
-}
-
-class _ToolTranscriptCardState extends State<_ToolTranscriptCard> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final lines = widget.item.text.split('\n');
-    final output = _expanded ? widget.item.text : lines.take(3).join('\n');
-    final body = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final colors = context.iris;
+    return Material(
+      key: const Key('session-scroll-bottom'),
+      color: colors.level3,
+      elevation: 6,
+      shadowColor: colors.shadow,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.fromLTRB(10, 0, 14, 0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text.rich(
-                _toolOutputText(output),
-                style: const TextStyle(
-                  color: Color(0xffc9dcea),
-                  fontFamily: 'monospace',
-                  fontSize: 12.5,
-                  height: 1.6,
+              IrisIcon('caret-down', size: 18, color: colors.foreground),
+              const SizedBox(width: 6),
+              Text(
+                '맨 아래로',
+                style: TextStyle(
+                  color: colors.foreground,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              for (final match in RegExp(
-                r'\[([^\]]+)\]\((iris-media:[0-9a-f]{32}|https?://[^\s)]+)\)',
-              ).allMatches(widget.item.text))
-                IrisMarkdown(match.group(0)!, selectable: false, compact: true),
+              if (count > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  constraints: const BoxConstraints(minWidth: 20),
+                  height: 20,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  decoration: BoxDecoration(
+                    color: colors.brand,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    '$count',
+                    style: TextStyle(
+                      color: colors.onBrand,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Container(
-        key: const Key('session-tool-card'),
-        height: _expanded ? null : 145,
-        decoration: BoxDecoration(
-          color: context.iris.terminal,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: 36,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
+  }
+}
+
+// 질문 대기 중인데 응답 요청이 없을 때 터미널로 보내는 카드
+class _QuestionFallbackCard extends StatelessWidget {
+  const _QuestionFallbackCard({required this.onTerminal});
+
+  final VoidCallback onTerminal;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return Container(
+      key: const Key('session-question-fallback'),
+      decoration: BoxDecoration(
+        color: colors.level1,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.pink, width: 1.5),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const IrisStatusChip(IrisStatus.block, label: '질문'),
+              const SizedBox(width: 8),
+              Text(
+                '터미널에서 답해야 합니다',
+                style: TextStyle(
+                  color: colors.foreground2,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [IrisButton(label: '터미널에서 답하기', onPressed: onTerminal)],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkingLine extends StatelessWidget {
+  const _WorkingLine({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    key: const Key('session-working-line'),
+    children: [
+      const IrisStatusGlyph(status: 'working'),
+      const SizedBox(width: 8),
+      Text(
+        label,
+        style: TextStyle(color: context.iris.foreground2, fontSize: 13.5),
+      ),
+    ],
+  );
+}
+
+class _UserBubble extends StatelessWidget {
+  const _UserBubble({required this.item, required this.time});
+
+  final TranscriptItem item;
+  final DateTime? time;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final style = IrisType.body.copyWith(
+      fontSize: 15,
+      height: 1.55,
+      letterSpacing: 0,
+    );
+    final pasted = parsePastedMessage(item.text);
+    return Align(
+      alignment: Alignment.centerRight,
+      child: LayoutBuilder(
+        builder: (context, box) => Container(
+          key: const Key('session-user-message'),
+          constraints: BoxConstraints(maxWidth: box.maxWidth * .82),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: colors.level2,
+            border: Border.all(color: colors.separator),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(18),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(18),
+              bottomRight: Radius.circular(6),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (pasted == null)
+                IrisMarkdown(
+                  item.text,
+                  key: const Key('session-user-markdown'),
+                  baseStyle: style,
+                  compact: true,
+                )
+              else
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const IrisIcon(
-                      'terminal-window',
-                      size: 14,
-                      color: Color(0xff8199aa),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        widget.item.tool ?? '도구',
-                        style: const TextStyle(
-                          color: Color(0xffc9dcea),
-                          fontFamily: 'monospace',
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w500,
-                          height: 16 / 12.5,
+                    if (pasted.text.isNotEmpty) ...[
+                      IrisMarkdown(
+                        pasted.text,
+                        key: const Key('session-user-markdown'),
+                        baseStyle: style,
+                        compact: true,
+                      ),
+                      const SizedBox(height: 9),
+                    ],
+                    for (final block in pasted.blocks) ...[
+                      PastedContextChip(
+                        key: const Key('transcript-pasted-context'),
+                        kind: block.kind,
+                        summary: block.summary,
+                        onPressed: () => showPastedContext(
+                          context: context,
+                          kind: block.kind,
+                          summary: block.summary,
+                          content: block.content,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '완료',
-                      style: TextStyle(
-                        color: context.iris.working,
-                        fontSize: 13,
-                      ),
-                    ),
+                      if (block != pasted.blocks.last)
+                        const SizedBox(height: 7),
+                    ],
                   ],
                 ),
-              ),
-            ),
-            if (_expanded) body else Expanded(child: body),
-            SizedBox(
-              height: 36,
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () => setState(() => _expanded = !_expanded),
-                style: const ButtonStyle(
-                  padding: WidgetStatePropertyAll(EdgeInsets.zero),
-                  foregroundColor: WidgetStatePropertyAll(Color(0xff8fd0f2)),
-                  overlayColor: WidgetStatePropertyAll(Colors.transparent),
-                  side: WidgetStatePropertyAll(
-                    BorderSide(color: Color(0x14a6daf4)),
-                  ),
-                  shape: WidgetStatePropertyAll(RoundedRectangleBorder()),
-                ),
-                child: Text(
-                  _expanded ? '출력 접기' : '출력 전체 ${lines.length}줄',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
+              if (time != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    _clock(time!),
+                    style: TextStyle(color: colors.muted, fontSize: 11.5),
                   ),
                 ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-TextSpan _toolOutputText(String output) {
-  final children = <TextSpan>[];
-  for (final entry in output.split('\n').indexed) {
-    if (entry.$1 > 0) children.add(const TextSpan(text: '\n'));
-    final line = entry.$2;
-    if (line == '…') {
-      children.add(
-        const TextSpan(
-          text: '…',
-          style: TextStyle(color: Color(0xff5e7b8e)),
+class _AssistantBlock extends StatelessWidget {
+  const _AssistantBlock({required this.item, required this.who});
+
+  final TranscriptItem item;
+  // 이름이 있으면 위에 작성자 줄을 붙인다
+  final String? who;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (who != null) ...[
+          Row(
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: colors.level3,
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  who!.characters.first.toUpperCase(),
+                  style: TextStyle(
+                    color: colors.foreground2,
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    height: 1,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(who!, style: TextStyle(color: colors.muted, fontSize: 12.5)),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        IrisMarkdown(
+          item.text,
+          key: const Key('session-assistant-message'),
+          baseStyle: IrisType.body.copyWith(
+            fontSize: 15,
+            height: 1.65,
+            letterSpacing: 0,
+          ),
         ),
-      );
-    } else if (line.startsWith('✓')) {
-      children.add(
-        const TextSpan(
-          text: '✓',
-          style: TextStyle(color: Color(0xff8bfbc2)),
-        ),
-      );
-      children.add(TextSpan(text: line.substring(1)));
-    } else {
-      children.add(TextSpan(text: line));
-    }
+      ],
+    );
   }
-  return TextSpan(children: children);
 }

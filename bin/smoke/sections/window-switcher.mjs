@@ -22,13 +22,14 @@ const bare = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "")
 export default async function run() {
   console.log("[window-switcher] 고른 macOS 창 순환");
 
-  await checkAsync("설정은 다섯 분류를 두고 각 분류에 자기 내용만 그린다", async () => {
+  await checkAsync("설정은 여섯 분류를 두고 각 분류에 자기 내용만 그린다", async () => {
     const mod = await import(new URL("../../../web/js/devtool/settings-view.js", import.meta.url).href);
     const sections = mod.SETTINGS_SECTIONS.map(({ id, label }) => ({ id, label }));
     const expected = [
       { id: "keys", label: "단축키" },
       { id: "features", label: "편의 기능" },
       { id: "windows", label: "창 전환" },
+      { id: "links", label: "링크 열기" },
       { id: "artifacts", label: "부산물" },
       { id: "security", label: "보안" },
     ];
@@ -43,12 +44,15 @@ export default async function run() {
       toggles: [{ id: "login", name: "로그인", desc: "설명", on: false }],
       artifacts: { kinds: [{ id: "shots", label: "화면 캡처", desc: "찍은 것", dir: "/x/shots", count: 2, bytes: 20 }],
         total: { count: 2, bytes: 20 }, canTrash: true },
+      links: { ok: true, current: "b", irisRegistered: true, choices: [
+        { id: "a", name: "Iris 공유 브라우저", path: "/A.app", self: true }, { id: "b", name: "B", path: "/B.app", self: false }] },
     };
     const panes = Object.fromEntries(expected.map(({ id }) => [id, mod.settingsMarkup({ ...model, section: id })]));
     const owned = {
       keys: "data-km-rec=",
       features: "data-set-screen=",
       windows: "km-switcher",
+      links: "data-link-app=",
       artifacts: "data-art-kind=",
       security: "data-set-toggle=",
     };

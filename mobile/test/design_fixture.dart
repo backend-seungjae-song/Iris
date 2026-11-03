@@ -468,39 +468,30 @@ AgentSessionView designQuestionBackground() {
     onBrowser: () {},
     onGitHub: () {},
     githubFailed: true,
-    showDeliveryStatus: false,
     canMessage: true,
   );
 }
 
-IrisSheetScene designPermissionScene() => IrisSheetScene(
-  sheetKey: const Key('permission-sheet'),
-  background: designSession(),
-  sheet: PermissionRequestSheet(
-    request: designPermissionRequest(),
-    agentName: 'Orca-Diff',
-    agentKind: 'codex',
-    space: 'iris',
-    onAnswer: (_) async =>
-        const RequestAnswerResult(rid: 'fixture', result: 'delivered'),
-  ),
+Widget designPermissionScene() => PermissionRequestSheet(
+  request: designPermissionRequest(),
+  agentName: 'Orca-Diff',
+  agentKind: 'codex',
+  space: 'iris',
+  onAnswer: (_) async =>
+      const RequestAnswerResult(rid: 'fixture', result: 'delivered'),
 );
 
-IrisSheetScene designQuestionScene({
+Widget designQuestionScene({
   Future<RequestAnswerResult> Function(List<QuestionResponse>)? onAnswer,
-}) => IrisSheetScene(
-  sheetKey: const Key('question-sheet'),
-  background: designQuestionBackground(),
-  sheet: QuestionRequestSheet(
-    request: designSheetQuestionRequest(),
-    agentName: '의존성 정리',
-    agentKind: 'codex',
-    space: 'iris',
-    onAnswer:
-        onAnswer ??
-        (_) async =>
-            const RequestAnswerResult(rid: 'fixture', result: 'delivered'),
-  ),
+}) => QuestionRequestSheet(
+  request: designSheetQuestionRequest(),
+  agentName: '의존성 정리',
+  agentKind: 'codex',
+  space: 'iris',
+  onAnswer:
+      onAnswer ??
+      (_) async =>
+          const RequestAnswerResult(rid: 'fixture', result: 'delivered'),
 );
 
 RemoteRequest designHumanRequest() => RemoteRequest(
@@ -727,17 +718,13 @@ const designTerminalKeys = <TerminalKeyButton>[
 
 Widget designHumanScene(DesignRemote remote) {
   remote.connection.frameKind = 'preview';
-  return IrisSheetScene(
-    sheetKey: const Key('human-turn-scene'),
-    background: designHumanBackground(),
-    sheet: HumanTurnSheet(
-      state: remote.state,
-      request: designHumanRequest(),
-      agent: designAgents()[4],
-      onOpenTab: () {},
-      previewImage: designFrameImages['preview'],
-      previewUrl: 'https://shop.test/checkout/verify',
-    ),
+  return HumanTurnSheet(
+    state: remote.state,
+    request: designHumanRequest(),
+    agent: designAgents()[4],
+    onOpenTab: () {},
+    previewImage: designFrameImages['preview'],
+    previewUrl: 'https://shop.test/checkout/verify',
   );
 }
 

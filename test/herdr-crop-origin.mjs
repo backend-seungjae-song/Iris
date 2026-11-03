@@ -80,6 +80,21 @@ const COMPACT_SIDEBAR = [
   " » │└─────────────────────────────────────────┘└─────────────────────────────────────────┘",
 ];
 
+// 사이드바 32칸, 대체 화면 TUI 의 구분선이 pane 첫 줄에 온 화면(herdr 0.9.1). 스크롤바 글자가 없다.
+const SIDEBAR_RULE_FIRST = [
+  " spaces                        │   1        2        3      +                 ",
+  "                               │────────────────────────────────────────────  ",
+  " · ~                           │text line 89                                  ",
+  " · sample                      │text line 90                                  ",
+  "   main                        │text line 91                                  ",
+  "                               │rows=33 draws=4                               ",
+];
+
+test("pane 첫 줄이 구분선이어도 탭 줄로 세지 않는다", () => {
+  setXterm(fakeXterm(SIDEBAR_RULE_FIRST));
+  assert.deepEqual(detectOrigin(), { cols: 32, rows: 1 });
+});
+
 test("알림 창이 경계선 일부를 덮어도 사이드바 폭을 읽는다", () => {
   setXterm(fakeXterm(SIDEBAR_WITH_NOTICE));
   assert.deepEqual(detectOrigin(), { cols: 32, rows: 1 });

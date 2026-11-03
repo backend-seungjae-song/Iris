@@ -53,8 +53,15 @@ function createHiddenViewport({
   const autoViewport = new Map();
   let lastSeenViewport = null;
   const vpChecked = new Map();
+  // 해제·명시 크기 지정마다 올리는 탭별 번호. 폭을 재는 사이 번호가 바뀌면 잰 결과는 버림
+  // - 늦게 건 대체 크기는 화면 쪽이 모르는 값이라 보이는 탭이 그 크기로 고정되고 크기 메뉴로 풀 수 없음
+  const epochs = new Map();
+  const epochOf = (id) => epochs.get(id) || 0;
+  const bump = (id) => epochs.set(id, epochOf(id) + 1);
 
-  function setDefaultViewport(width, height) {
+  // 사람이 크기를 정한 탭의 표시 크기는 기준에서 제외(ensureReady 와 같은 조건)
+  function setDefaultViewport(width, height, wcId) {
+    if (wcId != null && hasExplicitDevice(Number(wcId))) return;
     lastSeenViewport = { width: Math.round(width), height: Math.round(height) };
   }
 
@@ -88,8 +95,11 @@ function createHiddenViewport({
       // 오른쪽이 잘려 보였다. IRIS_NO_HIDDEN_VP=1 로 이 보정을 끄면 699×801 로 맞았다.
       // 이 보정이 실제로 다루는 것은 그릴 표면이 없어 0 이 된 게스트다. 그것만 본다.
       if (opts && opts.onlyIfCollapsed) {
+        const epoch = epochOf(id);
+        const stillHidden = () => epochOf(id) === epoch && !isTabShown(id) && !hasExplicitDevice(id);
         send("Runtime.evaluate", { expression: "[innerWidth,innerHeight]", returnByValue: true })
           .then((result) => {
+            if (!stillHidden()) return;
             const value = result && result.result && result.result.value;
             const width = Array.isArray(value) ? Number(value[0]) : 0;
             const height = Array.isArray(value) ? Number(value[1]) : 0;
@@ -97,7 +107,7 @@ function createHiddenViewport({
             applyPin(id, send, want);
           })
           // 측정하지 못하면 기본값을 적용한다. 배경 탭이 자기를 폰으로 인식하는 쪽의 비용이 더 크다.
-          .catch(() => applyPin(id, send, want));
+          .catch(() => { if (stillHidden()) applyPin(id, send, want); });
         return true;
       }
       applyPin(id, send, want);
@@ -112,6 +122,7 @@ function createHiddenViewport({
   function clearAutoViewport(wcId, send) {
     const id = Number(wcId);
     const had = autoViewport.has(id);
+    bump(id);
     autoViewport.delete(id);
     vpChecked.delete(id);
     try { send("Emulation.clearDeviceMetricsOverride").catch(() => {}); } catch {}
@@ -121,6 +132,7 @@ function createHiddenViewport({
   // 사람이 직접 정한 device metrics가 바로 같은 CDP 상태를 덮으므로 별도 clear를 먼저 보내지 않는다.
   function yieldToExplicitViewport(wcId) {
     const id = Number(wcId);
+    bump(id);
     autoViewport.delete(id);
     vpChecked.delete(id);
   }
@@ -139,6 +151,7 @@ function createHiddenViewport({
     const at = now();
     if (at - (vpChecked.get(id) || 0) < 1000) return;
     vpChecked.set(id, at);
+    const epoch = epochOf(id);
     let size = null;
     try {
       const result = await send("Runtime.evaluate", {
@@ -147,7 +160,7 @@ function createHiddenViewport({
       const value = result && result.result && result.result.value;
       if (Array.isArray(value)) size = { width: Number(value[0]) || 0, height: Number(value[1]) || 0 };
     } catch {}
-    if (!size) return;
+    if (!size || epochOf(id) !== epoch) return;
     if (size.width > 0 && size.height > 0) {
       // 사람이 정한 모바일 viewport를 다음 배경 탭의 기본 크기로 물려주지 않는다.
       if (!autoViewport.has(id) && !hasExplicitDevice(id)) {
@@ -169,15 +182,41 @@ function createHiddenViewport({
     vpChecked.delete(Number(wcId));
   }
 
+  async function release(wcId, send) {
+    const id = Number(wcId);
+    const prefix = id + ":";
+    const focusKeys = [...focusEmulated].filter((key) => key.startsWith(prefix));
+    const hadFocus = focusKeys.length > 0;
+    const hadViewport = autoViewport.has(id);
+    vpChecked.delete(id);
+    const failures = [];
+    if (hadFocus) {
+      try {
+        await send("Emulation.setFocusEmulationEnabled", { enabled: false });
+        for (const key of focusKeys) focusEmulated.delete(key);
+      } catch (cause) { failures.push(cause); }
+    }
+    if (hadViewport) {
+      bump(id);
+      try {
+        await send("Emulation.clearDeviceMetricsOverride");
+        autoViewport.delete(id);
+      } catch (cause) { failures.push(cause); }
+    }
+    if (failures.length) throw new AggregateError(failures, "hidden viewport 자원을 반환하지 못했습니다");
+    return { focus: hadFocus, viewport: hadViewport };
+  }
+
   function forget(wcId) {
     const id = Number(wcId);
     clearFocusEmulation(id);
     autoViewport.delete(id);
     vpChecked.delete(id);
+    epochs.delete(id);
   }
 
   return { pin, clearAutoViewport, ensureReady, setDefaultViewport,
-    resetSession, yieldToExplicitViewport, forget };
+    resetSession, release, yieldToExplicitViewport, forget };
 }
 
 module.exports = { createHiddenViewport };

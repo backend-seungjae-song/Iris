@@ -132,6 +132,7 @@ pnpm dev:app
 | [기능 확장](docs/extending.md) | 기능 추가와 분리 |
 | [기능 계약](docs/capabilities.md) | 모듈 구성과 검사 목록 |
 | [에이전트 자식 세션](docs/agent-context.md) | 별도 세션 실행과 관리 |
+| [확인 탭 알림](docs/review-notify.md) | 보고서나 화면을 연 탭으로 이동하는 알림 |
 | [기여 안내](CONTRIBUTING.md) | 검사와 풀 리퀘스트 절차 |
 
 ## 보안과 라이선스

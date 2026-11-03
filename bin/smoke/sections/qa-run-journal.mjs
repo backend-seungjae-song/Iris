@@ -1,6 +1,6 @@
 // 소유 범위: 회차 journal. 줄마다 run_id·source, 명령 전후 기록, 증거의 회차 폴더 저장.
 // 제공 API: 러너가 한 번 부르는 비동기 기본 run.
-// 의존 대상: core 의 공유 검사·파일 도구, sources 의 공유 소스, Node 파일·경로·모듈 API.
+// 의존 대상: core의 공유 검사·파일 도구, sources의 공유 소스, qa-row-contract의 문체 판정, Node API
 // 유지 조건: 검사 이름과 본문. 40-qa-evidence.mjs 를 기능별로 분리한 것이고,
 //   분리하면서 본문을 바꾸지 않았고, 원본 대비 바이트 대조로 이를 강제한다.
 // 영향 범위: 러너가 동적 import 로 이 run 을 부르며 sources 의 공유 상수 계약도 함께 본다.
@@ -24,10 +24,11 @@ import {
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
 // 회차 폴더 이름을 여기서 다시 적지 않는다. 생산자와 값이 갈리면 이 검사가 엉뚱한 위치를 본다.
 import { artifactDir } from "../../../server/artifacts-home.cjs";
+import { nominalFault } from "../../../server/qa-row-contract.js";
 
 export default async function run() {
 console.log("[11] QA 회차 journal — 브라우저 생산자");
-const qaJournal = read("server/qa-journal.js"), qaJournalEntry = read("server/browser-commands.js");
+const qaJournal = read("server/qa-journal.js"), qaJournalEntry = read("server/mcp-worker/browser-service.js"), qaJournalHost = read("server/mcp-host/handlers.js"), qa = read("bin/iris-qa.mjs"), protocol = read("server/qa-protocol.js");
 // 이 파일은 회차 전체의 원본이 아니라 "서버가 받은 브라우저 명령 장부"다. 앱은 idb를 직접
 // 부르고 API·코드·저장소 계측기도 서버 밖이라, 여기 없는 source가 회차에는 더 있다.
 check("회차 로그는 journal이고 줄마다 run_id·source가 붙는다", () =>
@@ -39,46 +40,35 @@ check("회차 로그는 journal이고 줄마다 run_id·source가 붙는다", ()
 // 단조 seq는 기록되지 않은 명령을 드러내지 못한다. 기록된 것에만 번호를 붙이므로 빈 번호가
 // 생기지 않는다. 실제 보증은 accepted/completed 짝이며, 짝 없는 accepted가 확인 불가 구간이다.
 check("명령은 보내기 전에 먼저 남는다", () =>
-  /const callId = noteRunAccepted\(cmd, args, session, runId\);/.test(qaJournalEntry)
+  /accepted = await call\("journal\.accept", \{ command, args, path: args\?\.path \}\);[\s\S]{0,400}journal\.recordFrame[\s\S]{0,500}const executed = await execute/.test(qaJournalEntry)
   // 조작 직전 프레임은 명령 전송 전에 찍힌다. 그 사이에 accepted 가 남아 있어야 전송 후
   // 응답이 없는 구간과 촬영 중 중단된 구간을 구별할 수 있다.
-  && qaJournalEntry.indexOf("noteRunAccepted(cmd, args, session, runId)")
-     < qaJournalEntry.indexOf('recordFrame(recRun, args && args.tab, "before"')
-  && /let last = null/.test(qaJournalEntry)
   && /kind: "accepted", call_id: callId/.test(qaJournal));
 check("끝난 뒤 같은 call_id로 닫는다", () =>
   /kind: "completed", call_id: callId \|\| undefined/.test(qaJournal)
-  && /noteRunEvent\(callId, cmd, args, session, out, tries, runId, commandRun\)/.test(qaJournalEntry)
-  && /noteRunEvent\(callId, cmd, args, session, last, tries, runId, commandRun\)/.test(qaJournalEntry)
+  && /call\("journal\.complete", \{ runToken: accepted\.runToken, result, tries \}\)/.test(qaJournalEntry)
+  && /noteRunEvent\(token\.callId, token\.command, token\.args, token\.session, input\.result/.test(qaJournalHost)
   && /const st = capturedRun \|\| runOf\(session, runId\)/.test(qaJournal));
 // 회차는 세션이 아니라 요청에 포함된다. 세션에만 묶으면 회차 둘이 겹칠 때 나중 회차가 앞 회차를
 // 가로채고, 이 계약이 깨지면 동시 회차가 경고 없이 섞인다.
-check("회차는 요청마다 실리고 세션은 기본값일 뿐이다", () =>
-  /function runOf\(session, runId\) \{[\s\S]{0,180}?runId \|\| \(session \? runBySession\.get/.test(qaJournal)
-  && /j\.run \? String\(j\.run\) : null/.test(httpHandler)
-  && /\.\.\.\(CURRENT_RUN \? \{ run: CURRENT_RUN \} : \{\}\)/.test(mcp));
+check("QA 회차는 요청마다 명시된다", () =>
+  /const \{ run, \.\.\.args \} = input/.test(qa)
+  && /run이 필요합니다/.test(qa)
+  && /session: owner/.test(qa)
+  && !/CURRENT_RUN/.test(mcp));
 // 서버를 안 지나는 계측기(앱 idb·API·코드·저장소)가 같은 장부에 합류하지 못하면 그 단계는
 // 파생에서 빠지고 다시 모델 서술로 되돌아간다.
-check("서버 밖 계측기도 같은 장부에 합류한다", () =>
-  /if \(cmd === "journal"\)/.test(qaJournal)
-  && /JOURNAL_SOURCES = new Set\(/.test(qaJournal)
-  && /kind: "assertion", source: "app"/.test(mcpApp));
+check("일반 앱 계측기는 QA 장부에 합류하지 않는다", () =>
+  !/await journal/.test(mcpApp) && !/addReceipt/.test(mcpApp)
+  && !/name: "app_expect"/.test(mcpApp));
 // 허용 목록을 리터럴로 적어 두면 목록이 생산자와 갈린 것을 이 검사가 보지 못한다. 실제로
 // bin/iris-mcp.mjs 가 source "moment" 로 내보내는데 허용값에 없어 서버가 전부 거절했고,
 // 부르는 쪽은 null 을 받고 넘어갔다(확인 결과: 전 회차 장부에 moment 0건).
 // 잠깐 뜬 알림은 다시 찍을 수 없어 그 증거는 복구되지 않는다. 목록이 아니라 대조로 검사한다.
-check("장부가 받는 source 목록이 실제 생산자를 다 담는다", () => {
-  const m = /JOURNAL_SOURCES = new Set\(\[([^\]]*)\]\)/.exec(qaJournal);
-  if (!m) return false;
-  const allowed = new Set([...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]));
-  if (!allowed.size) return false;
-  const emitted = new Set();
-  for (const src of [mcp, mcpApp]) {
-    for (const x of String(src).matchAll(/source:\s*"([a-z_]+)"/g)) emitted.add(x[1]);
-  }
-  if (!emitted.size) return false;             // 못 세면 통과시키지 않는다: 0건은 계측기 고장
-  return [...emitted].every((s2) => allowed.has(s2));
-});
+check("QA 채널만 판정 명령을 내준다", () =>
+  /expect: object/.test(protocol) && /qa_/.test(qa)
+  && !/name: "browser_expect"/.test(mcp)
+  && !/name: "app_expect"/.test(mcpApp));
 // 증거가 회차 폴더 밖에 있으면 파생한 회차는 검사기의 evidence_root 요구를 못 넘는다.
 check("증거는 발급과 같은 자리에서 회차 폴더로 굳는다", () =>
   /function persistArtifact\(st, src\)/.test(qaJournal)
@@ -106,10 +96,9 @@ check("입력값은 journal에도 안 남는다", () =>
 check("회차에 안 묶이면 지금까지대로 동작한다", () =>
   /if \(!st\) return null;\s*\/\/ 회차에 안 묶인/.test(qaJournal)
   && /if \(!st \|\| !runLogged\(cmd\)\) return null;/.test(qaJournal));
-check("영수증 번호는 회차가 있으면 서버 것을 쓴다", () =>
-  /function addReceipt\(d, serverId, runId\)/.test(mcpReport)
-  && /id: serverId \|\| "r" \+ \(receipts\.length \+ 1\)/.test(mcpReport)
-  && /shot: r\.data\.shot \|\| null \}, r\.data\.receipt, CURRENT_RUN\);/.test(mcp));
+check("판정 영수증은 QA 명령으로만 요청한다", () =>
+  /expect: object/.test(protocol) && /report: object/.test(protocol)
+  && !/addReceipt/.test(mcp) && !/CURRENT_RUN/.test(mcp));
 // ── 요구 원장: 소스 모양이 아니라 실제로 실행해 확인한다 ──────────────────
 // 게이트를 소스로만 검사하면 `false &&` 한 줄에 우회된다(변이 검사에서 확인).
 await (async () => {
@@ -262,11 +251,6 @@ await (async () => {
 
   // 규칙으로 적어 두면 다음 회차의 글은 또 서술형으로 온다. 문장 끝을 서버가 본다.
   check("보고서 문장은 명사형으로만 들어간다", () => {
-    const src = read("server/qa-journal.js");
-    const a0 = src.indexOf("const NARRATIVE_TAIL");
-    if (a0 < 0) return false;
-    const a2 = src.indexOf("\nfunction nominalFault", a0);
-    const f = new Function(src.slice(a0, a2) + "\n return narrativeSentences;")();
     const cases = [
       ["버튼이 안 눌렸다.", true],                         // 서술형은 잡는다
       ["사유가 비어 있음.", false],                        // 명사형은 통과
@@ -278,7 +262,7 @@ await (async () => {
       ["첫 줄은 됨\n둘째 줄은 안 된다.", true],            // 여러 줄도 다 본다
       ["", false],
     ];
-    return cases.every(([t, want]) => (f(t).length > 0) === want);
+    return cases.every(([text, want]) => Boolean(nominalFault("판정", text)) === want);
   });
 
   check("서술형 판정문은 줄을 닫지 못한다", () => {
@@ -401,32 +385,12 @@ await (async () => {
   // 없는 기능과 같다. 실제로 basis·void·aside가 서버에만 있어 그것을 쓰려던 회차가
   // "action은 … 중 하나입니다"로 거부당했다. 서버가 받는 동작과 MCP가 내주는 동작을
   // 대조한다.
-  check("서버가 받는 원장 동작은 MCP 표면에도 다 있다", () => {
-    const server = read("server/qa-journal.js");
-    const m = /action은 ([^"]+?) 중 하나입니다/.exec(server);
-    if (!m) return false;
-    const wanted = m[1].split("·").map((x) => x.trim()).filter(Boolean);
-    const enumLine = /enum: \[([^\]]*)\][^}]*?description: "declare=/.exec(mcp);
-    if (!enumLine) return false;
-    const have = enumLine[1].split(",").map((x) => x.trim().replace(/^"|"$/g, ""));
-    return wanted.every((w) => have.includes(w)) && wanted.length === have.length;
-  });
+  check("QA 줄 도구는 서버 선언과 판정 계약을 쓴다", () =>
+    /row: QA_ROW_SCHEMA/.test(protocol) && /applyQaRow/.test(read("server/qa-channel.js"))
+    && !/name: "browser_row"/.test(mcp));
   // 줄에 근거 원문을 실을 수 있어도 MCP가 그 칸을 안 내주면 보고서는 영영 원문 없이 나간다.
-  check("근거 원문과 따라 도는 목록도 MCP가 내준다", () =>
-    /quote: \{ type: "string"/.test(mcp) && /sourceShot: \{ type: "string"/.test(mcp)
-    && /covers: \{ type: "array"/.test(mcp)
-    // 목록은 여럿이다. 앞 회차의 지적과 코드에서 찾은 발생 위치를 한 회차가 함께 든다.
-    && /list: \{ type: "array"/.test(mcp) && /from: \{ type: "object"/.test(mcp)
-    && /pick: \{ type: "string"/.test(mcp)
-    && /receipt: \{ type: "string", description: "void:/.test(mcp)
-    && /frames: \{ type: "array", items: \{ type: "string" \}, description: "aside:/.test(mcp)
-    // 스키마만 있고 전달자가 없으면 값이 서버까지 안 간다.
-    && /action: "basis", runId/.test(mcp) && /action: "void", runId/.test(mcp)
-    && /action: "aside", runId/.test(mcp) && /\{ list: a\.list \}/.test(mcp)
-    // 목록이 도중에 들어오면 이미 세운 줄에 나중에 이어야 한다.
-    && /"covers", "open"/.test(mcp) && /action: "covers", runId/.test(mcp)
-    && /row: a\.row, covers: a\.covers/.test(mcp));
-
+  check("QA 줄 도구는 임의 증거 입력 명령을 주지 않는다", () =>
+    !/journal: object/.test(protocol) && /applyQaRow/.test(read("server/qa-channel.js")));
   // 색만 남은 판정은 발견이 아니다. 보고서를 읽는 사람이 보는 것은 "무엇을 보았는가" 한
   // 문장이고, 그 문장이 빠지면 화면에 색만 남는다. 실제로 아홉 줄이 그렇게 닫혔다.
   // 부르는 쪽이 said로 보냈지만 서버가 note만 받아 버린 것이 원인이므로 두 이름을 모두 받는다.
@@ -780,7 +744,7 @@ await (async () => {
     if (!row || row.what !== "일일 퀘스트 > ↑ 클릭 > 저장 > 순서 바뀜")
       throw new Error("재시작 뒤 교정이 안 살아났다: " + (row && row.what));
     if (!row.walked || !row.walked["정상"]) throw new Error("교정이 닫힌 경로를 지웠다");
-    return /what: a\.what/.test(mcp) && /if \(e\.what\) r0\.what = e\.what/.test(mcpReport);
+    return /if \(e\.what\) r0\.what = e\.what/.test(mcpReport);
   });
 
   // 2차 QA처럼 앞 회차의 지적을 받아 도는 회차는 그 목록이 맨 앞에 서야 문서 하나로 닫힌다.
@@ -823,14 +787,14 @@ await (async () => {
 // 기록은 확인 과정의 부산물이어야 한다. 프레임을 사람이 직접 호출하면 기록 밀도가 사람에 따라
 // 달라진다. 확인 결과 단계의 21%가 사진 없음이었고, 직전 프레임 9개 중 6개는 다른 조작의 직후 장면이었다.
 check("조작은 스스로 직전·직후를 남긴다", () => {
-  const cmds = sliceBetween(qaJournal, "const ACT_CMDS = new Set(", "export function isActCmd", "조작 명령 집합");
+  const cmds = sliceBetween(qaJournalEntry, "const ACT_COMMANDS = new Set(", "const RETRY_DELAYS", "조작 명령 집합");
   return ["click", "fill", "key", "select", "goto", "bulkfill"].every((c) => cmds.includes(`"${c}"`))
     // 회차가 열려 있을 때만 찍는다. 회차 밖 단발 조작까지 찍으면 쓰지 않는 파일이 쌓인다.
-    && /const recRun = isActCmd\(cmd\) \? runFor\(session, runId\) : null/.test(qaJournalEntry)
-    && /recordFrame\(recRun, args && args\.tab, "before", shoot\)/.test(qaJournalEntry)
-    && /recordFrame\(recRun, args && args\.tab, "after", shoot\)/.test(qaJournalEntry)
+    && /accepted\?\.captureFrames && ACT_COMMANDS\.has\(command\)/.test(qaJournalEntry)
+    && /journal\.recordFrame", \{ runToken: accepted\.runToken, tab: args\?\.tab, phase: "before" \}/.test(qaJournalEntry)
+    && /journal\.recordFrame", \{ runToken: accepted\.runToken, tab: args\?\.tab, phase: "after" \}/.test(qaJournalEntry)
     // 촬영이 실패해도 조작 결과는 그대로 반환한다. 기록 실패가 이미 수행된 조작을 무효로 만들지 않는다.
-    && /try \{ await recordFrame\(recRun, args && args\.tab, "after", shoot\); \} catch \{\}/.test(qaJournalEntry);
+    && /try \{ await call\("journal\.recordFrame", \{ runToken: accepted\.runToken, tab: args\?\.tab, phase: "after" \}\); \} catch \{\}/.test(qaJournalEntry);
 });
 // 중복은 만든 뒤 제거하지 않고 찍는 시점에 판별한다. 디스크 사용량과 정리 부담이
 // 그대로면 증거가 밀려난다.
@@ -854,15 +818,9 @@ check("녹화 프레임은 회차 폴더로 간다", () =>
 check("중복은 같은 탭의 직전 프레임과만 견준다", () =>
   /function lastFrame\(st, tab\)/.test(qaJournal)
   && qaJournal.includes('.get(String(tab || ""))'));
-check("회차 여닫기가 도구로 노출된다", () =>
-  /name: "browser_run"/.test(mcp)
-  && /enum: \["begin", "end", "status"\]/.test(mcp)
-  && /C\("run", \{ action: act, runId: a\.runId \|\| CURRENT_RUN \|\| undefined,/.test(mcp)
-  && /surfaces: \{ type: "array"/.test(mcp)
-  && /CURRENT_RUN = act === "end" \? null :/.test(mcp));
-
-
-
+check("회차 여닫기가 QA 도구로 노출된다", () =>
+  /run_begin: object/.test(protocol) && /run_end: object/.test(protocol)
+  && /qa_/.test(qa) && !/name: "browser_run"/.test(mcp));
 // ── 증거 사슬 누수 (전수 점검) ────────────────────────────────
 // 아래는 모두 같은 유형이다. 도구는 값을 갖고 있는데 기록이 그 값을 옮기지 않았다. 기록되지 않은
 // 값은 "그 사실이 없다"와 구별되지 않고, 나중에 그 필드로 집계하면 항상 0이 나온다.
@@ -886,9 +844,7 @@ check("받은 상세는 잘라서 담는다", () =>
 
 // 몇 곳이 맞았는지가 판정문 문자열 안에만 있으면 회차 전체에서 셀 수 없다.
 check("판정이 몇 곳을 봤는지 수로 남는다", () =>
-  /matched: d\.matched != null \? Number\(d\.matched\) : undefined/.test(qaJournal)
-  && /matched: f\.hits\.length/.test(mcpApp));
-
+  /matched: d\.matched != null \? Number\(d\.matched\) : undefined/.test(qaJournal));
 // 한 호출이 장면을 여럿 돌려주는 shotsizes 는 저장 로직이 하나만 처리해 나머지가 누락됐다.
 check("한 호출이 여럿 돌려준 장면도 회차로 굳는다", () =>
   /Array\.isArray\(d\.shots\) && d\.shots\.length/.test(qaJournal)
@@ -899,29 +855,20 @@ check("같아서 안 남긴 프레임에도 줄이 박힌다", () =>
   /same_as: prev, same: true, url: d\.url \|\| undefined, \.\.\.laneStamp\(st\)/.test(qaJournal));
 
 // 앱 조작은 idb 를 직접 부르므로 서버의 자동 기록 경로를 지나지 않는다. 도구 넷이 장부에 0건이었다.
-check("앱 조작도 장부에 남는다", () =>
-  /const APP_ACT = new Set\(\["app_tap", "app_text", "app_key", "app_swipe"\]\)/.test(mcpApp)
-  && /if \(!APP_ACT\.has\(t\.name\)\) continue;/.test(mcpApp)
-  && /kind: "accepted", source: "app", cmd: t\.name\.slice\(4\)/.test(mcpApp)
-  && /kind: "completed", source: "app", cmd: t\.name\.slice\(4\)/.test(mcpApp));
-
+check("일반 앱 조작은 장부에 쓰지 않는다", () =>
+  /const APP_ACT = new Set/.test(mcpApp)
+  && !/kind: "accepted", source: "app"/.test(mcpApp)
+  && !/kind: "completed", source: "app"/.test(mcpApp));
 // 브라우저 증거에는 url 이 붙는데 앱 증거에는 아무것도 안 붙어, 그 줄의 주제를 정할 수 없었다.
-check("앱 증거에도 어느 화면인지 붙는다", () =>
-  /function appIdent\(udid, app\)/.test(mcpApp)
-  && (String(mcpApp).match(/url: appIdent\(u, app\)/g) || []).length >= 3);
-
+check("일반 앱 관찰에는 화면 이름이 남는다", () =>
+  /app: s\.app/.test(mcpApp) && /screen: s\.frame/.test(mcpApp));
 // 장부가 거절해도 그 사실이 기록되지 않았다. 드물게 발생하는 거절이 조용하면 발견되지 않는다.
-check("장부가 거절하면 그 사실이 들린다", () =>
-  /console\.error\(`\[iris\] 장부가 거절했다/.test(mcp));
-
+check("일반 MCP는 QA 장부를 호출하지 않는다", () =>
+  !/CURRENT_RUN/.test(mcp) && !/call\("journal"/.test(mcp));
 // 잠깐 뜬 알림은 다시 찍을 수 없다. 문구뿐 아니라 측정값도 그때 함께 남긴다.
-check("잠깐 뜬 알림의 실측값이 남는다", () =>
-  /source: "moment", shot,/.test(mcp)
-  && /떠있던초: m\.lived != null/.test(mcp)
-  && /장부에 안 실렸다/.test(mcp));
-
-
-
+check("잠깐 뜬 알림의 실측값은 도구 응답에 남는다", () =>
+  /delivered\.push\(\{ text: g\.text, lived, shot: g\.shot/.test(mcpApp)
+  && /moments = delivered\.splice\(0\)/.test(mcpApp));
   // 소스 모양 검사는 실제 효과를 확인하지 못한다. 위 검사가 모두 통과해도 장부에 무엇이
   // 적히는지는 확인되지 않는다. 실제로 회차를 열고 도구 반환을 흘려 장부에 남는 줄을 읽는다.
   await checkAsync("도구가 돌려준 것이 실제로 장부에 적힌다", async () => {

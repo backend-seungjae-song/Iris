@@ -1,4 +1,5 @@
 import { isHostWindows } from "../core/host-path.js";
+import { createDropdown } from "../core/dropdown.js";
 // 소유 범위: Mac 원격 관리 화면
 // 제공 API: panelHtml, initCapability(ctx)
 // 의존 대상: capability context의 wsSend와 remote.* 서버 메시지
@@ -6,45 +7,26 @@ import { isHostWindows } from "../core/host-path.js";
 // 영향 범위: remote rail 화면과 원격 서비스 요청
 
 export const panelHtml = `
-  <div class="remote-body" id="remote-body">
+  <div class="remote-body" id="remote-body" data-mode="manage">
     <header class="remote-head">
       <div>
         <h2>휴대폰 원격 제어</h2>
-        <p>이 컴퓨터의 원격 제어 사용 여부와 등록 기기를 관리합니다.</p>
+        <p id="remote-subtitle">이 컴퓨터의 원격 제어와 등록 기기를 관리합니다.</p>
       </div>
     </header>
-    <section class="remote-guide" id="remote-guide" aria-live="polite" hidden>
-      <div class="remote-section-head"><h3>휴대폰 연결 순서</h3></div>
+    <section class="remote-guide remote-setup-only" id="remote-guide" aria-live="polite" hidden>
+      <div class="remote-section-head"><h3>연결 순서</h3><span class="remote-progress" id="remote-progress"></span></div>
       <ol class="remote-steps" id="remote-steps"></ol>
     </section>
-    <section class="remote-card remote-pin-card" id="remote-pin-card" hidden>
-      <div class="remote-section-head">
-        <h3>접속 PIN 변경</h3>
-        <span class="remote-pin-status" id="remote-pin-status">설정됨</span>
-      </div>
-      <p class="remote-pin-detail">PIN 기한이 지난 뒤 다시 연결할 때 입력할 숫자 6자리 이상을 정하세요.</p>
-      <form class="remote-pin-form" id="remote-pin-form">
-        <label for="remote-pin">새 PIN</label>
-        <input class="remote-pin-input" id="remote-pin" type="password" inputmode="numeric" minlength="6" maxlength="32" autocomplete="new-password" />
-        <label for="remote-pin-confirm">PIN 확인</label>
-        <input class="remote-pin-input" id="remote-pin-confirm" type="password" inputmode="numeric" minlength="6" maxlength="32" autocomplete="new-password" />
-        <button type="submit" class="cc-btn cc-btn-pri" id="remote-pin-save">PIN 변경</button>
-      </form>
-      <div class="remote-pin-idle">
-        <label for="remote-pin-idle">PIN 다시 확인</label>
-        <select id="remote-pin-idle">
-          <option value="10">10분 동안 사용하지 않을 때</option>
-          <option value="20">20분 동안 사용하지 않을 때</option>
-          <option value="30">30분 동안 사용하지 않을 때</option>
-          <option value="60">60분 동안 사용하지 않을 때</option>
-        </select>
-        <p>폰 화면을 사용하는 동안 기한이 갱신됩니다. 다른 앱에서 돌아오면 기한 안에서 자동으로 다시 연결합니다.</p>
-      </div>
-    </section>
-    <section class="remote-card" id="remote-status-card" aria-live="polite">
+    <section class="remote-card remote-status-card remote-manage-only" id="remote-status-card" aria-live="polite">
       <div class="remote-state-line"><span class="remote-dot" id="remote-dot"></span><strong id="remote-status">확인 중…</strong></div>
       <p class="remote-detail" id="remote-detail">저장된 설정을 확인하고 있습니다.</p>
       <button type="button" class="cc-btn cc-btn-pri" id="remote-action" hidden></button>
+    </section>
+    <section class="remote-card remote-status-card remote-health remote-manage-only" id="remote-health" aria-live="polite" hidden>
+      <div class="remote-state-line"><span class="remote-dot remote-dot-warn"></span><strong id="remote-health-title"></strong></div>
+      <p class="remote-detail" id="remote-health-detail"></p>
+      <button type="button" class="cc-btn cc-btn-pri" id="remote-health-action" hidden></button>
     </section>
     <p class="remote-feedback" id="remote-feedback" role="status" hidden></p>
     <section class="remote-requests" id="remote-requests" hidden>
@@ -66,17 +48,45 @@ export const panelHtml = `
       <p class="remote-countdown" id="remote-countdown"></p>
       <button type="button" class="cc-btn cc-btn-txt" id="remote-pair-cancel">취소</button>
     </section>
-    <section class="remote-devices" id="remote-devices" hidden>
+    <section class="remote-devices remote-manage-only" id="remote-devices">
       <div class="remote-section-head">
         <h3>등록 기기</h3>
         <button type="button" class="cc-btn cc-btn-pri" id="remote-pair-start">기기 추가</button>
       </div>
+      <p class="remote-device-note" id="remote-device-note" hidden></p>
       <div class="remote-device-list" id="remote-device-list"></div>
     </section>
-    <section class="remote-hook" id="remote-hook">
-      <div class="remote-section-head"><h3>Claude 질문 응답</h3></div>
-      <p class="remote-hook-status" id="remote-hook-status"></p>
-      <button type="button" class="cc-btn cc-btn-pri" id="remote-hook-action"></button>
+    <section class="remote-settings remote-manage-only" id="remote-settings">
+      <div class="remote-section-head"><h3>설정</h3></div>
+      <div class="remote-setting-row" id="remote-hook">
+        <div>
+          <strong>Claude 질문 응답</strong>
+          <span id="remote-hook-status"></span>
+        </div>
+        <button type="button" class="cc-btn cc-btn-pri" id="remote-hook-action"></button>
+      </div>
+      <details class="remote-setting" id="remote-pin-card" hidden>
+        <summary>
+          <span class="remote-setting-label"><strong>접속 PIN</strong><span id="remote-pin-status">설정됨</span></span>
+        </summary>
+        <div class="remote-setting-body">
+          <p class="remote-pin-detail">PIN 기한이 지난 뒤 다시 연결할 때 입력할 숫자 6자리 이상을 정하세요.</p>
+          <div id="remote-pin-slot">
+            <form class="remote-pin-form" id="remote-pin-form">
+              <label for="remote-pin">새 PIN</label>
+              <input class="remote-pin-input" id="remote-pin" type="password" inputmode="numeric" minlength="6" maxlength="32" autocomplete="new-password" />
+              <label for="remote-pin-confirm">PIN 확인</label>
+              <input class="remote-pin-input" id="remote-pin-confirm" type="password" inputmode="numeric" minlength="6" maxlength="32" autocomplete="new-password" />
+              <button type="submit" class="cc-btn cc-btn-pri" id="remote-pin-save">PIN 변경</button>
+            </form>
+          </div>
+          <div class="remote-pin-idle">
+            <span class="remote-field-label" id="remote-pin-idle-label">PIN 다시 확인</span>
+            <div id="remote-pin-idle"></div>
+            <p>폰 화면을 사용하는 동안 기한이 갱신됩니다. 다른 앱에서 돌아오면 기한 안에서 자동으로 다시 연결합니다.</p>
+          </div>
+        </div>
+      </details>
     </section>
   </div>
 `;
@@ -95,6 +105,8 @@ let openedLoginUrl = null;
 let pinPauseNoticeShown = false;
 let startupStateTimer = null;
 const PIN_PAUSED_NOTICE_ID = "remote-pin-paused";
+const PIN_IDLE_MINUTES = [10, 20, 30, 60];
+let idleDropdown = null;
 
 function byId(id) {
   return document.getElementById(id);
@@ -117,6 +129,12 @@ function notifyPausedForPin() {
     action: { label: "원격 화면 열기", run: openRemoteScreen },
   });
   try { ctx.acHost?.notify?.({ id: PIN_PAUSED_NOTICE_ID, title, body, level: "warn" }); } catch {}
+}
+
+// 접속 PIN이나 등록 기기가 없으면 연결 순서를 보여 주고, 둘 다 있으면 관리 화면을 보여 준다
+function setupNeeded(state) {
+  if (!state) return false;
+  return state.pinConfigured !== true || !(Array.isArray(state.devices) && state.devices.length > 0);
 }
 
 function viewOf(state) {
@@ -177,7 +195,10 @@ function renderPairing() {
   const scan = byId("remote-pair-scan");
   const code = byId("remote-pair-code");
   const start = byId("remote-pair-start");
-  if (start) start.hidden = current?.status !== "on" || !!pairing;
+  if (start) {
+    start.hidden = !!pairing;
+    start.disabled = current?.status !== "on";
+  }
   if (!card || !scan || !code) return;
   card.hidden = !pairing;
   scan.hidden = pairing?.phase !== "scan";
@@ -211,9 +232,12 @@ function formatAddedAt(value) {
 }
 
 function renderDevices() {
-  const section = byId("remote-devices");
   const list = byId("remote-device-list");
-  if (section) section.hidden = current?.status !== "on";
+  const note = byId("remote-device-note");
+  if (note) {
+    note.hidden = current?.status === "on";
+    note.textContent = "원격 제어를 켜면 기기를 추가할 수 있습니다.";
+  }
   if (!list || typeof document.createElement !== "function") return;
   const devices = Array.isArray(current?.devices) ? current.devices : [];
   if (pendingRemoval && !devices.some((device) => device.deviceId === pendingRemoval)) pendingRemoval = null;
@@ -365,8 +389,8 @@ function renderHook() {
   const action = byId("remote-hook-action");
   if (!status || !action) return;
   const installed = current?.questionHookInstalled === true;
-  status.textContent = installed ? "질문 응답이 설치되어 있습니다." : "Claude 질문을 휴대폰과 이 화면에서 답하려면 설치하세요.";
-  action.textContent = installed ? "제거" : "질문 응답 설치";
+  status.textContent = installed ? "설치됨" : "설치하면 휴대폰과 이 화면에서 Claude 질문에 답할 수 있습니다.";
+  action.textContent = installed ? "제거" : "설치";
   action.dataset.hookAction = installed ? "remove" : "install";
   action.disabled = false;
   action.classList.toggle("cc-btn-danger", installed);
@@ -384,10 +408,9 @@ function renderPin() {
     save.textContent = configured ? "PIN 변경" : "PIN 저장";
     save.disabled = false;
   }
-  const idle = byId("remote-pin-idle");
-  if (idle && [10, 20, 30, 60].includes(current?.pinIdleMinutes)) {
-    idle.value = String(current.pinIdleMinutes);
-    idle.disabled = false;
+  if (idleDropdown && PIN_IDLE_MINUTES.includes(current?.pinIdleMinutes)) {
+    idleDropdown.setValue(String(current.pinIdleMinutes));
+    idleDropdown.el.querySelector(".cc-dd-trigger").disabled = false;
   }
 }
 
@@ -396,6 +419,13 @@ function render() {
   if (!host) return;
   const view = viewOf(current);
   host.dataset.tone = view.tone;
+  host.dataset.mode = setupNeeded(current) ? "setup" : "manage";
+  const subtitle = byId("remote-subtitle");
+  if (subtitle) {
+    subtitle.textContent = host.dataset.mode === "setup"
+      ? "순서대로 따라 하면 휴대폰이 연결됩니다."
+      : "이 컴퓨터의 원격 제어와 등록 기기를 관리합니다.";
+  }
   byId("remote-status").textContent = view.title;
   byId("remote-detail").textContent = view.detail;
   const action = byId("remote-action");
@@ -410,6 +440,7 @@ function render() {
   renderRequests();
   renderHook();
   renderGuide();
+  renderHealth();
   renderPin();
   renderFeedback();
 }
@@ -452,31 +483,19 @@ function guideSteps() {
     {
       title: "접속 PIN 설정",
       done: current?.pinConfigured === true,
-      summary: "설정됨",
       detail: "휴대폰에서 입력할 숫자 6자리 이상을 두 번 입력해 저장하세요.",
       pinForm: true,
     },
     {
       title: isHostWindows() ? "Windows Tailscale 연결" : "Mac Tailscale 연결",
       done: tailscale?.phase === "running",
-      summary: mac.detail,
       detail: mac.detail,
       tone: mac.tone,
       action: mac.action ? { kind: `ts-${mac.action}`, label: mac.label, disabled: mac.disabled } : null,
     },
     {
-      title: "휴대폰 Tailscale 연결",
-      done: online.length > 0,
-      summary: online.map((phone) => phone.name).filter(Boolean).join(", ") || "연결됨",
-      detail: phones.length
-        ? "휴대폰 Tailscale 앱에서 연결을 켜세요."
-        : `휴대폰에 Tailscale을 설치하고 이 컴퓨터와 같은 계정${tailnet ? `(${tailnet})` : ""}으로 로그인하세요. 아래 QR을 휴대폰 카메라로 찍으면 설치 화면이 열립니다. 로그인하면 이 단계가 자동으로 완료됩니다.`,
-      qr: phones.length ? null : tailscale?.phoneInstallQr,
-    },
-    {
       title: "원격 제어 켜기",
       done: current?.status === "on",
-      summary: current?.listener?.address ? `${current.listener.address}:${current.listener.port}` : "켜짐",
       detail: failed && current.error?.message ? current.error.message : "이 컴퓨터가 Tailscale 주소로만 휴대폰 연결을 받습니다.",
       tone: failed ? "error" : undefined,
       action: {
@@ -488,10 +507,12 @@ function guideSteps() {
     {
       title: "휴대폰 등록",
       done: devices.length > 0,
-      summary: devices.map((device) => device.name).join(", "),
       detail: pairing
         ? "휴대폰 Iris Remote 앱에서 ‘QR 코드 스캔’을 누르고 아래 QR을 찍으세요. 휴대폰에 뜬 6자리 숫자를 아래에 입력하면 끝납니다."
-        : "휴대폰에서 Iris Remote 앱을 연 뒤 기기 추가를 누르세요.",
+        : online.length > 0
+          ? "휴대폰에서 Iris Remote 앱을 연 뒤 아래 ‘기기 추가’를 눌러 QR을 띄우세요."
+          : `먼저 휴대폰에 Tailscale을 설치하고 이 컴퓨터와 같은 계정${tailnet ? `(${tailnet})` : ""}으로 로그인하세요. 아래 QR을 휴대폰 카메라로 찍으면 설치 화면이 열립니다. 그다음 휴대폰에서 Iris Remote 앱을 열고 ‘기기 추가’를 눌러 QR을 띄우세요.`,
+      qr: !pairing && online.length === 0 ? tailscale?.phoneInstallQr : null,
       action: pairing ? null : { kind: "pair", label: "기기 추가" },
     },
   ];
@@ -500,38 +521,31 @@ function guideSteps() {
 function renderGuide() {
   const guide = byId("remote-guide");
   const list = byId("remote-steps");
-  const statusCard = byId("remote-status-card");
   if (!guide || !list || typeof document.createElement !== "function") return;
   const pinCard = byId("remote-pin-card");
   const pinForm = byId("remote-pin-form");
-  if (pinCard && pinForm) pinCard.append(pinForm);
+  if (pinCard && pinForm) (byId("remote-pin-slot") || pinCard).append(pinForm);
   const steps = guideSteps();
-  const complete = steps.every((step) => step.done);
-  guide.hidden = complete;
-  if (statusCard) statusCard.hidden = !complete;
-  // 등록 전에는 연결 순서의 기기 추가 버튼 하나만
-  if (!complete && byId("remote-devices")) byId("remote-devices").hidden = true;
+  guide.hidden = !setupNeeded(current);
+  const progress = byId("remote-progress");
+  if (progress) progress.textContent = `${steps.filter((step) => step.done).length}/${steps.length}`;
   const currentIndex = steps.findIndex((step) => !step.done);
+  // 끝난 단계는 보여 주지 않는다. 남은 단계만 원래 번호로 나열하고 첫 단계에만 설명과 버튼을 둔다
   const nodes = steps.map((step, index) => {
+    if (step.done) return null;
     const item = document.createElement("li");
     item.className = "remote-step";
-    item.dataset.state = step.done ? "done" : index === currentIndex ? "current" : "later";
+    item.dataset.state = index === currentIndex ? "current" : "later";
     if (step.tone === "error" && index === currentIndex) item.dataset.tone = "error";
     const head = document.createElement("div");
     head.className = "remote-step-head";
     const mark = document.createElement("span");
     mark.className = "remote-step-mark";
-    mark.textContent = step.done ? "✓" : String(index + 1);
+    mark.textContent = String(index + 1);
     const title = document.createElement("strong");
     title.textContent = step.title;
     head.append(mark, title);
     item.append(head);
-    if (step.done && step.summary) {
-      const summary = document.createElement("p");
-      summary.className = "remote-step-summary";
-      summary.textContent = step.summary;
-      item.append(summary);
-    }
     if (index === currentIndex) {
       const detail = document.createElement("p");
       detail.className = "remote-step-detail";
@@ -557,10 +571,27 @@ function renderGuide() {
       }
     }
     return item;
-  });
+  }).filter(Boolean);
   list.replaceChildren(...nodes);
   const qr = steps[currentIndex]?.qr;
   if (qr) drawQr(qr, "remote-guide-qr");
+}
+
+// 설정이 끝난 뒤 Tailscale이 끊기면 관리 화면 위쪽에 원인과 복구 버튼을 보여 준다
+function renderHealth() {
+  const card = byId("remote-health");
+  if (!card) return;
+  const broken = !!tailscale && tailscale.phase !== "running" && !setupNeeded(current);
+  card.hidden = !broken;
+  if (!broken) return;
+  const view = tailscaleView(tailscale);
+  byId("remote-health-title").textContent = view.title;
+  byId("remote-health-detail").textContent = view.detail;
+  const action = byId("remote-health-action");
+  action.hidden = !view.action;
+  action.disabled = view.disabled === true;
+  action.dataset.guideAction = view.action ? `ts-${view.action}` : "";
+  action.textContent = view.label || "";
 }
 
 function runGuideAction(kind) {
@@ -598,6 +629,7 @@ function receiveTailscale(message) {
   if (message.phase !== "needs-login") loginRequested = false;
   else if (loginRequested && message.authUrl && openedLoginUrl !== message.authUrl) openLoginTab(message.authUrl);
   renderGuide();
+  renderHealth();
   scheduleTailscalePoll();
 }
 
@@ -688,6 +720,14 @@ function receivePinResult(message) {
   ctx.wsSend({ type: "remote.status" });
 }
 
+export function requestPinIdle(minutes) {
+  if (!PIN_IDLE_MINUTES.includes(minutes)) return false;
+  const trigger = idleDropdown?.el.querySelector(".cc-dd-trigger");
+  if (trigger) trigger.disabled = true;
+  ctx.wsSend({ type: "remote.pin-idle.set", minutes });
+  return true;
+}
+
 function receivePinIdleResult(message) {
   feedback = `PIN 다시 확인 기한을 ${message.minutes}분으로 저장했습니다.`;
   renderFeedback();
@@ -716,12 +756,17 @@ export function initCapability(context) {
     });
   } catch {}
   byId("remote-pin-form")?.addEventListener("submit", sendAccessPin);
-  byId("remote-pin-idle")?.addEventListener("change", (event) => {
-    const minutes = Number(event.currentTarget.value);
-    if (![10, 20, 30, 60].includes(minutes)) return;
-    event.currentTarget.disabled = true;
-    ctx.wsSend({ type: "remote.pin-idle.set", minutes });
-  });
+  const idleMount = byId("remote-pin-idle");
+  if (idleMount && typeof document.createElement === "function") {
+    idleDropdown?.destroy();
+    idleDropdown = createDropdown({
+      items: PIN_IDLE_MINUTES.map((minutes) => ({ value: String(minutes), label: `${minutes}분 동안 사용하지 않을 때` })),
+      value: "10",
+      ariaLabel: "PIN 다시 확인 기한",
+      onChange: (value) => requestPinIdle(Number(value)),
+    });
+    idleMount.append(idleDropdown.el);
+  }
   for (const id of ["remote-pin", "remote-pin-confirm"]) {
     byId(id)?.addEventListener("input", (event) => {
       event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "").slice(0, 32);
@@ -732,6 +777,12 @@ export function initCapability(context) {
     if (!action) return;
     event.currentTarget.disabled = true;
     ctx.wsSend({ type: `remote.${action}` });
+  });
+  byId("remote-health-action")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    if (!button.dataset.guideAction || button.disabled) return;
+    button.disabled = true;
+    runGuideAction(button.dataset.guideAction);
   });
   byId("remote-steps")?.addEventListener("click", (event) => {
     const button = event.target?.closest?.("[data-guide-action]");

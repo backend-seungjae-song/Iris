@@ -118,13 +118,40 @@ function createWindowCatalog({ execFile, readCoreSource, log }) {
     }
     let resolved = matches.map((m) => m.id);
     const front = matches.find((m) => m.window.id === snapshot.front)?.id ?? snapshot.front;
-    while (resolved.length) {
-      const id = core.selectTarget({ ...input, front, resolved }).id;
-      if (id == null) break;
+    // 차례: 창 하나 또는 묶음. 순서·포커스 규칙은 JXA irisStep 과 동일
+    const plan = core.planStops((input.targets || []).map((t) => ({ id: t.id ?? t.cgId, group: t.group })));
+    const frontStop = core.stopIdOf(plan, front) ?? front;
+    const focus = (w) => winNative.request({ op: "focus", hwnd: w.id, pid: w.pid, start: w.pidStart });
+    const raiseCompanions = async (ids) => {
+      const also = [], left = [];
+      for (const other of ids) {
+        const w = matches.find((m) => m.id === other).window;
+        const r = await focus(w);
+        if (r.ok) also.push(other);
+        else left.push({ id: other, reason: r.error === "desktop-switch-unsupported" ? "other-desktop" : "raise-did-not-land" });
+      }
+      return { also, left };
+    };
+    for (let attempts = 0; resolved.length && attempts < (input.targets || []).length; attempts += 1) {
+      const stopIds = plan.stops.filter((stop) => stop.members.some((m) => resolved.includes(m))).map((stop) => stop.id);
+      const stopId = core.selectTarget({
+        ordered: plan.ordered, resolved: stopIds, front: frontStop,
+        cursor: core.stopIdOf(plan, input.cursor), dir: input.dir,
+      }).id;
+      if (stopId == null) break;
+      const live = plan.stops.find((stop) => stop.id === stopId).members.filter((m) => resolved.includes(m));
+      const id = live[0];
       const w = matches.find((m) => m.id === id).window;
-      if (w.pid === input.ownPid) return { ok: true, raised: null, own: id, resolved, missing, front };
-      const r = await winNative.request({ op: "focus", hwnd: w.id, pid: w.pid, start: w.pidStart });
-      if (r.ok) return { ok: true, raised: id, resolved, missing, front };
+      if (w.pid === input.ownPid) {
+        const group = await raiseCompanions(live.slice(1));
+        return { ok: true, raised: null, own: id, ...group, resolved, missing, front };
+      }
+      const r = await focus(w);
+      if (r.ok) {
+        const group = await raiseCompanions(live.slice(1));
+        if (group.also.length) await focus(w);
+        return { ok: true, raised: id, ...group, resolved, missing, front };
+      }
       missing.push({ id, reason: r.error === "desktop-switch-unsupported" ? "desktop-switch-failed" : "raise-did-not-land" });
       resolved = resolved.filter((other) => other !== id);
     }
@@ -181,6 +208,9 @@ function createWindowCatalog({ execFile, readCoreSource, log }) {
     };
     // 이 앱의 자기 창은 앱이 직접 올린다. 스크립트는 그 id 만 알려 준다.
     if ("own" in parsed && parsed.own != null) result.own = parsed.own;
+    // 묶음 차례에서 같이 올린 창과 못 올린 창
+    if (Array.isArray(parsed.also)) result.also = parsed.also;
+    if (Array.isArray(parsed.left)) result.left = parsed.left;
     return result;
   }
 

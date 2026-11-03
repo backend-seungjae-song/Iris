@@ -35,6 +35,21 @@
 
 const { isFileUrl, isLocalPage } = require("./local-link.cjs");
 
+// 페이지 프로세스가 죽은 탭에는 CDP 명령을 보내지 않는다. 그 상태에서 Emulation.setDeviceMetricsOverride 는
+// Electron 43 메인 프로세스를 죽이고(WebContentsImpl::SetDeviceEmulationSize 빈 포인터), 페이지가 처리하는
+// 명령은 응답 없이 멈춘다. 모든 모듈이 이 wc 의 같은 debugger 객체로 보내므로 여기 한 곳에서 막는다.
+// 이 가드가 실패해도 뒤따르는 탭 설정은 막지 않는다.
+function guardCrashedSend(wc) {
+  try {
+    const dbg = wc.debugger;
+    if (!dbg || typeof dbg.sendCommand !== "function" || typeof wc.isCrashed !== "function") return;
+    const send = dbg.sendCommand.bind(dbg);
+    dbg.sendCommand = (...args) => (wc.isDestroyed() || wc.isCrashed())
+      ? Promise.reject(new Error("탭의 페이지 프로세스가 종료됐습니다. 새로고침한 뒤 다시 시도하세요."))
+      : send(...args);
+  } catch {}
+}
+
 function createWebviewLifecycle({
   app,
   noThrottleOpt,
@@ -49,6 +64,7 @@ function createWebviewLifecycle({
   registerSessionPrimer,
   // main-frame 탐색을 부착 정책에 알린다(로그인 호스트 진입 시 즉시 detach). url null 은 탐색 종료.
   noteNavigation = () => false,
+  noteDocumentNavigation = () => {},
   forgetAttachPolicy = () => {},
   noteFrameOrigin,
   dropChildSession,
@@ -65,6 +81,8 @@ function createWebviewLifecycle({
   holdAiCausality,
   // 앱이 렌더링하는 링크인지 판정한다. 확장자 표는 렌더러가 소유하고 여기는 복사본만 본다.
   appDrawsLink = () => false,
+  // 페이지가 시작한 이동이 다른 계정 규칙 주소인지(설정 「링크 열기」). true 면 요청 전에 막고 렌더러가 그 계정으로 다시 엶
+  linkAccountFor = () => false,
   // 새 창으로 여는 앱 주소(mailto:·zoommtg: 등). 사람에게 물어 설치된 앱으로 넘긴다. 앱 주소가 아니면 무시.
   // 요청한 프레임은 주지 않아 referrer(정책 적용 뒤 origin, no-referrer 면 빈 값)를 함께 넘긴다.
   openAppUrl = () => {},
@@ -130,6 +148,7 @@ function createWebviewLifecycle({
       // AI 명령이 실행되는 중에 생성된 webview 는 그 명령이 연 탭이다. 자기 wc 에는 명령이 없으므로
       // 물려주지 않으면 로드 중 내려받기·권한 요청이 사용자 조작으로 분류된다.
       if (aiDrivingAnywhere && aiDrivingAnywhere()) inheritCausality(wc, null);
+      guardCrashedSend(wc);
       wc.setBackgroundThrottling(!noThrottleOpt); // 보호 사유는 렌더러/캡처 참조가 생긴 순간 아래에서 해제
       wc.once("destroyed", () => clearThrottleState(wc));
       // 서버의 탭 등록 해제. 창을 닫으면 렌더러가 함께 사라져 직접 알리지 못함
@@ -239,10 +258,25 @@ function createWebviewLifecycle({
       };
       // 브라우저가 렌더링할 수 있는 것은 브라우저가 렌더링한다. 앱이 렌더링하는 것(마크다운)만 가로챈다.
       // 나머지는 렌더링하지 못하는 순간 내려받기로 분류되고, 그 경로는 download-hook 이 담당한다.
+      // 계정 규칙 주소로 가는 이동은 원래 계정으로 요청이 나가기 전에 막음. 한 번만 쓰는 로그인 링크가
+      // 원래 계정에서 쓰이면 바뀐 계정에서 다시 열 때 로그인 오류(2026-11-03 사용자)
+      const switchAccount = (ev, u) => {
+        if (!/^https?:/i.test(u) || !linkAccountFor(wc, u)) return false;
+        if (!toHost("ac-link-account", { wcId: wc.id, url: u })) return false;
+        ev.preventDefault();
+        return true;
+      };
+      wc.on("will-redirect", (ev, url, _isInPlace, isMainFrame) => {
+        try {
+          if (isMainFrame === false || (ev && ev.isMainFrame === false)) return;
+          switchAccount(ev, String(url || (ev && ev.url) || ""));
+        } catch {}
+      });
       wc.on("will-navigate", (ev, url) => {
         try {
           if (ev && ev.isMainFrame === false) return;
           const u = String(url || (ev && ev.url) || "");
+          if (switchAccount(ev, u)) return;
           if (!isFileUrl(u) || !appDrawsLink(u) || !pageIsLocal()) return;
           if (!toHost("ac-open-local", { target: u })) return;
           ev.preventDefault();
@@ -321,6 +355,7 @@ function createWebviewLifecycle({
           } catch {}
           const popupId = "popup:" + randomUuid();
           registerPopup(popupId, cwc);
+          registerSessionPrimer(cwc.id, () => {});
           const syncPopupFocus = () => setThrottleReason(cwc, "popup-focused", childWin.isFocused());
           childWin.on("focus", syncPopupFocus);
           childWin.on("blur", syncPopupFocus);
@@ -341,6 +376,31 @@ function createWebviewLifecycle({
           try { cwc.on("page-title-updated", (ev) => { ev.preventDefault(); stampOrigin(); }); } catch {}
           cwc.on("did-navigate", stampOrigin);
           cwc.on("did-navigate-in-page", stampOrigin);
+          let pendingDocumentNavigation = false;
+          const popupAttached = () => {
+            let attached = false; try { attached = cwc.debugger.isAttached(); } catch {}
+            return attached;
+          };
+          cwc.on("did-start-navigation", (_ev, url, isInPlace, isMainFrame) => {
+            if (!isMainFrame || isInPlace) return;
+            try { noteNavigation(cwc.id, url); } catch {}
+            if (!popupAttached()) {
+              pendingDocumentNavigation = true;
+              noteDocumentNavigation(cwc.id);
+            }
+          });
+          cwc.on("will-redirect", (ev, url, _isInPlace, isMainFrame) => {
+            if (isMainFrame === false || (ev && ev.isMainFrame === false)) return;
+            try { noteNavigation(cwc.id, url); } catch {}
+          });
+          cwc.on("did-navigate", () => {
+            if (!popupAttached() && !pendingDocumentNavigation) noteDocumentNavigation(cwc.id);
+            pendingDocumentNavigation = false;
+          });
+          cwc.on("did-stop-loading", () => {
+            pendingDocumentNavigation = false;
+            try { noteNavigation(cwc.id, null); } catch {}
+          });
           stampOrigin();
           const reg = () => {
             let title = "";
@@ -352,14 +412,17 @@ function createWebviewLifecycle({
           reg();
           cwc.on("did-navigate", reg);
           cwc.on("page-title-updated", reg);
-          cwc.once("destroyed", () => {
+          let popupUnregistered = false;
+          const unregisterSitePopup = () => {
+            if (popupUnregistered) return;
+            popupUnregistered = true;
+            registerSessionPrimer(cwc.id, null);
+            forgetAttachPolicy(cwc.id);
             unregisterPopup(popupId); clearThrottleState(cwc);
             ctlSend({ type: "browser-tab-gone", wc: cwc.id, tabId: popupId });
-          });
-          childWin.once("closed", () => {
-            unregisterPopup(popupId);
-            ctlSend({ type: "browser-tab-gone", wc: cwc.id, tabId: popupId });
-          });
+          };
+          cwc.once("destroyed", unregisterSitePopup);
+          childWin.once("closed", unregisterSitePopup);
           let reachedOpenerOrigin = false, openerHost = "";
           try { openerHost = new URL(wc.getURL()).host; } catch {}
           cwc.on("did-navigate", (_ev, u) => { try { if (openerHost && new URL(u).host === openerHost) reachedOpenerOrigin = true; } catch {} });

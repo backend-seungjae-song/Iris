@@ -114,15 +114,55 @@ List<int> _sgrParameters(String value) {
   return result;
 }
 
+// 앱 테마 색으로 바꿔 그리는 터미널 팔레트. 없으면 기본 ANSI 색
+class TerminalColors {
+  const TerminalColors({
+    required this.foreground,
+    required this.background,
+    required this.dim,
+    required this.red,
+    required this.green,
+    required this.yellow,
+    required this.blue,
+    required this.cyan,
+    required this.cursor,
+  });
+  final Color foreground;
+  final Color background;
+  final Color dim;
+  final Color red;
+  final Color green;
+  final Color yellow;
+  final Color blue;
+  final Color cyan;
+  final Color cursor;
+
+  // 0~15 번 ANSI 색. 자홍(5·13)은 기본 팔레트 유지
+  Color? ansi(int index) => switch (index) {
+    0 => background,
+    1 || 9 => red,
+    2 || 10 => green,
+    3 || 11 => yellow,
+    4 || 12 => blue,
+    6 || 14 => cyan,
+    7 || 15 => foreground,
+    8 => dim,
+    _ => null,
+  };
+}
+
 TerminalGrid parseTerminalGrid(
   String input, {
   required int columns,
   required int rows,
+  TerminalColors? colors,
 }) {
   if (columns <= 0 || rows <= 0) throw ArgumentError('터미널 열·행 수 확인 필요');
-  const foregroundDefault = Color(0xffc9dcea),
-      backgroundDefault = Color(0xff101820);
-  const base = TextStyle(color: foregroundDefault, fontFamily: 'monospace');
+  final foregroundDefault = colors?.foreground ?? const Color(0xffc9dcea),
+      backgroundDefault = colors?.background ?? const Color(0xff101820);
+  Color palette(int index) =>
+      (index < 16 ? colors?.ansi(index) : null) ?? terminalPalette(index);
+  final base = TextStyle(color: foregroundDefault, fontFamily: 'monospace');
   List<List<TerminalCell>> empty() => List.generate(
     rows,
     (_) => List.generate(columns, (_) => TerminalCell(' ', base)),
@@ -185,7 +225,7 @@ TerminalGrid parseTerminalGrid(
         case 48:
           Color? color;
           if (i + 2 < codes.length && codes[i + 1] == 5) {
-            color = terminalPalette(codes[i + 2].clamp(0, 255));
+            color = palette(codes[i + 2].clamp(0, 255));
             i += 2;
           } else if (i + 4 < codes.length && codes[i + 1] == 2) {
             color = Color.fromARGB(
@@ -204,13 +244,13 @@ TerminalGrid parseTerminalGrid(
             }
           }
         default:
-          if (code >= 30 && code <= 37) foreground = terminalPalette(code - 30);
-          if (code >= 40 && code <= 47) background = terminalPalette(code - 40);
+          if (code >= 30 && code <= 37) foreground = palette(code - 30);
+          if (code >= 40 && code <= 47) background = palette(code - 40);
           if (code >= 90 && code <= 97) {
-            foreground = terminalPalette(code - 90 + 8);
+            foreground = palette(code - 90 + 8);
           }
           if (code >= 100 && code <= 107) {
-            background = terminalPalette(code - 100 + 8);
+            background = palette(code - 100 + 8);
           }
       }
     }
@@ -370,7 +410,7 @@ TerminalGrid parseTerminalGrid(
   );
 }
 
-double terminalFontSize(double width, int columns) {
+double terminalFontSize(double width, int columns, {double max = 16}) {
   final painter = TextPainter(
     text: const TextSpan(
       text: 'M',
@@ -378,7 +418,7 @@ double terminalFontSize(double width, int columns) {
     ),
     textDirection: TextDirection.ltr,
   )..layout();
-  return (width / columns / painter.width * 16).clamp(.01, 16);
+  return (width / columns / painter.width * 16).clamp(.01, max);
 }
 
 ({int column, int row}) terminalCellAt(
@@ -393,9 +433,10 @@ double terminalFontSize(double width, int columns) {
 );
 
 class TerminalGridPainter extends CustomPainter {
-  const TerminalGridPainter(this.grid, this.fontSize);
+  const TerminalGridPainter(this.grid, this.fontSize, {this.cursorColor});
   final TerminalGrid grid;
   final double fontSize;
+  final Color? cursorColor;
   @override
   void paint(Canvas canvas, Size size) {
     final cellWidth = size.width / grid.columns,
@@ -442,18 +483,22 @@ class TerminalGridPainter extends CustomPainter {
           cellWidth,
           cellHeight,
         ),
-        Paint()..color = Colors.white.withValues(alpha: .4),
+        Paint()..color = cursorColor ?? Colors.white.withValues(alpha: .4),
       );
     }
   }
 
   @override
   bool shouldRepaint(TerminalGridPainter oldDelegate) =>
-      oldDelegate.grid != grid || oldDelegate.fontSize != fontSize;
+      oldDelegate.grid != grid ||
+      oldDelegate.fontSize != fontSize ||
+      oldDelegate.cursorColor != cursorColor;
 }
 
 String terminalErrorMessage(String code) => switch (code) {
   'terminal-frame-too-large' => '터미널 화면이 48 KiB를 넘어 표시할 수 없습니다.',
+  'terminal-read-timeout' => '터미널 읽기 시간이 초과되었습니다. 자동으로 다시 시도합니다.',
+  'terminal-screen-stale' => '출력은 바뀌지만 화면이 갱신되지 않습니다. Mac에서 이 터미널을 확인하세요.',
   'terminal-layout-unavailable' => '터미널 화면 크기를 확인할 수 없습니다. 다시 연결하세요.',
-  _ => '터미널 화면을 읽지 못했습니다. 컴퓨터에서 pane 상태를 확인하세요.',
+  _ => '터미널 화면을 읽지 못했습니다. 컴퓨터에서 터미널 상태를 확인하세요.',
 };

@@ -56,7 +56,9 @@ function createUploadController({
   }
 
   function forget(wcId) {
+    const plan = uploadPlans.get(wcId);
     uploadPlans.delete(wcId);
+    if (plan && plan.timer) clearTimeoutFn(plan.timer);
   }
 
   // 올릴 파일이 정해져 있어 다음 파일 선택창을 CDP 가 받아야 하는가.

@@ -49,6 +49,17 @@
       ]
     },
     {
+      "name": "북마크",
+      "kind": "rail",
+      "entry": "bookmarkmgr",
+      "rootIds": [
+        "bookmarkmgr-panel"
+      ],
+      "surfaceIds": [
+        "bkm-body"
+      ]
+    },
+    {
       "name": "로컬 서버",
       "kind": "rail",
       "entry": "localdev",

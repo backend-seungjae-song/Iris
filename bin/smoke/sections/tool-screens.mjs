@@ -563,10 +563,17 @@ await checkAsync("설정 배선이 붙잡는 이름이 그림에 다 있다", as
     toggles: [{ id: "login-convenience", name: "로그인 편의 기능", desc: "설명", on: false, warn: "" },
       { id: "site:geolocation", name: "위치 사용", desc: "설명", on: true, clear: { id: "geolocation", label: "기록 지우기" } }],
     screens: [{ id: "memo", label: "메모", on: true, lock: "" }],
+    // 묶음과 고른 창이 있어야 묶기·풀기·선택 배선 이름이 그려진다
     switcher: {
-      windows: [{ id: 1, cgId: 1, displayApp: "메모", displayTitle: "한 장", picked: true }],
-      picked: [{ id: 1 }], status: { permission: true },
+      windows: [{ id: 1, cgId: 1, pickKey: "k1", displayApp: "메모", displayTitle: "한 장", picked: true },
+        { id: 2, cgId: 2, pickKey: "k2", displayApp: "메모", displayTitle: "두 장", picked: true }],
+      picked: [{ pickKey: "k1", group: "g1" }, { pickKey: "k2", group: "g1" }], selected: ["k1"], status: { permission: true },
     },
+    links: { ok: true, current: "b", irisRegistered: true, choices: [
+      { id: "a", name: "Iris 공유 브라우저", path: "/A.app", self: true }, { id: "b", name: "B", path: "/B.app", self: false }] },
+    // 규칙과 경로가 붙은 입력이 있어야 지우기·도메인 전체로 배선 이름이 그려진다
+    linkRules: { rules: [{ pattern: "github.com", profile: "p" }], accounts: [{ id: "", name: "기본" }, { id: "p", name: "Work" }],
+      draft: "github.com/acme", draftAccount: "p", undo: { pattern: "x.com", profile: "" } },
     conflicts: [], changed: 1,
   };
   const all = mod.SETTINGS_SECTIONS.map((s) => mod.settingsMarkup({ ...model, section: s.id })).join("\n");
@@ -857,6 +864,9 @@ await checkAsync("기능의 서버 쪽 반을 표가 밝힌다", async () => {
     const s2 = read(f);
     const tally = new Map();
     for (const [n, c] of ownerOf) {
+      // CDP 입력 이벤트 이름이 Chrome 미러의 WebSocket 메시지 이름과 같다.
+      if (f === "native/electron/cdp-qa-input.cjs" && ["mouseWheel", "keyDown", "keyUp"].includes(n)
+        && /async "qa-input"\(/.test(s2) && /module\.exports = \{ createQaInputCommands \}/.test(s2)) continue;
       if (!(s2.includes(`"${n}"`) || s2.includes(`'${n}'`))) continue;
       tally.set(c, (tally.get(c) || 0) + 1);
     }
@@ -2187,6 +2197,7 @@ await checkAsync("채팅 복붙을 틀이 모른다", async () => {
     "chatcopy.wheel": wiring, "chatcopy.dragStart": wiring, "chatcopy.dragMove": wiring,
     "chatcopy.dragEnd": wiring, "chatcopy.selectionChanged": wiring,
     "chatcopy.dragHint": wiring, "chatcopy.dropFiles": wiring,
+    "chatcopy.forwardStart": wiring, "chatcopy.forwardEnd": wiring,
     "chatcopy.captureAfterWrite": mainSrc,
   };
   const boot = read("web/js/chatcopy/boot.js");

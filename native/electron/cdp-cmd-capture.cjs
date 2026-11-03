@@ -40,7 +40,80 @@ function createCaptureCommands({
   path,
   shotsDir,
 }) {
+  const bounded = (promise, ms) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("remote-frame-timeout")), ms);
+    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+  // 탭별 screencast 상태, 요청이 4초 끊기면 멈춘다
+  const streams = new Map();
+  const streamQuality = new Map();
+  function stopStream(id) {
+    const stream = streams.get(id);
+    if (!stream) return;
+    streams.delete(id);
+    clearTimeout(stream.idle);
+    try { stream.dbg.off("message", stream.onMessage); } catch {}
+    try { stream.dbg.sendCommand("Page.stopScreencast").catch(() => {}); } catch {}
+    if (stream.held && captureHold) { try { Promise.resolve(captureHold(id, false)).catch(() => {}); } catch {} }
+    for (const resolve of stream.waiters.splice(0)) resolve();
+  }
+  async function ensureStream(wc, width) {
+    const current = streams.get(wc.id);
+    if (current && current.width === width) return current;
+    if (current) stopStream(wc.id);
+    const dbg = wc.debugger;
+    const stream = { dbg, width, frame: null, idle: null, held: false, waiters: [], startedAt: Date.now() };
+    stream.onMessage = (_event, method, params) => {
+      if (method !== "Page.screencastFrame") return;
+      dbg.sendCommand("Page.screencastAck", { sessionId: params.sessionId }).catch(() => {});
+      stream.frame = params.data;
+      for (const resolve of stream.waiters.splice(0)) resolve();
+    };
+    dbg.on("message", stream.onMessage);
+    streams.set(wc.id, stream);
+    try {
+      stream.held = captureHold ? await captureHold(wc.id, true) : false;
+      await dbg.sendCommand("Page.startScreencast", { format: "jpeg", quality: streamQuality.get(wc.id) || 45,
+        maxWidth: width, maxHeight: width * 4, everyNthFrame: 1 });
+    } catch (error) { stopStream(wc.id); throw error; }
+    return stream;
+  }
   return {
+    // 원격 전용 화면 스트림, 켜 둔 screencast 의 최신 프레임을 바로 돌려준다
+    async remoteframe(send, wc, args) {
+      const width = Math.max(240, Math.min(2560, Number(args.width) || 1080));
+      if (!streams.get(wc.id)) await send("Page.getLayoutMetrics");
+      const stream = await ensureStream(wc, width);
+      clearTimeout(stream.idle);
+      stream.idle = setTimeout(() => stopStream(wc.id), 4000);
+      // 오래 켜 둔 screencast 는 몇 번 그린 뒤 프레임을 보내지 않는다(스크롤해도 같은 그림만 온다).
+      // 새로 시작한 screencast 는 첫 프레임을 바로 보내므로 요청마다 다시 시작해 현재 화면을 받는다.
+      if (stream.frame && Date.now() - stream.startedAt > 100) {
+        stream.frame = null;
+        stream.startedAt = Date.now();
+        await stream.dbg.sendCommand("Page.stopScreencast").catch(() => {});
+        await stream.dbg.sendCommand("Page.startScreencast", { format: "jpeg", quality: streamQuality.get(wc.id) || 45,
+          maxWidth: width, maxHeight: width * 4, everyNthFrame: 1 });
+      }
+      if (!stream.frame) await new Promise((resolve) => { stream.waiters.push(resolve); setTimeout(resolve, 1500); });
+      if (!stream.frame) throw new Error("remote-frame-timeout");
+      if (Buffer.byteLength(stream.frame, "base64") > 384 * 1024) {
+        streamQuality.set(wc.id, 40);
+        stopStream(wc.id);
+        throw new Error("remote-frame-too-large");
+      }
+      return { ok: true, jpeg: stream.frame, captureMs: 0, conversionMs: 0 };
+    },
+    // 가로 휠 지원과 기존 마우스 명령의 유지
+    async remotewheel(send, wc, args) {
+      let held = false;
+      try {
+        held = captureHold ? await captureHold(wc.id, true) : false;
+        await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: args.x, y: args.y,
+          deltaX: args.dx, deltaY: args.dy });
+        return { ok: true };
+      } finally { if (held) { try { await captureHold(wc.id, false); } catch {} } }
+    },
     // 전후를 픽셀로 비교한다. 변경 여부를 이미지로 보이려면 세 번째 이미지가 필요하다.
     async diff(_send, _wc, args) {
       const a = String(args.before || ""), b = String(args.after || "");
@@ -101,13 +174,11 @@ function createCaptureCommands({
         const dpr = Math.max(1, Math.min(3, Number(args.dpr) || 1));
         // 화면 몫 clip은 찍기 직전에 측정한다. hold 로 webview 크기가 바뀌면 그 전에 측정한 좌표는
         // 어긋난다(확인 결과: 미리 측정한 값으로 찍으니 같은 화면이 2×2로 반복됐다).
-        const mkArgs = async () => {
-          if (clip) return { format: "png", clip: { ...clip, scale: dpr } };
-          if (dpr <= 1) return { format: "png" };
-          const base = await viewportClip(send);
-          const scale = Math.max(1, Math.min(dpr, 16000 / Math.max(base.width, base.height)));
-          return { format: "png", clip: { ...base, scale } };
-        };
+        // 합성 화면은 기기 배율까지만 그려져 있어 clip.scale 을 1보다 올리면 모자란 칸이 같은 화면의 반복으로 채워짐
+        // (레티나 dpr 2 → 6896×3544 2×2 반복, dpr 3 → 아래쪽 반복). 결과 배율은 기기 배율까지만 내고 요청보다 낮으면 알림
+        const { ratio: deviceRatio = 1 } = await viewportClip(send);
+        const shotDpr = Math.min(dpr, deviceRatio);
+        const mkArgs = async () => clip ? { format: "png", clip: { ...clip, scale: 1 } } : { format: "png" };
         const race = (p, ms, tag) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(tag)), ms))]);
         await waitRenderIdle(send, args.settle);          // 반쯤 그려진 화면을 증거로 남기지 않는다
         let png = null, via = "surface";
@@ -158,7 +229,7 @@ function createCaptureCommands({
         // 방식은 디스크와 정리 부담이 그대로라, 촬영 시점에 판정한다.
         if (args.sameAs && samePng(String(args.sameAs), png)) {
           return { ok: true, path: String(args.sameAs), same: true, url: wc.getURL(),
-            title: wc.getTitle(), via, dpr };
+            title: wc.getTitle(), via, dpr: shotDpr };
         }
         const dir = shotsDir;
         fs.mkdirSync(dir, { recursive: true });
@@ -168,7 +239,8 @@ function createCaptureCommands({
         const p = args.path ? String(args.path) : path.join(dir, "shot-" + Date.now() + ".png");
         fs.mkdirSync(path.dirname(p), { recursive: true });
         fs.writeFileSync(p, png);
-        return { ok: true, path: p, url: wc.getURL(), title: wc.getTitle(), via, dpr,
+        return { ok: true, path: p, url: wc.getURL(), title: wc.getTitle(), via, dpr: shotDpr,
+          ...(dpr > deviceRatio ? { requestedDpr: dpr, dprNote: `이 화면의 기기 배율 ${deviceRatio}까지만 찍힘` } : {}),
           ...(fullVp ? { fullPage: fullVp } : {}),
           marked: drew ? drew.found : 0, missing: drew ? drew.missing : [], caption: caption || undefined,
           zoomRestored: zoom.on ? `${zoom.bz || zoom.hz || zoom.bt} (원래대로 되돌림 — 배율은 dpr을 쓰세요)` : undefined };

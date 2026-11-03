@@ -6,6 +6,7 @@ import { isHostWindows, pathBasename, samePath, pathWithin, relativePath, joinPa
 // 영향 범위: tab-store·fileview·monacoEditor·monacoViewState 및 브라우저 webview 수명주기.
 
 import { bmActiveId, boundSpace, bsMutate, getBrowserState, setBrowserActiveTab } from "../browser/state.js";
+import { keepAwakeItem } from "../browser/keep-awake.js";
 import {
   getWebview, removeDiscardedWebview, removeWebview, removeWebviewLastUsed,
   removeWebviewStatus,
@@ -14,9 +15,11 @@ import { fileKindOf } from "../core/file-kinds.js";
 import { callHook } from "../core/hooks.js";
 import { noteClosedCenterTab } from "./closed-tabs.js";
 import {
-  getActiveTabId, getCenterSpace, getCurrentTabs, getTabs, getTabSpaces,
+  getActiveTabId, isTabVisible, getCenterSpace, getCurrentTabs, getTabs, getTabSpaces,
   removeTab, setActiveTab,
 } from "./tab-store.js";
+
+import { paneHas, paneIndex, paneLayout, paneRemove, paneRename, paneTabs } from "./pane-store.js";
 
 let esc, showToast, fileview, tabstrip, BROWSER_MODE, isFileLikeKind;
 let tabIoRegistry, sendTabIo;
@@ -122,12 +125,33 @@ export async function saveTabForClose(t, space) {
   const pending = mine === undefined ? saveFileTab(t, space) : mine;
   if (pending) await pending;
 }
+function snapshotCloseTarget(target, space, tab) {
+  const snapshot = { ...target, space, tabId: target.tabId || tab.id, tabRef: tab, ref: tab };
+  if (Number.isInteger(target.pane) && !("paneRef" in target)) {
+    snapshot.paneRef = paneLayout(space)?.panes[target.pane] || null;
+  }
+  return snapshot;
+}
+function localCloseIndex(target) {
+  if (!Number.isInteger(target.pane)) return null;
+  const layout = paneLayout(target.space);
+  if (layout) return target.paneRef ? layout.panes.indexOf(target.paneRef) : -1;
+  return !target.paneRef || target.paneRef.ids.has(target.tabRef.id) ? 0 : -1;
+}
+function closesLastMembership(target, targets) {
+  if (!Number.isInteger(target.pane)) return true;
+  const layout = paneLayout(target.space);
+  if (!layout) return localCloseIndex(target) === 0;
+  return layout.panes.every((p, index) => !p.ids.has(target.tabRef.id) || targets.some((other) =>
+    other.space === target.space && other.tabRef === target.tabRef &&
+    (!Number.isInteger(other.pane) || localCloseIndex(other) === index)));
+}
 function resolveLiveCloseTargets(targets) {
   const liveTargets = [];
   for (const target of targets || []) {
     const list = getTabs(target.space);
     const current = list.find((tab) => tab === target.ref);
-    if (!current) continue;
+    if (!current || localCloseIndex(target) === -1) continue;
     if (current === target.ref) liveTargets.push(target);
   }
   return liveTargets;
@@ -150,16 +174,30 @@ async function captureBrowserHistories(targets) {
 
 export function removeTabsNow(targets, browserHistories = null) {
   callHook("viewer.closePopups");
-  const seen = new Set();
+  const seen = new Map();
   let changed = false;
-  for (const target of targets || []) {
+  const snapshots = (targets || []).filter(Boolean).map((target) => {
+    const tab = target.tabRef || target.ref;
+    return tab ? snapshotCloseTarget(target, target.space, tab) : target;
+  });
+  for (const target of snapshots) {
     const tabRef = target && (target.tabRef || target.ref);
-    if (!tabRef || seen.has(tabRef)) continue;
-    seen.add(tabRef);
+    if (!tabRef) continue;
+    const memberships = seen.get(tabRef) || new Set();
+    const membership = Number.isInteger(target.pane) ? target.paneRef || target.pane : "all";
+    if (memberships.has(membership)) continue;
+    memberships.add(membership); seen.set(tabRef, memberships);
     const list = getTabs(target.space);
     const current = list.find((tab) => tab === tabRef);
     if (!current) continue;
     if (target.ref && !(current === target.ref)) continue;
+    const index = localCloseIndex(target);
+    if (index === -1) continue;
+    if (index !== null) {
+      if (!paneRemove(target.space, current.id, index)) continue;
+      changed = true;
+      if (paneHas(target.space, current.id)) continue;
+    }
     callHook("viewer.cleanupDocxRender", current);
     callHook("viewer.tearDownTab", current);
     if (isFileLikeKind(current.kind) && current.path) untrackFileWatch(current.path, target.space, current.id);
@@ -213,9 +251,13 @@ export async function closeTabs(targets) {
   for (const target of targets || []) {
     const space = target.space || getCenterSpace();
     const tab = target.tabRef || target.ref || getTabs(space).find((item) => item.id === target.tabId);
-    if (tab) snapshots.push({ space, tabId: target.tabId || tab.id, tabRef: tab, ref: tab });
+    if (tab) snapshots.push(snapshotCloseTarget({ ...target, ref: tab }, space, tab));
   }
-  const dirtyTargets = snapshots.filter((target) => isTabDirty(target.tabRef));
+  const dirtyRefs = new Set();
+  const dirtyTargets = snapshots.filter((target) => {
+    if (!isTabDirty(target.tabRef) || !closesLastMembership(target, snapshots) || dirtyRefs.has(target.tabRef)) return false;
+    dirtyRefs.add(target.tabRef); return true;
+  });
   if (!dirtyTargets.length) {
     const browserHistories = await captureBrowserHistories(snapshots);
     removeTabsNow(snapshots, browserHistories);
@@ -237,14 +279,15 @@ export async function closeTabs(targets) {
     const saveResults = await Promise.allSettled(liveDirtyTargets.map((target) => saveTabForClose(target.tabRef, target.space)));
     const successfulRefs = new Set(liveSnapshots.filter((target) => !liveDirtyTargets.includes(target)).map((target) => target.tabRef));
     saveResults.forEach((result, index) => { if (result.status === "fulfilled") successfulRefs.add(liveDirtyTargets[index].tabRef); });
-    const closableTargets = liveSnapshots.filter((target) => successfulRefs.has(target.tabRef) && !isTabDirty(target.tabRef));
+    const closableTargets = liveSnapshots.filter((target) => successfulRefs.has(target.tabRef) && (!isTabDirty(target.tabRef) || !closesLastMembership(target, liveSnapshots)));
     const browserHistories = await captureBrowserHistories(closableTargets);
     removeTabsNow(closableTargets, browserHistories);
   }
 }
 function closeTab(id) {
+  const pane = paneLayout(getCenterSpace())?.focus || 0;
   const tabRef = getTabs(getCenterSpace()).find((tab) => tab.id === id);
-  if (tabRef) closeTabs([{ space: getCenterSpace(), tabId: id, tabRef }]);
+  if (tabRef) closeTabs([{ space: getCenterSpace(), tabId: id, tabRef, pane }]);
 }
 export async function closeActiveTab() {
   // 분리 브라우저 창: 서버 상태의 활성 브라우저 탭을 닫는다(tab-store는 메인 창 구조라 무효).
@@ -260,14 +303,14 @@ export async function closeActiveTab() {
     return;
   }
   const tabRef = getTabs(getCenterSpace()).find((tab) => tab.id === getActiveTabId(getCenterSpace()));
-  if (tabRef) closeTabs([{ space: getCenterSpace(), tabId: tabRef.id, tabRef }]);
+  if (tabRef) return closeTabs([{ space: getCenterSpace(), tabId: tabRef.id, tabRef, pane: paneLayout(getCenterSpace())?.focus || 0 }]);
 }
 // 파일 rename/move 후 열린 탭이 옛 경로를 계속 쓰면(편집·저장 시 삭제 파일 재생성 등) 안 되므로 재타깃.
 export function retargetFileTabs(oldPath, newPath) {
   if (!oldPath || !newPath) return;
   const monacoModels = getMonacoModels();
   const monacoViewState = getMonacoViewState();
-  const monacoEditor = getMonacoEditor();
+  const monacoEditors = [getMonacoEditor(0), getMonacoEditor(1)];
   const monaco = getMonacoRuntime();
   const oldPref = oldPath + "/";
   const pathMoves = new Map();
@@ -282,7 +325,7 @@ export function retargetFileTabs(oldPath, newPath) {
         pathMoves.set(oldTabPath, np);
         untrackFileWatch(oldTabPath, sp, oldId);
         t.path = np; t.id = "file:" + np; t.label = pathBasename(np); trackFileWatch(sp, t);
-        if (getActiveTabId(sp) === oldId) setActiveTab(sp, t.id);
+        paneRename(sp, oldId, t.id);
         for (const registryItem of tabIoRegistry) {
           const entry = registryItem[1];
           if (entry.tabRef !== t) continue;
@@ -295,20 +338,26 @@ export function retargetFileTabs(oldPath, newPath) {
   }
   for (const [oldKey, np] of pathMoves) {
     const oldModel = monacoModels.get(oldKey);
-    const oldViewState = monacoViewState.get(oldKey);
+    const viewStates = monacoEditors.map((editor, index) => {
+      const attached = !!(oldModel && editor?.getModel() === oldModel);
+      const viewState = attached ? editor.saveViewState() : monacoViewState.get(`${index}\0${oldKey}`);
+      monacoViewState.delete(`${index}\0${oldKey}`);
+      if (viewState) monacoViewState.set(`${index}\0${np}`, viewState);
+      return { editor, attached, viewState };
+    });
     if (oldModel) {
       const currentValue = oldModel.getValue();
-      const wasAttached = !!(monacoEditor && monacoEditor.getModel() === oldModel);
-      const attachedViewState = wasAttached ? monacoEditor.saveViewState() : oldViewState;
+      for (const { editor, attached } of viewStates) if (attached) editor.setModel(null);
       oldModel.dispose();
       monacoModels.delete(oldKey);
       const newModel = monaco.editor.createModel(currentValue, monacoLangFor(np), monaco.Uri.file(np));
       monacoModels.set(np, newModel);
-      if (wasAttached) monacoEditor.setModel(newModel);
-      if (attachedViewState) monacoViewState.set(np, attachedViewState);
-      if (wasAttached && attachedViewState) monacoEditor.restoreViewState(attachedViewState);
-    } else if (oldViewState) monacoViewState.set(np, oldViewState);
-    monacoViewState.delete(oldKey);
+      for (const { editor, attached, viewState } of viewStates) {
+        if (!attached) continue;
+        editor.setModel(newModel);
+        if (viewState) editor.restoreViewState(viewState);
+      }
+    }
   }
   renderTabs(); showActiveTab(); persistFileTabs();
 }
@@ -349,7 +398,7 @@ function commitDiscardTab(t, staged, space) {
   resetModelTextExternally(t.path, content || "");
   t.draft = null;
   const activeTab = centerSpace === space
-    ? getTabs(centerSpace).find((tab) => tab.id === getActiveTabId(centerSpace) && tab === t)
+    ? getTabs(centerSpace).find((tab) => isTabVisible(centerSpace, tab.id) && tab === t)
     : null;
   if (activeTab === t) renderFileView(t);
   renderTabs();
@@ -387,24 +436,28 @@ export async function discardTabToDisk(target) {
   }, space);
   return true;
 }
-// 이 스페이스의 탭을 전부 닫는다. 저장하지 않은 편집이 있으면 먼저 알린다. 확인 없이 닫으면
-// 되돌릴 수 없다.
-// 메뉴는 반드시 이 함수를 호출해야 한다. 메뉴가 같은 처리를 따로 구현하면 여기의 미저장
-// 경고가 뜨지 않고, 함수의 존재만 확인하는 검사는 그 상태를 통과시킨다.
-export function closeAllTabs() {
-  const list = getCurrentTabs().slice();
+export function closeAllTabs(index) {
+  const space = getCenterSpace(), pane = index ?? paneLayout(space)?.focus ?? 0;
+  const list = paneTabs(space, getCurrentTabs(), pane).slice();
   if (!list.length) return;
-  const dirty = list.filter((tab) => isTabDirty(tab));
+  const targets = list.map((tabRef) => snapshotCloseTarget({ pane }, space, tabRef));
+  const dirty = targets.filter((target) => isTabDirty(target.tabRef) && closesLastMembership(target, targets));
   if (dirty.length) showToast(`저장하지 않은 편집이 ${dirty.length}개 있습니다`, { level: "warn" });
-  closeTabs(list.map((tabRef) => ({ space: getCenterSpace(), tabId: tabRef.id, tabRef })));
+  return closeTabs(targets);
 }
 
-function initTabCloseEvents() {
+function initTabCloseEvents() { wireTabStrip(tabstrip); }
+
+const wiredStrips = new WeakSet();
+export function wireTabStrip(tabstrip) {
+  if (wiredStrips.has(tabstrip)) return;
+  wiredStrips.add(tabstrip);
   tabstrip.addEventListener("click", (e) => {
+    const pane = Number(tabstrip.dataset?.pane || 0);
     const close = e.target.closest(".cclose");
-    if (close) { e.stopPropagation(); const tabRef = getCurrentTabs().find((tab) => tab.id === close.dataset.close); if (tabRef) closeTabs([{ space: getCenterSpace(), tabId: tabRef.id, tabRef }]); return; }
+    if (close) { e.stopPropagation(); const tabRef = getCurrentTabs().find((tab) => tab.id === close.dataset.close); if (tabRef) closeTabs([{ space: getCenterSpace(), tabId: tabRef.id, tabRef, pane }]); return; }
     const tab = e.target.closest(".ctab");
-    if (tab) { const tid = tab.dataset.tab; setActiveTab(getCenterSpace(), tid); renderTabs(); showActiveTab(); persistFileTabs();
+    if (tab) { tabstrip.focus?.(); const tid = tab.dataset.tab; setActiveTab(getCenterSpace(), tid, pane); renderTabs(); showActiveTab(); persistFileTabs();
       if (String(tid).startsWith("browser:")) bsMutate({ op: "tab.switch", space: getCenterSpace(), id: tid }); }
   });
   // 콘솔 탭바 우클릭. 파일 탭이면 파일 트리와 같은 동작을 할 수 있어야 하므로,
@@ -415,15 +468,22 @@ function initTabCloseEvents() {
     e.preventDefault(); e.stopPropagation();
     const id = tab.dataset.tab;
     const t = getCurrentTabs().find((x) => x.id === id); if (!t) return;
+    const space = getCenterSpace(), index = Number(tabstrip.dataset?.pane ?? paneIndex(space, id));
+    const localTabs = () => paneTabs(space, getTabs(space), index);
     const extra = [];
     const discardTarget = { space: getCenterSpace(), tabId: id, tabRef: t };
     if (isFileLikeKind(t.kind) && t.path) extra.push({ label: "수정 사항 모두 취소", disabled: !t.hasDiskSnapshot,
       act: () => discardTabToDisk(discardTarget) });
     extra.push({ sep: true });
-    extra.push({ label: "탭 닫기", act: () => closeTabs([{ space: getCenterSpace(), tabId: id, tabRef: t }]) });
-    extra.push({ label: "다른 탭 모두 닫기", disabled: getCurrentTabs().length < 2,
-      act: () => closeTabs(getCurrentTabs().filter((v) => v.id !== id).map((tabRef) => ({ space: getCenterSpace(), tabId: tabRef.id, tabRef }))) });
-    extra.push({ label: "모두 닫기", danger: true, act: () => closeAllTabs() });
+    if (t.kind === "browser") {
+      const stored = ((getBrowserState().tabsBySpace || {})[space] || []).find((x) => x.id === id);
+      if (stored) extra.push(keepAwakeItem(space, stored));
+    }
+    extra.push(...(callHook("split.tabItems", t, space, index) || []));
+    extra.push({ label: "탭 닫기", act: () => closeTabs([{ space, tabId: id, tabRef: t, pane: index }]) });
+    extra.push({ label: "다른 탭 모두 닫기", disabled: localTabs().length < 2,
+      act: () => closeTabs(localTabs().filter((v) => v.id !== id).map((tabRef) => ({ space, tabId: tabRef.id, tabRef, pane: index }))) });
+    extra.push({ label: "모두 닫기", danger: true, act: () => closeAllTabs(index) });
     if (isFileLikeKind(t.kind) && t.path) { openFileCtx(e.clientX, e.clientY, t.path, false, extra); return; }
     showCtx(e.clientX, e.clientY, extra.slice(1));  // 파일이 아니면 닫기 계열만(앞의 구분선 제거)
   }, true);

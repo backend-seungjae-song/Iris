@@ -40,7 +40,7 @@ console.log("[12] 계획 러너 — 대상은 하나로 좁혀질 때만 누른�
     && /요소가 비활성이다/.test(cdp)
     && /out\.occluded = !!\(top && top !== el/.test(cdp));
   check("locate는 읽기라 재시도해도 안전한 목록에 있다", () =>
-    /READONLY_CMDS = new Set\(\[[^\]]*"locate"/.test(srvP));
+    /const READ_ONLY = new Set\(\[[^\]]*"locate"/.test(srvP));
   check("우선순위는 testid → role\\+name → 선택자다", () =>
     /if \(spec\.testid\) \{[\s\S]{0,80}how = "testid"/.test(cdp)
     && /how = spec\.role && spec\.name \? "role\+name"/.test(cdp));

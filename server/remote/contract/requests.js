@@ -8,11 +8,13 @@ export const REMOTE_REQUEST_TYPES = Object.freeze([
   "caps.get",
   "ping",
   "watch",
+  "session.watch",
   "transcript.page",
   "transcript.watch",
   "agent.stop",
   "agent.message",
   "request.answer",
+  "device.unregister",
   ...ADVANCED_REQUEST_TYPES,
 ]);
 
@@ -71,6 +73,7 @@ const validators = new Map([
   ["caps.get", (value) => hasExactKeys(value, ["type"])],
   ["ping", (value) => hasExactKeys(value, ["type", "rid"], ["active"])
     && isRequestId(value.rid) && (value.active === undefined || typeof value.active === "boolean")],
+  ["session.watch", (value) => hasExactKeys(value, ["type", "rid"], ["prompts", "promptFallback"]) && isRequestId(value.rid) && (value.prompts === undefined || typeof value.prompts === "boolean") && (value.promptFallback === undefined || typeof value.promptFallback === "boolean")],
   ["watch", (value) => hasExactKeys(value, ["type", "rid"]) && isRequestId(value.rid)],
   ["transcript.page", (value) => hasExactKeys(value, ["type", "rid", "agent"], ["before"])
     && isRequestId(value.rid) && isHex(value.agent, 16)
@@ -86,6 +89,7 @@ const validators = new Map([
       && value.drafts.length <= 8 && new Set(value.drafts).size === value.drafts.length
       && value.drafts.every((ref) => isHex(ref, 16)))
     && (value.text.length > 0 || value.drafts?.length > 0)],
+  ["device.unregister", (value) => hasExactKeys(value, ["type", "rid"]) && isRequestId(value.rid)],
   ["request.answer", (value) => hasExactKeys(value, ["type", "rid", "request", "answer"])
     && isRequestId(value.rid) && isHex(value.request, 16) && isAnswer(value.answer)],
 ]);

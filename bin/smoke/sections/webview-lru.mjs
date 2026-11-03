@@ -154,7 +154,7 @@ await checkAsync("보고 있는 탭 하나만 실제로 올린다", async () => 
 check("안 올린 탭은 잠자는 탭으로 등록돼 목록에 남는다", () => {
   // 건너뛰기만 하면 탭은 목록에 있어도 눌렀을 때 동작하지 않는다. 깨울 정보(주소·프로필)가
   // 없기 때문이다. 등록해 두어야 wakeWebview 가 그 정보로 복원한다.
-  return /shouldMaterializeTab\(t\.id, act, WEBVIEW_LRU\)/.test(dock)
+  return /shouldMaterializeTab\(t\.id, act, WEBVIEW_LRU, !!t\.qaRunId\)/.test(dock)
     && /sleepStoredTab\(t\.id, t, sp\)/.test(dock)
     && /export function sleepStoredTab/.test(webview)
     && /recordDiscardedWebview\(tabId, \{ url, profile, discardedAt: 0 \}\)/.test(webview)

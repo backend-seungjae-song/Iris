@@ -14,7 +14,7 @@
 // 영향 범위
 //   native preload/chrome-mirror/live-chrome IPC, browser/webview-factory·dock 훅, 27-chrome-mirror.css.
 
-import { provide } from "../core/hooks.js";
+import { callHook, provide } from "../core/hooks.js";
 
 const mirrorsByTab = new Map();
 const tabsByMirror = new Map();
@@ -710,9 +710,11 @@ function mirrorTabItem(rec) {
   try { if (!url && rec.el?.getURL) url = rec.el.getURL() || ""; } catch {}
   const parsed = httpUrl(url);
   if (!parsed) return null;
-  return { label: "진짜 Chrome으로 열기", act: () => {
-    if (parsed.origin === "https://claude.ai") enterMirror(rec, parsed.href, true);
-    else enterMirror(rec, parsed.href, true, { manualHost: parsed.host });
+  // 미러는 전용 빈 프로필이라 계정·확장이 없음. 탭과 짝지은 실제 Chrome 프로필 창으로 엶(Chrome 은 그 프로필의 원격 디버깅을 막음)
+  // 짝지은 프로필이 있으면 넘기기 기능이 열고, 창을 닫을 때 쿠키를 가져옴
+  return { label: "크롬으로 열기", act: () => {
+    if (callHook("handoff.openSynced", rec) === true) return;
+    host.openInChrome({ url: parsed.href, source: callHook("handoff.chromeSource", rec) || "" });
   } };
 }
 

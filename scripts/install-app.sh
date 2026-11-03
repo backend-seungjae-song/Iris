@@ -15,6 +15,13 @@ cd "$(dirname "$0")/.."
 
 APP=/Applications/Iris.app
 BUILT=dist/mac-arm64/Iris.app
+source scripts/mcp-worker/deployment-lock.sh
+IRIS_DEPLOY_STATE_DIR="${IRIS_DEPLOY_STATE_DIR:-$HOME/.iris}"
+STAGE=""
+mkdir -p "$IRIS_DEPLOY_STATE_DIR"
+iris_deployment_lock_acquire "$IRIS_DEPLOY_STATE_DIR"
+trap '[ -z "${STAGE:-}" ] || rm -rf -- "$STAGE"; iris_deployment_lock_release || true' EXIT
+trap 'exit 1' HUP INT TERM
 
 # 이름이 겹치는 미사용 사본이 있으면 어느 쪽을 고쳤는지 착각한다. 쓰이지 않는 사본을 고치고
 # 빌드하면 "고쳤는데 그대로"인 앱이 나가므로 빌드 전에 잡는다.
@@ -36,13 +43,20 @@ if ! /usr/bin/codesign --verify --deep --strict "$BUILT" 2>/dev/null; then
 fi
 /usr/bin/codesign --verify --deep --strict "$BUILT"
 
+# 복사는 앱을 끄기 전에 같은 볼륨의 임시 위치로 한다. 교체 자리에서 복사하다 프로세스가 죽으면
+# (2026-10-17 17:17, 호출한 세션이 재시작됨) 되돌리기도 실행되지 않아 반쪽 앱만 남고 앱이 켜지지 않았다.
+# 미리 복사해 두면 교체는 이름 바꾸기 두 번으로 끝나고, 앱이 꺼져 있는 시간도 복사 시간만큼 줄어든다.
+STAGE="$APP.new-$$"
+rm -rf "$STAGE"
+ditto "$BUILT" "$STAGE"
+
 # 설치된 앱은 개발 환경 변수를 물려받지 않는다. 이 스크립트는 pnpm 안에서 돌고 `open`은 지금 셸의
 # 환경을 앱에 그대로 물려준다. 개발용으로 띄웠던 셸에서 실행해 흘러든 REMOTE=1 로 설치된 앱이
 # 127.0.0.1 이 아니라 0.0.0.0 에 붙은 적이 있다. 서버 준비 확인도 같은 환경에서 해야 설치 앱의
 # 포트·상태 폴더를 본다.
 # Iris 터미널 등 Electron 이 node 모드로 띄운 셸은 ELECTRON_RUN_AS_NODE=1 을 물려준다. 그대로 열면 앱이 node 로
 # 실행되자마자 끝나, 새 앱도 되돌린 옛 앱도 뜨지 않고 앱이 꺼진 채 남는다.
-installed_env() { env -u IRIS_PORT -u IRIS_STATE_DIR -u PORT -u REMOTE -u HOST -u ELECTRON_RUN_AS_NODE "$@"; }
+installed_env() { env -u IRIS_PORT -u IRIS_STATE_DIR -u IRIS_SERVER_ROOT -u PORT -u REMOTE -u HOST -u ELECTRON_RUN_AS_NODE "$@"; }
 # iris-channel.mjs 는 다른 Claude 세션이 Iris 실행 파일로 띄운 MCP 서버라 앱이 꺼져도 남는다. 앱으로 세면
 # 종료를 끝내 확인하지 못하고 앱이 꺼진 채로 멈춘다.
 running() {
@@ -62,11 +76,28 @@ quit_app() {
 echo "3/6  앱 종료"
 # 사용자가 종료를 취소했거나 앱이 응답하지 않으면 여기서 멈춘다. 떠 있는 앱의 번들을 옮기면
 # 그 앱은 사라진 파일을 읽게 되고, 새 앱을 열면 두 앱이 함께 뜬다.
+# 종료 실패 당시 프로세스 상태와 메인 프로세스 샘플을 dist/ 에 저장한다. 창만 닫히고 SIGTERM 에도 꺼지지 않은
+# 사례(2026-10-17)의 원인을 강제 종료 뒤에는 알 수 없었다.
+record_quit_failure() {
+  local report pids
+  report="dist/quit-failure-$(date +%Y%m%d-%H%M%S).txt"
+  # 메인·서버와, 그 사례에서 한 시간 동안 R 상태였던 렌더러처럼 CPU 를 쓰는 도우미
+  pids=$( { pgrep -fl "$APP/Contents/MacOS/Iris" | grep -v "/server/remote/channel/iris-channel.mjs" | cut -d' ' -f1
+    ps -axo pid=,stat=,command= | grep -F "$APP/Contents/Frameworks" | awk '$2 ~ /^R/ {print $1}'; } | sort -u || true)
+  {
+    ps -axo pid,ppid,stat,etime,%cpu,command | grep -F "$APP/Contents" | grep -v grep
+    for pid in $pids; do /usr/bin/sample "$pid" 2; done
+  } > "$report" 2>&1 || true
+  echo "종료 실패 당시 프로세스 상태: $report"
+}
+
 if ! quit_app; then
   echo "앱이 종료되지 않아 교체하지 않습니다. 앱을 종료한 뒤 다시 실행하세요."
-  # 기다림이 끝난 직후에 종료가 끝나면 앱이 꺼진 채로 남는다. 그때는 기존 앱을 다시 연다.
+  record_quit_failure
+  # 기다림이 끝난 직후에 종료가 끝나면 앱이 꺼진 채로 남는다. 아직 떠 있으면 종료 요청으로 창만 닫힌 상태일 수
+  # 있다. 어느 쪽이든 open 으로 기존 앱을 열거나 창을 다시 띄운다(main.cjs activate 가 창이 없으면 새로 만든다).
   for _ in $(seq 1 30); do running || break; sleep 1; done
-  running || installed_env open -a "$APP" || echo "이전 앱을 다시 열지 못했습니다 — $APP 를 직접 여세요."
+  installed_env open -a "$APP" || echo "이전 앱을 다시 열지 못했습니다 — $APP 를 직접 여세요."
   exit 1
 fi
 
@@ -90,8 +121,10 @@ rollback() {
 }
 
 echo "4/6  교체"
+# 교체부터 새 서버 준비까지 종료 신호를 받으면 옛 앱으로 되돌린다. 그냥 끝나면 앱이 꺼진 채 남는다.
+trap 'rollback "설치가 중간에 종료됨"' HUP INT TERM
 if [ -d "$APP" ]; then OLD="$APP.old-$$"; mv "$APP" "$OLD"; fi
-ditto "$BUILT" "$APP" || rollback "교체 실패"
+mv "$STAGE" "$APP" || rollback "교체 실패"
 
 echo "5/6  실행"
 installed_env open -a "$APP" || rollback "새 앱 실행 실패"
@@ -102,6 +135,7 @@ running || rollback "새 앱이 서버 준비 중에 종료됨"
 # 터미널이 앞에 없을 때(에이전트가 백그라운드로 실행) open 은 앱을 앞으로 가져오지 않는다.
 # 창은 떠 있어도 다른 앱 뒤에 가려져 사용자는 앱이 안 켜진 것으로 본다.
 osascript -e 'tell application "Iris" to activate' 2>/dev/null || true
+trap - HUP INT TERM
 
 echo "6/6  에이전트 컨텍스트 안내 설치"
 # 앱은 이미 바뀌어 돌고 있다. 스킬 파일 하나 때문에 여기서 실패하면 옛 앱 사본이 남고 설치가

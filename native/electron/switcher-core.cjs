@@ -7,7 +7,7 @@
 //
 // 제공 API
 //   assignOrdinals · matchWindow · reconcile · pruneDeadProcesses · pick · unpick · movePicked · selectTarget ·
-//   serialize · deserialize 를 순수 함수로 제공한다.
+//   groupPicked · leavePicked · ungroup · findOwnWindow · planStops · stopIdOf · serialize · deserialize 를 순수 함수로 제공한다.
 //
 // 의존 대상
 //   호출자가 넘긴 창 목록, 선택 상태, 살아 있는 프로세스 표만 본다. 파일·프로세스·Electron과
@@ -19,6 +19,9 @@
 //   재시작 재결합은 안정 앱 열쇠(구 저장본은 앱 이름)+제목+순번만 쓰고, 찾지 못하면 제외한다.
 //   저장할 때 불완전한 선택은 기본값으로 보존하고, 불러올 때 pid 0은 host가 생존 여부를 판정하도록 남긴다.
 //   모든 반환값은 새 값이며 호출자가 준 객체와 배열을 고치지 않는다.
+//   묶음: 선택 목록에서 붙어 있고 group 값이 같은 항목들. 단축키 한 번에 묶음 하나를 올림
+//   group 없는 항목: 혼자 한 차례
+//   떨어진 같은 group 값과 하나만 남은 묶음: normalizeGroups 가 정리
 //
 // 영향 범위
 //   공급자는 창 목록과 프로세스 생존표를 만드는 host다. 소비자는 설정의 선택 목록과 화면을
@@ -71,6 +74,89 @@ function copyState(state) {
 
 function emptyState() {
   return { version: 1, picked: [], cursor: null };
+}
+
+var GROUP_LIMIT = 40;
+
+function groupOf(item) {
+  return item && typeof item.group === "string" && item.group ? item.group : "";
+}
+
+// 붙어 있는 같은 group 항목의 [start, end) 범위 목록. group 없는 항목은 혼자 한 범위
+function stopRanges(picked) {
+  var ranges = [];
+  var i = 0;
+  var end;
+  var group;
+  while (i < picked.length) {
+    group = groupOf(picked[i]);
+    end = i + 1;
+    if (group) {
+      while (end < picked.length && groupOf(picked[end]) === group) end += 1;
+    }
+    ranges.push({ start: i, end: end });
+    i = end;
+  }
+  return ranges;
+}
+
+function rangeOfIndex(ranges, index) {
+  var i;
+  for (i = 0; i < ranges.length; i += 1) {
+    if (index >= ranges[i].start && index < ranges[i].end) return i;
+  }
+  return -1;
+}
+
+function freshGroupName(used) {
+  var n = 1;
+  while (used["g" + n]) n += 1;
+  used["g" + n] = true;
+  return "g" + n;
+}
+
+// 하나만 남은 묶음의 group 삭제, 떨어진 같은 group 의 뒤쪽에 새 이름 부여
+// 이 모듈이 만든 사본 picked 를 그 자리에서 수정
+function normalizeGroups(picked) {
+  var ranges = stopRanges(picked);
+  var used = {};
+  var all = {};
+  var i;
+  var j;
+  var group;
+  var name;
+  for (i = 0; i < picked.length; i += 1) {
+    if (groupOf(picked[i])) all[groupOf(picked[i])] = true;
+  }
+  for (i = 0; i < ranges.length; i += 1) {
+    group = groupOf(picked[ranges[i].start]);
+    if (!group) continue;
+    if (ranges[i].end - ranges[i].start < 2) {
+      delete picked[ranges[i].start].group;
+      continue;
+    }
+    name = group;
+    if (used[group]) name = freshGroupName(all);
+    used[name] = true;
+    for (j = ranges[i].start; j < ranges[i].end; j += 1) picked[j].group = name;
+  }
+  return picked;
+}
+
+function itemMatchesRef(item, id, pickKey) {
+  if (isInteger(id)) return itemOwnsId(item, id);
+  if (typeof pickKey !== "string") return false;
+  return item.pickKey === pickKey || (typeof item.pickKey !== "string" && pickKeyFor(item) === pickKey);
+}
+
+function indexOfRef(picked, options) {
+  var id = options ? options.id : null;
+  var pickKey = options ? options.pickKey : null;
+  var i;
+  for (i = 0; i < picked.length; i += 1) {
+    if (itemMatchesRef(picked[i], id, pickKey)) return i;
+  }
+  return -1;
 }
 
 function pickKeyFor(item) {
@@ -279,7 +365,7 @@ function reconcile(options) {
     rows.push(row);
   }
 
-  return { state: { version: 1, picked: nextPicked, cursor: cursor }, rows: rows, dropped: dropped };
+  return { state: { version: 1, picked: normalizeGroups(nextPicked), cursor: cursor }, rows: rows, dropped: dropped };
 }
 
 function pruneDeadProcesses(options) {
@@ -302,7 +388,7 @@ function pruneDeadProcesses(options) {
       removed += 1;
     }
   }
-  return { state: { version: 1, picked: picked, cursor: cursor }, removed: removed };
+  return { state: { version: 1, picked: normalizeGroups(picked), cursor: cursor }, removed: removed };
 }
 
 function samePickedWindow(item, window) {
@@ -368,40 +454,217 @@ function unpick(options) {
       picked.push(copyObject(state.picked[i]));
     }
   }
-  return { version: 1, picked: picked, cursor: removedCursor ? null : state.cursor };
+  return { version: 1, picked: normalizeGroups(picked), cursor: removedCursor ? null : state.cursor };
 }
 
+// 혼자인 창과 unit "stop": 차례 전체를 이웃 차례 너머로 이동
+// 묶음 안의 창: 그 묶음 안에서만 이동. 맨 앞 창이 전환 때 포커스를 받아 묶음 안 순서도 의미 있음
 function movePicked(options) {
   var original = options && options.state;
   var picked = original && Array.isArray(original.picked) ? original.picked : null;
-  var id = options ? options.id : null;
-  var pickKey = options ? options.pickKey : null;
   var direction = options ? options.dir : null;
-  var hasId = isInteger(id);
-  var hasPickKey = typeof pickKey === "string";
-  var index = -1;
-  var target;
+  var index;
+  var ranges;
+  var at;
+  var range;
+  var neighbor;
   var state;
   var item;
-  var i;
+  var block;
+  var target;
 
-  if (!picked || (direction !== -1 && direction !== 1) || (!hasId && !hasPickKey)) return original;
-  for (i = 0; i < picked.length; i += 1) {
-    if (hasId ? itemOwnsId(picked[i], id) :
-      (picked[i].pickKey === pickKey ||
-        (typeof picked[i].pickKey !== "string" && pickKeyFor(picked[i]) === pickKey))) {
-      index = i;
-      break;
-    }
+  if (!picked || (direction !== -1 && direction !== 1)) return original;
+  index = indexOfRef(picked, options);
+  if (index < 0) return original;
+  ranges = stopRanges(picked);
+  at = rangeOfIndex(ranges, index);
+  range = ranges[at];
+
+  if (options.unit !== "stop" && range.end - range.start > 1) {
+    target = index + direction;
+    if (target < range.start || target >= range.end) return original;
+    state = copyState(original);
+    item = state.picked[index];
+    state.picked[index] = state.picked[target];
+    state.picked[target] = item;
+    return state;
   }
-  target = index + direction;
-  if (index < 0 || target < 0 || target >= picked.length) return original;
+
+  neighbor = ranges[at + direction];
+  if (!neighbor) return original;
+  state = copyState(original);
+  block = state.picked.splice(range.start, range.end - range.start);
+  target = direction === -1 ? neighbor.start : neighbor.end - block.length;
+  Array.prototype.splice.apply(state.picked, [target, 0].concat(block));
+  normalizeGroups(state.picked);
+  return state;
+}
+
+function pickKeySet(pickKeys) {
+  var set = {};
+  var i;
+  var list = Array.isArray(pickKeys) ? pickKeys : [];
+  for (i = 0; i < list.length; i += 1) {
+    if (typeof list[i] === "string") set[list[i]] = true;
+  }
+  return set;
+}
+
+function itemPickKey(item) {
+  return typeof item.pickKey === "string" ? item.pickKey : pickKeyFor(item);
+}
+
+// 고른 창들을 새 묶음 하나로 병합. 목록 순서 유지, 위치는 첫 번째로 고른 창이 있던 차례의 앞
+// 다른 묶음에 있던 창은 그 묶음에서 빠지고, 남은 창이 하나뿐인 묶음은 normalizeGroups 가 정리
+function groupPicked(options) {
+  var original = options && options.state;
+  var picked = original && Array.isArray(original.picked) ? original.picked : null;
+  var wanted = pickKeySet(options && options.pickKeys);
+  var chosen = [];
+  var i;
+  var state;
+  var ranges;
+  var at;
+  var rest = [];
+  var block = [];
+  var used = {};
+  var name;
+
+  if (!picked) return original;
+  for (i = 0; i < picked.length; i += 1) {
+    if (wanted[itemPickKey(picked[i])]) chosen.push(i);
+  }
+  if (chosen.length < 2) return original;
 
   state = copyState(original);
-  item = state.picked[index];
-  state.picked[index] = state.picked[target];
-  state.picked[target] = item;
+  ranges = stopRanges(state.picked);
+  at = ranges[rangeOfIndex(ranges, chosen[0])].start;
+  for (i = 0; i < state.picked.length; i += 1) {
+    if (groupOf(state.picked[i])) used[groupOf(state.picked[i])] = true;
+  }
+  name = freshGroupName(used);
+  for (i = 0; i < state.picked.length; i += 1) {
+    if (chosen.indexOf(i) >= 0) {
+      state.picked[i].group = name;
+      block.push(state.picked[i]);
+    } else {
+      rest.push(state.picked[i]);
+    }
+  }
+  state.picked = rest.slice(0, at).concat(block, rest.slice(at));
+  normalizeGroups(state.picked);
   return state;
+}
+
+// 고른 창들을 각자의 묶음에서 빼서 그 묶음 바로 뒤의 혼자인 차례로 이동. 고른 창끼리의 순서 유지
+function leavePicked(options) {
+  var original = options && options.state;
+  var picked = original && Array.isArray(original.picked) ? original.picked : null;
+  var wanted = pickKeySet(options && options.pickKeys);
+  var state;
+  var i;
+  var ranges;
+  var range;
+  var item;
+  var changed = false;
+
+  if (!picked) return original;
+  state = copyState(original);
+  // 뒤에서부터 빼야 같은 묶음의 여러 창이 원래 순서대로 묶음 뒤에 선다
+  for (i = state.picked.length - 1; i >= 0; i -= 1) {
+    if (!wanted[itemPickKey(state.picked[i])] || !groupOf(state.picked[i])) continue;
+    ranges = stopRanges(state.picked);
+    range = ranges[rangeOfIndex(ranges, i)];
+    if (range.end - range.start < 2) continue;
+    item = state.picked.splice(i, 1)[0];
+    delete item.group;
+    state.picked.splice(range.end - 1, 0, item);
+    changed = true;
+  }
+  if (!changed) return original;
+  normalizeGroups(state.picked);
+  return state;
+}
+
+// 그 창이 속한 묶음 전체를 혼자인 차례로 분리. 순서 유지
+function ungroup(options) {
+  var original = options && options.state;
+  var picked = original && Array.isArray(original.picked) ? original.picked : null;
+  var index;
+  var ranges;
+  var range;
+  var state;
+  var i;
+
+  if (!picked) return original;
+  index = indexOfRef(picked, options);
+  if (index < 0) return original;
+  ranges = stopRanges(picked);
+  range = ranges[rangeOfIndex(ranges, index)];
+  if (range.end - range.start < 2) return original;
+
+  state = copyState(original);
+  for (i = range.start; i < range.end; i += 1) delete state.picked[i].group;
+  return state;
+}
+
+// 이 앱의 창 가운데 저장된 선택이 가리키는 창의 순번. 못 찾으면 -1
+// candidates: { id: 창 번호(macOS CGWindowID·Windows HWND), title, bounds: [x, y, ...] }
+// 같은 제목의 창이 여럿일 수 있어(에뮬레이터 분리 창 등) 창 번호를 먼저 보고, 제목은 하나뿐일 때만 쓴다
+function findOwnWindow(target, candidates) {
+  var list = Array.isArray(candidates) ? candidates : [];
+  var ids = [];
+  var i;
+  var titleHits = [];
+  var samePlace = function (item) {
+    return validBounds(target.bounds) && Array.isArray(item.bounds)
+      && item.bounds[0] === target.bounds[0] && item.bounds[1] === target.bounds[1];
+  };
+  if (!target) return -1;
+  if (isInteger(target.cgId)) ids.push(target.cgId);
+  if (isInteger(target.id)) ids.push(target.id);
+  for (i = 0; i < list.length; i += 1) {
+    if (isInteger(list[i].id) && ids.indexOf(list[i].id) >= 0) return i;
+  }
+  for (i = 0; i < list.length; i += 1) {
+    if (list[i].title === target.matchTitle) {
+      if (samePlace(list[i])) return i;
+      titleHits.push(i);
+    }
+  }
+  if (titleHits.length === 1) return titleHits[0];
+  for (i = 0; i < list.length; i += 1) {
+    if (samePlace(list[i])) return i;
+  }
+  return -1;
+}
+
+// 전환 한 번에 올릴 차례 목록. targets: 선택 순서의 { id, group }
+// 차례 id 는 맨 앞 창의 id. 묶음이 없으면 차례 목록과 창 목록이 같음
+function planStops(targets) {
+  var list = Array.isArray(targets) ? targets.filter(function (item) { return item && item.id != null; }) : [];
+  var ranges = stopRanges(list);
+  var stops = [];
+  var i;
+  var j;
+  var members;
+  for (i = 0; i < ranges.length; i += 1) {
+    members = [];
+    for (j = ranges[i].start; j < ranges[i].end; j += 1) members.push(list[j].id);
+    stops.push({ id: members[0], members: members });
+  }
+  return { ordered: stops.map(function (stop) { return stop.id; }), stops: stops };
+}
+
+// 창 id 에 해당하는 차례 id. 어느 차례에도 없으면 null
+function stopIdOf(plan, memberId) {
+  var stops = plan && Array.isArray(plan.stops) ? plan.stops : [];
+  var i;
+  if (memberId == null) return null;
+  for (i = 0; i < stops.length; i += 1) {
+    if (indexOfStrict(stops[i].members, memberId) >= 0) return stops[i].id;
+  }
+  return null;
 }
 
 function indexOfStrict(values, wanted) {
@@ -457,6 +720,7 @@ function normalizeStoredItem(source) {
     bounds: source.bounds.slice(),
   };
   if (typeof source.appKey === "string" && source.appKey) item.appKey = source.appKey.slice(0, 400);
+  if (groupOf(source)) item.group = source.group.slice(0, GROUP_LIMIT);
   item.pickKey = pickKeyFor(item);
   return item;
 }
@@ -474,6 +738,7 @@ function normalizeSerializableItem(source) {
     bounds: validBounds(value.bounds) ? value.bounds.slice() : [0, 0, 0, 0],
   };
   if (appKey) item.appKey = appKey.slice(0, 400);
+  if (groupOf(value)) item.group = value.group.slice(0, GROUP_LIMIT);
   item.pickKey = pickKeyFor(item);
   return item;
 }
@@ -502,7 +767,7 @@ function deserialize(raw) {
   }
   return {
     version: 1,
-    picked: picked,
+    picked: normalizeGroups(picked),
     cursor: isInteger(source.cursor) ? source.cursor : null,
   };
 }
@@ -516,7 +781,7 @@ function serialize(state) {
   for (i = 0; i < limit; i += 1) picked.push(normalizeSerializableItem(source[i]));
   return {
     version: 1,
-    picked: picked,
+    picked: normalizeGroups(picked),
     cursor: state && isInteger(state.cursor) ? state.cursor : null,
   };
 }
@@ -529,6 +794,12 @@ module.exports = {
   pick: pick,
   unpick: unpick,
   movePicked: movePicked,
+  groupPicked: groupPicked,
+  leavePicked: leavePicked,
+  ungroup: ungroup,
+  findOwnWindow: findOwnWindow,
+  planStops: planStops,
+  stopIdOf: stopIdOf,
   selectTarget: selectTarget,
   serialize: serialize,
   deserialize: deserialize,

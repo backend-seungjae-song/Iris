@@ -25,13 +25,25 @@ import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
 export default async function run() {
 console.log("[2k] herdr 그대로 — 우리가 일부러 바꾸는 것 말고는 막지 않는다");
 // 마우스 트래킹을 전부 억제하면 herdr 의 탭 클릭·"1 new message (click) ↓" 배너·복사 토스트가
-// 동작하지 않는다. 억제의 목적은 "드래그=로컬 선택" 하나이므로 그것만 남기고 나머지는 돌려준다.
+// 동작하지 않는다. 억제의 목적은 수식키·가운데·오른쪽 끌기의 로컬 선택이므로 그것만 남기고 나머지는 돌려준다.
 check("움직이지 않은 클릭은 herdr로 전달", () => {
   const seg = sliceBetween(xtermWiring, 'terminalInner.addEventListener("mouseup"', 'terminalInner.addEventListener("contextmenu"', "움직이지 않은 클릭은 herdr로 전달");
   return /wsSend\(\{ type: "pty\.input", data: "\\x1b\[<" \+ b \+ at \+ "M\\x1b\[<" \+ b \+ at \+ "m" \}\)/.test(seg);
 });
-check("드래그는 herdr로 안 감(로컬 선택 유지)", () => {
-  const seg = sliceBetween(xtermWiring, 'terminalInner.addEventListener("mouseup"', 'terminalInner.addEventListener("contextmenu"', "드래그는 herdr로 안 감(로컬 선택 유지)");
+// 왼쪽 끌기는 누르기·이동·떼기를 그대로 herdr로 보낸다. 선택·복사를 herdr와 pane 앱(Claude Code 전체 화면 등)이
+// 하므로 앱이 겉에 띄운 표시(Jump to bottom 등)·접힌 줄을 앱 기준으로 정리한다. 로컬로 칸을 읽어 복사하면
+// CLI 화면이 바뀔 때마다 표시 글자가 복사본에 섞였다. 수식키 끌기와 가운데·오른쪽 끌기만 로컬 선택이다.
+check("왼쪽 끌기는 herdr로 전달(앱이 선택·복사)", () => {
+  const down = sliceBetween(xtermWiring, 'terminalInner.addEventListener("mousedown"', "mdBtn = e.button", "왼쪽 끌기는 herdr로 전달(앱이 선택·복사)");
+  const send = /const sendMouse = \(code, cell, up\) => wsSend\(\{ type: "pty\.input", data: "\\x1b\[<" \+ code/.test(xtermWiring);
+  const press = /e\.button === 0 && !e\.metaKey && !e\.ctrlKey && !e\.altKey && !e\.shiftKey && getAppMouseOn\(\)/.test(down)
+    && /e\.preventDefault\(\); e\.stopPropagation\(\);/.test(down) && /sendMouse\(0, held, false\)/.test(down);
+  const move = /sendMouse\(32, cell, false\)/.test(xtermWiring);
+  const up = /sendMouse\(0, cell, true\)/.test(xtermWiring) && /if \(e\.button === 0\) releaseHeld\(e\)/.test(xtermWiring);
+  return send && press && move && up;
+});
+check("가운데·오른쪽 끌기는 herdr로 안 감(로컬 선택 유지)", () => {
+  const seg = sliceBetween(xtermWiring, 'terminalInner.addEventListener("mouseup"', 'terminalInner.addEventListener("contextmenu"', "가운데·오른쪽 끌기는 herdr로 안 감(로컬 선택 유지)");
   return /Math\.abs\(e\.clientX - mdX\) > 3 \|\| Math\.abs\(e\.clientY - mdY\) > 3\) return;/.test(seg)
     && /if \(mdHadSel\) return;/.test(seg);
 });
@@ -136,9 +148,14 @@ check("Ctrl/Cmd+Shift 클릭이 선택 확장에 이중 소비되지 않음", ()
     && /ss\.disable\(\); selOff = true;/.test(seg) && /ss\.enable\(\)/.test(seg);
 });
 check("이벤트 자체는 막지 않음(링크 클릭 보존)", () => {
-  // mousedown을 막으면 xterm이 링크 대상을 기억하지 못해 링크 클릭이 통째로 죽는다.
+  // mousedown을 막으면 xterm이 링크 대상을 기억하지 못해 링크 클릭이 통째로 죽는다. 막는 곳은 왼쪽 끌기 전달
+  // 하나이고, 링크는 ⌘·⌃ 를 눌러야 살아나므로 수식키 없음·링크 포인터 없음 조건 안에서만 막는다.
   const seg = sliceBetween(xtermWiring, "function selService", 'terminalInner.addEventListener("contextmenu"', "이벤트 자체는 막지 않음(링크 클릭 보존)");
-  return !/stopPropagation\(\)/.test(seg) && !/preventDefault\(\)/.test(seg);
+  const fwd = sliceBetween(seg, "if (e.button === 0 && !e.metaKey", "mdBtn = e.button", "이벤트 자체는 막지 않음(링크 클릭 보존)");
+  const rest = seg.replace(fwd, "");
+  const gate = /!e\.metaKey && !e\.ctrlKey && !e\.altKey && !e\.shiftKey/.test(fwd) && /!terminalInner\.querySelector\("\.xterm-cursor-pointer"\)/.test(fwd)
+    && /export function linkModeFromEvent\(e\) \{ return !!\(e && \(e\.metaKey \|\| e\.ctrlKey\)\); \}/.test(xtermWiring);
+  return gate && !/stopPropagation\(\)/.test(rest) && !/preventDefault\(\)/.test(rest);
 });
 check("내부 API 없으면 폴백 + 로그", () => {
   const seg = sliceBetween(xtermWiring, "function selService", 'terminalInner.addEventListener("contextmenu"', "내부 API 없으면 폴백 + 로그");

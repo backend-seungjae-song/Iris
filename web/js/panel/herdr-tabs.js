@@ -208,9 +208,9 @@ export function openCreateMenu(x, y, spaceId) {
 export function createItems(space) {
   const make = (launch, name) => wsSend({ type: "tab.create", workspaceId: space, name, launch });
   return [
-    { label: "새 탭 — Claude 세션", act: () => make("claude", "claude") },
-    { label: "새 탭 — Codex 세션", act: () => make("codex", "codex") },
-    { label: "새 탭 — 빈 터미널", act: () => wsSend({ type: "tab.create", workspaceId: space }) },
+    { label: "새 Claude 세션", act: () => make("claude", "claude") },
+    { label: "새 Codex 세션", act: () => make("codex", "codex") },
+    { label: "새 터미널", act: () => wsSend({ type: "tab.create", workspaceId: space }) },
   ];
 }
 

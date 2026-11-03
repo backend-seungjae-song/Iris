@@ -2,219 +2,90 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  answerUserAsk, initBrowserCommands, pendingUserNotices, runBrowserCmd,
+  consoleAsk, initBrowserCommands, notifyHostUser, pendingUserNotices, progressHostUser,
 } from "../server/browser-commands.js";
+import {
+  createHostIdentityAuthority, createIndexUserPorts, createMcpHostDispatcher, createMcpHostHandlers,
+} from "../server/mcp-host/index.js";
+import { createWorkerBrowserService } from "../server/mcp-worker/browser-service.js";
 
 const sent = [];
 initBrowserCommands({ broadcast: (message) => sent.push(message) });
 const session = (name) => `notice-test-${name}-${process.pid}`;
-const turn = () => new Promise((resolve) => setImmediate(resolve));
-// 30초 대기 타이머. 서버가 마감 시각에서 남은 시간을 계산해 1ms 지나면 29999
-const isWaitTimer = (ms) => ms > 29000 && ms <= 30000;
-// 대기 타이머 등록까지. 부하가 크면 파일 쓰기 뒤로 수 ms 밀림. 2초 넘으면 그대로 진행해 검사가 실패
-async function until(ready) {
-  const end = Date.now() + 2000;
-  while (!ready() && Date.now() < end) await new Promise((resolve) => setImmediate(resolve));
+let commandSequence = 0;
+const identityAuthority = createHostIdentityAuthority();
+const hostHandlers = createMcpHostHandlers({
+  browser: { commandGuard: () => ({ qaOwned: false }) },
+  user: createIndexUserPorts({ consoleAsk, notifyHostUser, progressHostUser }),
+});
+const host = createMcpHostDispatcher({ workerGeneration: "notice:1", identityAuthority, handlers: hostHandlers });
+let workerContext = null;
+const worker = createWorkerBrowserService({
+  hostApi: {
+    withCommand: (command, run) => {
+      const previous = workerContext;
+      workerContext = { ...command, callId: 0 };
+      return Promise.resolve(run()).finally(() => { workerContext = previous; });
+    },
+    call: async (operation, input) => {
+      workerContext.callId += 1;
+      const response = await host.dispatch({ protocol: 1, type: "host.request",
+        requestId: `notice-host-${commandSequence}-${workerContext.callId}`,
+        workerGeneration: "notice:1", commandId: workerContext.commandId,
+        callId: workerContext.callId, operation, identity: workerContext.identity, input });
+      if (!response.ok) throw Object.assign(new Error(response.error.message), { code: response.error.code });
+      return response.output;
+    },
+  },
+  activity: { run: (_kind, _id, run) => run() },
+});
+let workerIdentity = { session: "" };
+async function runWorkerCmd(command, args, skey) {
+  workerIdentity = { session: skey, commandId: `notice-command-${++commandSequence}` };
+  identityAuthority.allowSession(skey);
+  return worker.dispatch({ command, args, identity: workerIdentity, commandId: workerIdentity.commandId });
 }
-
-test("ask는 선택지 없이 대상이 없으면 거절하고 선택한 첫 답만 완료로 판정", async () => {
-  const skey = session("choice");
-  const missing = await runBrowserCmd("ask", { message: "골라 주세요", wait: 30 }, skey);
-  assert.equal(missing.ok, false);
-  assert.match(missing.error, /choices/);
-  const pending = runBrowserCmd("ask", { message: "골라 주세요", choices: ["네", "아니오"], wait: 30 }, skey);
-  await turn();
-  const notice = sent.findLast((message) => message.type === "ai-ask" && message.session === skey);
-  assert.ok(notice);
-  assert.deepEqual(notice.choices, ["네", "아니오"]);
-  answerUserAsk(notice.id, "네");
-  const result = await pending;
-  assert.equal(result.data.id, notice.id);
-  assert.equal(result.data.done, true);
-  assert.equal(result.data.answer, "네");
-  assert.equal(pendingUserNotices().some((item) => item.id === notice.id), false);
-});
-
-test("ask는 잘못된 이어받기 id와 대기 범위 밖 값을 거절", async () => {
-  const skey = session("ask-validation");
-  const missing = await runBrowserCmd("ask", { message: "이어 주세요", device: "smoke-device", ask_id: "없는-id", wait: 30 }, skey);
-  assert.equal(missing.ok, false);
-  assert.match(missing.error, /찾을 수 없습니다/);
-  const tooLong = await runBrowserCmd("ask", { message: "기다려 주세요", choices: ["계속", "취소"], wait: 241 }, skey);
-  assert.equal(tooLong.ok, false);
-  assert.match(tooLong.error, /30~240초/);
-  const twoTargets = await runBrowserCmd("ask", { message: "기다려 주세요", tab: "@tab", device: "sim-1", wait: 30 }, skey);
-  assert.equal(twoTargets.ok, false);
-  assert.match(twoTargets.error, /tab과 device/);
-});
-
-test("같은 질문을 동시에 요청하면 알림과 대기 호출을 하나만 만든다", async () => {
-  const skey = session("concurrent");
-  const args = { message: "계속할까요", choices: ["계속", "취소"], wait: 30 };
-  const first = runBrowserCmd("ask", args, skey);
-  const second = runBrowserCmd("ask", args, skey);
-  await turn();
-  const notices = pendingUserNotices().filter((item) => item.session === skey);
-  for (const notice of notices) answerUserAsk(notice.id, "계속");
-  const results = await Promise.all([first, second]);
-  assert.equal(notices.length, 1);
-  assert.equal(results.filter((result) => result.ok).length, 1);
-  assert.equal(results.filter((result) => !result.ok).length, 1);
-  const next = runBrowserCmd("ask", args, skey);
-  await turn();
-  const nextNotice = pendingUserNotices().find((item) => item.session === skey);
-  assert.ok(nextNotice);
-  assert.notEqual(nextNotice.id, notices[0].id);
-  answerUserAsk(nextNotice.id, "취소");
-  assert.equal((await next).data.answer, "취소");
-});
-
-test("사용자 지정 두 번째 답이 다 했음이어도 진행으로 판정하지 않는다", async () => {
-  const skey = session("custom-done");
-  const pending = runBrowserCmd("ask", { message: "답을 고르세요", choices: ["진행", "다 했음"], wait: 30 }, skey);
-  await turn();
-  const notice = pendingUserNotices().find((item) => item.session === skey);
-  answerUserAsk(notice.id, "다 했음");
-  const result = await pending;
-  assert.equal(result.data.answer, "다 했음");
+// 사람에게 묻는 요청은 세션 콘솔에서(사용자 2026-10-28). 화면·폰 알림 없이 바로 반환
+test("ask는 알림을 보내지 않고 대화에서 물을 내용을 바로 돌려준다", async () => {
+  const skey = session("console-ask");
+  const before = sent.length;
+  const result = await runWorkerCmd("ask", { message: "결제해 주세요", choices: ["다 했어요", "못 해요"] }, skey);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.console, true);
+  assert.equal(result.data.answered, false);
   assert.equal(result.data.done, false);
+  assert.match(result.data.note, /이 세션 대화에서 사용자에게 직접 물으세요: "결제해 주세요" \(선택지: 다 했어요 \/ 못 해요\)/);
+  assert.equal(sent.slice(before).some((message) => message.type === "ai-ask"), false);
+  assert.equal(pendingUserNotices().length, 0);
+  const empty = await runWorkerCmd("ask", { message: " " }, skey);
+  assert.equal(empty.ok, false);
 });
 
-test("서버를 새로 시작한 뒤 이전 질문의 답으로 새 질문을 닫지 않는다", async () => {
-  const oldServer = await import("../server/browser-commands.js?notice-before-restart");
-  const newServer = await import("../server/browser-commands.js?notice-after-restart");
-  const oldSent = [], newSent = [];
-  oldServer.initBrowserCommands({ broadcast: (m) => oldSent.push(m) });
-  newServer.initBrowserCommands({ broadcast: (m) => newSent.push(m) });
-  const args = { message: "끝내 주세요", device: "smoke-device", wait: 30 };
-  const oldPending = oldServer.runBrowserCmd("ask", args, session("restart"));
-  const newPending = newServer.runBrowserCmd("ask", args, session("restart"));
-  const oldId = oldSent.find((m) => m.type === "ai-ask").id;
-  const newId = newSent.find((m) => m.type === "ai-ask").id;
-  try {
-    newServer.answerUserAsk(oldId, "다 했음");
-    assert.equal(newServer.pendingUserNotices().some((m) => m.id === newId), true);
-    assert.notEqual(oldId, newId);
-  } finally {
-    oldServer.answerUserAsk(oldId, "다 했음");
-    newServer.answerUserAsk(newId, "못 했음");
-    await Promise.all([oldPending, newPending]);
-  }
-});
-
-test("id 없이 같은 질문을 이어받아도 최초 선택지로 완료를 판정한다", async () => {
-  const skey = session("implicit-resume");
-  const nativeSetTimeout = globalThis.setTimeout;
-  let expire;
-  globalThis.setTimeout = (fn, ms, ...rest) => isWaitTimer(ms) ? (expire = fn, { fake: true }) : nativeSetTimeout(fn, ms, ...rest);
-  try {
-    const args = { message: "골라 주세요", device: "smoke-device", choices: ["진행", "취소"], wait: 30 };
-    const first = runBrowserCmd("ask", args, skey);
-    await until(() => expire);
-    expire();
-    const timeout = await first;
-    answerUserAsk(timeout.data.id, "진행");
-    const result = await runBrowserCmd("ask", { ...args, choices: undefined }, skey);
-    assert.equal(result.data.id, timeout.data.id);
-    assert.equal(result.data.answer, "진행");
-    assert.equal(result.data.done, true);
-  } finally { globalThis.setTimeout = nativeSetTimeout; }
-});
-
-test("ask 시간 초과 뒤 같은 id와 알림을 이어받고 사이에 누른 답을 전달", async () => {
-  const skey = session("resume");
-  const nativeSetTimeout = globalThis.setTimeout;
-  let expire;
-  globalThis.setTimeout = (fn, ms, ...rest) => isWaitTimer(ms) ? (expire = fn, { fake: true }) : nativeSetTimeout(fn, ms, ...rest);
-  try {
-    const first = runBrowserCmd("ask", { message: "끝내 주세요", device: "smoke-device", wait: 30 }, skey);
-    await until(() => expire);
-    const notice = sent.findLast((message) => message.type === "ai-ask" && message.session === skey);
-    assert.ok(notice);
-    answerUserAsk(notice.id, "갔음");
-    assert.equal(typeof expire, "function");
-    expire();
-    const timeout = await first;
-    assert.equal(timeout.data.answered, false);
-    assert.equal(timeout.data.id, notice.id);
-    assert.equal(timeout.data.waitLimitSeconds, 30);
-    assert.match(timeout.data.resume, /ask_id/);
-    assert.equal(pendingUserNotices().filter((item) => item.id === notice.id).length, 1);
-    answerUserAsk(notice.id, "다 했음");
-    assert.equal(pendingUserNotices().some((item) => item.id === notice.id), false,
-      "답한 질문은 포커스 변경과 재연결 때 다시 보내지 않는다");
-    assert.ok(sent.some((message) => message.type === "ai-ask-closed" && message.id === notice.id),
-      "다른 창에서도 답한 질문을 닫는다");
-    answerUserAsk(notice.id, "못 했음");
-    answerUserAsk(notice.id, "갔음");
-    const beforeResume = sent.length;
-    const again = await runBrowserCmd("ask", { message: "끝내 주세요", device: "smoke-device", ask_id: notice.id, wait: 30 }, skey);
-    assert.equal(again.data.id, notice.id);
-    assert.equal(again.data.round, 2);
-    assert.equal(again.data.done, true);
-    assert.equal(again.data.answer, "다 했음", "다른 창의 늦은 답이 첫 답을 바꾸지 않는다");
-    assert.equal(again.data.went, true);
-    assert.equal(sent.slice(beforeResume).some((message) => message.type === "ai-ask"), false,
-      "보관된 답을 전달할 때 질문을 다시 띄우지 않는다");
-    assert.equal(pendingUserNotices().some((item) => item.id === notice.id), false);
-  } finally { globalThis.setTimeout = nativeSetTimeout; }
-});
-
-test("approve 시간 초과는 거절하고 화면에 만료 신호를 보냄", async () => {
-  const skey = session("approve");
-  const nativeSetTimeout = globalThis.setTimeout;
-  let expire;
-  globalThis.setTimeout = (fn, ms, ...rest) => isWaitTimer(ms) ? (expire = fn, { fake: true }) : nativeSetTimeout(fn, ms, ...rest);
-  try {
-    const pending = runBrowserCmd("approve", { title: "대량 입력", summary: "열 칸에 입력", wait: 30 }, skey);
-    // 부하가 크면 대기 타이머 등록이 한 턴 뒤로 밀림
-    await until(() => expire);
-    const notice = sent.findLast((message) => message.type === "ai-ask" && message.session === skey);
-    assert.equal(notice.kind, "approve");
-    expire();
-    const result = await pending;
-    assert.equal(result.data.approved, false);
-    assert.equal(result.data.answered, false);
-    assert.ok(sent.some((message) => message.type === "ai-ask-closed" && message.id === notice.id && message.expired));
-    assert.equal(pendingUserNotices().some((item) => item.id === notice.id), false);
-  } finally { globalThis.setTimeout = nativeSetTimeout; }
-});
-
-test("approve는 제목을 요구하고 시간 초과 결과에 실제 대기 상한을 기록", async () => {
-  const skey = session("approve-validation");
-  const missing = await runBrowserCmd("approve", { summary: "한 칸에 입력", wait: 30 }, skey);
-  assert.equal(missing.ok, false);
-  assert.match(missing.error, /title/);
-  const twoTargets = await runBrowserCmd("approve", { title: "입력 승인", summary: "한 칸에 입력", tab: "@tab", device: "sim-1", wait: 30 }, skey);
-  assert.equal(twoTargets.ok, false);
-  assert.match(twoTargets.error, /tab과 device/);
-  const nativeSetTimeout = globalThis.setTimeout;
-  let expire;
-  globalThis.setTimeout = (fn, ms, ...rest) => isWaitTimer(ms) ? (expire = fn, { fake: true }) : nativeSetTimeout(fn, ms, ...rest);
-  try {
-    const pending = runBrowserCmd("approve", { title: "입력 승인", summary: "한 칸에 입력", wait: 30 }, skey);
-    await until(() => expire);
-    expire();
-    const result = await pending;
-    assert.equal(result.data.approved, false);
-    assert.equal(result.data.waitLimitSeconds, 30);
-    assert.equal(typeof result.data.waitedSeconds, "number");
-  } finally { globalThis.setTimeout = nativeSetTimeout; }
+test("approve는 알림 없이 거절 상태로 돌려주고 대화에서 승인받게 한다", async () => {
+  const skey = session("console-approve");
+  const before = sent.length;
+  const result = await runWorkerCmd("approve", { title: "삭제", summary: "주문 3건 삭제" }, skey);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.approved, false);
+  assert.deepEqual(result.data.choices, ["승인", "취소"]);
+  assert.match(result.data.note, /"주문 3건 삭제"/);
+  assert.equal(sent.slice(before).some((message) => message.type === "ai-ask"), false);
+  assert.equal((await runWorkerCmd("approve", { title: "삭제" }, skey)).ok, false);
 });
 
 test("notify는 같은 key와 빈도 초과를 합치고 관련 기기를 전달", async () => {
   const skey = session("notify");
-  const first = await runBrowserCmd("notify", { level: "info", title: "첫 알림", key: "build", device: "sim-1" }, skey);
-  const merged = await runBrowserCmd("notify", { level: "ok", title: "완료", key: "build", device: "sim-1" }, skey);
+  const first = await runWorkerCmd("notify", { level: "info", title: "첫 알림", key: "build", device: "sim-1" }, skey);
+  const merged = await runWorkerCmd("notify", { level: "ok", title: "완료", key: "build", device: "sim-1" }, skey);
   assert.equal(merged.data.id, first.data.id);
   assert.equal(merged.data.shown, "merged");
   const keyed = sent.findLast((message) => message.type === "ai-notify" && message.id === first.data.id);
   assert.equal(keyed.device, "sim-1");
-  for (const title of ["둘", "셋"]) await runBrowserCmd("notify", { level: "info", title }, skey);
-  const overflow = await runBrowserCmd("notify", { level: "info", title: "넷" }, skey);
+  for (const title of ["둘", "셋"]) await runWorkerCmd("notify", { level: "info", title }, skey);
+  const overflow = await runWorkerCmd("notify", { level: "info", title: "넷" }, skey);
   assert.equal(overflow.data.shown, "merged");
   assert.ok(sent.some((message) => message.type === "ai-notify" && message.id === overflow.data.id && message.title === "외 1건"));
-  const badTarget = await runBrowserCmd("notify", { level: "warn", title: "대상 오류", tab: "@missing", device: "sim-1" }, skey);
+  const badTarget = await runWorkerCmd("notify", { level: "warn", title: "대상 오류", tab: "@missing", device: "sim-1" }, skey);
   assert.equal(badTarget.ok, false);
 });
 
@@ -224,14 +95,14 @@ test("progress는 시작·갱신·완료에 같은 id를 쓰고 TTL 뒤 경고",
   const timers = [];
   globalThis.setTimeout = (fn, ms, ...rest) => ms === 1000 ? (timers.push(fn), { fake: true }) : nativeSetTimeout(fn, ms, ...rest);
   try {
-    const first = await runBrowserCmd("progress", { op: "start", title: "작업 중", ttl: 1 }, skey);
+    const first = await runWorkerCmd("progress", { op: "start", title: "작업 중", ttl: 1 }, skey);
     const id = first.data.id;
-    const update = await runBrowserCmd("progress", { op: "update", id, p: 0.5 }, skey);
+    const update = await runWorkerCmd("progress", { op: "update", id, p: 0.5 }, skey);
     assert.equal(update.data.ok, true);
-    const end = await runBrowserCmd("progress", { op: "end", id, result: "ok" }, skey);
+    const end = await runWorkerCmd("progress", { op: "end", id, result: "ok" }, skey);
     assert.equal(end.data.ok, true);
     assert.ok(sent.filter((message) => message.type === "ai-progress" && message.id === id).every((message) => message.id === id));
-    const stale = await runBrowserCmd("progress", { op: "start", title: "응답 대기", ttl: 1 }, skey);
+    const stale = await runWorkerCmd("progress", { op: "start", title: "응답 대기", ttl: 1 }, skey);
     timers.at(-1)();
     assert.ok(sent.some((message) => message.type === "ai-progress" && message.id === stale.data.id && message.result === "warn"));
   } finally { globalThis.setTimeout = nativeSetTimeout; }

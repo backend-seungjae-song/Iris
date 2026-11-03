@@ -23,6 +23,7 @@ test("인증 뒤 요청은 정확한 키와 rid 형식만 받는다", () => {
     { type: "agent.stop", rid: "s1", agent: AGENT },
     { type: "agent.message", rid: "m1", agent: AGENT, text: "첫째\n둘째" },
     { type: "agent.message", rid: "m2", agent: AGENT, text: "", drafts: ["d".repeat(32)] },
+    { type: "device.unregister", rid: "u1" },
     { type: "request.answer", rid: "a1", request: "b".repeat(32), answer: { behavior: "allow" } },
   ];
   for (const request of requests) {

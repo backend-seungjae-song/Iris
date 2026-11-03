@@ -77,7 +77,8 @@ export function deliverAgentPick(a) {
     a.sessionUuid ? `세션: ${a.sessionUuid}` : null,
     a.paneId === getCurTarget() ? "지금 이 세션 자신" : null,
     `읽기: herdr pane read ${a.paneId} --source recent --lines 50`,
-    `보내기: herdr pane run ${a.paneId} "<명령>"`,
+    // 빈 입력창의 흐린 안내 문구를 쓰다 만 글로 읽지 않게, 입력창을 판정한 뒤 보내는 명령을 준다.
+    `보내기: iris-pane-send ${a.paneId} "<명령>"`,
   ]);
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = "세션 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";

@@ -96,7 +96,7 @@ function createMainWindow({
   app, BrowserWindow, dialog, shell, webContents, windowLayout, guardWebviewPartition,
   pinHiddenViewportById, preloadPath, webviewPreloadPath, appUrl: APP_URL,
   audioDiagEnabled: AUDIO_DIAG_ENABLED, noThrottleOpt: NO_THROTTLE_OPT,
-  markAppAlive, console,
+  markAppAlive, console, hidden = false,
   setTimeout, clearTimeout, setImmediate,
 }) {
   let win;
@@ -110,6 +110,7 @@ function createMainWindow({
   function createWindow() {
     markAppAlive(); // 창 생성은 앱 생존으로 판정한다(취소된 quit로 남은 플래그 해제)
     const opts = {
+      ...(hidden ? { show: false } : {}),
       width: 1180,
       height: 800,
       minWidth: 720,
@@ -132,8 +133,8 @@ function createMainWindow({
     };
     const saved = windowLayout.applySavedBounds(opts, "mainBounds"); // 꺼졌을 당시 위치·크기 복원
     // 풀스크린은 저장 모니터에 보이는 창을 먼저 배치 후 전환(숨긴 창 setFullScreen→메인 모니터 오작동 회피).
-    const fs = !!(saved && saved.fullscreen);
-    const max = !!(saved && saved.maximized && !fs);
+    const fs = !hidden && !!(saved && saved.fullscreen);
+    const max = !hidden && !!(saved && saved.maximized && !fs);
     if (max) opts.show = false;
     win = new BrowserWindow(opts);
     if (max) { win.maximize(); win.once("ready-to-show", () => { try { win.show(); } catch {} }); }
@@ -215,10 +216,11 @@ function createMainWindow({
     try { win.loadURL(APP_URL).catch(() => scheduleLoadRetry()); }
     catch { scheduleLoadRetry(); }
   }
-  // did-fail-load 도 재시도(초기 커넥션 거부).
+  // did-fail-load 도 재시도(초기 커넥션 거부)
+  // - 앱 화면 자체의 실패만. 안의 iframe(메모랩 등) 실패로 앱 화면 전체를 다시 불러오면 화면이 번쩍임
   app.on("web-contents-created", (_e, contents) => {
-    contents.on("did-fail-load", (_ev, code) => {
-      if (contents === win?.webContents && code !== -3) scheduleLoadRetry();
+    contents.on("did-fail-load", (_ev, code, _desc, _url, isMainFrame) => {
+      if (contents === win?.webContents && isMainFrame && code !== -3) scheduleLoadRetry();
     });
     // 브라우저(webview) 확대/축소: Cmd +/-/0. 포커스가 webview에 있어도 동작하도록 메인에서 처리.
     if (contents.getType() === "webview") {

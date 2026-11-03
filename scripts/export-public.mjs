@@ -17,7 +17,7 @@ import { scanLine, scanPath, SKIP, TRACES_LOADED, PRIVATE_LIST_PATH } from "./pr
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // 아는 단어 목록은 git 이 모르는 파일이라 공개본에 포함되지 않는다. 검사·내보내기 도구 자체는
-// 나간다. 받은 쪽도 자기 흔적을 걸러 다시 낼 수 있어야 한다. CLAUDE.md 도 넣는다. 이 저장소를
+// 나간다. 받은 쪽도 자기 흔적을 걸러 다시 낼 수 있어야 한다. CLAUDE.md·AGENTS.md 도 넣는다. 이 저장소를
 // 고칠 때의 필수 규칙(앱 다운타임·환경 분리·서버 재시작)이 거기에만 있고, 그것을 모르면
 // 데이터가 사라질 수 있다. smoke 도 그 존재를 검사한다.
 const SHAPE_ONLY = process.argv.includes("--shape-only");

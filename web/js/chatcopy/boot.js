@@ -8,8 +8,8 @@
 //   터미널 위에서만 동작하는 기능이다.
 //
 // 의존 대상
-//   core/hooks 의 provide, panel/terminal 의 상태 접근자, 그리고 자기 하위 모듈 셋
-//   (edge-drag · copy-text · drop-path). ctx 에서 꺼내는 것은 main 이 실제로 주는 이름뿐이다.
+//   core/hooks 의 provide, panel/terminal 의 상태 접근자, 그리고 자기 하위 모듈 넷
+//   (edge-drag · copy-text · drop-path · forward-copy). ctx 에서 꺼내는 것은 main 이 실제로 주는 이름뿐이다.
 //
 // 유지 조건
 //   이 파일을 앱 셸이 정적으로 import 하면 "끈 기능은 로드되지 않는다" 규칙이 깨진다.
@@ -27,6 +27,7 @@ import {
   initEdgeDrag,
 } from "./edge-drag.js";
 import { fileDragHotNext, insertDroppedPaths, setDragHot } from "./drop-path.js";
+import { forwardEnd, forwardStart } from "./forward-copy.js";
 
 // 고르는 동안 오는 선택 변경을 이만큼 모아서 마지막 한 번만 알린다.
 const COPY_TOAST_DELAY_MS = 250;
@@ -46,13 +47,9 @@ export function initCapability(ctx) {
   provide("chatcopy.dragMove", (e) => edgeTrack(e));
   provide("chatcopy.dragEnd", (e) => { finishDrag(e); });
   provide("chatcopy.captureAfterWrite", () => edgeCaptureAfterWrite());
-  // 복사됐다는 사실을 알린다.
-  //
-  // 드래그 복사만 알리면 그냥 선택해 복사한 경우에는 표시가 없어, 사람은 복사가
-  // 됐는지 붙여넣기 전에는 알 수 없다.
-  // 고르는 동안 선택 변경이 여러 번 오므로 마지막 한 번만 알린다. 선택이 풀리면 예약도 취소한다.
-  // 취소하지 않으면 지워진 선택을 두고 "복사됨"이 뜬다.
-  // 알림은 복사 결과가 온 뒤에 띄운다. 복사하지 못했으면 그 사실을 알린다.
+  // 복사 실패 알림
+  // - 성공은 알리지 않음. 앱(herdr·Claude Code)의 복사 표시와 겹침(2026-11-03 사용자)
+  // - 고르는 동안 선택 변경이 여러 번 오므로 마지막 한 번만 판정. 선택이 풀리면 예약 취소
   let copiedTimer = null, copiedGen = 0;
   const noteCopied = (text, written) => {
     const gen = ++copiedGen;
@@ -62,7 +59,7 @@ export function initCapability(ctx) {
       copiedTimer = null;
       const ok = await written;
       if (gen !== copiedGen) return;
-      showToast(ok ? `${String(text).split("\n").length}줄 복사됨` : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" });
+      if (!ok) showToast("복사하지 못했습니다", { level: "err", near: "action" });
     }, COPY_TOAST_DELAY_MS);
   };
 
@@ -73,6 +70,10 @@ export function initCapability(ctx) {
     const s = cropAwareSelection();
     if (!s) { noteCopied(""); return; }
     noteCopied(s, writeClipboard(s));
+  });
+  provide("chatcopy.forwardStart", () => forwardStart());
+  provide("chatcopy.forwardEnd", async (range) => {
+    await forwardEnd(range, writeClipboard);
   });
   provide("chatcopy.dragHint", (kind, overTerminal) => setDragHot(fileDragHotNext(kind, overTerminal)));
   provide("chatcopy.dropFiles", (files) => insertDroppedPaths(files, { acHost, showToast, getCurTarget }));
@@ -88,12 +89,10 @@ export function initCapability(ctx) {
     if (!got || !got.text) return;
     const text = got.text;
     if (!(await writeClipboard(text))) { showToast("범위 복사를 만들었지만 클립보드에 쓰지 못했습니다", { level: "err", near: "action" }); return; }
-    const lines = text.split("\n").length;
-    // 잘렸을 수 있다는 사실을 감추면 모르고 붙여넣게 된다. 완전본과 다른 문구를 쓰고, 어느 대조가
-    // 일치하지 않았는지 함께 남긴다. 이 정보가 없으면 원인을 찾을 수 없다.
-    showToast(got.degraded ? `${lines}줄만 복사했습니다` : `${lines}줄 복사됨(화면 밖 포함)`,
-      { level: got.degraded ? "err" : "ok", body: got.degraded ? "화면에서 본 범위만 복사했습니다." : undefined,
-        detail: got.degraded ? String(got.degraded) : undefined, near: "action" });
+    // 잘렸을 수 있다는 사실을 감추면 모르고 붙여넣게 된다. 어느 대조가 일치하지 않았는지 함께 남긴다.
+    // 완전히 복사한 경우는 알리지 않음(위 실패 알림과 같은 이유)
+    if (got.degraded) showToast(`${text.split("\n").length}줄만 복사했습니다`,
+      { level: "err", body: "화면에서 본 범위만 복사했습니다.", detail: String(got.degraded), near: "action" });
   }
 
   return {};

@@ -50,11 +50,17 @@ let broadcast;
 let getHerdr;
 let relayToOneConsole;
 let uiToken;
+let onRelayEvent = () => {};
+let onTargetGeneration = () => {};
+let onExecutorRegistered = () => {};
 
 export function initBrowserRuntime(deps) {
   broadcast = deps.broadcast;
   getHerdr = deps.getHerdr;
   relayToOneConsole = deps.relayToOneConsole;
+  onRelayEvent = deps.onRelayEvent || (() => {});
+  onTargetGeneration = deps.onTargetGeneration || (() => {});
+  onExecutorRegistered = deps.onExecutorRegistered || (() => {});
 
   loadTabHandles();
   loadGroupHandles();
@@ -76,14 +82,41 @@ function cdpExecutorReady() {
 }
 
 function requestCdp(cmd, args, wc, timeoutMs) {
+  return requestCdpMessage({ type: "cdp-exec", cmd, args: args || {}, wc }, timeoutMs);
+}
+
+function requestCdpMessage(message, timeoutMs = 30000) {
   return new Promise((resolve) => {
-    if (!cdpExecutorReady() || !wc) { resolve({ ok: false, error: "실행기 없음" }); return; }
+    if (!cdpExecutorReady()) { resolve({ ok: false, error: "실행기 없음", code: "EXECUTOR_GONE", sent: false, appGone: true }); return; }
     const id = "cdp" + (++cdpSeq);
-    const timer = setTimeout(() => { cdpPending.delete(id); resolve({ ok: false, error: `timeout(${timeoutMs / 1000}s)` }); }, timeoutMs);
+    const timer = setTimeout(() => { cdpPending.delete(id); resolve({ ok: false, error: `timeout(${timeoutMs / 1000}s)`, code: "TIMEOUT", sent: true }); }, timeoutMs);
     cdpPending.set(id, { resolve, timer });
-    try { cdpExecutorWs.send(JSON.stringify({ type: "cdp-exec", id, cmd, args: args || {}, wc })); }
-    catch (e) { clearTimeout(timer); cdpPending.delete(id); resolve({ ok: false, error: String(e.message || e) }); }
+    try { cdpExecutorWs.send(JSON.stringify({ ...message, id })); }
+    catch (e) { clearTimeout(timer); cdpPending.delete(id); resolve({ ok: false, error: String(e.message || e), sent: false }); }
   });
+}
+
+function requestWorkerRelay({ workerGeneration, commandId, callId, targetToken, command, args, wc, unit, timeoutMs = 30000 }) {
+  return requestCdpMessage({ type: "cdp-exec", workerGeneration, commandId, callId, targetToken,
+    cmd: command, args: args || {}, wc, ...(unit ? { unit } : {}) }, timeoutMs);
+}
+
+function requestWorkerGeneration(type, workerGeneration, options = {}, timeoutMs = 5000) {
+  return requestCdpMessage({ type, workerGeneration, ...options }, timeoutMs);
+}
+
+// 확인 창 문구는 페이지가 비밀번호·전화번호를 담을 수 있어 Electron 결과 guard(기억한 비밀 값 가리기)를 거침
+// guard 를 거치지 못하면 문구를 뺌
+async function redactDialog(wc, dialog) {
+  if (!dialog) return dialog;
+  const source = typeof dialog.full === "string" ? dialog.full : dialog.message || "";
+  const r = await requestCdp("redact", { text: source }, wc, 3000);
+  const text = r && r.ok !== false ? (r.data && typeof r.data.text === "string" ? r.data.text : r.text) : null;
+  return { ...dialog, message: typeof text === "string" ? text.slice(0, 200) : "(확인 창 문구를 가리지 못해 뺐습니다)" };
+}
+async function safeDialogResult(wc, result, answerTool) {
+  if (!result || !result.dialogOpen) return result;
+  return dialogBlocked(await redactDialog(wc, result.dialogOpen), answerTool);
 }
 
 function registerCdpExecutor(ws, msg) {
@@ -106,8 +139,10 @@ function registerCdpExecutor(ws, msg) {
     return false;
   }
   cdpExecutorWs = ws;
-  cdpExecutor = { app: String(msg.app || "?"), pid: Number(msg.pid) || 0, at: Date.now() };
+  cdpExecutor = { app: String(msg.app || "?"), pid: Number(msg.pid) || 0, at: Date.now(),
+    features: Array.isArray(msg.features) ? msg.features.filter(item => typeof item === "string").slice(0, 16) : [] };
   console.log(`[cdp] 실행기 등록 — ${cdpExecutor.app} (pid ${cdpExecutor.pid})`);
+  Promise.resolve().then(() => onExecutorRegistered(cdpExecutor)).catch(() => {});
   return true;
 }
 
@@ -117,14 +152,26 @@ function resolveCdpResult(ws, msg) {
   if (!pending) return false;
   clearTimeout(pending.timer);
   cdpPending.delete(msg.id);
-  pending.resolve(msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error });
+  pending.resolve(msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error, code: msg.code, ...(msg.details ? { details: msg.details } : {}) });
   return true;
+}
+
+function handleCdpExecutorEvent(ws, msg) {
+  if (ws !== cdpExecutorWs) return false;
+  if (msg.type === "relay-event") { onRelayEvent(msg.event); return true; }
+  if (msg.type === "browser-target-generation") { onTargetGeneration(msg); return true; }
+  return false;
+}
+
+function cdpExecutorInfo() {
+  return cdpExecutor ? { ...cdpExecutor } : null;
 }
 
 function disconnectCdpExecutor(ws) {
   if (ws !== cdpExecutorWs) return false;
   cdpExecutorWs = null;
   cdpExecutor = null;
+  onTargetGeneration({ reset: true });
   tabReg.clear();
   tabIdByWc.clear();
   activeTabBySpace.clear();
@@ -299,6 +346,7 @@ function replacePaneSpaces(agents) {
   spaceByPane.clear();
   for (const agent of agents) if (agent.pane_id && agent.workspace_id) spaceByPane.set(String(agent.pane_id), String(agent.workspace_id));
 }
+export function rememberQaPane(pane, space) { spaceByPane.set(String(pane), String(space)); }
 function getLastTab(pane) { return lastTabByPane.get(String(pane)) || null; }
 // 사용자 지목(UI 픽)만 여기 들어온다. AI는 직접 넣을 수 없다. 키는 탭 정체성이다. 같은 지목을
 // wc 집합으로도 보관하면 wc가 재발급될 때마다 옮겨야 하고, 한 번이라도 놓치면 지목이
@@ -306,9 +354,19 @@ function getLastTab(pane) { return lastTabByPane.get(String(pane)) || null; }
 // 지목은 사용자가 앱에서 하는 동작이다. 루프백이면 앱이라는 판정으로는 앱과 임의의 로컬
 // 프로세스를 구별할 수 없다. 확인 결과 임의 프로세스가 WS로 붙어 자신에게 임의의 탭을
 // 지목하고 바로 조작할 수 있었다(AI가 스스로 권한을 넓히는 경로). 그래서 앱만 아는 토큰을 요구한다.
-// 토큰은 파일(0600)에 있고 Electron main만 읽어 렌더러에 넘기므로 원격(폰) UI는 지목할 수 없다.
+// 앱이 띄운 서버는 토큰을 파이프(IRIS_UI_TOKEN_FD)로만 받는다. 파일은 같은 사용자의 다른 프로세스가 읽을 수 있음
+// 단독 실행(개발·테스트)은 파일(0600)에 두고 Electron main 이 읽어 렌더러에 넘긴다. 원격(폰) UI는 지목할 수 없다.
 const UI_TOKEN_PATH = path.join(IRIS_HOME, "ui-token");
 function loadUiToken() {
+  const fd = Number(process.env.IRIS_UI_TOKEN_FD);
+  delete process.env.IRIS_UI_TOKEN_FD;
+  if (Number.isInteger(fd) && fd > 2) {
+    try {
+      const t = fs.readFileSync(fd, "utf8").trim();
+      fs.closeSync(fd);
+      if (t.length >= 32) { try { fs.rmSync(UI_TOKEN_PATH, { force: true }); } catch {} return t; }
+    } catch {}
+  }
   try { const t = fs.readFileSync(UI_TOKEN_PATH, "utf8").trim(); if (t.length >= 32) return t; } catch {}
   const t = crypto.randomBytes(32).toString("hex");
   try { fs.mkdirSync(path.dirname(UI_TOKEN_PATH), { recursive: true }); fs.writeFileSync(UI_TOKEN_PATH, t, { mode: 0o600 }); } catch {}
@@ -953,9 +1011,11 @@ const spaceStateParticipant = {
 
 // 대화상자는 server/browser/dialogs.js 가 소유한다. broadcast 는 init 에서 결정되므로
 // 값이 아니라 호출 함수로 넘긴다.
-const dialogs = createDialogs({ metaOfWc, broadcast: (m) => broadcast(m) });
+// AI 가 최근 5분 안에 명령을 보낸 탭(iris-mcp·iris-qa 모두 markControl 을 거침)
+const aiUsingWc = (wc) => { const id = tabIdOfWc(wc); const until = id ? aiUseByTab.get(id) : 0; return !!until && until > Date.now(); };
+const dialogs = createDialogs({ metaOfWc, broadcast: (m) => broadcast(m), aiTab: aiUsingWc });
 const { plannedAnswer, dialogPlanText, setDialogPlan, setFrameOrigins, setTabDialog,
-  openDialogAsk, closeDialogAsk, answerDialogAsk } = dialogs;
+  openDialogAsk, closeDialogAsk, answerDialogAsk, dialogBlocked, raceDialog } = dialogs;
 
 function flushNow() {
   return {
@@ -971,12 +1031,17 @@ export {
   adoptGroup,
   aiTargetsSnapshot,
   answerDialogAsk,
+  dialogBlocked,
+  raceDialog,
+  redactDialog,
+  safeDialogResult,
   broadcastAiTargets,
   broadcastTabHandles,
   cdpExecutorReady,
   closeDialogAsk,
   closedTabsWire,
   controlMessage,
+  controlOwnerOf,
   controlSnapshot,
   designateGroup,
   designateTab,
@@ -992,6 +1057,7 @@ export {
   goneReply,
   grantTab,
   grantTabIdsOf,
+  grantedByTabId,
   groupExists,
   groupHandleFor,
   groupTabIds,
@@ -1019,6 +1085,10 @@ export {
   replaceDesignatedGroups,
   replaceDesignatedTabs,
   requestCdp,
+  requestWorkerRelay,
+  requestWorkerGeneration,
+  handleCdpExecutorEvent,
+  cdpExecutorInfo,
   resolveCdpResult,
   resolveTabWcWaiters,
   resolveTarget,

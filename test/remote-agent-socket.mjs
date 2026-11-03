@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createAgentSocketServer, shouldWaitForQuestion, validQuestions } from "../server/remote/agent-socket.js";
+import { createAgentSocketServer, validQuestions } from "../server/remote/agent-socket.js";
 import { createRequestStore } from "../server/remote/requests.js";
 
 const AGENT = "a".repeat(32);
@@ -56,6 +56,7 @@ async function setup(t, overrides = {}) {
     requests,
     isRemoteEnabled: () => true,
     hasRegisteredDevices: () => true,
+    hasPhoneSessions: () => true,
     ...overrides,
   });
   try { await server.start(); }
@@ -99,7 +100,7 @@ test("허용 요청은 request_id 가 같아도 최신 요청의 답만 돌려�
   assert.equal(await answer, "delivered");
 });
 
-test("질문은 형식을 검사하고 먼저 온 Mac 답을 hook에 전달한다", async (t) => {
+test("69 질문은 동기 요청 없이 보관하고 hook 종료 뒤 유지한다", async (t) => {
   const built = await setup(t);
   if (!built) return;
   const client = lineClient(built.socketPath);
@@ -110,14 +111,17 @@ test("질문은 형식을 검사하고 먼저 온 Mac 답을 hook에 전달한�
     { label: "빨강", description: "" }, { label: "파랑", description: "" },
   ] }];
   client.send({ type: "question", questions });
-  await until(() => built.requests.list().length === 1);
-  const pending = built.requests.list()[0];
-  const answer = built.requests.answer(pending.ref, { answers: [{ labels: ["파랑", "빨강"] }] });
-  assert.deepEqual(await client.next(), { type: "question.answer", answers: [{ labels: ["파랑", "빨강"] }] });
-  assert.equal(await answer, "delivered");
+  assert.deepEqual(await client.next(), { type: "question.none" });
+  assert.equal(built.requests.list().length, 0);
+  assert.equal(built.server.questions.list().length, 1);
+  client.socket.destroy();
+  await until(() => built.server.connectionCount() === 0);
+  assert.equal(built.server.questions.list().length, 1);
   assert.equal(validQuestions([...questions, { ...questions[0] }]), false, "질문 원문 중복");
   assert.equal(validQuestions([{ ...questions[0], options: [{ label: "a, b", description: "" }] }]), false);
   assert.equal(validQuestions([{ question: "생략?", header: "생략", options: [{ label: "예" }] }]), true);
+  assert.equal(validQuestions([{ question: "미리보기?", header: "미리", options: [{ label: "예", description: "", preview: "```\nx\n```" }] }]), true);
+  assert.equal(validQuestions([{ question: "미리보기?", header: "미리", options: [{ label: "예", preview: 3 }] }]), false);
 });
 
 test("등록 기기가 없거나 원격을 끄면 질문 hook을 결정 없이 즉시 푼다", async (t) => {
@@ -145,11 +149,153 @@ test("남은 경로가 소켓이 아니면 지우지 않고 시작을 거부한�
   assert.equal(await fsp.readFile(socketPath, "utf8"), "keep");
 });
 
-test("질문 대기는 형식·원격 상태·등록 기기를 모두 요구한다", () => {
-  const questions = [{ question: "계속?", header: "확인", multiSelect: false,
-    options: [{ label: "예", description: "" }] }];
-  assert.equal(shouldWaitForQuestion(questions, true, 1), true);
-  assert.equal(shouldWaitForQuestion(questions, false, 1), false);
-  assert.equal(shouldWaitForQuestion(questions, true, 0), false);
-  assert.equal(shouldWaitForQuestion([], true, 1), false);
+const terminalTestQuestions = [{ question: '어느 색?', header: '색', options: [{ label: '파랑', preview: 'terminal only' }] }];
+async function ask(built) {
+  const client = lineClient(built.socketPath);
+  await client.ready;
+  client.send({ role: 'question-hook', v: 1, paneId: 'known-pane', cliSession: 'session' });
+  await client.next();
+  client.send({ type: 'question', questions: terminalTestQuestions });
+  return client;
+}
+
+test('packet63 폰 없음 즉시 터미널 전달·재표시·상태 해제 삭제', async (t) => {
+  const logs = [];
+  const built = await setup(t, { hasPhoneSessions: () => false, log: (line) => logs.push(line) });
+  if (!built) return;
+  built.source.question = true;
+  const client = await ask(built);
+  assert.deepEqual(await client.next(), { type: 'question.none' });
+  assert.equal(built.requests.list().length, 0);
+  assert.equal(built.server.questions.list().length, 1);
+  assert.deepEqual(built.server.questions.list()[0].body.questions[0].options, [{ label: '파랑', description: '' }]);
+  assert.deepEqual(logs, ['[remote] question reason=retained']);
+  client.socket.destroy();
+  await until(() => built.server.connectionCount() === 0);
+  assert.equal(built.server.questions.list().length, 1, 'hook 종료 뒤 재연결용 보관');
+  built.source.question = false;
+  assert.deepEqual(built.server.questions.list(), []);
+});
+
+test('69 폰 연결과 무관한 보관·새 질문 교체·세션·기한 삭제', async t => {
+  let clock = 0;
+  const built = await setup(t, { now: () => clock, log() {} });
+  if (!built) return;
+  built.source.question = true;
+  const first = await ask(built); await first.next(); first.socket.destroy();
+  const old = built.server.questions.list()[0].ref;
+  const next = await ask(built); await next.next(); next.socket.destroy();
+  assert.equal(built.requests.list().length, 0);
+  assert.equal(built.server.questions.list().length, 1);
+  assert.notEqual(built.server.questions.list()[0].ref, old);
+  built.source.sessionUuid = 'other';
+  assert.deepEqual(built.server.questions.list(), []);
+  delete built.source.sessionUuid;
+  const last = await ask(built); await last.next(); last.socket.destroy();
+  clock = 86400001;
+  assert.deepEqual(built.server.questions.list(), []);
+});
+
+test('packet63 다른 pane 보관 분리·세션 종료 알림·거절 사유 내용 없는 로그', async (t) => {
+  const logs = [];
+  const sources = new Map(['known-pane', 'second-pane'].map((paneId, index) => [paneId,
+    { ref: index ? 'b'.repeat(32) : AGENT, kind: 'claude', status: 'blocked', source: { paneId, sessionUuid: 'session' } }]));
+  let changed;
+  const built = await setup(t, { hasPhoneSessions: () => false, log: (line) => logs.push(line),
+    agents: { resolvePane: (paneId) => sources.get(paneId), subscribe(fn) { changed = fn; } } });
+  if (!built) return;
+  const first = await ask(built);
+  await first.next();
+  const second = lineClient(built.socketPath);
+  await second.ready;
+  second.send({ role: 'question-hook', v: 1, paneId: 'second-pane', cliSession: 'session' });
+  await second.next();
+  second.send({ type: 'question', questions: [{ ...terminalTestQuestions[0], question: '다른 질문?' }] });
+  await second.next();
+  assert.deepEqual(built.server.questions.list().map((q) => [q.agent, q.body.questions[0].question]),
+    [[AGENT, '어느 색?'], ['b'.repeat(32), '다른 질문?']]);
+  let notifications = 0;
+  built.server.questions.subscribe(() => notifications++);
+  sources.delete('known-pane'); changed();
+  assert.equal(notifications, 1);
+  assert.equal(built.server.questions.list()[0].agent, 'b'.repeat(32));
+  second.send({ type: 'question', questions: [], path: '/private/path' });
+  await second.next();
+  assert.deepEqual(built.server.questions.list(), [], '거절된 새 질문도 이전 질문 제거');
+  assert.equal(logs.at(-1), '[remote] question reason=validation-rejected');
+  assert.equal(logs.some((line) => line.includes('/private') || line.includes('다른 질문')), false);
+});
+
+test('packet63 원격 꺼짐 사유와 등록 기기 없음 사유', async (t) => {
+  for (const [reason, overrides] of [['remote-disabled', { isRemoteEnabled: () => false }], ['no-device', { hasRegisteredDevices: () => false }]]) {
+    const logs = [];
+    const built = await setup(t, { ...overrides, log: (line) => logs.push(line) });
+    if (!built) return;
+    const client = await ask(built);
+    assert.deepEqual(await client.next(), { type: 'question.none' });
+    assert.deepEqual(logs, [`[remote] question reason=${reason}`]);
+  }
+});
+
+test('packet63 보관 개수·전체 크기 상한과 원격 요청 원문 폐기', async (t) => {
+  const sources = new Map();
+  const built = await setup(t, { hasPhoneSessions: () => false, log() {},
+    agents: { resolvePane: (paneId) => sources.get(paneId) } });
+  if (!built) return;
+  async function add(index, large = false) {
+    const paneId = `pane-${index}`;
+    sources.set(paneId, { ref: index.toString(16).padStart(32, '0'), kind: 'claude', status: 'blocked',
+      source: { paneId, sessionUuid: 'session' } });
+    const client = lineClient(built.socketPath);
+    await client.ready;
+    client.send({ role: 'question-hook', v: 1, paneId, cliSession: 'session' });
+    await client.next();
+    client.send({ type: 'question', questions: [{ question: large ? 'q'.repeat(8000) : '질문?', header: '확인',
+      options: [{ label: '예', description: large ? 'd'.repeat(4000) : '' }] }] });
+    await client.next();
+    client.socket.destroy();
+  }
+  for (let index = 1; index <= 4; index++) await add(index, true);
+  assert.equal(built.server.questions.list().length, 2);
+  assert.ok(Buffer.byteLength(JSON.stringify(built.server.questions.list())) <= 32 * 1024);
+  for (let index = 5; index <= 38; index++) await add(index);
+  assert.equal(built.server.questions.list().length, 32);
+});
+
+ test('69 질문 제어문자 제거·빈 선택지 거절·삭제 사유 코드', async t => {
+  const logs = [];
+  const built = await setup(t, { log: line => logs.push(line) });
+  if (!built) return;
+  built.source.question = true;
+  const client = await ask(built); await client.next();
+  client.send({ type: 'question', questions: [{ question: '색?\u0007', header: '색\u001b',
+    options: [{ label: '파랑\u0000', description: '설명\u0001' }] }] });
+  await client.next();
+  assert.deepEqual(built.server.questions.list()[0].body.questions[0], { question: '색?', header: '색',
+    multiSelect: false, options: [{ label: '파랑', description: '설명' }] });
+  built.source.question = false;
+  assert.deepEqual(built.server.questions.list(), []);
+  assert.equal(logs.at(-1), '[remote] question reason=computer-answered');
+  client.send({ type: 'question', questions: [{ question: '색?', header: '색', options: [{ label: '\u0000' }] }] });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(built.server.questions.list(), []);
+  assert.equal(logs.at(-1), '[remote] question reason=validation-rejected');
+  client.socket.destroy();
+});
+
+test("승인 hook hint 는 에이전트별로 보관하고 형식이 틀리거나 다른 에이전트면 버린다", async (t) => {
+  const built = await setup(t);
+  if (!built) return;
+  const client = lineClient(built.socketPath);
+  await client.ready;
+  client.send({ role: "question-hook", v: 1, paneId: "known-pane", cliSession: "session" });
+  await client.next();
+  client.send({ type: "hint", tool: "Bash", target: "echo a", extra: 1 });
+  client.send({ type: "hint", tool: "", target: "x" });
+  client.send({ type: "hint", tool: "Bash", target: "x".repeat(301) });
+  client.send({ type: "hint", tool: "Edit", target: "/p/a.js" });
+  await until(() => built.server.questions.hint(AGENT));
+  const found = built.server.questions.hint(AGENT);
+  assert.deepEqual(found, { tool: "Edit", target: "/p/a.js" });
+  assert.equal(built.server.questions.hint("other-agent"), null);
 });

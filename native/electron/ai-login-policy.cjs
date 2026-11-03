@@ -21,6 +21,8 @@
 //   CDP login handler·result safety와 서버 ai-login-note다. 일치하지 않으면 권한·비밀번호 비노출·사용자 알림이 함께 깨진다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/ai-login-policy.cjs
 
+const { isLocalOrigin } = require("../../server/local-origin.cjs");
+
 function createAiLoginPolicy({
   fs, path, stateDir, ipcMain, isTrustedSender, credentialService, cookieImport,
   chromeImportRegistry, chromeProfileCid, isProfilePartition, setLoginProvider, ctlSend,
@@ -50,6 +52,8 @@ function createAiLoginPolicy({
     } catch {}
   }
   function aiLoginAllowed(origin, username) { return loadAiLogin().has(String(origin) + "\n" + String(username)); }
+  // 로컬 주소는 계정별 허용 없이 AI가 저장된 로그인을 쓴다(사용자 2026-10-28). 판정은 local-origin.cjs
+  function aiMayUse(origin, username) { return isLocalOrigin(origin) || aiLoginAllowed(origin, username); }
   // 저장된 로그인 전체(사이트·아이디만) + 허용 여부. 비번은 절대 나가지 않는다.
   function aiLoginInventory() {
     loadAiLogin();
@@ -113,7 +117,17 @@ function createAiLoginPolicy({
     let partition = null;
     try { partition = partitionForSession(wc.session); } catch {}
     const saved = partition ? credentialService.listForOrigin(partition, origin) : [];
-    const allowed = saved.filter((l) => aiLoginAllowed(origin, l.username));
+    const allowed = saved.filter((l) => aiMayUse(origin, l.username));
+    if (opts?.qaAccounts === true) {
+      let dev = null;
+      try { dev = await localLoginFor(origin); } catch {}
+      const accounts = (opts.qaApproved === true ? saved : allowed).map((entry) => ({ username: entry.username, allowed: aiMayUse(origin, entry.username), local: false,
+        password: credentialService.passwordFor(partition, origin, entry.username) }));
+      if (dev && !accounts.some((entry) => entry.username === dev.username))
+        accounts.push({ username: dev.username, password: dev.password, allowed: true, local: true });
+      return { origin, accounts, unavailable: saved.filter((entry) => !accounts.some((account) => account.username === entry.username))
+        .map((entry) => ({ username: entry.username, allowed: false, local: false })) };
+    }
     const notify = (kind, extra) => ctlSend({ type: "ai-login-note", kind, wc: wc.id, origin, ...(extra || {}) });
     // 로컬은 프로젝트가 심어 둔 개발 계정으로 자동 로그인한다. 이 계정 하나 때문에 사용자를
     // 부르면 확인할 때마다 사람이 붙어야 한다. 이 경로는 로컬에서만 열리며, 판정은

@@ -11,7 +11,7 @@ async function keys(platform) {
   globalThis.acHost = { platform };
   return import(`../web/js/core/keymap.js?platform=${platform}`);
 }
-function harness(map, platform, { browser = false, terminal = false } = {}) {
+function harness(map, platform, { browser = false, terminal = false, focusedKind = "browser" } = {}) {
   const listeners = [], calls = [];
   const win = { acHost: { platform, appReload: () => calls.push("app") } };
   const document = { activeElement: {}, addEventListener: (_e, fn, capture) => listeners.push({ fn, capture }), getElementById: () => null };
@@ -20,7 +20,7 @@ function harness(map, platform, { browser = false, terminal = false } = {}) {
     currentSwitcherState: () => ({}), isAgentRenaming: () => false, getTerminal: () => ({ contains: () => terminal }),
     cycleRail: (n) => calls.push(`rail:${n}`), cycleAgent: (n) => calls.push(`agent:${n}`), cycleSpace: (n) => calls.push(`space:${n}`), cycleCenterTab: (n) => calls.push(`tab:${n}`),
     runSwitcherKey: (n) => { calls.push(`switch:${n}`); return "step"; }, gotoMainScreen() {}, gotoSpaceBrowser() {}, toggleDevTools() {},
-    curTabs: () => [{ id: "b", kind: "browser" }], getCenterSpace: () => "s", getActiveTabId: () => "b", shouldTakeFindKey: () => false,
+    curTabs: () => [{ id: "b", kind: focusedKind }], getCenterSpace: () => "s", getActiveTabId: () => "b", shouldTakeFindKey: () => false,
     activeWv: () => ({ el: { reload: () => calls.push("page"), reloadIgnoringCache: () => calls.push("page-hard") } }),
     closeCurrentHerdrPane: () => calls.push("pane"), closeActiveTab: () => calls.push("close-page"), closeTabs: () => calls.push("close-page"),
     saveActiveFile: () => calls.push("save"), startInlineRename: () => calls.push("rename"), callHook() {},
@@ -84,7 +84,7 @@ test("Windows saved file restore deduplicates path variants, remaps active ID an
   const doc = { id: "file:C:/WORK/report.docx", path: "C:/WORK/report.docx", kind: "docx", docxData: { dirty: true } };
   const tabs = [doc], reads = [], active = [], values = new Map([["ac.filetabs", JSON.stringify({ s: { files: ["C:/Work/a.md", "c:\\WORK\\a.md", "C:\\work\\report.docx"], active: "file:c:\\WORK\\a.md" } })], ["ac.centerspace", "s"]]);
   const restore = evaluate("web/js/center/tabs.js", "let fileTabsRestored", undefined, "restoreFileTabs", {
-    localStorage: { getItem: (k) => values.get(k), setItem: (k, v) => values.set(k, v) }, spid: (k) => k, ensureTabSpace() {}, getTabs: () => tabs,
+    BROWSER_MODE: false, callHook: () => false, localStorage: { getItem: (k) => values.get(k), setItem: (k, v) => values.set(k, v) }, spid: (k) => k, ensureTabSpace() {}, getTabs: () => tabs,
     fileKindOf: (p) => /docx$/.test(p), addTab: (_sp, t) => { tabs.push(t); return t; }, makeFileTab: (p) => ({ id: "file:" + p, kind: "file", path: p }),
     requestFileContent: (...args) => reads.push(args), trackFileWatch() {}, setActiveTab: (_sp, id) => active.push(id), setCenterSpace() {}, renderTabs() {}, showActiveTab() {},
   });
@@ -204,4 +204,14 @@ test("static Windows labels and class adapt while Darwin DOM stays unchanged", a
   globalThis.acHost = { platform: "win32" }; applyHostUi(doc);
   assert.equal(classAdded, true); assert.equal(text.nodeValue, "탐색기에서 파일을 끌어다 놓기");
   assert.equal(attr.get("title"), "클릭 (Ctrl+Shift+E)"); assert.equal(attr.get("placeholder"), "Ctrl+Shift+S");
+});
+
+test("분할의 파일 칸 포커스는 보이는 브라우저를 새로고침하지 않음", async () => {
+  const map = await keys("win32"), h = harness(map, "win32", { focusedKind: "file" });
+  assert.equal(h.press({ key: "r", ctrlKey: true }), false);
+  assert.equal(h.press({ key: "F5" }), false);
+  assert.deepEqual(h.calls, []);
+  const mac = harness(await keys("darwin"), "darwin", { focusedKind: "file" });
+  mac.press({ key: "r", metaKey: true });
+  assert.equal(mac.calls.includes("page"), false);
 });

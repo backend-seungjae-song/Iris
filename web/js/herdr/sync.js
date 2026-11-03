@@ -11,7 +11,7 @@
 //   main 소유 선택 scalar는 접근자·setter로, 마지막 에이전트 객체와 DOM은 init에서 참조로 받는다.
 //
 // 유지 조건
-//   동일 pane 이면 대기 취소 → 300ms debounce → 1.5s 사용자 쿨다운(버리지 않고 끝난 뒤 반영) → pane 존재 확인 순서와,
+//   동일 pane 이면 대기 취소 → 100ms debounce → 1.5s 사용자 쿨다운(버리지 않고 끝난 뒤 반영) → pane 존재 확인 순서와,
 //   역동기화 경로에서 herdr focus를 되보내지 않는 loop-safe 경계를 그대로 보존한다.
 //
 // 영향 범위
@@ -46,7 +46,8 @@ export function scheduleHerdrSync(paneId) {
   herdrSyncTimer = null;
   herdrSyncPane = paneId && paneId !== getCurTarget() ? paneId : null;
   if (!herdrSyncPane) return;
-  const wait = Math.max(300, lastUserSelect + 1500 - Date.now());
+  // 서버가 포커스 요청과 겹친 방송을 focusStale 로 가려 주므로 대기는 연속 방송을 묶는 정도로 짧게 둔다.
+  const wait = Math.max(100, lastUserSelect + 1500 - Date.now());
   herdrSyncTimer = setTimeout(() => applyHerdrFocus(herdrSyncPane), wait);
 }
 

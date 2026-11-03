@@ -328,14 +328,15 @@ await checkAsync("pick-mode는 실제 맨 앞인 우리 창 하나에만 좌표�
     globalThis.clearInterval = originalClearInterval;
   }
 });
-check("사람을 부르는 길이 있다", () => {
-  const si = read("server/index.js"), commands = read("server/browser-commands.js"), mcp = read("bin/iris-mcp.mjs"), cli = read("bin/iris-browser.mjs");
-  return /function askUser\(args, session\)/.test(commands)
-    && /if \(cmd === "ask"\)/.test(commands)
-    && /type: "ai-ask"/.test(commands)
-    && /msg\.type === "ai-ask-answer"/.test(si)
-    && /tabAllowed\(session, tabId\)\.ok/.test(commands) // 남의 탭으로 부르지 않는다
-    && /"ai-ask": dispatchWs\(consoleOnly\(handleAiAskMessage\)\)/.test(mainJs)
+// 사람에게 묻는 요청은 알림 없이 세션 대화에서 묻게 돌려준다(사용자 2026-10-28 "콘솔로만")
+check("사람에게 묻는 길이 있다", () => {
+  const worker = read("server/mcp-worker/browser-service.js"), host = read("server/mcp-host/index-user-ports.js"), mcp = read("bin/iris-mcp.mjs"), cli = read("bin/iris-browser.mjs");
+  const ask = fnBody(worker, "askInput");
+  return /command === "ask" \|\| command === "approve"/.test(worker)
+    && /call\("user\.ask", prepared\.input\)/.test(worker)
+    && /consoleAsk\(input\._kind === "approve"/.test(host)
+    && /createIndexUserPorts\(\{ consoleAsk/.test(read("server/index.js"))
+    && !/user\.notify|broadcast\(|execOnWc\(/.test(ask)
     && /browser_ask_user/.test(mcp)
     && /case "ask":/.test(cli);
 });
@@ -386,13 +387,13 @@ check("폴더 객체를 처음 알게 되면 id 열쇠에 쌓인 것을 옮긴�
 // 그 그룹을 쓸 수 없다. 대상을 나누는 지점은 단일 대상 경로보다 위여야 한다.
 // 권한 검사·그룹 흡수·오류 문구가 전부 그 아래 있어서 대상마다 똑같이 적용된다.
 check("여러 탭에 한 번에 (최대 4)", () => {
-  const si = readAll("server");
+  const si = read("server/mcp-worker/browser-service.js");
   return /const MAX_TARGETS = 4;/.test(si)
-    && /function refList\(tab\)/.test(si)
-    && /if \(targets && targets\.length !== 1\)/.test(si)
-    && /targets\.map\(\(t\) => runBrowserCmd\(cmd, \{ \.\.\.\(args \|\| \{\}\), tab: t \}/.test(si)
-    && /ok: okCount === per\.length,/.test(si)     // 절반만 된 것을 성공이라 부르지 않는다
-    && /\[\.\.\.new Set\(arr\)\]/.test(si);        // 같은 탭을 두 번 적어도 한 번만
+    && /function targetRefs\(value\)/.test(si)
+    && /if \(refs && refs\.length !== 1\)/.test(si)
+    && /refs\.map\(async tab => \{[\s\S]{0,300}?executeOne\(command, \{ \.\.\.args, tab \}, identity\)/.test(si)
+    && /ok: okCount === targets\.length,/.test(si)     // 절반만 된 것을 성공이라 부르지 않는다
+    && /\[\.\.\.new Set\(refs\)\]/.test(si);       // 같은 탭을 두 번 적어도 한 번만
 });
 check("MCP·CLI가 대상 목록을 받는다", () => {
   const mcp = read("bin/iris-mcp.mjs"), cli = read("bin/iris-browser.mjs");
@@ -414,13 +415,13 @@ check("같은 이름이 겹치면 고르지 않는다", () => {
 check("목록이 준 정체성 그대로도 받는다", () => /if \(tabReg\.has\(String\(ref\)\)\) return String\(ref\);/.test(readAll("server")));
 check("숨은 탭 개수를 흘리지 않는다", () => !/hidden: tabReg\.size - visible\.length/.test(allServer));
 check("한 번만 지정은 기본 대상을 안 바꾼다", () => {
-  const si = read("server/browser-commands.js");
-  const seg = sliceFrom(si, "// --tab은 이번 명령에만 적용된다", 200, "한 번만 지정은 기본 대상을 안 바꾼다");
-  return /absorbIntoSessionGroup\(session, want\);/.test(seg) && !/setLastTab/.test(seg);
+  const si = read("server/mcp-host/current-server.js");
+  const seg = sliceFrom(si, "if (want != null)", 1000, "한 번만 지정은 기본 대상을 안 바꾼다");
+  return /absorbIntoSessionGroup\(identity\.session, want\);/.test(seg) && !/setLastTab/.test(seg);
 });
 check("지목받은 탭 폴백은 되돌아오지 않는다", () => {
-  const si = readAll("server");
-  return /runBrowserCmd\(cmd, \{ \.\.\.\(args \|\| \{\}\), tab: pick \}, session, true(, runId)?\)/.test(si);
+  const si = read("server/mcp-worker/browser-service.js");
+  return /if \(state\.grantedTab\) return executeOne\(command, \{ \.\.\.args, tab: state\.grantedTab \}, identity, true\)/.test(si);
 });
 check("그룹 권한은 로컬 UI에서만 생긴다", () => {
   const si = read("server/browser-message-handlers.js");
@@ -480,11 +481,9 @@ check("서버가 다시 뜨면 열린 탭을 전부 다시 알린다", () => {
 // 동안 CDP 가 붙은 채로 남는다.
 check("막힌 것을 푸는 명령은 줄을 서지 않는다", () => {
   const seg = sliceBetween(cdpc, "const QUEUE_BYPASS", "async function cdpExecRaw", "막힌 것을 푸는 명령은 줄을 서지 않는다");
-  return /QUEUE_BYPASS = new Set\(\["dialog", "dialoginfo", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff"\]\)/.test(seg)
+  return /QUEUE_BYPASS = new Set\(\["dialog", "dialoginfo", "dialogs", "nativewin", "nativeclick", "nativekey", "handoff", "redact"\]\)/.test(seg)
     && /if \(QUEUE_BYPASS\.has\(cmd\)\) return guard\(withCmdTimeout/.test(seg);
 });
-// 사람을 부르는 서버 명령은 알림을 띄우기 전에 그 탭의 CDP 를 뗀다. 유휴 창을 기다리면 사람이
-// 로그인하는 동안 CDP 가 붙은 채다. 전달 실패가 호출을 막으면 안 되므로 기다리지 않는다.
 // 실측 도구가 스스로 CDP 창을 열면 사람 탭의 상태를 잴 수 없다. cdpstate 는 touch 앞에서 답하고 끝난다.
 check("cdpstate 는 부착 정책을 건드리지 않고 답한다", () => {
   const cdpc = read("native/electron/cdp-control.cjs");
@@ -495,13 +494,6 @@ check("cdpstate 는 부착 정책을 건드리지 않고 답한다", () => {
   return at >= 0 && touch >= 0 && at < touch
     && !/touch\(|ensureAttached|debugger\.attach/.test(state)
     && /cdpSession\.primed\(wc\.id\)/.test(state) && /identityOwnsDebugger\(wc\)/.test(state);
-});
-check("사람을 부르면 알림 전에 handoff 를 보낸다", () => {
-  const seg = fnBody(read("server/browser-commands.js"), "askUser");
-  const proceed = sliceBetween(seg, "const proceed =", "const wc =", "사람을 부르면 알림 전에 handoff 를 보낸다");
-  const at = proceed.indexOf('execOnWc("handoff", {}, wc).catch(() => {})');
-  const notice = proceed.indexOf('broadcast({ type: "ai-ask"');
-  return at >= 0 && notice >= 0 && at < notice;
 });
 // 확인 창(alert/confirm)은 탭이 아니라 창에 붙는다. 다른 탭을 보고 있으면 관계없는 페이지 위에
 // 떠서 그 창 전체를 막는다. 어느 탭이 묻는지 모르면 사람도 AI도 진행할 수 없다.
@@ -522,7 +514,8 @@ check("안 보이는 탭에서는 요소를 직접 눌러 준다", () => {
   const seg = sliceBetween(cdpCmdInputSource, "  async function clickTarget", "\n\n  return {", "안 보이는 탭에서는 요소를 직접 눌러 준다");
   return /withLayout\(send, async \(applied\)/.test(seg)   // 레이아웃을 씌웠다 = 안 보이는 탭이다
     // 교차 출처 프레임 안의 요소도 같은 경로를 쓴다. 그 좌표는 프레임 좌표계라 그대로 누르면 다른 위치가 눌린다.
-    && /if \(applied \|\| sid\)/.test(seg)
+    // 누르면 사용자 포커스가 옮겨 가는 탭도 같은 경로(좌표 누르기는 그 창의 키보드 포커스를 이 탭으로 옮김)
+    && /const elementOnly = applied \|\| sid \|\| !\(await pressAllowed\(wc\)\)/.test(seg) && /if \(elementOnly\)/.test(seg)
     && /Runtime\.callFunctionOn/.test(seg)
     && /userGesture: true/.test(seg)                        // 팝업·파일선택이 막히지 않게
     && /via: "element"/.test(seg) && /via: "input"/.test(seg); // 어느 길로 갔는지 결과에 남긴다
@@ -607,6 +600,12 @@ check("좌표 명령이 레이아웃으로 감싸져 있다", () =>
   /async function clickTarget[\s\S]*?return await withLayout/.test(cdpCmdInputSource)
   && /async hover[\s\S]*?return await withLayout/.test(cdpCmdInputSource)
   && /async screenshot\(send, wc, args\) \{ return await withLayout/.test(cdpCmdCaptureSource));
+check("pick·sketch 캡처는 메인의 기존 CDP 처리기를 유지한다", () =>
+  /⑦·⑧에서도 메인에 유지/.test(cdpc)
+  && /runCdp:\s*\(webContentsMod, wcId, cmd, args\)\s*=>\s*cdpExec\(webContentsMod, wcId, cmd, args \|\| \{\}\)/.test(cdpc)
+  && !/internal-capture|captureGuestPage|runInternalCapture/.test(cdpc)
+  && /__acQ\(/.test(cdpCmdCaptureSource)
+  && /stitchFullPage\(send, \{ dpr, settle: args\.settle \}\)/.test(cdpCmdCaptureSource));
 // 열림·저장 패널의 버튼은 그룹 안에 중첩돼 이름으로 지정할 수 없다. 닫을 방법이 없으면 사용자가 진행할 수 없다.
 // 변수에 담은 sheet 참조로는 buttons가 조회되지 않는다. 취소·열기가 있는데 빈 배열이 돌아온다.
 // 버튼 이름이 없으면 무엇을 누를지 알 수 없어 인식이 무의미해진다.
@@ -820,7 +819,7 @@ await checkAsync("기기를 고르는 도구는 스코프 밖 참조로 죽지 �
   if (!out.ok && !String(out.error || "").trim()) throw new Error("거절하면서 이유를 안 준다");
   // simTarget 을 타는 도구가 늘거나 줄면 이 검사가 덮는 범위가 조용히 바뀐다.
   const viaTarget = ["app_snapshot", "app_tap", "app_text", "app_swipe", "app_key",
-    "app_screenshot", "app_expect", "app_observe"];
+    "app_screenshot", "app_observe"];
   const names = surface.tools.map((x) => x.name);
   const missing = viaTarget.filter((n) => !names.includes(n));
   if (missing.length) throw new Error(`기기를 고르는 도구가 사라졌다: ${missing.join(", ")}`);

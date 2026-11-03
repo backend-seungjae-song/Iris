@@ -97,7 +97,7 @@ test("에이전트 복원은 같은 대화 id와 원래 워크트리 폴더를 �
   await f.dispatch({ type: "archive.restore", id: head.id });
   const send = f.calls.find((call) => call[0] === "send");
   assert.equal(send?.[1], "spare-pane");
-  assert.match(send[2], /'claude' '--resume' 'saved-session'\r$/);
+  assert.match(send[2], / && claude --resume saved-session\r$/);
   const cd = send[2].slice(0, send[2].indexOf(" && "));
   assert.equal(execFileSync("/bin/zsh", ["-c", cd + " && pwd -P"], { encoding: "utf8" }).trim(), fs.realpathSync(f.cwd));
   assert.equal(archive.get(head.id), null);

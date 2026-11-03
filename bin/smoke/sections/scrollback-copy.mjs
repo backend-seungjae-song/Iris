@@ -343,12 +343,21 @@ await checkAsync("여러 줄에 나열된 링크는 줄마다 자기 링크가 �
   const wrapped = ["/srv/aaa/bbb/ccc/ddd/eee/fff/ggg/hhh/iii", "jjj/kkk.js"];
   const full = "/srv/aaa/bbb/ccc/ddd/eee/fff/ggg/hhh/iiijjj/kkk.js";
   want("꽉 찬 줄에서 접힘", wrapped, [[full], [full]]);
+  // URL 은 `?`·`=`·`&`·`#`·`:` 앞뒤에서도 접힌다. 경로 글자만 이어진 글자로 보면 거기서 잘렸다.
+  const query = "https://a.example/search?alpha=1&beta=2#top";
+  for (const k of [24, 25, 30, 32, 40]) {
+    const pre = " ".repeat(COLS - k);
+    want(`URL 이 ${JSON.stringify(query[k - 1])} 뒤에서 접힘`, [pre + query.slice(0, k), query.slice(k)], [[query], [query]]);
+  }
   // 오른쪽 끝을 채우지 않고 토큰 중간에서 끊는 TUI 도 있다. 코덱스가 그렇다. 폭 110칸 화면에서
   // 그 줄은 104칸에서 끝나고 `information-` 로 잘려 있었다(확인 결과). 끝을 채웠는지만
   // 보면 이 경우를 놓쳐 링크가 둘로 갈라진다.
   const cut = [".working/2026-a/reports/information-", "preservation-verification.md"];
   const joined = ".working/2026-a/reports/information-preservation-verification.md";
   want("안 찬 줄이라도 토큰 한가운데서 끊겼으면 이어진다", cut, [[joined], [joined]]);
+  // `_` 바로 앞에서 끊기면 앞 줄 끝은 보통 글자이고 다음 줄이 `_` 로 시작한다.
+  const under = ".working/2026-a/report", underRest = "_final_v2.md";
+  want("다음 줄이 _ 로 시작하면 이어진다", [under, underRest], [[under + underRest], [under + underRest]]);
   // 그 규칙이 목록까지 이어 붙이면 안 된다. 디렉터리 목록은 `/` 로 끝난다.
   // 끝의 `/` 는 원래 제거한다(terminalBarePathToken). 여기서 확인하는 것은 줄이 합쳐지지 않는 것이다.
   want("`/` 로 끝나는 디렉터리 목록은 따로다", ["- /Users/x/a/", "- /Users/x/b/", "- /Users/x/c/"],
@@ -359,7 +368,7 @@ await checkAsync("여러 줄에 나열된 링크는 줄마다 자기 링크가 �
 });
 
 // 복사 완료를 알리는 경로다. 소스 모양이 아니라 실제 훅을 불러서 확인한다.
-await checkAsync("그냥 골라 복사해도 복사됐다고 알린다", async () => {
+await checkAsync("골라 복사하면 성공 알림을 띄우지 않는다", async () => {
   const term = await import(new URL("../../../web/js/panel/terminal.js", import.meta.url).href);
   const hooks = await import(new URL("../../../web/js/core/hooks.js", import.meta.url).href);
   const boot = await import(new URL("../../../web/js/chatcopy/boot.js", import.meta.url).href);
@@ -377,8 +386,7 @@ await checkAsync("그냥 골라 복사해도 복사됐다고 알린다", async (
       getLastAgents: () => [], getCurTarget: () => null, wsIsOpen: () => false,
       acHost: {}, copyText: async () => true,
     });
-    // 고르는 동안 선택 변경이 여러 번 발생하므로 모아서 마지막 한 번만 알린다.
-    // 모으지 않으면 드래그하는 동안 알림이 계속 뜬다.
+    // 앱의 복사 표시와 겹치므로 성공은 알리지 않음(2026-11-03 사용자)
     hooks.callHook("chatcopy.selectionChanged");
     hooks.callHook("chatcopy.selectionChanged");
     hooks.callHook("chatcopy.selectionChanged");
@@ -387,8 +395,7 @@ await checkAsync("그냥 골라 복사해도 복사됐다고 알린다", async (
     hooks.clearHooks();
     term.setXterm(prev);
   }
-  if (toasts.length !== 1) throw new Error(`알림이 ${toasts.length}번 — 한 번이어야 한다: ${JSON.stringify(toasts)}`);
-  if (!/2줄 복사됨/.test(toasts[0])) throw new Error(`알림 문구가 다르다: ${toasts[0]}`);
+  if (toasts.length !== 0) throw new Error(`성공인데 알림: ${JSON.stringify(toasts)}`);
   return true;
 });
 

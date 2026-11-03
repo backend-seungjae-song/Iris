@@ -4993,6 +4993,7 @@ function registerEmulatorFrameStreamHandlers() {
       if (!ownerWindow) {
         throw new Error("Emulator frame stream must originate from a BrowserWindow.");
       }
+      const allowFrame = require("./frame-pace.cjs").createFramePacer(ownerWindow);
       const streamId = (0, import_node_crypto2.randomUUID)();
       const stream = new MjpegFrameStream(
         args.streamUrl,
@@ -5003,7 +5004,7 @@ function registerEmulatorFrameStreamHandlers() {
             }
           }, "onError"),
           onFrame: /* @__PURE__ */ __name((frame) => {
-            if (!owner.isDestroyed()) {
+            if (!owner.isDestroyed() && allowFrame()) {
               owner.send("emulator:frameStreamFrame", {
                 streamId,
                 bytes: frameToArrayBuffer(frame)

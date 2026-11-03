@@ -1,18 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:iris_remote/design/agent_tile.dart';
 import 'package:iris_remote/design/buttons.dart';
 import 'package:iris_remote/design/command_text.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:iris_remote/design/bottom_nav.dart';
 import 'package:iris_remote/design/icon.dart';
-import 'package:iris_remote/design/markdown_text.dart';
+import 'package:iris_remote/design/motion.dart';
 import 'package:iris_remote/design/sheet.dart';
+import 'package:iris_remote/design/status_chip.dart';
+import 'package:iris_remote/design/toast.dart';
 import 'package:iris_remote/design/tokens.dart';
 import 'package:iris_remote/format/control_characters.dart';
 import 'package:iris_remote/format/result_text.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
 import 'package:iris_remote/screens/agent_screen.dart';
+import 'package:iris_remote/screens/terminal_question_screen.dart';
 import 'package:iris_remote/screens/terminal_screen.dart';
+import 'package:iris_remote/screens/terminal_question_card.dart';
 import 'package:iris_remote/design/browser_groups.dart';
 import 'package:iris_remote/screens/browser_screen.dart';
 import 'package:iris_remote/screens/human_turn_screen.dart';
@@ -25,9 +33,11 @@ class AgentListScreen extends StatelessWidget {
     required this.state,
     required this.onDisconnect,
     required this.onUnregister,
+    this.responseFocus = 0,
     super.key,
   });
 
+  final int responseFocus;
   final RemoteState state;
   final VoidCallback onDisconnect;
   final VoidCallback onUnregister;
@@ -37,6 +47,7 @@ class AgentListScreen extends StatelessWidget {
     return ListenableBuilder(
       listenable: state,
       builder: (context, _) => AgentHomeView(
+        responseFocus: responseFocus,
         agents: state.agents
             .where(
               (agent) =>
@@ -44,6 +55,42 @@ class AgentListScreen extends StatelessWidget {
             )
             .toList(),
         requests: state.requests,
+        promptSession: state.supports('terminal.select') ? state.session : null,
+        terminalQuestions:
+            state.supports('terminal.watch') && state.supports('terminal.key')
+            ? state.terminalQuestions
+            : const [],
+        onRefresh: state.refreshSessions,
+        onOpenWaitingTerminal: state.supports('terminal.watch')
+            ? (agent) => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      TerminalScreen(state: state, agentRef: agent.ref),
+                ),
+              )
+            : null,
+        onOpenTerminalQuestion: (request) => Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) =>
+                TerminalScreen(state: state, agentRef: request.agent),
+          ),
+        ),
+        onAnswerTerminalQuestion: (request, agent) => showTerminalQuestion(
+          context: context,
+          state: state,
+          agent: agent,
+          onTerminal: () => Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) =>
+                  TerminalScreen(state: state, agentRef: request.agent),
+            ),
+          ),
+          onChat: () => Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) => AgentScreen(state: state, agentRef: agent.ref),
+            ),
+          ),
+        ),
         connectionName: state.macName,
         browserSpaces: state.browserSpaces,
         browserTabs: state.browserTabs,
@@ -60,8 +107,10 @@ class AgentListScreen extends StatelessWidget {
         onAnswerQuestion: (request, body, responses) =>
             state.answerQuestions(request, body, responses),
         onOpenRequest: (request, agent) async {
-          if (request.body is PermissionRequestBody) {
-            final denied = await showPermissionRequestSheet(
+          final body = request.body;
+          final String? deniedAgent;
+          if (body is PermissionRequestBody) {
+            deniedAgent = await showPermissionRequestSheet(
               context: context,
               request: request,
               state: state,
@@ -69,19 +118,8 @@ class AgentListScreen extends StatelessWidget {
               agentKind: agent.kind,
               space: agent.space,
             );
-            if (denied && context.mounted) {
-              await Navigator.of(context).push<void>(
-                MaterialPageRoute(
-                  builder: (_) => AgentScreen(
-                    state: state,
-                    agentRef: agent.ref,
-                    focusComposer: true,
-                  ),
-                ),
-              );
-            }
-          } else if (request.body is QuestionRequestBody) {
-            await showQuestionRequestSheet(
+          } else if (body is QuestionRequestBody) {
+            deniedAgent = await showQuestionRequestSheet(
               context: context,
               request: request,
               state: state,
@@ -89,13 +127,27 @@ class AgentListScreen extends StatelessWidget {
               agentKind: agent.kind,
               space: agent.space,
             );
-          } else if (request.body is BrowserUserRequestBody) {
-            await showHumanTurnSheet(
+          } else if (body is BrowserUserRequestBody) {
+            deniedAgent = await showHumanTurnSheet(
               context: context,
               state: state,
               request: request,
               agent: agent,
               onOpenTab: () => _openHumanTab(context, request, agent),
+            );
+          } else {
+            deniedAgent = null;
+          }
+          // 이동한 요청에서 거절했으면 처음 연 요청이 아니라 그 에이전트의 대화로 이어감
+          if (deniedAgent != null && context.mounted) {
+            await Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => AgentScreen(
+                  state: state,
+                  agentRef: deniedAgent!,
+                  focusComposer: true,
+                ),
+              ),
             );
           }
         },
@@ -242,6 +294,13 @@ class AgentHomeView extends StatefulWidget {
     required this.agents,
     required this.requests,
     required this.connectionName,
+    this.responseFocus = 0,
+    this.terminalQuestions = const [],
+    this.onAnswerTerminalQuestion,
+    this.promptSession,
+    this.onOpenTerminalQuestion,
+    this.onOpenWaitingTerminal,
+    this.onRefresh,
     this.browserSpaces = const [],
     this.browserTabs = const [],
     this.browserTabGroups = const [],
@@ -256,8 +315,17 @@ class AgentHomeView extends StatefulWidget {
     super.key,
   });
 
+  final int responseFocus;
   final List<RemoteAgent> agents;
   final List<RemoteRequest> requests;
+  final ActiveRemoteSession? promptSession;
+  final List<RemoteRequest> terminalQuestions;
+  // 터미널 질문을 전체 화면으로 열기
+  final void Function(RemoteRequest request, RemoteAgent agent)?
+  onAnswerTerminalQuestion;
+  final ValueChanged<RemoteRequest>? onOpenTerminalQuestion;
+  final ValueChanged<RemoteAgent>? onOpenWaitingTerminal;
+  final Future<void> Function()? onRefresh;
   final String connectionName;
   final List<BrowserSpace> browserSpaces;
   final List<BrowserTab> browserTabs;
@@ -278,12 +346,32 @@ class AgentHomeView extends StatefulWidget {
 }
 
 class _AgentHomeViewState extends State<AgentHomeView> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void didUpdateWidget(AgentHomeView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.responseFocus != widget.responseFocus && _scroll.hasClients) {
+      _scroll.jumpTo(0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   final Set<String> _resolved = {};
+  // 입장 모션을 이미 낸(또는 첫 빌드에 있던) 질문 카드 id
+  final Set<String> _enteredCards = {};
+  bool _cardsSeeded = false;
   final Set<String> _collapsedSpaces = {};
   _HomeSort _sort = _HomeSort.iris;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.iris;
     final pending = widget.requests
         .where(
           (request) =>
@@ -291,208 +379,244 @@ class _AgentHomeViewState extends State<AgentHomeView> {
               _agent(request.agent)?.kind != 'terminal',
         )
         .toList(growable: false);
-    final requestedAgents = pending.map((request) => request.agent).toSet();
-    final listedAgents = widget.agents
-        .where((agent) => !requestedAgents.contains(agent.ref))
-        .toList(growable: false);
-    final spaces = _agentSpaces(listedAgents);
-    final recent = [...listedAgents]..sort(_compareRecent);
+    final terminalCards = widget.onOpenTerminalQuestion == null
+        ? const <(RemoteRequest, RemoteAgent)>[]
+        : [
+            for (final question in widget.terminalQuestions)
+              if (_agent(question.agent) case final agent?) (question, agent),
+          ];
+    final waiting = widget.onOpenWaitingTerminal == null
+        ? const <RemoteAgent>[]
+        : widget.agents
+              .where(
+                (a) =>
+                    (a.status == 'blocked' || a.question) &&
+                    !widget.requests.any((r) => r.agent == a.ref) &&
+                    !widget.terminalQuestions.any((r) => r.agent == a.ref),
+              )
+              .toList(growable: false);
+    final questionCount =
+        pending.length + terminalCards.length + waiting.length;
+    if (!_cardsSeeded) {
+      _cardsSeeded = true;
+      _enteredCards.addAll([
+        for (final (request, _) in terminalCards) request.ref,
+        for (final agent in waiting) 'waiting-${agent.ref}',
+        for (final request in pending) request.ref,
+      ]);
+    }
+    final spaces = _agentSpaces(widget.agents);
+    final recent = [...widget.agents]..sort(_compareRecent);
+    final bottom = MediaQuery.paddingOf(context).bottom;
 
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: ListView(
-          key: const Key('home-scroll'),
-          padding: EdgeInsets.only(
-            bottom: 14 + MediaQuery.paddingOf(context).bottom,
-          ),
-          children: [
-            SizedBox(
-              key: const Key('home-header'),
-              height: 50,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '에이전트',
-                      key: const Key('home-title'),
-                      style: IrisType.title.copyWith(
-                        color: context.iris.foreground,
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        IrisRoundButton(
-                          key: const Key('home-sort'),
-                          icon: _sort == _HomeSort.iris ? 'stack' : 'clock',
-                          tooltip: _sort == _HomeSort.iris
-                              ? '정렬: Iris 순서'
-                              : '정렬: 최근 활동순',
-                          onPressed: _showSortOptions,
-                        ),
-                        const SizedBox(width: 8),
-                        IrisRoundButton(
-                          key: const Key('home-settings'),
-                          icon: 'gear-six',
-                          tooltip: '설정',
-                          onPressed: widget.onSettings,
-                        ),
-                      ],
-                    ),
-                  ],
+      body: Stack(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: ListView(
+              key: const Key('home-scroll'),
+              controller: _scroll,
+              padding: EdgeInsets.only(bottom: 24 + bottom),
+              children: [
+                _HomeHeader(
+                  name: widget.connectionName,
+                  spaceCount: spaces.length,
+                  sessionCount: widget.agents.length,
+                  onSettings: widget.onSettings,
                 ),
-              ),
-            ),
-            SizedBox(
-              key: const Key('home-connection'),
-              height: 26,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
-                child: Row(
-                  children: [
-                    Container(
-                      key: const Key('home-live-dot'),
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: context.iris.working,
-                        borderRadius: BorderRadius.circular(4),
-                        boxShadow: [
-                          BoxShadow(
-                            color: context.iris.working.withValues(alpha: 0.14),
-                            spreadRadius: 3,
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 320),
+                  curve: irisEase,
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _QuestionHeader(count: questionCount),
+                      if (questionCount == 0)
+                        _QuestionEmpty(
+                          onTerminal: _openTerminal,
+                          onBrowser: _openBrowser,
+                        )
+                      else
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Column(
+                            children: [
+                              for (final (request, agent) in terminalCards)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: IrisEnterOnce(
+                                    key: ValueKey('enter-${request.ref}'),
+                                    registry: _enteredCards,
+                                    id: request.ref,
+                                    child: TerminalQuestionCard(
+                                      key: ValueKey(request.ref),
+                                      request: request,
+                                      session: widget.promptSession,
+                                      agentName: agent.name,
+                                      onOpen: () =>
+                                          widget.onOpenTerminalQuestion!(
+                                            request,
+                                          ),
+                                      onChat: () => widget.onOpenAgent(agent),
+                                      onAnswer:
+                                          widget.onAnswerTerminalQuestion ==
+                                              null
+                                          ? null
+                                          : () =>
+                                                widget
+                                                    .onAnswerTerminalQuestion!(
+                                                  request,
+                                                  agent,
+                                                ),
+                                    ),
+                                  ),
+                                ),
+                              for (final agent in waiting)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: IrisEnterOnce(
+                                    key: ValueKey('enter-waiting-${agent.ref}'),
+                                    registry: _enteredCards,
+                                    id: 'waiting-${agent.ref}',
+                                    child: _WaitingTerminalCard(
+                                      agent: agent,
+                                      // 질문형 끝맺음은 대화창에서 답하고, 터미널 대기만 터미널로 이동
+                                      onOpen: agent.question
+                                          ? () => widget.onOpenAgent(agent)
+                                          : () => widget.onOpenWaitingTerminal!(
+                                              agent,
+                                            ),
+                                    ),
+                                  ),
+                                ),
+                              for (final request in pending)
+                                if (_agent(request.agent) case final agent?)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: IrisEnterOnce(
+                                      key: ValueKey('enter-${request.ref}'),
+                                      registry: _enteredCards,
+                                      id: request.ref,
+                                      child: _RequestCard(
+                                        key: ValueKey(request.ref),
+                                        request: request,
+                                        agent: agent,
+                                        onOpen: () => widget.onOpenRequest(
+                                          request,
+                                          agent,
+                                        ),
+                                        onPermission: (allow) =>
+                                            _answerPermission(request, allow),
+                                        onQuestion: (responses) =>
+                                            _answerQuestion(request, responses),
+                                        onHuman: widget.onAnswerHuman == null
+                                            ? null
+                                            : (choice) =>
+                                                  _answerHuman(request, choice),
+                                      ),
+                                    ),
+                                  ),
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Text(
-                        '${widget.connectionName} · 실시간 · 1초 전 확인',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.iris.muted,
-                          fontSize: 15,
-                          height: 18 / 15,
                         ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 320),
-              curve: const Cubic(0.22, 1, 0.36, 1),
-              alignment: Alignment.topCenter,
-              child: pending.isEmpty
-                  ? const SizedBox(width: double.infinity)
-                  : Column(
+                _SessionsHeader(
+                  count: widget.agents.length,
+                  sortedByRecent: _sort == _HomeSort.recent,
+                  onSort: _showSortOptions,
+                  onRefresh: widget.onRefresh == null ? null : _refresh,
+                ),
+                if (widget.agents.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 40, 20, 0),
+                    child: Text(
+                      '열려 있는 세션이 없습니다.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: colors.muted, fontSize: 15),
+                    ),
+                  )
+                else if (_sort == _HomeSort.iris)
+                  for (final (index, space) in spaces.indexed)
+                    _SpaceCard(
+                      headerKey: Key('home-space-${space.ref}'),
+                      label: space.label,
+                      color: _spaceColor(colors, index),
+                      count: space.nodes.length,
+                      expanded: !_collapsedSpaces.contains(space.ref),
+                      onToggle: () => _toggle(space.ref),
                       children: [
-                        _SectionHeader(
-                          key: const Key('home-needed-header'),
-                          label: '답이 필요함',
-                          count: pending.length,
-                          hot: true,
+                        for (final node in space.nodes)
+                          _AgentRow(
+                            agent: node.agent,
+                            depth: node.depth,
+                            request: _requestFor(pending, node.agent),
+                            onTap: () => widget.onOpenAgent(node.agent),
+                            onOpenRequest: _openRequest,
+                            onOpenWaiting: widget.onOpenWaitingTerminal,
+                          ),
+                      ],
+                    )
+                else
+                  _SpaceCard(
+                    headerKey: const Key('home-recent-header'),
+                    label: '최근 활동순',
+                    color: colors.muted,
+                    count: recent.length,
+                    expanded: !_collapsedSpaces.contains('recent'),
+                    onToggle: () => _toggle('recent'),
+                    children: [
+                      for (final agent in recent)
+                        _AgentRow(
+                          agent: agent,
+                          showSpace: true,
+                          request: _requestFor(pending, agent),
+                          onTap: () => widget.onOpenAgent(agent),
+                          onOpenRequest: _openRequest,
+                          onOpenWaiting: widget.onOpenWaitingTerminal,
                         ),
-                        for (final entry in pending.indexed)
-                          if (_agent(entry.$2.agent) case final agent?)
-                            _RequestRow(
-                              key: ValueKey(entry.$2.ref),
-                              request: entry.$2,
-                              agent: agent,
-                              showDivider: entry.$1 > 0,
-                              onOpen: () =>
-                                  widget.onOpenRequest(entry.$2, agent),
-                              onPermission: (allow) =>
-                                  _answerPermission(entry.$2, allow),
-                              onQuestion: (responses) =>
-                                  _answerQuestion(entry.$2, responses),
-                              onHuman: widget.onAnswerHuman == null
-                                  ? null
-                                  : (choice) => _answerHuman(entry.$2, choice),
-                            ),
+                    ],
+                  ),
+                if (widget.browserTabs.isNotEmpty &&
+                    widget.onOpenBrowserTab != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                    child: _SectionTitle(
+                      key: const Key('home-browser-header'),
+                      label: '브라우저 탭',
+                      count: widget.browserTabs.length,
+                    ),
+                  ),
+                  for (final (index, group) in browserGroups(
+                    widget.browserSpaces,
+                    widget.browserTabs,
+                    widget.agents,
+                  ).indexed)
+                    _SpaceCard(
+                      label: '${group.space.name} · ${group.name}',
+                      color: _spaceColor(colors, index),
+                      count: group.tabs.length,
+                      expanded: true,
+                      children: [
+                        for (final tab in group.tabs)
+                          _BrowserRow(
+                            tab: tab,
+                            space: group.space.name,
+                            group: widget.browserTabGroups
+                                .where((item) => item.ref == tab.group)
+                                .firstOrNull,
+                            onTap: () => _openTab(tab, group.agent),
+                          ),
                       ],
                     ),
-            ),
-            if (_sort == _HomeSort.iris)
-              for (final space in spaces) ...[
-                _SpaceHeader(
-                  key: Key('home-space-${space.ref}'),
-                  label: space.label,
-                  count: space.nodes.length,
-                  expanded: !_collapsedSpaces.contains(space.ref),
-                  onTap: () => setState(() {
-                    if (!_collapsedSpaces.add(space.ref)) {
-                      _collapsedSpaces.remove(space.ref);
-                    }
-                  }),
-                ),
-                if (!_collapsedSpaces.contains(space.ref))
-                  for (final node in space.nodes)
-                    _AgentRow(
-                      agent: node.agent,
-                      depth: node.depth,
-                      quiet: node.agent.status != 'working',
-                      onTap: () => widget.onOpenAgent(node.agent),
-                    ),
-              ]
-            else if (recent.isNotEmpty) ...[
-              _SectionHeader(
-                key: const Key('home-recent-header'),
-                label: '최근 활동순',
-                count: recent.length,
-              ),
-              for (final agent in recent)
-                _AgentRow(
-                  agent: agent,
-                  quiet: agent.status != 'working',
-                  onTap: () => widget.onOpenAgent(agent),
-                ),
-            ],
-            if (widget.browserTabs.isNotEmpty &&
-                widget.onOpenBrowserTab != null) ...[
-              _SectionHeader(
-                key: const Key('home-browser-header'),
-                label: '브라우저 탭',
-                count: widget.browserTabs.length,
-              ),
-              for (final group in browserGroups(
-                widget.browserSpaces,
-                widget.browserTabs,
-                widget.agents,
-              )) ...[
-                _SectionHeader(
-                  label: '${group.space.name} · ${group.name}',
-                  count: group.tabs.length,
-                ),
-                for (final tab in group.tabs)
-                  _BrowserRow(
-                    tab: tab,
-                    space: group.space.name,
-                    group: widget.browserTabGroups
-                        .where((item) => item.ref == tab.group)
-                        .firstOrNull,
-                    onTap: () => widget.onOpenBrowserGroupTab != null
-                        ? widget.onOpenBrowserGroupTab!(tab, group.agent)
-                        : widget.onOpenBrowserTab!(tab),
-                  ),
+                ],
               ],
-            ],
-            if (widget.agents.isEmpty && pending.isEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 64, 20, 0),
-                child: Text(
-                  '열려 있는 에이전트가 없습니다.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: context.iris.muted, fontSize: 15),
-                ),
-              ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -504,6 +628,63 @@ class _AgentHomeViewState extends State<AgentHomeView> {
     return null;
   }
 
+  RemoteRequest? _requestFor(List<RemoteRequest> pending, RemoteAgent agent) =>
+      pending.where((request) => request.agent == agent.ref).firstOrNull;
+
+  void _toggle(String key) => setState(() {
+    if (!_collapsedSpaces.add(key)) _collapsedSpaces.remove(key);
+  });
+
+  void _openRequest(RemoteRequest request, RemoteAgent agent) =>
+      unawaited(widget.onOpenRequest(request, agent));
+
+  Future<void> _refresh() async {
+    try {
+      await widget.onRefresh!();
+    } catch (_) {
+      if (mounted) {
+        showIrisToast(
+          context,
+          '새로고침하지 못했습니다. 다시 시도하세요.',
+          tone: IrisToastTone.error,
+        );
+      }
+    }
+  }
+
+  // 첫 터미널 세션 화면. 없으면 안내
+  void _openTerminal() {
+    final terminal = widget.agents
+        .where((agent) => agent.kind == 'terminal')
+        .firstOrNull;
+    if (terminal == null) {
+      showIrisToast(context, '열린 터미널이 없습니다.', tone: IrisToastTone.error);
+      return;
+    }
+    widget.onOpenAgent(terminal);
+  }
+
+  // 홈 목록 첫 브라우저 탭 화면. 없으면 안내
+  void _openBrowser() {
+    final group = widget.onOpenBrowserTab == null
+        ? null
+        : browserGroups(
+            widget.browserSpaces,
+            widget.browserTabs,
+            widget.agents,
+          ).where((group) => group.tabs.isNotEmpty).firstOrNull;
+    if (group == null) {
+      showIrisToast(context, '열린 브라우저 탭이 없습니다.', tone: IrisToastTone.error);
+      return;
+    }
+    _openTab(group.tabs.first, group.agent);
+  }
+
+  void _openTab(BrowserTab tab, RemoteAgent? agent) =>
+      widget.onOpenBrowserGroupTab != null
+      ? widget.onOpenBrowserGroupTab!(tab, agent)
+      : widget.onOpenBrowserTab!(tab);
+
   Future<void> _showSortOptions() async {
     await showIrisSheet<void>(
       context: context,
@@ -514,7 +695,7 @@ class _AgentHomeViewState extends State<AgentHomeView> {
           const IrisSheetGrabber(),
           const SizedBox(height: 18),
           Text(
-            '에이전트 정렬',
+            '세션 정렬',
             style: TextStyle(
               color: context.iris.foreground,
               fontSize: 21,
@@ -601,146 +782,609 @@ class _AgentHomeViewState extends State<AgentHomeView> {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.label,
-    required this.count,
-    this.hot = false,
-    super.key,
+// 스페이스 점 색. 스페이스 순서대로 돌려 쓴다
+Color _spaceColor(IrisColors colors, int index) => [
+  colors.sky,
+  colors.lime,
+  colors.teal,
+  colors.mint,
+  colors.yellow,
+][index % 5];
+
+// 머리글. 컴퓨터 이름 22/700 + 실시간 칩, 아래 보조 줄, 오른쪽 설정
+class _HomeHeader extends StatelessWidget {
+  const _HomeHeader({
+    required this.name,
+    required this.spaceCount,
+    required this.sessionCount,
+    required this.onSettings,
   });
 
-  final String label;
-  final int count;
-  final bool hot;
+  final String name;
+  final int spaceCount;
+  final int sessionCount;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 62,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 30, 20, 10),
-        child: Row(
-          children: [
-            SizedBox(
-              width: hot ? 68.2 : null,
-              child: Text(
-                label,
-                maxLines: 1,
-                softWrap: false,
-                style: IrisType.label.copyWith(color: context.iris.foreground2),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              key: hot ? const Key('home-needed-count') : null,
-              width: count < 10 ? 22.4 : null,
-              constraints: const BoxConstraints(minWidth: 22),
-              height: 22,
-              padding: const EdgeInsets.symmetric(horizontal: 7),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: hot
-                    ? context.iris.blocked.withValues(
-                        alpha: Theme.of(context).brightness == Brightness.dark
-                            ? 0.16
-                            : 0.12,
-                      )
-                    : context.iris.level2,
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Text(
-                '$count',
-                style: TextStyle(
-                  color: hot ? context.iris.blocked : context.iris.foreground2,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  height: 16 / 13,
+    final colors = context.iris;
+    return Container(
+      key: const Key('home-header'),
+      constraints: const BoxConstraints(minHeight: 64),
+      padding: const EdgeInsets.fromLTRB(20, 6, 6, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        key: const Key('home-title'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colors.foreground,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.44,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const IrisStatusChip(IrisStatus.live),
+                  ],
                 ),
-              ),
+                const SizedBox(height: 3),
+                Text(
+                  key: const Key('home-connection'),
+                  '스페이스 $spaceCount · 세션 $sessionCount',
+                  style: TextStyle(color: colors.muted, fontSize: 12.5),
+                ),
+              ],
             ),
-          ],
+          ),
+          _IconAction(
+            key: const Key('home-settings'),
+            tooltip: '설정',
+            shapes: irisSlidersShapes,
+            onPressed: onSettings,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 44x44 투명 아이콘 버튼
+class _IconAction extends StatelessWidget {
+  const _IconAction({
+    required this.tooltip,
+    required this.onPressed,
+    this.icon,
+    this.shapes,
+    super.key,
+  });
+
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final String? icon;
+  final String? shapes;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final color = colors.foreground2;
+    return Semantics(
+      button: true,
+      label: tooltip,
+      enabled: onPressed != null,
+      onTap: onPressed,
+      excludeSemantics: true,
+      child: Opacity(
+        opacity: onPressed == null ? .38 : 1,
+        child: SizedBox.square(
+          dimension: 44,
+          child: TextButton(
+            onPressed: onPressed,
+            style: ButtonStyle(
+              padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+              overlayColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.pressed)
+                    ? colors.tint2
+                    : Colors.transparent,
+              ),
+              backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
+              shape: const WidgetStatePropertyAll(CircleBorder()),
+            ),
+            child: shapes != null
+                ? SvgPicture.string(
+                    irisNavSvg(shapes!, color),
+                    width: 22,
+                    height: 22,
+                  )
+                : IrisIcon(icon!, size: 20, color: color),
+          ),
         ),
       ),
     );
   }
 }
 
-class _SpaceHeader extends StatelessWidget {
-  const _SpaceHeader({
+// 질문 구역 머리글. 건수는 있으면 분홍 배지, 없으면 숫자만
+class _QuestionHeader extends StatelessWidget {
+  const _QuestionHeader({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final mono = TextStyle(
+      fontFamily: 'monospace',
+      fontWeight: FontWeight.w500,
+      color: colors.foreground2,
+    );
+    return Container(
+      key: const Key('home-needed-header'),
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      alignment: Alignment.centerLeft,
+      child: Row(
+        children: [
+          Text(
+            '질문',
+            style: TextStyle(
+              color: colors.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.26,
+            ),
+          ),
+          const SizedBox(width: 8),
+          IrisPulse(
+            value: count,
+            child: count == 0
+                ? Text('0', style: mono.copyWith(fontSize: 13))
+                : Container(
+                    key: const Key('home-needed-count'),
+                    constraints: const BoxConstraints(minWidth: 20),
+                    height: 20,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: colors.pink,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: mono.copyWith(
+                        color: colors.ink,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 질문이 없을 때. 점선 상자 + 터미널·브라우저 바로가기
+class _QuestionEmpty extends StatelessWidget {
+  const _QuestionEmpty({required this.onTerminal, required this.onBrowser});
+
+  final VoidCallback onTerminal;
+  final VoidCallback onBrowser;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return Padding(
+      key: const Key('home-empty'),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: CustomPaint(
+        foregroundPainter: _DashedRRect(colors.line2, 16),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 24, 18, 18),
+          child: Column(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colors.tint2,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: IrisIcon('check', size: 26, color: colors.link),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '질문이 없습니다',
+                style: TextStyle(
+                  color: colors.foreground,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '새 질문이 오면 알림으로 알려 줍니다.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: colors.muted,
+                  fontSize: 13.5,
+                  height: 1.55,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _Tile(
+                      key: const Key('home-tile-terminal'),
+                      icon: 'terminal-window',
+                      label: '터미널 열기',
+                      onTap: onTerminal,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _Tile(
+                      key: const Key('home-tile-browser'),
+                      icon: 'globe',
+                      label: '브라우저 탭',
+                      onTap: onBrowser,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
+  const _Tile({
+    required this.icon,
     required this.label,
-    required this.count,
-    required this.expanded,
     required this.onTap,
     super.key,
   });
 
+  final String icon;
   final String label;
-  final int count;
-  final bool expanded;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 52,
-      child: TextButton(
-        onPressed: onTap,
-        style: const ButtonStyle(
-          padding: WidgetStatePropertyAll(EdgeInsets.fromLTRB(20, 12, 20, 8)),
-          shape: WidgetStatePropertyAll(RoundedRectangleBorder()),
-          alignment: Alignment.centerLeft,
-        ),
-        child: Row(
-          children: [
-            IrisIcon(
-              expanded ? 'caret-down' : 'caret-right',
-              size: 15,
-              color: context.iris.faint,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
+    final colors = context.iris;
+    return Material(
+      color: colors.level1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: colors.separator),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 76),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IrisIcon(icon, size: 22, color: colors.link),
+              const SizedBox(height: 6),
+              Text(
                 label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: IrisType.label.copyWith(color: context.iris.foreground2),
-              ),
-            ),
-            Container(
-              constraints: const BoxConstraints(minWidth: 22),
-              height: 22,
-              padding: const EdgeInsets.symmetric(horizontal: 7),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: context.iris.level2,
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Text(
-                '$count',
                 style: TextStyle(
-                  color: context.iris.foreground2,
+                  color: colors.foreground,
                   fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  height: 16 / 13,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _RequestRow extends StatefulWidget {
-  const _RequestRow({
+class _DashedRRect extends CustomPainter {
+  _DashedRRect(this.color, this.radius);
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Offset.zero & size,
+          Radius.circular(radius),
+        ).deflate(.5),
+      );
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final metric in path.computeMetrics()) {
+      for (var at = 0.0; at < metric.length; at += 7) {
+        canvas.drawPath(metric.extractPath(at, at + 4), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedRRect old) =>
+      old.color != color || old.radius != radius;
+}
+
+// 세션 구역 머리글. 제목 15/600 + 건수, 오른쪽 정렬·새로고침
+class _SessionsHeader extends StatelessWidget {
+  const _SessionsHeader({
+    required this.count,
+    required this.sortedByRecent,
+    required this.onSort,
+    required this.onRefresh,
+  });
+
+  final int count;
+  final bool sortedByRecent;
+  final VoidCallback onSort;
+  final VoidCallback? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 6, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SectionTitle(label: '세션', count: count),
+          ),
+          _IconAction(
+            key: const Key('home-sort'),
+            tooltip: sortedByRecent ? '정렬: 최근 활동순' : '정렬: Iris 순서',
+            icon: sortedByRecent ? 'clock' : 'stack',
+            onPressed: onSort,
+          ),
+          if (onRefresh != null)
+            _IconAction(
+              key: const Key('home-refresh'),
+              tooltip: '새로고침',
+              icon: 'arrow-clockwise',
+              onPressed: onRefresh,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.label, required this.count, super.key});
+
+  final String label;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return Padding(
+      padding: EdgeInsets.zero,
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: colors.foreground,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$count',
+            style: TextStyle(
+              color: colors.muted,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 스페이스 묶음 카드. 머리글(색 점·이름·건수·접기) 아래에 줄을 모은다
+class _SpaceCard extends StatelessWidget {
+  const _SpaceCard({
+    required this.label,
+    required this.color,
+    required this.count,
+    required this.expanded,
+    required this.children,
+    this.onToggle,
+    this.headerKey,
+  });
+
+  final String label;
+  final Color color;
+  final int count;
+  final bool expanded;
+  final VoidCallback? onToggle;
+  final Key? headerKey;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final radius = BorderRadius.circular(16);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: colors.level1,
+        borderRadius: radius,
+        border: Border.all(color: colors.separator),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            key: headerKey,
+            onTap: onToggle,
+            child: Container(
+              height: 48,
+              padding: const EdgeInsets.fromLTRB(16, 0, 4, 0),
+              decoration: BoxDecoration(
+                border: expanded && children.isNotEmpty
+                    ? Border(bottom: BorderSide(color: colors.separator))
+                    : null,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colors.foreground,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$count',
+                          style: TextStyle(
+                            color: colors.muted,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (onToggle != null)
+                    SizedBox.square(
+                      dimension: 44,
+                      child: Center(
+                        child: IrisIcon(
+                          expanded ? 'caret-down' : 'caret-right',
+                          size: 16,
+                          color: colors.muted,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            for (final (index, child) in children.indexed)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: index > 0
+                      ? Border(top: BorderSide(color: colors.separator))
+                      : null,
+                ),
+                child: child,
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+// 대기 중인 터미널. 질문 구역에 올라오는 카드
+class _WaitingTerminalCard extends StatelessWidget {
+  const _WaitingTerminalCard({required this.agent, required this.onOpen});
+
+  final RemoteAgent agent;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return Container(
+      key: Key('waiting-${agent.ref}'),
+      padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+      decoration: BoxDecoration(
+        color: colors.level1,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.separator),
+      ),
+      child: Row(
+        children: [
+          const IrisStatusGlyph(status: 'blocked', size: 16),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              '${agent.name} · 답 필요',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: colors.foreground2,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IrisButton(
+            label: agent.question ? '대화창으로 이동' : '터미널에서 답하기',
+            tone: IrisButtonTone.primary,
+            height: 36,
+            expand: false,
+            onPressed: onOpen,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 질문 카드. 윗줄(종류·시간) / 본문 / 아랫줄(세션·버튼). 카드를 누르면 상세
+class _RequestCard extends StatefulWidget {
+  const _RequestCard({
     required this.request,
     required this.agent,
     required this.onOpen,
     required this.onPermission,
     required this.onQuestion,
     this.onHuman,
-    this.showDivider = false,
     super.key,
   });
 
@@ -750,20 +1394,19 @@ class _RequestRow extends StatefulWidget {
   final Future<String> Function(bool allow) onPermission;
   final Future<String> Function(List<QuestionResponse> responses) onQuestion;
   final Future<String> Function(String choice)? onHuman;
-  final bool showDivider;
 
   @override
-  State<_RequestRow> createState() => _RequestRowState();
+  State<_RequestCard> createState() => _RequestCardState();
 }
 
-class _RequestRowState extends State<_RequestRow> {
+class _RequestCardState extends State<_RequestCard> {
   bool _busy = false;
   String? _result;
 
-  Future<void> _permission(bool allow) async {
+  Future<void> _run(Future<String> Function() send) async {
     if (_busy) return;
     setState(() => _busy = true);
-    final result = await widget.onPermission(allow);
+    final result = await send();
     if (mounted) {
       setState(() {
         _busy = false;
@@ -772,243 +1415,245 @@ class _RequestRowState extends State<_RequestRow> {
     }
   }
 
-  Future<void> _question(String label) async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    final result = await widget.onQuestion([
+  Future<void> _permission(bool allow) =>
+      _run(() => widget.onPermission(allow));
+
+  Future<void> _question(String label) => _run(
+    () => widget.onQuestion([
       QuestionLabels([label]),
-    ]);
-    if (mounted) {
-      setState(() {
-        _busy = false;
-        _result = result;
-      });
-    }
-  }
+    ]),
+  );
 
-  Future<void> _human(String choice) async {
-    if (_busy || widget.onHuman == null) return;
-    setState(() => _busy = true);
-    final result = await widget.onHuman!(choice);
-    if (mounted) {
-      setState(() {
-        _busy = false;
-        _result = result;
-      });
-    }
+  Future<void> _human(String choice) {
+    final answer = widget.onHuman;
+    return answer == null ? Future.value() : _run(() => answer(choice));
   }
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.iris;
     final body = widget.request.body;
-    return Container(
+    final human = body is BrowserUserRequestBody;
+    final single =
+        body is QuestionRequestBody &&
+        body.questions.length == 1 &&
+        !body.questions.first.multiSelect;
+    final (icon, label) = switch (body) {
+      PermissionRequestBody() => ('terminal-window', '명령 실행 승인'),
+      QuestionRequestBody() => (
+        'chat-circle-dots',
+        body.questions.length > 1
+            ? '질문 ${body.questions.length}개'
+            : body.questions.first.multiSelect
+            ? '질문 · 여러 개 선택'
+            : body.questions.first.options.isEmpty
+            ? '질문'
+            : '질문 · 하나 고르기',
+      ),
+      BrowserUserRequestBody() => ('user', '사람이 할 일'),
+    };
+    return Material(
       key: Key('request-${widget.request.ref}'),
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-      decoration: widget.showDivider
-          ? BoxDecoration(
-              border: Border(top: BorderSide(color: context.iris.separator)),
-            )
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      color: colors.level1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colors.separator),
+      ),
+      child: InkWell(
+        onTap: widget.onOpen,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IrisAgentTile(
-                key: Key('home-agent-tile-${widget.request.ref}'),
-                statusKey: Key('home-status-${widget.request.ref}'),
-                kind: widget.agent.kind,
-                status:
-                    body is PermissionRequestBody ||
-                        body is BrowserUserRequestBody
-                    ? 'blocked'
-                    : 'question',
+              Row(
+                children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: human ? colors.dangerTint : colors.tint2,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    alignment: Alignment.center,
+                    child: IrisIcon(
+                      icon,
+                      size: 15,
+                      color: human ? colors.dangerText : colors.link,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      key: Key('home-request-title-${widget.request.ref}'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.foreground2,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _relativeTime(widget.request.createdAt),
+                    key: Key('home-agent-time-${widget.request.ref}'),
+                    style: TextStyle(
+                      color: colors.muted,
+                      fontSize: 12.5,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  IrisIcon('caret-right', size: 14, color: colors.muted),
+                ],
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 3),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
+              const SizedBox(height: 7),
+              if (body case PermissionRequestBody())
+                _HomeCommand(command: visibleControlCharacters(body.input))
+              else if (body case QuestionRequestBody())
+                Text(
+                  body.questions.first.question,
+                  key: Key('home-question-title-${widget.request.ref}'),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: _bodyStyle(colors),
+                )
+              else if (body case BrowserUserRequestBody())
+                Text(
+                  body.title,
+                  key: Key('home-human-title-${widget.request.ref}'),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: _bodyStyle(colors),
+                ),
+              if (single) ...[
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final entry
+                        in body.questions.first.options.take(6).indexed)
+                      _NumberedChoice(
+                        key: ValueKey(
+                          'home-choice-${widget.request.ref}-${entry.$1 + 1}',
+                        ),
+                        number: entry.$1 + 1,
+                        label: entry.$2.label,
+                        onPressed: _busy
+                            ? null
+                            : () => _question(entry.$2.label),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 7),
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 40),
+                child: Row(
+                  children: [
+                    IrisStatusGlyph(
+                      status: human ? 'blocked' : _glyph(body),
+                      size: 16,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
                         widget.agent.name,
                         key: Key('home-agent-name-${widget.request.ref}'),
-                        style: IrisType.rowTitle,
-                      ),
-                      const SizedBox(height: 1),
-                      Text(
-                        body is BrowserUserRequestBody
-                            ? '${widget.agent.space} · 브라우저'
-                            : widget.agent.space,
-                        key: Key('home-agent-space-${widget.request.ref}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: context.iris.muted,
-                          fontSize: 14,
-                          height: 17 / 14,
+                          color: colors.foreground2,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                    ],
+                    ),
+                    const SizedBox(width: 8),
+                    ..._actions(body),
+                  ],
+                ),
+              ),
+              if (_result != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _result!,
+                    style: TextStyle(color: colors.muted, fontSize: 13),
                   ),
                 ),
-              ),
-              const SizedBox(width: 13.5),
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Text(
-                  _relativeTime(widget.agent.lastActivityAt),
-                  key: Key('home-agent-time-${widget.request.ref}'),
-                  style: IrisType.meta.copyWith(color: context.iris.faint),
-                ),
-              ),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(left: 58, top: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (body case PermissionRequestBody()) ...[
-                  SizedBox(
-                    key: const Key('home-request-title'),
-                    height: 21.75,
-                    child: Text(
-                      '명령 실행 허용',
-                      style: TextStyle(
-                        color: context.iris.blocked,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _HomeCommand(command: visibleControlCharacters(body.input)),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      IrisButton(
-                        key: const Key('home-allow'),
-                        label: _busy ? '처리 중…' : '허용',
-                        tone: IrisButtonTone.primary,
-                        height: 36,
-                        expand: false,
-                        onPressed: _busy ? null : () => _permission(true),
-                      ),
-                      IrisButton(
-                        key: const Key('home-deny'),
-                        label: '거절',
-                        tone: IrisButtonTone.danger,
-                        height: 36,
-                        expand: false,
-                        onPressed: _busy ? null : () => _permission(false),
-                      ),
-                      IrisButton(
-                        key: const Key('home-open'),
-                        label: '열기',
-                        tone: IrisButtonTone.ghost,
-                        height: 36,
-                        expand: false,
-                        onPressed: widget.onOpen,
-                      ),
-                    ],
-                  ),
-                ] else if (body case QuestionRequestBody()) ...[
-                  IrisMarkdown(
-                    '${body.questions.length == 1 ? '**질문**' : '**질문 ${body.questions.length}개**'} · ${body.questions.first.question}',
-                    key: Key('home-question-title-${widget.request.ref}'),
-                    compact: true,
-                    selectable: false,
-                    baseStyle: TextStyle(
-                      color: context.iris.foreground2,
-                      fontSize: 15,
-                      height: 1.45,
-                    ),
-                    textColor: context.iris.foreground2,
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final entry
-                          in body.questions.first.options.take(2).indexed)
-                        _NumberedChoice(
-                          key: ValueKey(
-                            'home-choice-${widget.request.ref}-${entry.$1 + 1}',
-                          ),
-                          number: entry.$1 + 1,
-                          label: entry.$2.label,
-                          onPressed: body.questions.length == 1 && !_busy
-                              ? () => _question(entry.$2.label)
-                              : widget.onOpen,
-                        ),
-                      IrisButton(
-                        label: '직접 답하기',
-                        tone: IrisButtonTone.ghost,
-                        height: 36,
-                        expand: false,
-                        onPressed: widget.onOpen,
-                      ),
-                    ],
-                  ),
-                ] else if (body case BrowserUserRequestBody()) ...[
-                  IrisMarkdown(
-                    '**사람 차례** · ${body.title}',
-                    key: Key('home-human-title-${widget.request.ref}'),
-                    compact: true,
-                    selectable: false,
-                    baseStyle: TextStyle(
-                      color: context.iris.foreground2,
-                      fontSize: 15,
-                      height: 1.45,
-                    ),
-                    textColor: context.iris.foreground2,
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      IrisButton(
-                        key: Key('home-human-open-${widget.request.ref}'),
-                        label: '탭 열기',
-                        icon: 'globe',
-                        tone: IrisButtonTone.primary,
-                        height: 36,
-                        expand: false,
-                        onPressed: body.tab == null ? null : widget.onOpen,
-                      ),
-                      IrisButton(
-                        key: Key('home-human-done-${widget.request.ref}'),
-                        label: '다 했음',
-                        height: 36,
-                        expand: false,
-                        onPressed: _busy ? null : () => _human('done'),
-                      ),
-                    ],
-                  ),
-                ],
-                if (_result != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      _result!,
-                      style: TextStyle(color: context.iris.muted, fontSize: 13),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
+
+  String _glyph(RemoteRequestBody body) =>
+      body is QuestionRequestBody ? 'question' : 'blocked';
+
+  TextStyle _bodyStyle(IrisColors colors) => TextStyle(
+    color: colors.foreground,
+    fontSize: 15.5,
+    fontWeight: FontWeight.w500,
+    height: 1.45,
+  );
+
+  List<Widget> _actions(RemoteRequestBody body) => switch (body) {
+    PermissionRequestBody() => [
+      IrisButton(
+        key: const Key('home-deny'),
+        label: '거절',
+        height: 36,
+        expand: false,
+        onPressed: _busy ? null : () => _permission(false),
+      ),
+      const SizedBox(width: 6),
+      IrisButton(
+        key: const Key('home-allow'),
+        label: _busy ? '처리 중…' : '허용',
+        tone: IrisButtonTone.primary,
+        height: 36,
+        expand: false,
+        onPressed: _busy ? null : () => _permission(true),
+      ),
+    ],
+    QuestionRequestBody() => [
+      IrisButton(
+        key: Key('home-answer-${widget.request.ref}'),
+        label: '답하기',
+        tone: IrisButtonTone.primary,
+        height: 36,
+        expand: false,
+        onPressed: widget.onOpen,
+      ),
+    ],
+    BrowserUserRequestBody() => [
+      IrisButton(
+        key: Key('home-human-open-${widget.request.ref}'),
+        label: '탭 열기',
+        icon: 'arrow-square-out',
+        height: 36,
+        expand: false,
+        onPressed: body.tab == null ? null : widget.onOpen,
+      ),
+      const SizedBox(width: 6),
+      IrisButton(
+        key: Key('home-human-done-${widget.request.ref}'),
+        label: '다 했음',
+        tone: IrisButtonTone.primary,
+        height: 36,
+        expand: false,
+        onPressed: _busy ? null : () => _human('done'),
+      ),
+    ],
+  };
 }
 
+// 승인 요청 명령. 코드 바탕 칩 + 복사
 class _HomeCommand extends StatelessWidget {
   const _HomeCommand({required this.command});
 
@@ -1016,44 +1661,32 @@ class _HomeCommand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      key: const Key('home-command'),
-      width: double.infinity,
-      height: 60.5,
-      padding: const EdgeInsets.fromLTRB(12, 10, 40, 10),
-      decoration: BoxDecoration(
-        color: context.iris.level1,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                r'$',
+    final colors = context.iris;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        key: const Key('home-command'),
+        padding: const EdgeInsets.fromLTRB(9, 3, 2, 3),
+        decoration: BoxDecoration(
+          color: colors.terminal,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: colors.separator),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: IrisCommandText(
+                command: command,
                 style: IrisType.mono.copyWith(
-                  color: context.iris.faint,
-                  fontSize: 13.5,
+                  color: colors.foreground,
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w500,
+                  height: 1.4,
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: IrisCommandText(
-                  command: command,
-                  style: IrisType.mono.copyWith(
-                    color: context.iris.foreground2,
-                    fontSize: 13.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          Positioned(
-            top: -7,
-            right: -37,
-            child: SizedBox.square(
+            ),
+            SizedBox.square(
               dimension: 32,
               child: TextButton(
                 onPressed: () =>
@@ -1061,16 +1694,17 @@ class _HomeCommand extends StatelessWidget {
                 style: const ButtonStyle(
                   padding: WidgetStatePropertyAll(EdgeInsets.zero),
                 ),
-                child: IrisIcon('copy', size: 16, color: context.iris.muted),
+                child: IrisIcon('copy', size: 16, color: colors.muted),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
+// 선택지 알약. 번호 + 이름, 누르면 바로 답을 보낸다
 class _NumberedChoice extends StatelessWidget {
   const _NumberedChoice({
     required this.number,
@@ -1081,22 +1715,28 @@ class _NumberedChoice extends StatelessWidget {
 
   final int number;
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.iris;
     return SizedBox(
       height: 36,
       child: TextButton(
         onPressed: onPressed,
         style: ButtonStyle(
+          minimumSize: const WidgetStatePropertyAll(Size.zero),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 14),
           ),
-          backgroundColor: WidgetStatePropertyAll(context.iris.level2),
-          foregroundColor: WidgetStatePropertyAll(context.iris.foreground),
+          backgroundColor: WidgetStatePropertyAll(colors.level2),
+          foregroundColor: WidgetStatePropertyAll(colors.foreground),
           shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(IrisRadius.pill),
+              side: BorderSide(color: colors.separator),
+            ),
           ),
         ),
         child: Row(
@@ -1105,19 +1745,23 @@ class _NumberedChoice extends StatelessWidget {
             Text(
               '$number',
               style: TextStyle(
-                color: context.iris.muted,
+                color: colors.muted,
                 fontFamily: 'monospace',
                 fontSize: 12,
                 height: 1.2,
               ),
             ),
             const SizedBox(width: 7),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                height: 1.2,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                ),
               ),
             ),
           ],
@@ -1125,6 +1769,146 @@ class _NumberedChoice extends StatelessWidget {
       ),
     );
   }
+}
+
+// 세션 줄 오른쪽 안내. 강조(알약)이면 답할 일이 있는 줄
+class _RowAction extends StatelessWidget {
+  const _RowAction({required this.label, this.onTap, this.accent = false});
+
+  final String label;
+  final VoidCallback? onTap;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    if (accent) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: 30,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: colors.brand,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: colors.onBrand,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              height: 1,
+            ),
+          ),
+        ),
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: colors.muted,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 2),
+        IrisIcon('caret-right', size: 16, color: colors.muted),
+      ],
+    );
+  }
+}
+
+// 세션·탭 공통 줄. 앞 표식 / 이름 / 메타 줄 / 오른쪽 안내
+class _ListRow extends StatelessWidget {
+  const _ListRow({
+    required this.leading,
+    required this.title,
+    required this.meta,
+    required this.action,
+    required this.onTap,
+    this.indent = 0,
+  });
+
+  final Widget leading;
+  final Widget title;
+  final List<Widget> meta;
+  final Widget action;
+  final VoidCallback onTap;
+  final double indent;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 64),
+        padding: EdgeInsets.fromLTRB(14 + indent, 10, 12, 10),
+        child: Row(
+          children: [
+            leading,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  title,
+                  const SizedBox(height: 2),
+                  SizedBox(height: 20, child: Row(children: meta)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            action,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MetaText extends StatelessWidget {
+  const _MetaText(this.text, {this.strong = false, this.color});
+
+  final String text;
+  final bool strong;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return Flexible(
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color ?? (strong ? colors.foreground2 : colors.muted),
+          fontSize: 12.5,
+          height: 20 / 12.5,
+        ),
+      ),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  const _Dot();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 6),
+    child: Text(
+      '·',
+      style: TextStyle(color: context.iris.muted, fontSize: 12.5),
+    ),
+  );
 }
 
 class _BrowserRow extends StatelessWidget {
@@ -1142,97 +1926,53 @@ class _BrowserRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.iris;
     final host = Uri.tryParse(tab.url)?.host;
-    return SizedBox(
+    return KeyedSubtree(
       key: Key('browser-tab-${tab.ref}'),
-      height: 66,
-      child: TextButton(
-        onPressed: onTap,
-        style: const ButtonStyle(
-          padding: WidgetStatePropertyAll(
-            EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+      child: _ListRow(
+        leading: SizedBox.square(
+          dimension: 18,
+          child: IrisIcon(
+            tab.url.contains('github.com') ? 'github-logo' : 'globe',
+            size: 18,
+            color: colors.foreground2,
           ),
-          shape: WidgetStatePropertyAll(RoundedRectangleBorder()),
         ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: Center(
-                child: IrisIcon(
-                  tab.url.contains('github.com') ? 'github-logo' : 'globe',
-                  size: 22,
-                  color: context.iris.foreground2,
-                ),
+        title: Text(
+          '${group == null ? '' : '${group!.name} · '}${tab.title.isEmpty ? (host ?? tab.url) : tab.title}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: browserGroupColor(group?.color) ?? colors.foreground,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            height: 21 / 15,
+          ),
+        ),
+        meta: [
+          _MetaText(space),
+          const _Dot(),
+          if (tab.aiControlled) ...[
+            Container(
+              key: Key('browser-ai-dot-${tab.ref}'),
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: colors.pink,
+                shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${group == null ? '' : '${group!.name} · '}${tab.title.isEmpty ? (host ?? tab.url) : tab.title}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: IrisType.rowTitle.copyWith(
-                      color: browserGroupColor(group?.color),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Text(
-                        '$space · ',
-                        style: TextStyle(
-                          color: context.iris.muted,
-                          fontSize: 15,
-                        ),
-                      ),
-                      if (tab.aiControlled) ...[
-                        Container(
-                          key: Key('browser-ai-dot-${tab.ref}'),
-                          width: 6,
-                          height: 6,
-                          decoration: const BoxDecoration(
-                            color: Color(0xfff4a1a7),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            '${tab.controlling.isEmpty ? 'AI' : tab.controlling.join(', ')}가 조작 중',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xfff4a1a7),
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      ] else
-                        Expanded(
-                          child: Text(
-                            tab.profile,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: context.iris.muted,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
+            const SizedBox(width: 5),
+            _MetaText(
+              '${tab.controlling.isEmpty ? 'AI' : tab.controlling.join(', ')}가 조작 중',
+              color: colors.dangerText,
             ),
-            IrisIcon('caret-right', size: 16, color: context.iris.faint),
-          ],
-        ),
+          ] else
+            _MetaText(tab.profile),
+        ],
+        action: const _RowAction(label: '열기'),
+        onTap: onTap,
       ),
     );
   }
@@ -1341,95 +2081,101 @@ class _AgentRow extends StatelessWidget {
   const _AgentRow({
     required this.agent,
     required this.onTap,
-    this.quiet = false,
+    required this.onOpenRequest,
+    required this.onOpenWaiting,
+    this.request,
     this.depth = 0,
+    this.showSpace = false,
   });
 
   final RemoteAgent agent;
   final VoidCallback onTap;
-  final bool quiet;
+  final void Function(RemoteRequest request, RemoteAgent agent) onOpenRequest;
+  final ValueChanged<RemoteAgent>? onOpenWaiting;
+  final RemoteRequest? request;
   final int depth;
+  final bool showSpace;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    final colors = context.iris;
+    final terminal = agent.kind == 'terminal';
+    final status = agent.question ? 'question' : agent.status;
+    final waiting =
+        !terminal && (request != null || status == 'blocked' || agent.question);
+    final request_ = request;
+    final answer = request_ != null
+        ? () => onOpenRequest(request_, agent)
+        : terminal && onOpenWaiting != null
+        ? () => onOpenWaiting!(agent)
+        : onTap;
+    return KeyedSubtree(
       key: Key('agent-row-${agent.ref}'),
-      height: 66,
-      child: TextButton(
-        onPressed: onTap,
-        style: ButtonStyle(
-          padding: WidgetStatePropertyAll(
-            EdgeInsets.fromLTRB(20 + depth * 18, 11, 20, 11),
+      child: _ListRow(
+        indent: depth * 18.0,
+        leading: SizedBox.square(
+          dimension: 18,
+          child: terminal
+              ? IrisIcon(
+                  'terminal-window',
+                  key: Key('agent-tile-${agent.ref}'),
+                  size: 18,
+                  color: colors.muted,
+                )
+              : IrisStatusGlyph(
+                  key: Key('agent-tile-${agent.ref}'),
+                  status: status,
+                ),
+        ),
+        title: Text(
+          agent.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: colors.foreground,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            height: 21 / 15,
           ),
-          shape: const WidgetStatePropertyAll(RoundedRectangleBorder()),
-          alignment: Alignment.centerLeft,
         ),
-        child: Row(
-          children: [
-            IrisAgentTile(
-              key: Key('agent-tile-${agent.ref}'),
-              statusKey: Key('agent-status-${agent.ref}'),
-              kind: agent.kind,
-              status: agent.question ? 'question' : agent.status,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          agent.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: IrisType.rowTitle.copyWith(
-                            color: quiet
-                                ? context.iris.foreground2
-                                : context.iris.foreground,
-                            fontWeight: quiet
-                                ? FontWeight.w500
-                                : FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        _relativeTime(agent.lastActivityAt),
-                        style: IrisType.meta.copyWith(
-                          color: context.iris.faint,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${agent.space} · ${agent.kind == 'terminal' ? '터미널' : _statusLabel(agent.status)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: context.iris.muted,
-                      fontSize: 15,
-                      height: 18 / 15,
-                      letterSpacing: -0.075,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        meta: [
+          IrisKindTag(kind: agent.kind),
+          const SizedBox(width: 6),
+          if (showSpace) ...[_MetaText(agent.space), const _Dot()],
+          if (!terminal) ...[
+            _MetaText(_statusLabel(status), strong: true),
+            const _Dot(),
           ],
-        ),
+          _MetaText(_relativeTime(agent.lastActivityAt)),
+        ],
+        action: waiting
+            ? _RowAction(
+                accent: true,
+                label: request_?.body is PermissionRequestBody ? '승인하기' : '답하기',
+                onTap: answer,
+              )
+            : _RowAction(label: _actionLabel(agent, status)),
+        onTap: onTap,
       ),
     );
   }
 }
 
+String _actionLabel(RemoteAgent agent, String status) {
+  if (agent.kind == 'terminal') return '열기';
+  return switch (status) {
+    'working' => '지켜보기',
+    'done' => '결과 보기',
+    _ => '열기',
+  };
+}
+
 String _statusLabel(String status) => switch (status) {
   'working' => '작업 중',
-  'idle' => '쉬는 중',
-  'done' => '작업 완료',
-  'blocked' => '허용 대기',
+  'idle' => '대기',
+  'done' => '완료',
+  'blocked' => '답 필요',
+  'question' => '질문 있음',
   _ => '상태 알 수 없음',
 };
 
@@ -1437,7 +2183,7 @@ String _relativeTime(int? timestamp) {
   if (timestamp == null) return '기록 없음';
   final elapsed = DateTime.now().millisecondsSinceEpoch - timestamp;
   if (elapsed < 60000) return '방금';
-  if (elapsed < 3600000) return '${elapsed ~/ 60000}분';
-  if (elapsed < 86400000) return '${elapsed ~/ 3600000}시간';
-  return '${elapsed ~/ 86400000}일';
+  if (elapsed < 3600000) return '${elapsed ~/ 60000}분 전';
+  if (elapsed < 86400000) return '${elapsed ~/ 3600000}시간 전';
+  return '${elapsed ~/ 86400000}일 전';
 }

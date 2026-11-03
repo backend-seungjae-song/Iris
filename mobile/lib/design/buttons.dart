@@ -4,13 +4,14 @@ import 'package:iris_remote/design/tokens.dart';
 
 enum IrisButtonTone { primary, secondary, danger, ghost }
 
+// 알약 버튼 .btn. 높이 48 기본, 36은 .btn.sm
 class IrisButton extends StatelessWidget {
   const IrisButton({
     required this.label,
     required this.onPressed,
     this.tone = IrisButtonTone.secondary,
     this.icon,
-    this.height = 50,
+    this.height = 48,
     this.width,
     this.expand = true,
     super.key,
@@ -24,49 +25,77 @@ class IrisButton extends StatelessWidget {
   final double? width;
   final bool expand;
 
-  @override
-  Widget build(BuildContext context) {
+  // Row 안에서 Expanded 로 감싸지 않은 본체. IrisActionBar 가 사용
+  Widget body(BuildContext context) {
     final colors = context.iris;
-    final (background, foreground) = switch (tone) {
-      IrisButtonTone.primary => (colors.brand, colors.onBrand),
-      IrisButtonTone.secondary => (colors.level2, colors.foreground),
-      IrisButtonTone.danger => (colors.level2, colors.blocked),
-      IrisButtonTone.ghost => (Colors.transparent, colors.link),
+    final small = height == 36;
+    final off = onPressed == null;
+    final (background, foreground, ring) = switch (tone) {
+      IrisButtonTone.primary when off => (
+        colors.level2,
+        colors.muted,
+        colors.separator,
+      ),
+      IrisButtonTone.primary => (
+        colors.brand,
+        colors.onBrand,
+        colors.accentEdge,
+      ),
+      IrisButtonTone.secondary => (
+        colors.level2,
+        colors.foreground,
+        colors.separator,
+      ),
+      IrisButtonTone.danger => (
+        colors.dangerTint,
+        colors.dangerText,
+        Colors.transparent,
+      ),
+      IrisButtonTone.ghost => (
+        Colors.transparent,
+        colors.foreground2,
+        Colors.transparent,
+      ),
     };
+    final fontSize = small ? 13.5 : 15.0;
+    final textTheme = Theme.of(context).textTheme.labelLarge;
     final button = SizedBox(
       width: width,
       height: height,
       child: TextButton(
         onPressed: onPressed,
         style: ButtonStyle(
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          overlayColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                tone == IrisButtonTone.ghost &&
+                    states.contains(WidgetState.pressed)
+                ? colors.tint
+                : Colors.transparent,
+          ),
           minimumSize: const WidgetStatePropertyAll(Size.zero),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           padding: WidgetStatePropertyAll(
-            EdgeInsets.symmetric(
-              horizontal: tone == IrisButtonTone.ghost ? 6 : 14,
-            ),
+            EdgeInsets.symmetric(horizontal: small ? 14 : 20),
           ),
           backgroundColor: WidgetStatePropertyAll(background),
           foregroundColor: WidgetStatePropertyAll(foreground),
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(height == 36 ? 11 : 14),
+              borderRadius: BorderRadius.circular(IrisRadius.pill),
+              side: BorderSide(
+                color: ring,
+                strokeAlign: BorderSide.strokeAlignInside,
+              ),
             ),
           ),
           textStyle: WidgetStatePropertyAll(
             TextStyle(
-              fontFamily: Theme.of(context).textTheme.labelLarge?.fontFamily,
-              fontFamilyFallback: Theme.of(context)
-                  .textTheme
-                  .labelLarge
-                  ?.fontFamilyFallback,
-              fontSize: height == 36 ? 15 : 17,
-              fontWeight: tone == IrisButtonTone.ghost
-                  ? FontWeight.w500
-                  : FontWeight.w600,
+              fontFamily: textTheme?.fontFamily,
+              fontFamilyFallback: textTheme?.fontFamilyFallback,
+              fontSize: fontSize,
+              fontWeight: FontWeight.w600,
               height: 1.2,
-              letterSpacing: height == 36 ? 0 : -0.17,
+              letterSpacing: fontSize * -0.005,
             ),
           ),
         ),
@@ -75,14 +104,25 @@ class IrisButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null) ...[
-              IrisIcon(icon!, size: height == 36 ? 15 : 18),
-              const SizedBox(width: 7),
+              IrisIcon(icon!, size: small ? 15 : 18),
+              const SizedBox(width: 8),
             ],
-            Text(label),
+            Flexible(
+              child: Text(label, maxLines: 1, overflow: TextOverflow.clip),
+            ),
           ],
         ),
       ),
     );
+    // 비활성 .btn[disabled] 불투명도 .42. 주색은 면 색으로 표현해 1
+    return off && tone != IrisButtonTone.primary
+        ? Opacity(opacity: .42, child: button)
+        : button;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final button = body(context);
     return expand ? Expanded(child: button) : button;
   }
 }

@@ -527,12 +527,10 @@ check("새 탭은 스페이스 기본 계정으로 뜬다", () => {
     // 현재 보고 있는 탭을 물려받지 않는다. 그것이 계정 복제의 원인이다.
     && !/profileOfTab\(activeBrowserId\(\)\)/.test(seg);
 });
-// 사용자가 직접 호출하는 경로는 탭 우클릭 하나다. 주소줄 버튼은 그 위치에 스케치가 들어가면서
-// 제거했다. 없음을 검사하므로 그 버튼이 다시 생기면 여기서 걸린다.
-check("임시 창은 탭 우클릭으로만 부른다", () =>
+check("인증 넘겨주기 전용 주소줄 버튼과 탭 메뉴는 제공하지 않는다", () =>
   !/id="wv-handoff"/.test(web) && !/#wv-handoff/.test(mainJs)
-  && /provide\("handoff\.tabItem"/.test(browserHandoff)
-  && /callHook\("handoff\.tabItem"/.test(browserTabs));
+  && !/provide\("handoff\.tabItem"/.test(browserHandoff)
+  && !/callHook\("handoff\.tabItem"/.test(browserTabs));
 // 사람이 방금 친 값을 다시 치게 하지 않는다. 걷는 쪽과 넣는 쪽이 같은 기준(id→name→type별 순번)을
 // 써야 칸이 맞는다. 순번은 빈 칸까지 세어야 양쪽이 어긋나지 않는다.
 check("지금 친 값을 걷어 임시 창에 넣는다", () => {
@@ -618,15 +616,11 @@ check("실 프로필 수확 뒤 DOM·쿠키 저장소를 즉시 flush한다", ()
   /session\.flushStorageData\(\)/.test(realHandoff) && /session\.cookies\.flushStore\(\)/.test(realHandoff));
 check("자동으로 열린 창에는 입력값을 안 싣는다", () =>
   /const snap = auto \? \{ url: "", fields: \[\] \} : await captureFields\(rec\)/.test(browserHandoff));
-// 패스키는 트리거 하나일 뿐이고, 임베드를 막는 사이트나 확장이 필요한 흐름도 같은 경로로 온다.
-// 직접 호출할 방법이 없으면 감지되지 않는 경우에 아무것도 할 수 없다.
-check("넘겨주기는 어느 탭에서든 손으로 부를 수 있다", () =>
-  /function handoffToChrome\(rec, reason, auto, now\)/.test(browserHandoff)
-  // 우클릭 메뉴의 그 항목은 이 기능이 만든다. 앱 셸은 이름만 호출하고 빈 항목을 걸러낸다.
-  && /provide\("handoff\.tabItem", \(rec\) => \(handoffCheck\(rec\)\.ok \? \{/.test(browserHandoff)
-  && /label: "Chrome에서 이어서 진행"/.test(browserHandoff)
-  && /const handoffItem = callHook\("handoff\.tabItem", getWebview\(tabId\)\);/.test(browserTabs)
-  && /if \(handoffItem\) items\.push\(handoffItem\);/.test(browserTabs));
+check("탭 메뉴는 Chrome 열기 하나만 제공한다", () =>
+  !/handoff\.tabItem/.test(browserHandoff)
+  && !/handoff\.tabItem/.test(browserTabs)
+  && /const mirrorItem = callHook\("mirror\.tabItem", getWebview\(tabId\)\);/.test(browserTabs)
+  && /if \(mirrorItem\) items\.push\(mirrorItem\);/.test(browserTabs));
 // 패스키는 누르게 하지 않는다. 지문 인증을 띄울 수 없는 것이 확정이라 물어볼 것이 없다.
 // 감지는 알림만 한다. 스스로 창을 띄우고 닫으면 사용자가 모르는 사이 세션이 바뀌므로,
 // 자동 처리는 두지 않는다. 창을 여는 결정은 사용자가 알림 막대의 "Chrome에서 열기"로 한다.

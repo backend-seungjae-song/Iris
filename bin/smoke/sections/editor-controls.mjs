@@ -308,26 +308,26 @@ export const cases = {
   "파일 호스트는 오래된 탭·토큰·미리보기·다른 모델을 거절한다"() {
     const source = read("web/js/center/text-editor.js");
     const tab = { id: "file:a", path: "a.md" }, model = {};
-    const base = { fileHostTab: tab, fileHostToken: 4, getRenderedFileOwner: () => tab, getRenderedFileToken: () => 4,
+    const base = { focusedPane: () => 0, paneLayout: () => null, editorSlot: () => ({ tab, token: 4, editor: { getModel: () => model } }), getRenderedFileOwner: () => tab, getRenderedFileToken: () => 4,
       getActiveTabId: () => tab.id, getCenterSpace: () => "space", callHook: () => false, monacoEditor: { getModel: () => model }, monacoModels: new Map([[tab.path, model]]) };
     const evaluate = (overrides) => {
       const values = { ...base, ...overrides };
       return new Function(...Object.keys(values), b4Function(source, "fileHostEditable") + "\nreturn fileHostEditable();")(...Object.values(values));
     };
     assert(evaluate({}));
-    for (const changed of [{ getRenderedFileOwner: () => ({}) }, { getRenderedFileToken: () => 3 }, { getActiveTabId: () => "b" }, { callHook: () => true }, { monacoEditor: { getModel: () => ({}) } }]) assert.equal(evaluate(changed), false);
+    for (const changed of [{ getRenderedFileOwner: () => ({}) }, { getRenderedFileToken: () => 3 }, { getActiveTabId: () => "b" }, { callHook: () => true }, { editorSlot: () => ({ tab, token: 4, editor: { getModel: () => ({}) } }) }]) assert.equal(evaluate(changed), false);
     const render = b4Function(source, "renderFileViewBody");
-    assert(render.indexOf("fileHostTab = null") < render.indexOf('callHook("viewer.renderBody"'));
-    assert(render.indexOf("renderToken !== getRenderedFileToken()") < render.indexOf("const m = modelFor(t)"));
-    assert(b4Function(source, "ensureMonaco").includes("writingExternal || !fileHostEditable()"));
+    assert(render.indexOf("slot.tab = null") < render.indexOf('callHook("viewer.renderBody"'));
+    assert(render.indexOf("renderToken !== getRenderedFileToken(pane)") < render.indexOf("const m = modelFor(t)"));
+    assert(b4Function(source, "ensureMonaco").includes("writingExternal || !fileHostEditable(pane)"));
     assert(source.includes('monacoPrefOpts("file")'));
     assert(source.includes('bindKeymapAction(monacoEditor, "editor-wrap"'));
     assert(source.includes('bindKeymapAction(monacoEditor, "editor-minimap"'));
     const editor = editorHarness("unchanged");
     let pressed;
-    const values = { monacoEditor: editor, monacoPrefOpts: () => ({ minimap: { enabled: false }, wordWrap: "on" }),
-      fileview: { querySelectorAll: () => [{ dataset: { editorPref: "wrap" }, classList: { toggle() {} }, setAttribute: (name, value) => { pressed = value; } }] }, editorPref: () => true };
-    new Function(...Object.keys(values), b4Function(source, "syncFilePrefs") + "\nsyncFilePrefs();")(...Object.values(values));
+    const values = { editorSlot: () => ({ editor }), monacoPrefOpts: () => ({ minimap: { enabled: false }, wordWrap: "on" }),
+      fileRoot: () => ({ querySelectorAll: () => [{ dataset: { editorPref: "wrap" }, classList: { toggle() {} }, setAttribute: (name, value) => { pressed = value; } }] }), editorPref: () => true };
+    new Function(...Object.keys(values), b4Function(source, "syncFilePrefs") + "\nsyncFilePrefs(0);")(...Object.values(values));
     assert.equal(editor.options.wordWrap, "on"); assert.equal(editor.options.minimap.enabled, false);
     assert.equal(pressed, "true"); assert.equal(editor.model.getValue(), "unchanged"); assert.deepEqual(editor.trace, []);
   },

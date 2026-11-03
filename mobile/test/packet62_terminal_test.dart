@@ -200,6 +200,8 @@ void main() {
       containsAllInOrder(['down', 'drag', 'up', 'up']),
     );
     expect(actions.last['hash'], 'd' * 64);
+    // 거절 안내 토스트가 끝나기를 기다림
+    await tester.pump(const Duration(seconds: 3));
     await tester.pumpWidget(const SizedBox());
     state.dispose();
     await session.disconnect();
@@ -238,7 +240,7 @@ void main() {
             .length,
         1,
       );
-      expect(find.text('현재 화면으로'), findsOneWidget);
+      expect(find.text('자동 따라가기'), findsOneWidget);
       wire.emit({
         'type': 'terminal.frame',
         'agent': prior.a,
@@ -257,7 +259,7 @@ void main() {
         wire.sent.where((request) => request['type'] == 'terminal.mouse'),
         isEmpty,
       );
-      await tester.tap(find.text('현재 화면으로'));
+      await tester.tap(find.text('자동 따라가기'));
       await tester.pumpAndSettle();
       final painter =
           tester

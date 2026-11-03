@@ -9,7 +9,6 @@ const {
   googleAuthUserAgent,
   identityOwnsDebugger,
   isGoogleAuthUrl,
-  rewriteGoogleAuthHeaders,
   sendDeviceUserAgentOverride,
 } = require("../native/electron/google-auth-user-agent.cjs");
 const { createDeviceEmulation } = require("../native/electron/cdp-device-emulation.cjs");
@@ -98,71 +97,6 @@ test("Firefox 140 UA는 실행 OS 토큰과 버전 토큰이 일치한다", () =
   if (process.platform === "darwin") assert.match(ua, /Macintosh; Intel Mac OS X 10\.15/);
   else if (process.platform === "win32") assert.match(ua, /Windows NT 10\.0; Win64; x64/);
   else assert.match(ua, /X11; Linux x86_64/);
-});
-
-test("인증 요청은 중복 UA 키를 모두 통일하고 모든 sec-ch-ua 힌트를 지운다", () => {
-  const headers = {
-    "user-agent": "old-a",
-    "USER-AGENT": "old-b",
-    "Sec-CH-UA": "brands",
-    "sec-ch-ua-platform": '"macOS"',
-    Accept: "text/html",
-  };
-  assert.equal(rewriteGoogleAuthHeaders(headers, "https://accounts.google.com/"), true);
-  assert.equal(headers["user-agent"], googleAuthUserAgent());
-  assert.equal(headers["USER-AGENT"], googleAuthUserAgent());
-  assert.equal(Object.keys(headers).some((key) => key.toLowerCase().startsWith("sec-ch-ua")), false);
-  assert.equal(headers.Accept, "text/html");
-});
-
-test("ordinary 문서의 auth-host iframe/XHR는 native wire identity를 유지한다", () => {
-  for (const resourceType of ["subFrame", "xhr", "script"]) {
-    const headers = { "User-Agent": BASE_UA, "sec-ch-ua": "stock" };
-    assert.equal(rewriteGoogleAuthHeaders(headers, "https://accounts.google.com/embedded", {
-      resourceType,
-    }), false);
-    assert.deepEqual(headers, { "User-Agent": BASE_UA, "sec-ch-ua": "stock" });
-  }
-
-  const fromAuthDocument = { "User-Agent": googleAuthUserAgent(), "sec-ch-ua": "wrong" };
-  assert.equal(rewriteGoogleAuthHeaders(fromAuthDocument, "https://accounts.google.com/embedded", {
-    resourceType: "subFrame",
-  }), true);
-  assert.deepEqual(fromAuthDocument, { "User-Agent": googleAuthUserAgent() });
-});
-
-test("인증 문서의 외부 요청도 Firefox UA를 보존하며 힌트를 제거한다", () => {
-  const headers = { "User-Agent": googleAuthUserAgent(), "sec-ch-ua-mobile": "?0" };
-  assert.equal(rewriteGoogleAuthHeaders(headers, "https://static.example.test/widget.js"), true);
-  assert.deepEqual(headers, { "User-Agent": googleAuthUserAgent() });
-
-  const ordinary = { "User-Agent": BASE_UA, "sec-ch-ua": "stock" };
-  assert.equal(rewriteGoogleAuthHeaders(ordinary, "https://example.com/"), false);
-  assert.deepEqual(ordinary, { "User-Agent": BASE_UA, "sec-ch-ua": "stock" });
-});
-
-test("인증 문서에서 떠나는 첫 main-frame 요청은 wire 단계에서 session base로 복원한다", () => {
-  const wc = new FakeWebContents(5, "https://accounts.google.com/");
-  attachGoogleAuthUserAgent(wc);
-  const headers = { "User-Agent": googleAuthUserAgent() };
-  assert.equal(rewriteGoogleAuthHeaders(headers, "https://example.com/return", {
-    resourceType: "mainFrame",
-    webContentsId: wc.id,
-  }), true);
-  assert.deepEqual(headers, { "User-Agent": BASE_UA });
-});
-
-test("active device가 있으면 인증 이탈 첫 main-frame 요청도 device base UA로 복원한다", async () => {
-  const wc = new FakeWebContents(6, "https://accounts.google.com/");
-  attachGoogleAuthUserAgent(wc);
-  await sendDeviceUserAgentOverride(wc, wc.debugger.sendCommand.bind(wc.debugger), MOBILE_PAYLOAD);
-  const headers = { "user-agent": googleAuthUserAgent(), "USER-AGENT": "duplicate" };
-  assert.equal(rewriteGoogleAuthHeaders(headers, "https://example.com/return", {
-    resourceType: "mainFrame",
-    webContents: wc,
-  }), true);
-  assert.equal(headers["user-agent"], MOBILE_PAYLOAD.userAgent);
-  assert.equal(headers["USER-AGENT"], MOBILE_PAYLOAD.userAgent);
 });
 
 test("webview와 popup 같은 WebContents는 인증 진입과 이탈 때 같은 CDP 수명주기를 쓴다", async () => {
@@ -386,18 +320,10 @@ test("popup 같은 새 WebContents의 첫 auth 탐색부터 CDP identity를 적�
   await flush();
   assert.deepEqual(uaWrites(wc), [{ userAgent: googleAuthUserAgent() }]);
   assert.deepEqual(wc.setUserAgentCalls, []);
-  const headers = { "User-Agent": BASE_UA, "Sec-CH-UA": "native" };
-  assert.equal(rewriteGoogleAuthHeaders(headers, "https://accounts.google.com/first", {
-    resourceType: "mainFrame",
-    webContents: wc,
-  }), true);
-  assert.equal(headers["User-Agent"], googleAuthUserAgent());
-  assert.equal(headers["Sec-CH-UA"], undefined);
 });
 
-// 첫 main-frame 요청이 Chrome 으로 나가면 Google 이 그 세션을 Chrome 으로 시작한다. CDP override 가
-// 아직 없거나 실패했어도 인증 호스트 main-frame 헤더는 Firefox 여야 하고 WebContents UA 는 건드리지 않는다.
-test("CDP attach 실패 시에도 인증 호스트 첫 main-frame 요청 헤더는 Firefox 이고 WebContents UA는 바꾸지 않는다", async () => {
+// CDP override 가 없거나 실패해도 WebContents UA 는 건드리지 않는다. 인증 호스트 첫 요청 헤더는 google-auth-rules 규칙이 맡는다.
+test("CDP attach 실패 시에도 WebContents UA는 바꾸지 않는다", async () => {
   const wc = new FakeWebContents(100);
   wc.debugger.attached = false;
   wc.debugger.attach = () => { throw new Error("debugger unavailable"); };
@@ -408,12 +334,6 @@ test("CDP attach 실패 시에도 인증 호스트 첫 main-frame 요청 헤더�
   assert.deepEqual(uaWrites(wc), []);
   assert.deepEqual(wc.setUserAgentCalls, []);
   assert.equal(wc.getUserAgent(), BASE_UA);
-  const headers = { "User-Agent": BASE_UA, "Sec-CH-UA": "native" };
-  assert.equal(rewriteGoogleAuthHeaders(headers, "https://accounts.google.com/first", {
-    resourceType: "mainFrame",
-    webContents: wc,
-  }), true);
-  assert.deepEqual(headers, { "User-Agent": googleAuthUserAgent() });
 });
 
 test("정체성 모듈이 스스로 붙인 debugger 만 소유로 답한다", async () => {

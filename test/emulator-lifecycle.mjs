@@ -70,6 +70,7 @@ async function fixture(run, { deferVendor = false, failVendor = false } = {}) {
             sessions.delete(params.worktree);
             return { ok: true, result: { deviceUdid } };
           }
+          if (method === "emulator.unregisterActive") { sessions.delete(params.worktree); return { ok: true, result: {} }; }
           return { ok: true, result: {} };
         },
       };
@@ -119,24 +120,24 @@ test("attach 도중 화면을 옮겨도 세션을 종료하거나 새 화면을 
   assert.equal(state.replacement, true);
 }));
 
-test("닫힌 탭의 늦은 attach만 정리하고 다른 탭의 세션을 유지한다", async () => fixture(async (page) => {
+test("탭을 닫으면 기기는 끄지 않고 그 탭의 연결만 끊으며, 늦게 끝난 attach 의 연결도 끊는다", async () => fixture(async (page) => {
   await connectPair(page);
   await page.evaluate(() => { pendingAttach.get("space:tab-b")(); paneA.close(); paneA.close(); });
   await page.waitForFunction(() => paneB.current().attached);
-  assert.equal(await page.evaluate(() => calls.filter((call) => call.method === "emulator.shutdown").length), 1);
+  const released = () => calls.filter((call) => call.method === "emulator.unregisterActive").length;
+  assert.equal(await page.evaluate(released), 1);
   await page.evaluate(() => pendingAttach.get("space:tab-a")());
-  await page.waitForFunction(() => calls.filter((call) => call.method === "emulator.shutdown").length === 2);
+  await page.waitForFunction((n) => calls.filter((call) => call.method === "emulator.unregisterActive").length === n, {}, 2);
   const state = await page.evaluate(() => ({
     sessions: [...sessions],
-    shutdowns: calls.filter((call) => call.method === "emulator.shutdown").map((call) => call.params),
+    releases: calls.filter((call) => call.method === "emulator.unregisterActive").map((call) => call.params),
+    shutdowns: calls.filter((call) => call.method === "emulator.shutdown").length,
     attached: paneB.current().attached,
   }));
   assert.deepEqual(state.sessions, [["space:tab-b", "device-b"]]);
   assert.equal(state.attached, true);
-  assert.deepEqual(state.shutdowns, [
-    { worktree: "space:tab-a", managedOnly: true },
-    { worktree: "space:tab-a", managedOnly: true },
-  ]);
+  assert.equal(state.shutdowns, 0, "탭 닫기가 기기를 껐다");
+  assert.deepEqual(state.releases, [{ worktree: "space:tab-a" }, { worktree: "space:tab-a" }]);
 }));
 
 test("번들 대기 중 dispose된 화면은 재사용한 container에 생성되지 않는다", async () => fixture(async (page, releaseVendor) => {
@@ -165,7 +166,7 @@ test("별도 창의 고정 기기는 이름·런타임·연결 상태를 보여 
     name: document.querySelector("#a .emu-tb-device-name").textContent,
     runtime: document.querySelector("#a .emu-tb-rt").textContent,
     status: document.querySelector("#a .emu-tb-status").textContent,
-    selector: !!document.querySelector("#a .emu-tb-dd"),
+    selector: !!document.querySelector('#a [aria-label="기기 바꾸기"]'),
   })), { name: "iPhone A", runtime: "iOS 18", status: "연결 안 됨", selector: false });
 }));
 
@@ -187,20 +188,21 @@ test("다른 기기 종료는 무시하고 해당 세션 종료는 화면을 유
   assert.equal(await page.evaluate(() => sessionStoppedListeners.size), 1);
 }));
 
-test("번들 대기 중 close는 해당 세션을 즉시 정리하고 화면을 만들지 않는다", async () => fixture(async (page, releaseVendor) => {
+test("번들 대기 중 close는 그 탭의 연결만 즉시 끊고 화면을 만들지 않는다", async () => fixture(async (page, releaseVendor) => {
   await page.evaluate(() => {
     const container = document.querySelector("#a");
     const pane = make(container, "space:tab-a", "device-a");
     pane.close(); pane.close();
     container.textContent = "새 화면";
   });
-  assert.equal(await page.evaluate(() => calls.filter((call) => call.method === "emulator.shutdown").length), 1);
+  assert.equal(await page.evaluate(() => calls.filter((call) => call.method === "emulator.unregisterActive").length), 1);
   releaseVendor();
   await page.evaluate(() => settleVendor());
   assert.deepEqual(await page.evaluate(() => ({
     settingsCalls, text: document.querySelector("#a").textContent,
-    shutdowns: calls.filter((call) => call.method === "emulator.shutdown").map((call) => call.params),
-  })), { settingsCalls: 0, text: "새 화면", shutdowns: [{ worktree: "space:tab-a", managedOnly: true }] });
+    releases: calls.filter((call) => call.method === "emulator.unregisterActive").map((call) => call.params),
+    shutdowns: calls.filter((call) => call.method === "emulator.shutdown").length,
+  })), { settingsCalls: 0, text: "새 화면", releases: [{ worktree: "space:tab-a" }], shutdowns: 0 });
 }, { deferVendor: true }));
 
 test("dispose 뒤 번들 로딩 실패가 새 화면에 오류를 쓰지 않는다", async () => fixture(async (page, releaseVendor) => {

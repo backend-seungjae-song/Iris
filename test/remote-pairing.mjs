@@ -409,7 +409,7 @@ test("원격 끄기와 기능 숨김은 진행 중 페어링을 폐기하고 이
     if (action === "disable") await remote.requestDisable();
     else {
       featureListener({ hidden: ["remote"], shown: [] });
-      for (let index = 0; index < 6; index++) await Promise.resolve();
+      await registry.save();
     }
     assert.equal(remote.getState().pairing, null, action);
     assert.equal(rpcOptions.onPairRequest({ nodeId: NODE_ID, peerIp: PEER_IP }, request(qr.secret, keyPair().spki)).ok, false);

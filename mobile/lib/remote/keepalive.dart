@@ -17,11 +17,23 @@ class KeepAlive {
 
   Future<void> start() => _invoke('start');
 
-  Future<void> update(int requestCount) =>
-      _invoke('update', {'requestCount': requestCount});
+  Future<void> update(int requestCount, {bool alert = false}) =>
+      _invoke('update', {'requestCount': requestCount, 'alert': alert});
 
-  Future<void> stop({bool disconnected = false}) =>
-      _invoke('stop', {'disconnected': disconnected});
+  void onOpenResponses(void Function()? callback) {
+    _channel.setMethodCallHandler(
+      callback == null
+          ? null
+          : (call) async {
+              if (call.method == 'openResponses') callback();
+            },
+    );
+  }
+
+  Future<bool> takeOpenResponses() async =>
+      await _channel.invokeMethod<bool>('takeOpenResponses') ?? false;
+
+  Future<void> stop() => _invoke('stop');
 
   Future<void> _invoke(String method, [Object? arguments]) async {
     try {

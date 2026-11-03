@@ -1,0 +1,16 @@
+import Foundation
+
+// P-256 공개키 X9.63 점(04‖X‖Y) → SPKI DER 변환. 서버가 Android 키와 같은 형식으로 읽음
+enum SpkiEncoder {
+    // SEQUENCE(0x59) { SEQUENCE(0x13) { id-ecPublicKey, prime256v1 }, BIT STRING(0x42) { 0x00 ‖ 점 } }
+    static let p256Header = Data([
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+        0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+    ])
+
+    // 비압축 점(65바이트, 첫 바이트 0x04)만 허용
+    static func wrap(x963Point point: Data) -> Data? {
+        guard point.count == 65, point.first == 0x04 else { return nil }
+        return p256Header + point
+    }
+}

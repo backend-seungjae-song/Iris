@@ -1,3 +1,4 @@
+import { paneLayout } from "../center/pane-store.js";
 import { isHostWindows } from "../core/host-path.js";
 import { cycleRail } from "../devtool/rail.js";
 import { closeCurrentHerdrPane } from "../core/keynav.js";
@@ -28,7 +29,7 @@ import { renderBookmarks, renderUrlDatalist, syncBookmarkStar, wireBookmarkBar }
 import { gotoMainScreen, gotoSpaceBrowser, runSwitcherKey } from "../core/screen-switch.js";
 import { profileIdForStored, spaceDefaultProfile, updateProfileBtn } from "./profiles.js";
 import {
-  bmTabs, boundSpace, bsMutate, getBrowserState, isBrowserStateLoaded,
+  bmTabs, boundSpace, bsMutate, followsSharedSpace, getBrowserState, isBrowserStateLoaded,
 } from "./state.js";
 import { renderBmTabs, shownBmTabs, syncAiGlow, wireBrowserModeTabstrip } from "./tabs.js";
 import { navigationDisplay } from "./navigation-feedback.js";
@@ -41,7 +42,7 @@ import {
   removeWebviewLastUsed, removeWebviewStatus,
 } from "./webview-store.js";
 import {
-  WEBVIEW_LRU, activeBrowserId, activeWv, markWebviewUsed, renderTabDialog, scheduleWebviewThrottling,
+  WEBVIEW_LRU, activeBrowserId, activeWv, markWebviewUsed, reloadActiveTab, renderTabDialog, scheduleWebviewThrottling,
   shouldMaterializeTab, sleepDeadSpaceWebviews, sleepStoredTab, syncNavButtons, wakeWebview,
 } from "./webview.js";
 import { openFilePalette } from "../center/file-palette.js";
@@ -54,6 +55,7 @@ import {
   removeTab, replaceTabs, setActiveTab, setCenterSpace,
 } from "../center/tab-store.js";
 import {
+  noteBrowserPanesReady,
   curTabs, ensureTabViewPane, getRenderedFileOwner, makeFileTab, renderTabs, requestFileContent,
   showActiveTab, syncWatchDirs, trackFileWatch, untrackFileWatch, withFileViewTransition,
 } from "../center/tabs.js";
@@ -129,7 +131,7 @@ export function initDock(deps) {
         case "screen-main": gotoMainScreen(); break;
         case "screen-browser": gotoSpaceBrowser(); break;
         case "new-tab": (isBrowser || BROWSER_MODE) ? newBrowserTab() : newHerdrTab(); break;
-        case "close-tab": if (BROWSER_MODE) closeActiveTab(); else if (t) closeTabs([{ space: centerSpace, tabId: t.id, tabRef: t }]); break;
+        case "close-tab": if (BROWSER_MODE) closeActiveTab(); else if (t) closeTabs([{ space: centerSpace, tabId: t.id, tabRef: t, pane: paneLayout(centerSpace)?.focus || 0 }]); break;
         case "reopen-tab": reopenLastClosed(); break;   // ⌘⇧T. 브라우저·센터 중 더 최근에 닫힌 것
         case "file-search": openFilePalette(); break;
         case "find-in-page": openFind(); break;   // webview 에 포커스가 있을 때의 ⌘F
@@ -141,9 +143,9 @@ export function initDock(deps) {
         case "print-page": { const r = activeWv(); try { if (r) r.el.print(); } catch {} break; }
         case "devtools": toggleDevTools(); break;
         case "reload-tab": { const r = activeWv(); if (callHook("mirror.command", r, "reload")) break;
-          try { if (r) r.el.reload(); } catch {} break; }
+          reloadActiveTab(); break; }
         case "force-reload-tab": { const r = activeWv(); if (callHook("mirror.command", r, "forceReload")) break;
-          try { if (r) r.el.reloadIgnoringCache(); } catch {} break; }
+          reloadActiveTab(true); break; }
         case "full-refresh": location.reload(); break; // 이 창 전체 새로고침(메인 창이면 main이 브라우저 창도 함께 리로드)
       }
     });
@@ -194,7 +196,7 @@ export function reconcileBrowserMode() {
   sleepDeadSpaceWebviews();   // 접은 스페이스의 탭은 기록만 남기고 내려놓는다
   // 공유(__shared__) 탭은 전용 공유 창(BOUND_SPACE=__shared__)만 호스팅한다. 비결속 창이 "그 탭으로"
   // goto로 activeSpace=__shared__를 따라와 여기서 만들면 같은 탭에 webview가 둘 생긴다(공유 창 + 이 창).
-  const hostShared = !BOUND_SPACE && sp === "__shared__";
+  const hostShared = followsSharedSpace();
   for (const t of tabs) { // 현재 스페이스 탭은 방문 시 생성(없으면). 이미 있으면 살려둔 채 재사용.
     if (hostShared) break;
     if (!shownIds.has(t.id)) continue;
@@ -210,7 +212,7 @@ export function reconcileBrowserMode() {
       // 크로미움 렌더러가 뜬다. 확인 결과: 탭 84개·스페이스 14개에서 메모리가
       // 부족했다. LRU(유휴 회수)는 생성 이후에 동작하므로 이 구간을 막지 못한다.
       // IRIS_WEBVIEW_LRU=0 으로 재우기를 끈 경우에는 이전처럼 전부 만든다(롤백 스위치 보존).
-      if (!shouldMaterializeTab(t.id, act, WEBVIEW_LRU)) { if (!discarded) sleepStoredTab(t.id, t, sp); continue; }
+      if (!shouldMaterializeTab(t.id, act, WEBVIEW_LRU, !!t.qaRunId)) { if (!discarded) sleepStoredTab(t.id, t, sp); continue; }
       rec = discarded
         ? wakeWebview(t.id)
         : createWebview(t.id, wantProfile, t.url && t.url !== "about:blank" ? t.url : undefined);
@@ -225,6 +227,11 @@ export function reconcileBrowserMode() {
     // 여는 중·실패한 주소 포함. active.url 만 쓰면 실패한 이동 뒤 주소줄이 빔
     const { url: shownUrl } = navigationDisplay(active);
     urlInput.value = isNewTab(shownUrl, active) ? "" : shownUrl;
+    syncBookmarkStar();
+  } else if (act && document.activeElement !== urlInput) {
+    // 잠든 활성 탭(공유 탭을 따라온 창 등)도 주소는 보임. 비워 두면 이전 탭 주소가 남음
+    const sleptUrl = (getDiscardedWebview(act) || {}).url || (bmTabs().find((t) => t.id === act) || {}).url || "";
+    urlInput.value = isNewTab(sleptUrl, null) ? "" : sleptUrl;
     syncBookmarkStar();
   }
   syncNavButtons();
@@ -361,6 +368,7 @@ export function reconcileConsoleDock() {
     scheduleWebviewThrottling();
   }
   consoleDocked = nowDocked;
+  noteBrowserPanesReady();
 }
 
 // 스페이스 브라우저의 분리/도킹 토글. 방향은 서버의 docked 상태 하나로 결정한다.

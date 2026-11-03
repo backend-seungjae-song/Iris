@@ -11,6 +11,10 @@ import {
 } from "../server/remote/contract/connection.js";
 import { canonicalBytes } from "../server/remote/contract/jcs.js";
 import { createConnectionAuth } from "../server/remote/auth.js";
+import { createResumeStore } from "../server/remote/resume-store.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const SERVER_INSTANCE = "1".repeat(32);
 const CERT_HASH = "2".repeat(64);
@@ -72,6 +76,7 @@ function fixture(overrides = {}) {
     verifyPin: overrides.verifyPin || (async (pin) => pin === "123456"
       ? { ok: true } : { ok: false, error: "incorrect", retryAfterMs: 1_000 }),
     getIdleMs: overrides.getIdleMs,
+    resumeStore: overrides.resumeStore,
     now: clock.now,
     randomBytes: () => Buffer.alloc(32, nonceByte++),
     setTimer: clock.setTimer,
@@ -316,11 +321,11 @@ test("서로 다른 기기라도 인증 세션은 전체 6개를 넘지 않는�
   }
 });
 
-test("PIN 기한은 마지막 사용부터 30분이며 활동하면 갱신되고 백그라운드 ping은 갱신하지 않는다", async () => {
+test("PIN 기한은 마지막 사용부터 10분이며 활동하면 갱신되고 백그라운드 ping은 갱신하지 않는다", async () => {
   const idle = fixture();
   const challenge = idle.open().challenge;
   await establish(idle, CONN_ID, idle.response(challenge));
-  idle.clock.advance(30 * 60_000);
+  idle.clock.advance(10 * 60_000);
   idle.clock.runDue();
   assert.deepEqual(idle.closed, [[CONN_ID, "idle-timeout"]]);
 
@@ -328,7 +333,7 @@ test("PIN 기한은 마지막 사용부터 30분이며 활동하면 갱신되고
   const activeChallenge = active.open().challenge;
   await establish(active, CONN_ID, active.response(activeChallenge));
   for (let index = 0; index < 3; index++) {
-    active.clock.advance((30 * 60_000) - 1);
+    active.clock.advance((10 * 60_000) - 1);
     assert.equal(active.auth.beginRequest(CONN_ID, { activity: true }).ok, true);
     active.auth.endRequest(CONN_ID);
     active.clock.runDue();
@@ -338,7 +343,7 @@ test("PIN 기한은 마지막 사용부터 30분이며 활동하면 갱신되고
   const ping = fixture();
   const pingChallenge = ping.open().challenge;
   await establish(ping, CONN_ID, ping.response(pingChallenge));
-  ping.clock.advance((30 * 60_000) - 1);
+  ping.clock.advance((10 * 60_000) - 1);
   assert.equal(ping.auth.beginRequest(CONN_ID, { activity: false }).ok, true);
   ping.auth.endRequest(CONN_ID);
   ping.clock.advance(1);
@@ -474,20 +479,20 @@ test("기한을 늘려도 이전 기한에 이미 만료된 재개 토큰은 다
   )), { ok: true, pinRequired: true });
 });
 
-test("서버는 평균 초당 10개와 짧은 20개 몰림을 허용하고 초과 요청만 거절한다", async () => {
+test("서버는 평균 초당 40개와 짧은 60개 몰림을 허용하고 초과 요청만 거절한다", async () => {
   const value = fixture();
   const challenge = value.open().challenge;
   await establish(value, CONN_ID, value.response(challenge));
-  for (let index = 1; index <= 8; index++) assert.equal(value.auth.beginRequest(CONN_ID).ok, true);
+  for (let index = 1; index <= 16; index++) assert.equal(value.auth.beginRequest(CONN_ID).ok, true);
   assert.deepEqual(value.auth.beginRequest(CONN_ID), { ok: false, error: "busy", close: false });
-  for (let index = 1; index <= 8; index++) value.auth.endRequest(CONN_ID);
-  for (let index = 9; index <= 20; index++) {
+  for (let index = 1; index <= 16; index++) value.auth.endRequest(CONN_ID);
+  for (let index = 17; index <= 60; index++) {
     assert.equal(value.auth.beginRequest(CONN_ID).ok, true);
     value.auth.endRequest(CONN_ID);
   }
   assert.deepEqual(value.auth.beginRequest(CONN_ID), { ok: false, error: "limit-exceeded", close: false });
   assert.equal(value.auth.get(CONN_ID).valid, true);
-  value.clock.advance(100);
+  value.clock.advance(30);
   assert.equal(value.auth.beginRequest(CONN_ID).ok, true);
   value.auth.endRequest(CONN_ID);
 });
@@ -521,4 +526,68 @@ test("전체 무효화는 PIN 변경 전의 챌린지와 재개 토큰을 제거
     { signed: { connId: OTHER_CONN_ID }, response: { resumeToken: established.resumeToken } },
   ));
   assert.deepEqual(resumed, { ok: true, pinRequired: true });
+});
+
+test("서버를 다시 시작해도 유휴 만료 안이면 저장된 토큰으로 PIN 없이 재접속하고 만료되면 PIN을 묻는다", async (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-resume-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const first = fixture({ resumeStore: createResumeStore({ stateDir }) });
+  const established = await establish(first, CONN_ID, first.response(first.open().challenge));
+  assert.equal(established.ok, true);
+  first.auth.flushResumeTokens();
+  const file = path.join(stateDir, "remote", "resume-tokens.json");
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(file, "utf8").includes(established.resumeToken), false, "토큰 원문은 저장하지 않음");
+
+  const resume = (value, token) => value.auth.authenticate(OTHER_CONN_ID, value.response(
+    value.open(OTHER_CONN_ID).challenge, value.connectionKey.privateKey,
+    { signed: { connId: OTHER_CONN_ID }, response: { resumeToken: token } },
+  ));
+  const restarted = fixture({ connectionKey: first.connectionKey, resumeStore: createResumeStore({ stateDir }) });
+  restarted.auth.restoreResumeTokens();
+  const resumed = resume(restarted, established.resumeToken);
+  assert.equal(resumed.ok, true);
+  assert.equal(resumed.resumed, true);
+  assert.equal(resumed.pinRequired, undefined);
+
+  // 다시 시작한 서버에서 10분이 지나면 같은 토큰으로도 PIN 을 묻는다
+  const late = fixture({ connectionKey: first.connectionKey, resumeStore: createResumeStore({ stateDir }) });
+  late.auth.restoreResumeTokens();
+  late.clock.advance(11 * 60_000);
+  assert.deepEqual(resume(late, established.resumeToken), { ok: true, pinRequired: true });
+});
+
+test("종료 저장은 이후 폐기에 지워지지 않고, 폐기·쓰기 경쟁·미래 시각은 재시작 뒤에 토큰을 살리지 못한다", async (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-resume-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const file = path.join(stateDir, "remote", "resume-tokens.json");
+  const saved = () => JSON.parse(fs.readFileSync(file, "utf8")).tokens.length;
+
+  // 정상 종료: 저장한 뒤 이어지는 연결 정리(전체 무효화)가 파일을 비우지 않는다
+  const first = fixture({ resumeStore: createResumeStore({ stateDir }) });
+  await establish(first, CONN_ID, first.response(first.open().challenge));
+  first.auth.flushResumeTokens();
+  first.auth.invalidate({ scope: "all" });
+  assert.equal(saved(), 1);
+
+  // 서버가 돌아가는 중 PIN 변경 같은 폐기는 바로 파일에 반영한다
+  const second = fixture({ connectionKey: first.connectionKey, resumeStore: createResumeStore({ stateDir }) });
+  second.auth.restoreResumeTokens();
+  second.auth.invalidate({ scope: "all" });
+  assert.equal(saved(), 0);
+
+  // 진행 중이던 비동기 저장이 더 새로운 동기 저장을 덮지 않는다
+  const store = createResumeStore({ stateDir });
+  const key = "a".repeat(64);
+  const entry = (deviceId) => [[key, { deviceId, lastActivityAt: Date.now() }]];
+  store.save(() => entry(DEVICE_ID));
+  const flushing = store.flush();
+  store.save(() => []);
+  store.flushSync();
+  await flushing;
+  assert.equal(saved(), 0);
+
+  // 마지막 사용 시각이 미래인 항목은 읽지 않는다
+  fs.writeFileSync(file, JSON.stringify({ version: 1, tokens: [[key, { deviceId: DEVICE_ID, lastActivityAt: Date.now() + 3_600_000 }]] }));
+  assert.deepEqual(createResumeStore({ stateDir }).load(10 * 60_000), []);
 });

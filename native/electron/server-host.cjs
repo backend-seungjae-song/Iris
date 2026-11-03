@@ -12,10 +12,12 @@
 // 보유하고, 그 프로세스를 앱 실행을 이유로 교체하면 안 된다. 전환기에는 launchd와
 // 앱이 겹쳐 실행될 수 있는데, 그때도 상태를 보유한 쪽이 계속 소유한다.
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { childEnv, NET_POLICY } = require("../../server/env.cjs");
 const { createDevSourceWatch } = require("./dev-source-watch.cjs");
 
@@ -65,6 +67,13 @@ function resolveRuntime(app) {
   }
   // 개발 기기에 node가 없는 경우는 사실상 없지만, 없으면 터미널을 잃더라도 화면은 뜨는 편이 낫다.
   return { bin: process.execPath, asNode: true };
+}
+
+function resolveAppPath({ isPackaged, platform = process.platform, execPath = process.execPath, root }) {
+  const paths = platform === "win32" ? path.win32 : path.posix;
+  if (!isPackaged) return paths.resolve(root);
+  if (platform === "win32") return paths.dirname(execPath);
+  return paths.resolve(execPath, "../../..");
 }
 
 // 두 경로가 같은 폴더를 가리키는지 판정한다. 문자열 비교로는 부족하다. macOS에서 `/tmp`는
@@ -153,6 +162,14 @@ class ServerHost {
     this.conflict = null;    // 그 자리에 있는 남의 서버(있으면 우리는 띄우지 않는다)
     this.reloading = false;  // 소스 감시가 요청한 의도된 재시작인지. 재시도 예산에서 제외한다
     this.sourceWatch = null; // 개발 환경에서만 실행된다
+    // 앱 UI 증명 값. 이 앱이 띄운 서버에는 파일 없이 파이프로만 전달: 같은 사용자의 다른 프로세스가 읽지 못하게
+    this.uiToken = crypto.randomBytes(32).toString("hex");
+  }
+
+  // 렌더러에 줄 UI 증명 값. 붙기만 한 서버는 그 서버가 만든 파일 값
+  currentUiToken() {
+    if (this.owned && process.platform !== "win32") return this.uiToken;
+    try { return fs.readFileSync(path.join(this.stateDir, "ui-token"), "utf8").trim(); } catch { return ""; }
   }
 
   log(line, sync = false) {
@@ -260,14 +277,36 @@ class ServerHost {
   watchSource() {
     if (this.sourceWatch || this.app.isPackaged) return null;
     if (process.env.IRIS_DEV_WATCH === "0") return null;
+    const root = resolveServerRoot(this.app);
     this.sourceWatch = createDevSourceWatch({
-      fs, path,
-      root: resolveServerRoot(this.app),
+      fs, path, root,
       log: (line) => this.log(line),
       reload: (rel) => this.reload(rel),
+      reloadWorker: (rel) => this.reloadWorker(rel),
+      classify: async (rel) => {
+        const graphModule = await import(pathToFileURL(path.join(root, "scripts/mcp-worker/graph.mjs")).href);
+        const graph = graphModule.buildExecutionGraph({ root });
+        const relative = `server/${String(rel).split(path.sep).join("/")}`;
+        const records = graph.membership[relative] || [];
+        return records.length === 1 && records[0].unit === "worker" ? "worker" : "server";
+      },
     });
     this.sourceWatch.start();
     return this.sourceWatch;
+  }
+
+  async reloadWorker(rel) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${this.port}/mcp-worker/reload-source`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok || body.ok === false) throw new Error(body.error || `HTTP ${response.status}`);
+      this.sourceWatch?.noteReloaded();
+      this.log(`worker 소스 반영: ${rel || "server worker 변경"}`);
+      return true;
+    } catch (error) {
+      this.log(`worker 소스를 반영하지 못했습니다: ${error.message || error}`);
+      return false;
+    }
   }
 
   // 의도된 재시작이다. 비정상 종료 후의 재시작과 구분한다. 재시도 예산은 반복 종료를 세는
@@ -314,6 +353,15 @@ class ServerHost {
       return;
     }
     const env = { ...process.env, ...childEnv({ port: this.port, stateDir: this.stateDir }) };
+    env.IRIS_MAIN_PID = String(process.pid);
+    env.IRIS_SERVER_ROOT = root;
+    env.IRIS_APP_PATH = resolveAppPath({ isPackaged: this.app.isPackaged, root });
+    try {
+      const bundle = JSON.parse(fs.readFileSync(path.join(root, ".iris-bundle.json"), "utf8"));
+      if (bundle.id) env.IRIS_BUNDLE_ID = String(bundle.id);
+    } catch {
+      env.IRIS_BUNDLE_ID ||= "development";
+    }
     // 서버가 자신을 설정하는 변수다. 앱이 물려받은 옛 값이 새 계약을 덮지 않게 지운다.
     delete env.PORT;
     // 이전 원격 설정 제거. 이전 버전 소스(IRIS_SERVER_ROOT)도 루프백 수신
@@ -325,8 +373,11 @@ class ServerHost {
     // Windows: 종료 요청용 IPC 채널, 콘솔 창 숨김, 설치 파일에 동봉한 herdr 위치
     const win = process.platform === "win32";
     if (win && this.app.isPackaged) env.IRIS_BUNDLED_HERDR = path.join(process.resourcesPath, "herdr", "herdr.exe");
-    const stdio = win ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"];
-    const child = spawn(runtime.bin, [entry], { cwd: root, env, stdio, windowsHide: true });
+    const stdio = win ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe", "pipe"];
+    if (!win) env.IRIS_UI_TOKEN_FD = "3";
+    // SIGUSR1 로 디버거를 열면 같은 사용자 프로세스가 서버 메모리(UI 증명 값)에 접근. 내장 Node(24)만 옵션 지원 확인
+    const child = spawn(runtime.bin, runtime.asNode ? ["--disable-sigusr1", entry] : [entry], { cwd: root, env, stdio, windowsHide: true });
+    if (!win) { child.stdio[3]?.on("error", () => {}); child.stdio[3]?.end(this.uiToken); }
     this.child = child;
     this.owned = true;
     const out = this.openLog();
@@ -455,4 +506,4 @@ class ServerHost {
   }
 }
 
-module.exports = { ServerHost, probe, healthMatches, resolveServerRoot, resolveRuntime };
+module.exports = { ServerHost, probe, healthMatches, resolveServerRoot, resolveRuntime, resolveAppPath };

@@ -8,6 +8,7 @@ import { handleGit } from "../../git-handlers.js";
 import { createGithubPrHandler } from "../../github-pr-handler.js";
 import { snapshot } from "../../runtime-state.js";
 import { redactMacPaths, truncateUtf8 } from "../public-text.js";
+import { isErrorCode } from "../contract/errors.js";
 
 function executablePath(name) {
   const candidates = process.platform === "win32"
@@ -141,7 +142,11 @@ export function createSourceControlFeature(options) {
     if (!agent || !requested) return { ok: false, code: "forbidden" };
     const value = await capture(githubHandler, { type: `githubpr.${operation}`, requestId: `remote-${Date.now()}`,
       path: requested, ...extra });
-    if (!value?.ok) return { ok: false, code: value?.error?.code === "local_only" ? "forbidden" : "unavailable" };
+    if (!value?.ok) {
+      const code = value?.error?.code;
+      // GitHub 실패 사유의 원격 전달, 지원 여부와 인증·저장소 상태 구분
+      return { ok: false, code: code === "local_only" ? "forbidden" : (isErrorCode(code) ? code : "unavailable") };
+    }
     return { ok: true, data: value };
   }
 
@@ -150,12 +155,9 @@ export function createSourceControlFeature(options) {
     githubAvailable() {
       if (options.githubAvailable != null) return !!options.githubAvailable;
       if (Date.now() - githubProbe.at < 30_000) return githubProbe.available;
-      const executable = executablePath("gh");
-      let available = false;
-      if (executable) {
-        try { execFileSync(executable, ["auth", "status"], { timeout: 3_000, stdio: "ignore" }); available = true; }
-        catch {}
-      }
+      const executable = options.githubExecutable === undefined ? executablePath("gh") : options.githubExecutable;
+      // gh 설치 여부만 capabilities에 반영, 인증 실패는 요청 결과로 표시
+      const available = !!executable;
       githubProbe = { at: Date.now(), available };
       return available;
     },

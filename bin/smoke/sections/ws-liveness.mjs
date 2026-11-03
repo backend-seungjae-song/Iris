@@ -14,17 +14,18 @@ import {
   b4Function, check, checkAsync, read, readAll, require_, ROOT, sourceFiles,
 } from "../core.mjs";
 import {
-  aiState, aiTabs, allServer, archive, archiveHandlers, browserCommands, browserRuntime,
+  aiState, aiTabs, allServer, archive, archiveHandlers, browserRuntime,
   browserTabs, cdpCaptureToolsSource, cdpCmdCaptureSource, cdpCmdInputSource,
   cdpCmdInspectSource, cdpHiddenViewportSource, cdpObservationSource, cdpSessionSource,
   cdpTransportSource, centerTabs, contextMenu, css, herdrAgents, herdrHandlers, herdrState,
-  httpHandler, main, mainJs, mcp, memoPanel, rail, xtermWiring, tabClose, terminalPanel,
+  main, mainJs, mcp, memoPanel, rail, xtermWiring, tabClose, terminalPanel,
   textEditor, web, webviewFactory, webviewThrottleSource, wsCore,
 } from "../sources.mjs";
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
 
 export default async function run() {
 console.log("\n[10g] 연결이 조용히 죽지 않는다");
+const workerBrowser = read("server/mcp-worker/browser-service.js");
 check("서버가 hb와 ping을 보낸다", () => {
   const t = read("server/ws-transport.js"); // 하트비트를 담당하는 계층은 전송 계층이다
   return /type: "hb"/.test(t) && /ws\.ping\(\)/.test(t) && /ws\._alive === false.*terminate/s.test(t);
@@ -39,10 +40,10 @@ check("실행기가 끊기면 대기 명령을 즉시 깨운다", () => {
   return /for \(const \[id, pending\] of cdpPending\)/.test(browserRuntime.slice(at, at + 1200));
 });
 // 일시적 단절은 곧 복구되므로 한 번 실패로 끝내지 않는다. 단, 이미 전송한 명령을 다시 보내면 두 번 실행된다.
-check("실패는 텀을 두고 5회까지 다시 시도", () => /const RETRY_DELAYS = \[700, 1200, 2000, 3000\]/.test(browserCommands)
-  && /runBrowserCmdResilient\(String\(j\.cmd/.test(httpHandler));
-check("보낸 뒤 답 없는 것은 읽기 명령만 재시도", () => /const READONLY_CMDS = new Set\(/.test(browserCommands)
-  && /const retryable = notSent \|\| \(sentUnknown && READONLY_CMDS\.has\(cmd\)\);/.test(browserCommands));
+check("실패는 텀을 두고 5회까지 다시 시도", () => /const RETRY_DELAYS = \[700, 1200, 2000, 3000\]/.test(workerBrowser)
+  && /for \(let attempt = 0; ; attempt\+\+\)/.test(workerBrowser));
+check("보낸 뒤 답 없는 것은 읽기 명령만 재시도", () => /const READ_ONLY = new Set\(/.test(workerBrowser)
+  && /const retryable = notSent \|\| \(sentUnknown && READ_ONLY\.has\(command\)\);/.test(workerBrowser));
 
 // [10h] 스크린샷은 증거가 된다
 // 폴더에 흩어진 PNG는 사용자가 열어보지 않는다. 확인할 위치에 표시를 얹고 한 장으로 묶어야 판단에 쓸 수 있다.

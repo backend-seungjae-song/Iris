@@ -24,9 +24,9 @@ import { shortcutLabel } from "../core/keymap.js";
 //
 // 유지 조건
 //   dispose() 는 DOM·구독·스트림만 정리하고 에뮬레이터 세션은 남긴다(창으로 옮길 때 다시 붙일
-//   세션이 있어야 한다). close() 는 탭을 완전히 닫을 때만 부르고, Orca 의 관리 세션 정리
-//   (managedOnly shutdown)를 그대로 한다. 둘을 바꿔 부르면 세션이 새지거나 헛통화가 남는다.
-//   attach 중 dispose 되어도 세션은 옮긴 화면에서 쓴다. close 뒤 attach가 끝나면 해당 세션을 정리한다.
+//   세션이 있어야 한다). close() 는 탭을 완전히 닫을 때만 부르고, 이 탭(worktree)과 세션의 연결만
+//   끊는다(emulator.unregisterActive). 기기는 켜 둠 — 끄는 것은 전원 버튼(stop)뿐.
+//   attach 중 dispose 되어도 세션은 옮긴 화면에서 쓴다. close 뒤 attach가 끝나면 그 연결도 끊는다.
 //   번들 로딩 중 화면을 떼거나 닫으면 그 화면의 DOM을 만들지 않는다.
 //
 // 영향 범위
@@ -45,7 +45,7 @@ import { createDropdown } from "../core/dropdown.js";
 import { runtimeLabel } from "./devices-panel.js";
 import { xcodeGuidance } from "./xcode-guidance.js";
 import { androidGuidance } from "./android-guidance.js";
-import { phoneControls } from "./controls.js";
+import { phoneControls, createKeyboardQueue } from "./controls.js";
 
 const VENDOR_URL = new URL("../../vendor/orca-emulator-pane.esm.js", import.meta.url).href;
 const vendorReady = import(VENDOR_URL);
@@ -76,6 +76,8 @@ const TB_ICON = {
   volume_down: TB_SVG('<path d="M4 10v4h4l5 4V6l-5 4z"/>'),
   volume_up: TB_SVG('<path d="M4 10v4h4l5 4V6l-5 4zM16 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/>'),
   lock: TB_SVG('<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'),
+  // 기기 키보드의 언어 전환(지구본) 키 모양
+  lang: TB_SVG('<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.2 2.5 13.8 0 16M12 4c-2.5 2.2-2.5 13.8 0 16"/>'),
   pick: TB_SVG('<path d="M4 4v15l4-4 3 5 2-1-3-5 6-1z"/>'),
   // 홈(빈 원)과 구분: 녹화 표준 모양인 테두리 원 + 속이 찬 가운데 점
   record: TB_SVG('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>'),
@@ -223,11 +225,14 @@ function buildPane(container, opts, vendor) {
     return b;
   };
   const tbSep = () => el("span", "emu-tb-sep");
-  const phoneLabels = { back: "뒤로", home: "홈", recents: "최근 앱", rotate: "회전", volume_down: "볼륨 내림", volume_up: "볼륨 올림", lock: "잠금" };
+  const phoneLabels = { back: "뒤로", home: "홈", recents: "최근 앱", rotate: "회전", volume_down: "볼륨 내림", volume_up: "볼륨 올림", lock: "잠금", lang: "한/영" };
+  const phoneTitles = { lang: "기기 키보드를 한글·영문으로 바꿉니다" };
   const phoneButtons = new Map();
   for (const [name, label] of Object.entries(phoneLabels)) {
-    const button = tbButton(label, name);
-    button.addEventListener("click", () => { if (name === "rotate") void sendRotate(); else sendButton(name); });
+    const button = tbButton(label, name, phoneTitles[name]);
+    button.addEventListener("click", () => { if (name === "rotate") void sendRotate(); else if (name === "lang") void sendLanguageSwitch(); else sendButton(name); });
+    // 한/영을 눌러도 기기 화면의 키 입력 받기를 유지해 바로 이어 침(포커스가 단추로 가면 받기가 꺼짐)
+    if (name === "lang") button.addEventListener("mousedown", (e) => { if (keyboardCaptureActive) e.preventDefault(); });
     phoneButtons.set(name, button);
     phoneBar.append(button);
   }
@@ -255,6 +260,25 @@ function buildPane(container, opts, vendor) {
   volMute.addEventListener("click", () => { vol.muted = !vol.muted; syncVolume(); void pushVolume(); });
   phoneBar.append(tbSep(), volBox);
   syncVolume();
+  // 화면 비율: 기기 안 Flutter 앱(device_preview)이 다른 기기의 크기·안전 영역·OS 를 흉내 낸다. 시뮬레이터는 그대로라
+  // 같은 화면을 눌러 확인한다. 그런 앱이 없는 기기에서는 숨긴다
+  const vp = { device: null, seq: 0, error: null };
+  const vpBox = el("div", "emu-vp");
+  const vpDropdown = createDropdown({
+    items: [], value: "", ariaLabel: "화면 비율", className: "emu-tb-dd emu-vp-dd",
+    onChange: (preset) => { void applyViewport(preset || null); },
+  });
+  const vpTrigger = vpDropdown.el.querySelector("button");
+  if (vpTrigger) {
+    vpTrigger.title = "이 기기의 앱을 다른 기기 화면 비율로 봅니다";
+    // 앱을 다시 실행하면 프리셋 목록과 현재 값이 바뀌므로 목록을 열 때 다시 받는다
+    vpTrigger.addEventListener("pointerdown", () => { void refreshViewport(); });
+  }
+  vpBox.append(tbSep(), vpDropdown.el);
+  vpBox.hidden = true;
+  phoneBar.append(vpBox);
+  // 앱이 기기보다 늦게 뜨는 경우가 많아, 숨겨져 있는 동안에는 15초마다 다시 찾는다
+  const vpTimer = setInterval(() => { if (vpBox.hidden && vp.device) void refreshViewport(); }, 15000);
   if (opts.onSketch) {
     const tbSketch = tbButton("스케치", "sketch", shortcutLabel("지금 앱 화면을 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다"));
     tbSketch.addEventListener("click", () => { opts.onSketch(); });
@@ -327,6 +351,41 @@ function buildPane(container, opts, vendor) {
       if (typeof r.volume === "number") { vol.volume = r.volume; vol.muted = !!r.muted; syncVolume(); }
       showVolumeResult(r);
     }).catch(() => {});
+  }
+  function syncViewportTarget() {
+    if (!host.viewport) return;
+    const device = isLiveNow() ? state.liveTarget || state.selectedUdid || null : null;
+    if (device === vp.device) return;
+    vp.device = device;
+    void refreshViewport();
+  }
+  async function refreshViewport() {
+    const device = vp.device;
+    const seq = ++vp.seq;
+    if (!device) { vpBox.hidden = true; return; }
+    const r = await host.viewport({ device, op: "list" }).catch(() => null);
+    if (disposed || seq !== vp.seq) return;
+    if (!r || !r.ok) { vpBox.hidden = true; return; }
+    const os = { iOS: "iOS", android: "Android", macOS: "macOS", windows: "Windows", linux: "Linux", fuchsia: "Fuchsia" };
+    vpDropdown.setItems([{ value: "", label: "실제 기기" },
+      ...r.presets.map((p) => ({ value: p.id, label: p.name, sub: os[p.platform] || p.platform || "" }))]);
+    vpDropdown.setValue(r.current || "");
+    vpBox.hidden = false;
+  }
+  async function applyViewport(preset) {
+    const device = vp.device;
+    if (!device) return;
+    const r = await host.viewport({ device, op: "apply", preset }).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+    if (disposed || device !== vp.device) return;
+    if (r && r.ok) {
+      vpDropdown.setValue(r.current || "");
+      if (vp.error && state.error === vp.error) { vp.error = null; state.error = null; render(); }
+      return;
+    }
+    vp.error = (r && r.error) || "화면 비율을 바꾸지 못했습니다.";
+    state.error = vp.error;
+    render();
+    void refreshViewport();
   }
   // 음량 실패 문장은 오류 줄에. 다음 성공 때 그 문장만 지움(다른 오류는 유지)
   function showVolumeResult(r) {
@@ -489,7 +548,7 @@ function buildPane(container, opts, vendor) {
       const res = await rpcCall(host, "emulator.attach", { device: target, worktree: workspaceId, focus: false });
       if (disposed) {
         // close가 먼저 끝났어도 attach 완료 시 관리 세션이 새로 등록될 수 있다.
-        if (closed) void rpcCall(host, "emulator.shutdown", { worktree: workspaceId, managedOnly: true }).catch(() => {});
+        if (closed) void rpcCall(host, "emulator.unregisterActive", { worktree: workspaceId }).catch(() => {});
         return { ok: false, canceled: true };
       }
       if (stopEpoch !== sessionStopEpoch) return { ok: false, canceled: true };
@@ -565,6 +624,20 @@ function buildPane(container, opts, vendor) {
 
   function sendTap(x, y) { rpcCall(host, "emulator.tap", { x, y, worktree: workspaceId }).catch(() => {}); }
   function sendButton(name) { rpcCall(host, "emulator.button", { name, worktree: workspaceId }).catch(() => {}); }
+  // 한국어 키보드가 없는 기기 등 실패 이유를 사람이 알아야 고칠 수 있어 오류 줄에 표시
+  let langError = null;
+  // iOS 는 응답의 Ctrl+Space 프레임을 키 입력 대기열로 보냄. Android 는 메인 프로세스가 보냄
+  async function sendLanguageSwitch() {
+    const request = rpcCall(host, "emulator.button", { name: "lang", worktree: workspaceId });
+    if (selectedPlatform() === "iOS") keyboardQueue.enqueueSwitch(request);
+    try {
+      await request;
+      if (langError && state.error === langError) { langError = null; state.error = null; render(); }
+    } catch (e) {
+      langError = e.message || "키보드 언어를 바꾸지 못했습니다.";
+      state.error = langError; render();
+    }
+  }
   function sendGesture(points) { rpcCall(host, "emulator.gesture", { points, worktree: workspaceId }).catch(() => {}); }
   async function sendRotate() {
     const orientation = state.nextRotateOrientation;
@@ -665,14 +738,17 @@ function buildPane(container, opts, vendor) {
     for (const usage of usages) ctrlSendKeyboardFrameNow({ type: "up", usage });
     if (resetAfter) pressedKeyboardUsages.clear();
   }
-  function cancelKeyboardFrames() { ctrlClearKeyboardTimers(); ctrlReleasePressedKeyboardUsages(true); }
+  function cancelKeyboardFrames() { keyboardQueue.clear(); ctrlClearKeyboardTimers(); ctrlReleasePressedKeyboardUsages(true); }
   function sendTouch(touch) {
     const ws = ctrlOpenSocket();
     if (!ws) return false;
     try { ws.send(encodeServeSimTouchFrame(touch)); return true; } catch { return false; }
   }
+  // 한/영 전환 뒤 키는 전환과 같은 순서로 이 연결에 보냄(controls.js createKeyboardQueue)
+  const keyboardQueue = createKeyboardQueue({ sendFrame: ctrlSendKeyboardFrameNow, delay: (ms) => new Promise((r) => setTimeout(r, ms)) });
   function sendKeyboardFrames(frames) {
     if (frames.length === 0 || !ctrlOpenSocket()) return false;
+    if (keyboardQueue.enqueueFrames(frames)) return true;
     frames.forEach((frame, index) => {
       if (index === 0) { ctrlSendKeyboardFrameNow(frame); return; }
       const id = setTimeout(() => { keyboardTimerIds.delete(id); ctrlSendKeyboardFrameNow(frame); }, index * KEYBOARD_FRAME_DELAY_MS);
@@ -1185,6 +1261,7 @@ function buildPane(container, opts, vendor) {
     updateControlStream(view.wsUrl, canInteractNow);
     renderFrameLayout();
     syncVolumeTarget();
+    syncViewportTarget();
   }
 
   // 초기 진입: 기기 목록을 받고, 이미 켜진 기기면 화면만 붙임. 꺼진 기기는 기본 기기로 골라만 두고 켜지 않음
@@ -1207,6 +1284,7 @@ function buildPane(container, opts, vendor) {
 
   function teardownDom() {
     clearInterval(modeTimer);
+    clearInterval(vpTimer);
     if (resizeObserver) resizeObserver.disconnect(); else window.removeEventListener("resize", scheduleSizeUpdate);
     if (sizeFrameId) cancelAnimationFrame(sizeFrameId);
     document.removeEventListener("visibilitychange", onDocVisibilityChange);
@@ -1274,7 +1352,15 @@ function buildPane(container, opts, vendor) {
       if (disposed) return { ok: false, canceled: true };
       if (stopRequested) return { ok: false, error: "기기를 종료하고 있습니다." };
       if (attachTask) return attachTask;
-      if (isLiveNow()) return { ok: true, udid: state.liveTarget };
+      if (isLiveNow()) {
+        // 연결 상태가 남아도 기기가 꺼졌을 수 있음(앱 재시작·외부 종료). 목록에서 꺼진 것이 확인될 때만 다시 붙음
+        const live = state.liveTarget;
+        const raw = await rpcCall(host, "emulator.listDevices", {}).catch(() => null);
+        const row = Array.isArray(raw) ? toSimulatorDeviceRows(raw).find((d) => d.udid === live) : null;
+        if (!row || !row.state || row.state === "Booted") return { ok: true, udid: live };
+        state.session = null; state.streamKey = null; state.liveTarget = null;
+        return attach(live);
+      }
       return attach(state.selectedUdid || undefined);
     },
     dispose() {
@@ -1286,7 +1372,7 @@ function buildPane(container, opts, vendor) {
       if (closed) return;
       closed = true;
       if (!disposed) { disposed = true; teardownDom(); }
-      void rpcCall(host, "emulator.shutdown", { worktree: workspaceId, managedOnly: true }).catch(() => {});
+      void rpcCall(host, "emulator.unregisterActive", { worktree: workspaceId }).catch(() => {});
     },
     setVisible(visible) {
       tabVisible = !!visible;
@@ -1328,7 +1414,7 @@ export function mountEmulatorPane(container, opts) {
       if (real) real.close();
       else if (!queuedClose) {
         queuedClose = true;
-        void rpcCall(opts.host, "emulator.shutdown", { worktree: opts.workspaceId, managedOnly: true }).catch(() => {});
+        void rpcCall(opts.host, "emulator.unregisterActive", { worktree: opts.workspaceId }).catch(() => {});
       }
     },
     stop() {

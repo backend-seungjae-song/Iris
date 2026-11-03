@@ -78,7 +78,8 @@ ensureSpawnHelper();
 // (localhost → ::1)는 Iris가 아니라 CMS로 연결됐다.
 // ELECTRON_RUN_AS_NODE 는 설치본이 Electron 을 node 로 쓰려고 서버에만 주는 값이다. 터미널로 넘어가면
 // 그 안에서 실행한 Electron 앱(electron ., 다른 Iris 개발 앱)이 앱이 아닌 node 로 떠서 app 이 없다며 죽는다.
-const SERVER_ONLY_ENV = ["PORT", "REMOTE", "ELECTRON_RUN_AS_NODE"];
+// IRIS_BUNDLE_ID·MAIN_PID·SERVER_ROOT·APP_PATH: 메인이 설치 앱 서버에만 주는 실행 식별값 · 물려주면 터미널에서 띄운 서버·개발 앱·QA 테스트가 설치 앱 값을 씀
+const SERVER_ONLY_ENV = ["PORT", "REMOTE", "ELECTRON_RUN_AS_NODE", "IRIS_BUNDLE_ID", "IRIS_MAIN_PID", "IRIS_SERVER_ROOT", "IRIS_APP_PATH"];
 // Iris 를 Claude Code·Codex 세션의 셸에서 띄우면 그 세션의 표시가 서버 환경에 남는다. herdr 서버가 아직 없으면
 // attach 가 이 환경으로 서버를 띄우고, 그 안의 모든 pane 이 물려받는다. 그러면 pane 에서 실행한 Claude 의 훅과
 // 채널이 CLAUDE_CODE_SESSION_ID 로 Iris 를 띄운 세션을 자기 세션으로 보고한다(server/remote/hooks/ask-question.mjs).

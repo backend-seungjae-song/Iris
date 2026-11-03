@@ -15,7 +15,7 @@ async function tempState(t) {
 test("PIN 기한은 stateHome 아래 형식으로 기본 30분을 저장하고 다시 읽는다", async (t) => {
   const stateDir = await tempState(t);
   const first = createSessionPolicyStore({ stateDir });
-  assert.deepEqual(await first.initialize(), { ok: true, pinIdleMinutes: 30 });
+  assert.deepEqual(await first.initialize(), { ok: true, pinIdleMinutes: 10 });
   assert.equal((await first.set(20)).pinIdleMinutes, 20);
 
   const second = createSessionPolicyStore({ stateDir });
@@ -46,5 +46,5 @@ test("형식이 틀린 저장 파일은 기본값으로 덮어쓰지 않는다",
   await fsp.writeFile(path.join(directory, "session-policy.json"), '{"pinIdleMinutes":15}\n');
   const store = createSessionPolicyStore({ stateDir });
   assert.deepEqual(await store.initialize(), { ok: false, error: "session-policy-invalid" });
-  assert.equal(store.getPinIdleMinutes(), 30);
+  assert.equal(store.getPinIdleMinutes(), 10);
 });

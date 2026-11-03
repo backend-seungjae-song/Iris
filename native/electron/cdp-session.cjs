@@ -20,6 +20,7 @@
 //
 // 현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/cdp-session.cjs
 
+const { pinWhileAttached } = require("./debugger-pin.cjs");
 function createCdpSession({
   observation,
   hiddenViewport,
@@ -36,6 +37,29 @@ function createCdpSession({
   attachBlockedCode = "cdp_blocked",
 }) {
   const wired = new Set();   // debugger/webContents 이벤트 수신기를 한 번 건 webContents id
+  const documentGenerations = new Map();
+  const debuggerGenerations = new Map();
+
+  function targetGenerations(wcId) {
+    const id = Number(wcId);
+    return {
+      documentGeneration: documentGenerations.get(id) || 0,
+      debuggerGeneration: debuggerGenerations.get(id) || 0,
+    };
+  }
+  function notifyGeneration(wcId, reason) {
+    ctlSend({ type: "browser-target-generation", wc: Number(wcId), reason, ...targetGenerations(wcId) });
+  }
+  function bumpDocument(wcId, reason) {
+    const id = Number(wcId);
+    documentGenerations.set(id, (documentGenerations.get(id) || 0) + 1);
+    notifyGeneration(id, reason);
+  }
+  function bumpDebugger(wcId, reason) {
+    const id = Number(wcId);
+    debuggerGenerations.set(id, (debuggerGenerations.get(id) || 0) + 1);
+    notifyGeneration(id, reason);
+  }
 
   // 프레임을 타고 내려가는 조회. 페이지의 주요 내용이 iframe 안에 있으면 최상위 document만 조회해서는
   // 사용자가 보고 있는 요소를 찾지 못한다(확인 결과: 본문이 통째로 iframe 인 어드민 화면).
@@ -93,7 +117,7 @@ function createCdpSession({
     observed.add(sid);
     // Runtime.evaluate는 Runtime domain event 구독 없이 쓸 수 있다. child Runtime.enable은 콘솔·stack
     // 직렬화 같은 관찰 흔적만 늘리고, Iris는 child Runtime event를 소비하지 않는다.
-    for (const domain of ["DOM", "Accessibility"]) {
+    for (const domain of ["DOM", "Accessibility", "Network"]) {
       dbg.sendCommand(domain + ".enable", {}, sid).catch(() => {});
     }
     dbg.sendCommand("Runtime.evaluate", { expression: FRAME_UTIL }, sid).catch(() => {});
@@ -121,6 +145,7 @@ function createCdpSession({
     if (wcId == null || !sid) return;
     childrenOf(wcId).delete(sid);
     observedChildrenOf(wcId).delete(sid);
+    observation.forgetRequests?.(wcId, sid);
   }
   // 그 탭이 지금 띄우고 있는 문서의 origin. 확인창 요청이 사칭인지 가릴 때 서버가 쓴다.
   function noteFrameOrigin(wcId, url) {
@@ -138,6 +163,29 @@ function createCdpSession({
     if (p.queue.length) return p.queue.shift();
     return p.mode;
   }
+  function clearDialogPlan(wcId) {
+    const plan = dialogPlans.get(Number(wcId));
+    if (plan) { plan.queue = []; plan.mode = null; plan.text = null; }
+    ctlSend({ type: "browser-dialog-plan", wc: Number(wcId), plan: null, text: null });
+  }
+
+  function replayExecutorState() {
+    for (const [wcId, origins] of frameOrigins) {
+      ctlSend({ type: "browser-frame-origins", wc: wcId, origins: Array.from(origins) });
+    }
+    for (const wcId of wired) {
+      const open = observation.dialogOpen(wcId);
+      if (open) ctlSend({ type: "browser-dialog-open", wc: wcId, kind: open.type,
+        message: String(open.message || "").slice(0, 300), byAi: !!aiDriving(wcId) });
+      else ctlSend({ type: "browser-dialog-closed", wc: wcId });
+      const plan = dialogPlans.get(wcId);
+      if (plan && (plan.queue.length || plan.mode)) {
+        ctlSend({ type: "browser-dialog-plan", wc: wcId,
+          plan: plan.queue.length ? { queue: [...plan.queue] } : { mode: plan.mode }, text: plan.text });
+      }
+    }
+    for (const wcId of sessionPrimers.keys()) notifyGeneration(wcId, "executor-register");
+  }
 
   // ── 세션 준비를 한 군데로 ────────────────────────────────────────────────
   //
@@ -152,10 +200,33 @@ function createCdpSession({
   const sessionPrimers = new Map();   // wcId → fn(wc, dbg). 탭이 죽으면 함께 지운다.
   const childPrimers = new Map();     // wcId → fn(dbg, sid). 처음 붙은 자식 프레임에만 돈다.
   function registerSessionPrimer(wcId, fn, childFn) {
-    if (typeof fn === "function") sessionPrimers.set(wcId, fn);
-    else sessionPrimers.delete(wcId);
-    if (typeof childFn === "function") childPrimers.set(wcId, childFn);
-    else if (typeof fn !== "function") childPrimers.delete(wcId);
+    const id = Number(wcId);
+    const existed = sessionPrimers.has(id);
+    if (typeof fn === "function") {
+      sessionPrimers.set(id, fn);
+      if (!existed) {
+        if (!documentGenerations.has(id)) documentGenerations.set(id, 1);
+        if (!debuggerGenerations.has(id)) debuggerGenerations.set(id, 0);
+        notifyGeneration(id, "connect");
+      }
+    } else {
+      sessionPrimers.delete(id);
+      if (existed) { bumpDocument(id, "destroy"); bumpDebugger(id, "destroy"); }
+    }
+    if (typeof childFn === "function") childPrimers.set(id, childFn);
+    else if (typeof fn !== "function") childPrimers.delete(id);
+  }
+
+  function hasSessionPrimer(wcId) {
+    return sessionPrimers.has(Number(wcId));
+  }
+
+  function noteDocumentNavigation(wcId) {
+    const id = Number(wcId);
+    childSessions.delete(id);
+    childObserved.delete(id);
+    frameOrigins.delete(id);
+    bumpDocument(id, "navigation");
   }
   function makeSend(wc) {
     const dbg = wc.debugger;
@@ -184,6 +255,7 @@ function createCdpSession({
     observationPrimed.delete(wcId);
     childSessions.delete(wcId);
     childObserved.delete(wcId);
+    observation.forgetRequests?.(wcId);
   }
 
   // 일반 탐색에 필요한 Page 계약만 준비한다. 이벤트 수신기를 먼저 걸어 Target.setAutoAttach가
@@ -225,17 +297,21 @@ function createCdpSession({
     if (!attached && !allowAttach(wc)) {
       throw tagError(new Error("이 페이지에서는 CDP 를 붙이지 않습니다(로그인 호스트). CDP 없이 되는 명령만 쓰거나 사람에게 넘기세요(browser_ask_user)."), attachBlockedCode);
     }
-    try { if (!attached) dbg.attach("1.3"); }
+    try { if (!attached) { dbg.attach("1.3"); pinWhileAttached(dbg); bumpDebugger(wc.id, "attach"); } }
     catch (e) { throw tagError(e, sessionDetachedCode); }
     if (!wired.has(wc.id)) {
       wired.add(wc.id);
       // 페이지가 이동하면 이전 snapshot의 ref(backendDOMNodeId)는 stale 이므로 세대를 올려 click이 거부하게 한다.
       // did-navigate는 최상위 내비게이션만 발생. did-navigate-in-page는 iframe에서도 발생하므로
       // isMainFrame일 때만 무효화(광고/위젯 iframe hash 변경이 메인 snapshot을 과잉 무효화하는 것 방지).
-      const bump = () => refRegistry.bumpNavigation(wc.id);
+      const bump = () => { refRegistry.bumpNavigation(wc.id); bumpDocument(wc.id, "navigation"); };
       wc.on("did-navigate", bump);
       wc.on("did-navigate-in-page", (_ev, _url, isMainFrame) => { if (isMainFrame) bump(); });
       wc.once("destroyed", () => {
+        if (sessionPrimers.has(wc.id)) {
+          bumpDocument(wc.id, "destroy");
+          bumpDebugger(wc.id, "destroy");
+        }
         wired.delete(wc.id);
         refRegistry.clear(wc.id);
         observation.forget(wc.id);
@@ -248,10 +324,11 @@ function createCdpSession({
         frameOrigins.delete(wc.id);
         clearSessionGuards(wc.id);
       });
-      dbg.on("detach", () => clearSessionGuards(wc.id));
+      dbg.on("detach", () => { clearSessionGuards(wc.id); bumpDebugger(wc.id, "detach"); });
       // 닫힌 루프 QA용 상시 수집: 콘솔 API·미처리 예외·브라우저 로그(에러/경고)·네트워크 실패(4xx/5xx·loadingFailed).
-      dbg.on("message", (_ev, method, params) => {
+      dbg.on("message", (_ev, method, params, sessionId = "") => {
         try {
+          observation.cdpEvent?.(wc.id, method, params, sessionId);
           if (method === "Target.attachedToTarget") {
             const ti = params && params.targetInfo;
             if (params && params.sessionId && ti && (ti.type === "iframe" || ti.type === "page")) {
@@ -307,12 +384,15 @@ function createCdpSession({
             observation.closeDialog(wc.id);
             ctlSend({ type: "browser-dialog-closed", wc: wc.id });
           } else if (method === "Network.requestWillBeSent") {
-            observation.noteRequest(wc.id, params.requestId, (params.request && params.request.url) || "");
+            observation.noteRequest(wc.id, params.requestId, (params.request && params.request.url) || "", sessionId);
           } else if (method === "Network.responseReceived") {
             const r = params.response || {};
             if (r.status >= 400) observation.recordNetwork(wc.id, { url: String(r.url || observation.requestUrl(wc.id, params.requestId) || "").slice(0, 300), status: r.status });
           } else if (method === "Network.loadingFailed") {
+            observation.finishRequest?.(wc.id, params.requestId, sessionId);
             if (params.errorText && params.errorText !== "net::ERR_ABORTED") observation.recordNetwork(wc.id, { url: String(observation.requestUrl(wc.id, params.requestId) || "").slice(0, 300), failed: params.errorText });
+          } else if (method === "Network.loadingFinished") {
+            observation.finishRequest?.(wc.id, params.requestId, sessionId);
           }
         } catch {}
       });
@@ -331,6 +411,7 @@ function createCdpSession({
   // 도구 실행 중 깨진 세션을 새 세션으로 바꾸고 두 계약을 모두 복원한다. 이 함수의 소비자는 이미
   // 명시적 관찰을 시작한 command timeout/reattach/capture recovery 경로다.
   function resetCdpSession(wc) {
+    bumpDocument(wc.id, "reset");
     try { if (wc.debugger.isAttached()) wc.debugger.detach(); } catch {}
     clearSessionGuards(wc.id);
     hiddenViewport.resetSession(wc.id);
@@ -353,8 +434,11 @@ function createCdpSession({
   // AI 세션(document 계약)이 지금 attach 위에 준비돼 있는가. 정체성 전달만을 위한 attach 와 구분한다.
   function primed(wcId) { return documentPrimed.has(Number(wcId)); }
 
+  function ownsChildSession(wcId, sessionId) { return childrenOf(Number(wcId)).has(sessionId); }
+
   return { ensureAttached, resetCdpSession, detachIdle, registerSessionPrimer, primeSession, primed,
-    noteChildSession, dropChildSession, childrenOf, noteFrameOrigin, planFor, nextAnswer };
+    noteChildSession, dropChildSession, childrenOf, noteFrameOrigin, planFor, nextAnswer,
+    targetGenerations, ownsChildSession, hasSessionPrimer, replayExecutorState, clearDialogPlan, noteDocumentNavigation };
 }
 
 module.exports = { createCdpSession };

@@ -16,7 +16,7 @@
 //
 // 영향 범위
 //   공급자는 cdp-control.cjs snapshot/observe의 세션 send와 페이지 DOM이고, 양방향 소비자는
-//   CLI·MCP 결과의 loginHint/humanHint 및 browser_ask_user 호출 흐름이다. 힌트 누락은 자동 로그인
+//   CLI·MCP 결과의 loginHint/humanHint 와 그 뒤 대화 질문 흐름이다. 힌트 누락은 자동 로그인
 //   가능성을 놓치거나 사람 개입이 필요한 탭을 알리지 않은 채 작업이 멈추는 문제로 이어진다.
 
 async function loginHint(send) {
@@ -56,9 +56,8 @@ async function humanHint(send) {
     })()` });
     const hits = (r && r.result && r.result.value) || [];
     if (!Array.isArray(hits) || !hits.length) return null;
-    return `사람만 할 수 있는 자리다(${hits.join(" · ")}). 대신하지 말고, 작업을 멈추고 대화로 부탁하지도 마라 — `
-      + `browser_ask_user로 불러라. 사용자는 다른 스페이스·다른 앱을 보고 있어 대화를 못 볼 수 있다. `
-      + `그 도구는 화면 알림으로 부르고 이 탭까지 데려가며, 갔는지 아닌지를 돌려준다.`;
+    return `사람만 할 수 있는 자리다(${hits.join(" · ")}). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. `
+      + `답을 받은 뒤 화면을 다시 확인하고 이어 간다.`;
   } catch { return null; }
 }
 

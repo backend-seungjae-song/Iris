@@ -10,6 +10,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { stateHome } from "./state-home.cjs";
+// 링크별 계정 규칙의 주소 해석은 화면과 같은 순수 모듈(server/remote/key-row.js 의 keymap 과 같은 방식)
+import { LINK_PATTERN_RE, matchLinkRule } from "../web/js/browser/link-rules.js";
 
 // 상태 폴더는 한 곳에서 정한다. 여기서만 경로를 다시 조합하면 개발 환경(`IRIS_STATE_DIR=~/.iris-dev`)이
 // 설치된 앱의 상태 파일을 그대로 쓴다. 두 서버가 같은 파일에 각자의 상태를 번갈아 써서 사용자가
@@ -42,7 +44,24 @@ function emptyState() {
     profileSources: {},        // { [profileId]: chromeCid } 전역
     defaultProfileBySpace: {}, // { [space]: profileId }
     urlHistoryBySpace: {},     // { [space]: [url…] } 최신순 최대 URL_HISTORY_MAX
+    linkProfileRules: [],      // [{pattern, profile}] 전역. 다른 앱·터미널·메모에서 연 링크를 이 계정으로(web/js/browser/link-rules.js)
   };
+}
+
+const LINK_RULES_MAX = 200;
+// 규칙 목록 정규화: 모양이 틀린 것·없는 계정을 가리키는 것 제외, 같은 주소는 마지막 것
+function cleanLinkRules(raw, profiles) {
+  if (!Array.isArray(raw)) return [];
+  const ids = new Set(["", ...(Array.isArray(profiles) ? profiles.map((p) => p && p.id).filter(Boolean) : [])]);
+  const byPattern = new Map();
+  for (const r of raw) {
+    const pattern = r && typeof r.pattern === "string" ? r.pattern : "";
+    const profile = r && typeof r.profile === "string" ? r.profile : null;
+    if (!pattern || pattern.length > 300 || !LINK_PATTERN_RE.test(pattern) || profile == null || !ids.has(profile)) continue;
+    byPattern.delete(pattern);
+    byPattern.set(pattern, { pattern, profile });
+  }
+  return [...byPattern.values()].slice(-LINK_RULES_MAX);
 }
 
 const URL_HISTORY_MAX = 60;
@@ -70,6 +89,10 @@ export function load() {
     if (!state.profileSources || typeof state.profileSources !== "object") state.profileSources = {};
     if (!state.defaultProfileBySpace || typeof state.defaultProfileBySpace !== "object") state.defaultProfileBySpace = {};
     if (!state.urlHistoryBySpace || typeof state.urlHistoryBySpace !== "object") state.urlHistoryBySpace = {};
+    state.linkProfileRules = cleanLinkRules(state.linkProfileRules, state.profiles);
+    // 없는 계정·이상한 값을 가리키는 북마크 계정은 지정 해제
+    const knownProfiles = new Set(["", ...state.profiles.map((p) => p && p.id).filter(Boolean)]);
+    clearBookmarkProfiles((pid) => typeof pid !== "string" || !knownProfiles.has(pid));
     // 이름 기반 스킴의 기본 라벨은 안정 기본 id("")로 바로 승격한다. 다른 레거시 이름은 프로필
     // 목록을 가진 로컬 렌더러가 encodeURIComponent(name) id로 바꿔 tab.profile mutation으로 되쓴다.
     let profileMigrated = false;
@@ -241,6 +264,13 @@ function ensureGroups(sp) {
   return state.groupsBySpace[sp];
 }
 
+// 탭 띠에 그리는 순서. 그룹 순서대로 그 그룹의 탭, 다음 그룹 없는 탭. 접힌 그룹의 탭은 안 보여서 제외
+function stripOrder(sp, tabs) {
+  const out = [];
+  for (const g of state.groupsBySpace[sp] || []) if (!g.collapsed) out.push(...tabs.filter((t) => t.group === g.id));
+  return out.concat(tabs.filter((t) => !t.group));
+}
+
 function ensureBmSpace(sp) {
   if (!sp) return null;
   if (!Array.isArray(state.bookmarksBySpace[sp])) state.bookmarksBySpace[sp] = [];
@@ -252,6 +282,13 @@ function bmList(scope, sp) {
   return scope === "common" ? state.bookmarksCommon : ensureBmSpace(sp);
 }
 function isFolder(x) { return !!(x && x.folder); }
+// 북마크 계정 지정 해제. drop(profileId) 가 참인 것만(폴더 안 포함)
+function clearBookmarkProfiles(drop) {
+  for (const list of [state.bookmarksCommon, ...Object.values(state.bookmarksBySpace || {})]) {
+    if (!Array.isArray(list)) continue;
+    for (const x of list) for (const b of isFolder(x) ? (x.items || []) : [x]) if (b && "profile" in b && drop(b.profile)) delete b.profile;
+  }
+}
 function findFolder(list, id) { return id ? list.find((x) => isFolder(x) && x.folder === String(id)) || null : null; }
 // url 은 폴더 안까지 합쳐 한 목록에 하나만 둔다. 별표가 url 하나로 추가·삭제를 정하기 때문이다.
 function findBm(list, url) {
@@ -307,6 +344,15 @@ export function mutate(m) {
         b.url = String(m.newUrl); changed = true;
       }
       if (m.title != null) { const t = String(m.title).slice(0, 60); if (b.title !== t) { b.title = t; changed = true; } }
+      // 북마크를 열 계정(설정의 북마크 관리). null 이면 지정 해제(링크 규칙·스페이스 기본을 따름), "" 는 기본 계정
+      if (m.profile !== undefined) {
+        if (m.profile === null) { if ("profile" in b) { delete b.profile; changed = true; } }
+        else {
+          const p = profileIdFromMutation(m.profile);
+          if (p == null || (p !== "" && !state.profiles.some((x) => x && x.id === p))) return false;
+          if (b.profile !== p) { b.profile = p; changed = true; }
+        }
+      }
       if (!changed) return false;
       break;
     }
@@ -315,7 +361,10 @@ export function mutate(m) {
       if (tabs.some((t) => t.id === m.id)) return false;
       // 계정을 지정하지 않은 새 탭은 여는 시점의 스페이스 기본을 상속해 기록한다. null로 남기면
       // 나중에 기본이 바뀔 때 이 탭이 다른 세션으로 옮겨 간다. 위 이관과 같은 이유다.
+      // 설정 「링크 열기」 규칙이 맞으면 그 계정이 스페이스 기본보다 먼저(AI 도구·휴대폰에서 계정 없이 연 탭)
       let profile = resolveSpaceDefault(sp);
+      const rule = matchLinkRule(m.url, state.linkProfileRules);
+      if (rule && profileIdFromMutation(rule.profile) != null) profile = profileIdFromMutation(rule.profile);
       if (Object.prototype.hasOwnProperty.call(m, "profile")) {
         profile = profileIdFromMutation(m.profile); if (profile == null) return false;
       }
@@ -409,12 +458,24 @@ export function mutate(m) {
       if (nm) t.name = nm; else delete t.name; // 빈 이름 = 커스텀 해제(자동 제목 복귀)
       break;
     }
+    // 잠들지 않게: 한 번 연 뒤 유휴·메모리 회수에서 빠지는 탭. 앱을 켤 때는 다른 탭처럼 잠든 채 복원
+    case "tab.keepAwake": {
+      const tabs = ensureSpace(sp); if (!tabs || !m.id) return false;
+      const t = tabs.find((x) => x.id === m.id); if (!t) return false;
+      const on = !!m.on;
+      if (!!t.keepAwake === on) return false;
+      if (on) t.keepAwake = true; else delete t.keepAwake;
+      break;
+    }
     case "tab.close": {
       const tabs = ensureSpace(sp); if (!tabs || !m.id) return false;
       const idx = tabs.findIndex((t) => t.id === m.id);
       if (idx < 0) return false;
+      // 닫은 탭이 활성이면 탭 띠에서 바로 오른쪽(없으면 왼쪽) 탭으로. 배열 끝 탭을 고르면 그룹 때문에 엉뚱한 위치로 이동
+      const shown = stripOrder(sp, tabs), at = shown.findIndex((t) => t.id === m.id);
+      const next = at < 0 ? null : shown[at + 1] || shown[at - 1] || null;
       tabs.splice(idx, 1);
-      if (state.activeBySpace[sp] === m.id) state.activeBySpace[sp] = tabs.length ? tabs[tabs.length - 1].id : null;
+      if (state.activeBySpace[sp] === m.id) state.activeBySpace[sp] = next ? next.id : tabs.length ? tabs[tabs.length - 1].id : null;
       break;
     }
     case "tab.switch": {
@@ -453,6 +514,17 @@ export function mutate(m) {
       const g = gs.find((x) => x.id === m.id); if (!g) return false;
       const c = !!m.collapsed; if (g.collapsed === c) return false;
       g.collapsed = c;
+      break;
+    }
+    // 그룹 순서는 사용자가 끌어서 정함. before 그룹 앞, 없으면 맨 끝
+    case "group.move": {
+      const gs = ensureGroups(sp); if (!gs || !m.id) return false;
+      const from = gs.findIndex((g) => g.id === m.id); if (from < 0) return false;
+      const was = gs.map((g) => g.id).join("\n");
+      const [moved] = gs.splice(from, 1);
+      const at = m.before ? gs.findIndex((g) => g.id === m.before) : -1;
+      if (at < 0) gs.push(moved); else gs.splice(at, 0, moved);
+      if (gs.map((g) => g.id).join("\n") === was) return false;
       break;
     }
     case "group.remove": { // 그룹만 해제하고 탭은 닫지 않는다
@@ -560,6 +632,17 @@ export function mutate(m) {
       // 이 칸을 기본으로 쓰던 스페이스는 기본 세션으로 되돌린다. 없는 칸을 가리키면 그 스페이스의
       // 새 탭이 어느 계정으로 열릴지 정해지지 않는다.
       for (const [sp, pid] of Object.entries(state.defaultProfileBySpace)) if (pid === id) delete state.defaultProfileBySpace[sp];
+      // 그 계정으로 열던 링크 규칙도 지움. 남기면 링크가 아무도 로그인한 적 없는 빈 칸에서 열림
+      state.linkProfileRules = (state.linkProfileRules || []).filter((r) => r.profile !== id);
+      // 그 계정으로 열던 북마크는 지정 해제(규칙·스페이스 기본을 따름)
+      clearBookmarkProfiles((pid) => pid === id);
+      break;
+    }
+    // 링크별 계정 규칙. 목록 전체를 바꿈(설정 화면이 추가·변경·삭제를 모두 이것으로)
+    case "linkRules.set": {
+      const next = cleanLinkRules(m.rules, state.profiles);
+      if (JSON.stringify(next) === JSON.stringify(state.linkProfileRules || [])) return false;
+      state.linkProfileRules = next;
       break;
     }
     case "profile.source": {

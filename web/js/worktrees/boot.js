@@ -339,9 +339,9 @@ function groupAgents({ spaceId, open, rows, count }) {
     html: open ? `<div class="wt-space-groups">${groups.filter((group) => !idle.includes(group)).map(groupHtml).join("")}${idleHtml}${notes}${app.getIsLocal() ? creation : ""}</div>` : "" };
 }
 function sessionItems(spaceId, cwd) {
-  return [["", "새 터미널"], ["codex", "새 Codex 세션"], ["claude", "새 Claude 세션"]].map(([launch, label]) => ({
+  return [["claude", "새 Claude 세션"], ["codex", "새 Codex 세션"], ["", "새 터미널"]].map(([launch, label]) => ({
     label, disabled: !app.getIsLocal(), act: () => {
-      if (app.getIsLocal()) app.wsSend({ type: "tab.create", workspaceId: spaceId, cwd, launch });
+      if (app.getIsLocal()) app.wsSend({ type: "tab.create", workspaceId: spaceId, cwd, launch, ...(launch ? { name: launch } : {}) });
     },
   }));
 }
@@ -508,11 +508,11 @@ function menuFor(spaceId, path, x, y) {
   const opened = app.orderedSpaces().some((space) => samePath(space.folder, item.path));
   const workspaceId = app.orderedSpaces().find((space) => samePath(space.folder, item.path))?.id || found.space.id;
   showCtx(x, y, [
-    ...[["", "새 터미널"], ["codex", "새 Codex 세션"], ["claude", "새 Claude 세션"]].map(([launch, label]) => ({
+    ...[["claude", "새 Claude 세션"], ["codex", "새 Codex 세션"], ["", "새 터미널"]].map(([launch, label]) => ({
       label, disabled: !app.getIsLocal() || item.prunable,
       act: () => {
         if (!app.getIsLocal() || item.prunable) return;
-        app.wsSend({ type: "tab.create", workspaceId, cwd: item.path, launch });
+        app.wsSend({ type: "tab.create", workspaceId, cwd: item.path, launch, ...(launch ? { name: launch } : {}) });
       },
     })),
     { sep: true },
@@ -563,7 +563,7 @@ function handleResult(message) {
         byFolder.set(folder, { ...data, entries: message.entries, ok: true, fetchedAt: Date.now() });
     }
     if (pending.op === "create") {
-      app.wsSend({ type: "tab.create", workspaceId: pending.spaceId, cwd: message.spaceCwd, launch: pending.launch || "" });
+      app.wsSend({ type: "tab.create", workspaceId: pending.spaceId, cwd: message.spaceCwd, launch: pending.launch || "", ...(pending.launch ? { name: pending.launch } : {}) });
       if (pending.launch) pendingBinds.set(message.spaceCwd, { workspaceId: pending.spaceId, repo: pending.repo, launch: pending.launch, until: Date.now() + BIND_WAIT_MS });
       app.showToast("worktree를 만들었습니다", { level: "ok", id: pending.toastId });
     } else app.showToast(pending.op === "rename" ? "표시 이름을 바꿨습니다" : "worktree를 삭제했습니다", { level: "ok", id: pending.toastId });

@@ -1,0 +1,3349 @@
+[
+  {
+    "name": "goto-shown",
+    "cmd": "goto",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/next",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "goto"
+      ],
+      [
+        "wc.loadURL",
+        "https://example.test/next"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "goto-schemeless",
+    "cmd": "goto",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/x",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "goto"
+      ],
+      [
+        "wc.loadURL",
+        "https://example.test/x"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "goto-hidden-tab-hold",
+    "cmd": "goto",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/next",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "goto"
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "wc.loadURL",
+        "https://example.test/next"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { try { return document.getAnimations().filter((a) => {\n            if (a.playState !== \"running\") return false;\n            try { const t = a.effect && a.effect.getTiming();\n                  if (t && (t.iterations === Infinity || !isFinite(t.iterations))) return false; } catch (e) {}\n            return true; }).length; } catch (e) { return 0; } })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "hold",
+        false
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "goto-no-url",
+    "cmd": "goto",
+    "response": {
+      "ok": false,
+      "error": "url 필요"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "goto"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "goto-load-error",
+    "cmd": "goto",
+    "response": {
+      "ok": false,
+      "error": "ERR_NAME_NOT_RESOLVED (-105) loading 'https://bad.test/'"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "goto"
+      ],
+      [
+        "wc.loadURL",
+        "https://bad.test/"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "goto-to-google-auth",
+    "cmd": "goto",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://accounts.google.com/signin",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "ai.enter"
+      ],
+      [
+        "wc.loadURL",
+        "https://accounts.google.com/signin"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "goto-on-blocked-host",
+    "cmd": "goto",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/back",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "ai.enter"
+      ],
+      [
+        "wc.loadURL",
+        "https://example.test/back"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "wait-ms",
+    "cmd": "wait",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "waited_ms": 5,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "wait"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "wait-ready",
+    "cmd": "wait",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "readyState": "complete",
+        "waited_ms": "<T>",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "wait"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "document.readyState",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "wait-loading-then-ready",
+    "cmd": "wait",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "readyState": "complete",
+        "waited_ms": "<T>",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "wait"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "document.readyState",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "document.readyState",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "wait-nocdp-ms",
+    "cmd": "wait",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "waited_ms": 5,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "ai.enter"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "wait-nocdp-loading",
+    "cmd": "wait",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "readyState": "complete",
+        "waited_ms": "<T>",
+        "via": "nocdp",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "ai.enter"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "back-ok",
+    "cmd": "back",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/prev",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "back"
+      ],
+      [
+        "wc.goBack"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "back-none",
+    "cmd": "back",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": false,
+        "error": "뒤로 갈 기록이 없습니다.",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "back"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "forward-ok",
+    "cmd": "forward",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/fwd",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "forward"
+      ],
+      [
+        "wc.goForward"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "forward-none",
+    "cmd": "forward",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": false,
+        "error": "앞으로 갈 기록이 없습니다.",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "forward"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "back-hidden-tab-hold",
+    "cmd": "back",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/prev",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "back"
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "wc.goBack"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { try { return document.getAnimations().filter((a) => {\n            if (a.playState !== \"running\") return false;\n            try { const t = a.effect && a.effect.getTiming();\n                  if (t && (t.iterations === Infinity || !isFinite(t.iterations))) return false; } catch (e) {}\n            return true; }).length; } catch (e) { return 0; } })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "hold",
+        false
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "reload-ok",
+    "cmd": "reload",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/a",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "reload"
+      ],
+      [
+        "wc.reload"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "reload-on-blocked-host",
+    "cmd": "reload",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "url": "https://example.test/a",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "ai.enter"
+      ],
+      [
+        "wc.reload"
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "viewport-set",
+    "cmd": "viewport",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "width": 390,
+        "height": 844,
+        "device": "phone",
+        "dpr": 3,
+        "reloaded": false,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "viewport"
+      ],
+      [
+        "viewport.apply",
+        {
+          "width": 390,
+          "height": 844,
+          "dpr": 3
+        }
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "viewport-clear",
+    "cmd": "viewport",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "cleared": true,
+        "reloaded": false,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "viewport"
+      ],
+      [
+        "viewport.apply",
+        {
+          "clear": true
+        }
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "viewport-in-band-failure",
+    "cmd": "viewport",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": false,
+        "error": "크기가 너무 작습니다",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "viewport"
+      ],
+      [
+        "viewport.apply",
+        {
+          "width": 1,
+          "height": 1
+        }
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "eval-value",
+    "cmd": "eval",
+    "response": {
+      "ok": true,
+      "data": {
+        "value": 2,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "eval"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "1+1",
+          "returnByValue": true,
+          "awaitPromise": true,
+          "userGesture": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "eval-undefined",
+    "cmd": "eval",
+    "response": {
+      "ok": true,
+      "data": {
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "eval"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "void 0",
+          "returnByValue": true,
+          "awaitPromise": true,
+          "userGesture": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "eval-exception",
+    "cmd": "eval",
+    "response": {
+      "ok": false,
+      "error": "ReferenceError: boom is not defined"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "eval"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "boom()",
+          "returnByValue": true,
+          "awaitPromise": true,
+          "userGesture": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "eval-on-blocked-host",
+    "cmd": "eval",
+    "response": {
+      "ok": false,
+      "error": "로그인 호스트에서는 CDP 를 붙이지 않아 eval 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
+      "code": "cdp_blocked"
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "eval-redacts-secret",
+    "cmd": "eval",
+    "response": {
+      "ok": true,
+      "data": {
+        "value": "비밀번호 ••••",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "eval"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "pw",
+          "returnByValue": true,
+          "awaitPromise": true,
+          "userGesture": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "text-cdp",
+    "cmd": "text",
+    "response": {
+      "ok": true,
+      "data": {
+        "text": "본문 글",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "text"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function(){var d=window.__acDocs?window.__acDocs():[document],o=[];for(var i=0;i<d.length;i++){var b=d[i].body;if(b&&b.innerText)o.push(b.innerText);}return o.join('\\n');})()",
+          "returnByValue": true
+        },
+        null
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "text-iframe",
+    "cmd": "text",
+    "response": {
+      "ok": true,
+      "data": {
+        "text": "본문 글\n프레임 글",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "text"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function(){var d=window.__acDocs?window.__acDocs():[document],o=[];for(var i=0;i<d.length;i++){var b=d[i].body;if(b&&b.innerText)o.push(b.innerText);}return o.join('\\n');})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function(){var d=window.__acDocs?window.__acDocs():[document],o=[];for(var i=0;i<d.length;i++){var b=d[i].body;if(b&&b.innerText)o.push(b.innerText);}return o.join('\\n');})()",
+          "returnByValue": true
+        },
+        "frame-1"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "text-nocdp",
+    "cmd": "text",
+    "response": {
+      "ok": true,
+      "data": {
+        "text": "로그인 화면 글",
+        "via": "nocdp",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "wc.exec",
+        "document.body ? document.body.innerText : ''",
+        true
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "text-nocdp-exec-fails",
+    "cmd": "text",
+    "response": {
+      "ok": true,
+      "data": {
+        "text": "",
+        "via": "nocdp",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "wc.exec",
+        "document.body ? document.body.innerText : ''",
+        true
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "locate-unique",
+    "cmd": "locate",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "how": "css",
+        "total": 1,
+        "visibleCount": 1,
+        "count": 1,
+        "url": "https://example.test/a",
+        "title": "예시",
+        "tag": "button",
+        "role": "button",
+        "name": "저장",
+        "visible": true,
+        "inViewport": true,
+        "occluded": false,
+        "text": "저장",
+        "disabled": false,
+        "unique": true,
+        "reasons": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "locate"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n          const spec = {\"testid\":null,\"role\":null,\"name\":null,\"sel\":\"#save\",\"nth\":null};\n          const vis = (el) => {\n            const s = getComputedStyle(el), b = el.getBoundingClientRect();\n            return s.visibility !== \"hidden\" && s.display !== \"none\" && Number(s.opacity) > 0.01\n              && b.width > 0 && b.height > 0;\n          };\n          // 접근가능한 이름. 스냅샷이 쓰는 것과 같은 순서로 본다.\n          const accName = (el) => {\n            const lb = el.getAttribute(\"aria-label\");\n            if (lb) return lb.trim();\n            const by = el.getAttribute(\"aria-labelledby\");\n            if (by) {\n              const t = by.split(/\\s+/).map((id) => (document.getElementById(id) || {}).innerText || \"\").join(\" \").trim();\n              if (t) return t;\n            }\n            if (el.tagName === \"INPUT\" || el.tagName === \"SELECT\" || el.tagName === \"TEXTAREA\") {\n              if (el.labels && el.labels.length) return (el.labels[0].innerText || \"\").trim();\n              if (el.placeholder) return el.placeholder.trim();\n            }\n            if (el.tagName === \"IMG\") return (el.alt || \"\").trim();\n            return (el.innerText || el.textContent || \"\").trim();\n          };\n          const IMPLICIT = { A: \"link\", BUTTON: \"button\", INPUT: \"textbox\", SELECT: \"combobox\",\n            TEXTAREA: \"textbox\", H1: \"heading\", H2: \"heading\", H3: \"heading\", H4: \"heading\",\n            H5: \"heading\", H6: \"heading\", NAV: \"navigation\", MAIN: \"main\", TABLE: \"table\",\n            UL: \"list\", OL: \"list\", LI: \"listitem\", FORM: \"form\", DIALOG: \"dialog\" };\n          const roleOf = (el) => {\n            const explicit = el.getAttribute(\"role\");\n            if (explicit) return explicit.trim().toLowerCase();\n            if (el.tagName === \"INPUT\") {\n              const t = (el.type || \"text\").toLowerCase();\n              if (t === \"checkbox\") return \"checkbox\";\n              if (t === \"radio\") return \"radio\";\n              if (t === \"submit\" || t === \"button\" || t === \"reset\") return \"button\";\n              return \"textbox\";\n            }\n            return IMPLICIT[el.tagName] || null;\n          };\n              if (false) {\n            const ours = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => e.__acMarked);\n            ours.forEach((e) => { e.removeAttribute(\"data-ac-target\"); delete e.__acMarked; });\n            return JSON.stringify({ cleared: ours.length, count: 0, total: 0, url: location.href });\n          }\n          let matched = [], how = null;\n          if (spec.testid) {\n            how = \"testid\";\n            const q = [\"data-testid\", \"data-test-id\", \"data-test\", \"data-qa\"]\n              .map((a) => \"[\" + a + \"=\" + JSON.stringify(spec.testid) + \"]\").join(\",\");\n            matched = __acQA(q);\n          } else if (spec.role || spec.name) {\n            how = spec.role && spec.name ? \"role+name\" : spec.role ? \"role\" : \"name\";\n            const want = spec.name == null ? null : spec.name.trim();\n            matched = __acQA(\"*\").filter((el) => {\n              if (spec.role && roleOf(el) !== spec.role.toLowerCase()) return false;\n              if (want == null) return true;\n              const n = accName(el);\n              return n === want || n.includes(want);\n            });\n            // 이름이 부모에도 그대로 흐르면 조상까지 다 맞는다. 가장 안쪽만 남긴다.\n            matched = matched.filter((el) => !matched.some((o) => o !== el && el.contains(o)));\n          } else if (spec.sel) {\n            how = \"css\";\n            matched = __acQA(spec.sel);\n          } else {\n            return JSON.stringify({ error: \"locator가 비어 있다 — testid·role/name·sel 중 하나가 필요하다\" });\n          }\n          const total = matched.length;\n          const visible = matched.filter(vis);\n          // 여럿이 맞아도 보이는 것이 하나면 그것으로 좁힌다. 숨은 템플릿·닫힌 모달이 흔하기 때문이다.\n          let use = visible.length ? visible : matched;\n          if (spec.nth != null) use = use[spec.nth] ? [use[spec.nth]] : [];\n          const el = use.length === 1 ? use[0] : null;\n          const out = {\n            how, total, visibleCount: visible.length, count: use.length,\n            url: location.href, title: document.title,\n          };\n          if (el) {\n            const b = el.getBoundingClientRect();\n            const cx = b.left + b.width / 2, cy = b.top + b.height / 2;\n            const top = document.elementFromPoint(cx, cy);\n            out.tag = el.tagName.toLowerCase();\n            out.role = roleOf(el);\n            out.name = accName(el).slice(0, 120);\n            out.visible = vis(el);\n            out.inViewport = b.top < innerHeight && b.bottom > 0 && b.left < innerWidth && b.right > 0;\n            // 가려짐은 \"가운데 점에 있는 것이 나도 내 자손도 아니다\"로 본다. 좌표 클릭이 다른\n            // 요소에 떨어지는 경우가 정확히 이것이다.\n            out.occluded = !!(top && top !== el && !el.contains(top) && !top.contains(el));\n            out.text = (el.innerText || el.value || \"\").trim().slice(0, 120);\n            out.disabled = !!(el.disabled || el.getAttribute(\"aria-disabled\") === \"true\");\n            // 확정한 그 요소를 다음 명령이 그대로 집어야 한다. 이름·역할은 선택자로 고정할 수\n            // 없고, nth-child 경로로 고정하면 그 사이 화면이 다시 그려졌을 때 조용히 옆 요소를\n            // 누른다. 표식을 남기면 다시 그려질 때 표식도 함께 사라져 다음 명령이 명확히\n            // 실패한다. 조용히 틀리는 것보다 멈추는 것이 낫다.\n            if (false) {\n              // 페이지가 원래 이 속성을 쓰고 있으면 지우지 않는다. 기존 상태를 지우고 그 자리에\n              // 우리 표시를 넣으면 검사 대상이 이미 우리가 바꾼 페이지가 된다.\n              const foreign = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => !e.__acMarked);\n              if (foreign.length) { out.markRefused = \"페이지가 data-ac-target을 이미 쓰고 있다\"; }\n              else {\n                document.querySelectorAll(\"[data-ac-target]\").forEach((e) => {\n                  e.removeAttribute(\"data-ac-target\"); delete e.__acMarked;\n                });\n                el.setAttribute(\"data-ac-target\", \"\"); el.__acMarked = true;\n                out.css = \"[data-ac-target]\";\n              }\n            }\n          } else if (use.length > 1) {\n            out.candidates = use.slice(0, 6).map((e) => ({\n              tag: e.tagName.toLowerCase(), role: roleOf(e),\n              name: accName(e).slice(0, 60), visible: vis(e),\n            }));\n          }\n          return JSON.stringify(out);\n        })()",
+          "returnByValue": true
+        },
+        null
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "locate-empty",
+    "cmd": "locate",
+    "response": {
+      "ok": false,
+      "error": "locator가 비어 있다 — testid·role/name·sel 중 하나가 필요하다"
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "locate"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n          const spec = {\"testid\":null,\"role\":null,\"name\":null,\"sel\":null,\"nth\":null};\n          const vis = (el) => {\n            const s = getComputedStyle(el), b = el.getBoundingClientRect();\n            return s.visibility !== \"hidden\" && s.display !== \"none\" && Number(s.opacity) > 0.01\n              && b.width > 0 && b.height > 0;\n          };\n          // 접근가능한 이름. 스냅샷이 쓰는 것과 같은 순서로 본다.\n          const accName = (el) => {\n            const lb = el.getAttribute(\"aria-label\");\n            if (lb) return lb.trim();\n            const by = el.getAttribute(\"aria-labelledby\");\n            if (by) {\n              const t = by.split(/\\s+/).map((id) => (document.getElementById(id) || {}).innerText || \"\").join(\" \").trim();\n              if (t) return t;\n            }\n            if (el.tagName === \"INPUT\" || el.tagName === \"SELECT\" || el.tagName === \"TEXTAREA\") {\n              if (el.labels && el.labels.length) return (el.labels[0].innerText || \"\").trim();\n              if (el.placeholder) return el.placeholder.trim();\n            }\n            if (el.tagName === \"IMG\") return (el.alt || \"\").trim();\n            return (el.innerText || el.textContent || \"\").trim();\n          };\n          const IMPLICIT = { A: \"link\", BUTTON: \"button\", INPUT: \"textbox\", SELECT: \"combobox\",\n            TEXTAREA: \"textbox\", H1: \"heading\", H2: \"heading\", H3: \"heading\", H4: \"heading\",\n            H5: \"heading\", H6: \"heading\", NAV: \"navigation\", MAIN: \"main\", TABLE: \"table\",\n            UL: \"list\", OL: \"list\", LI: \"listitem\", FORM: \"form\", DIALOG: \"dialog\" };\n          const roleOf = (el) => {\n            const explicit = el.getAttribute(\"role\");\n            if (explicit) return explicit.trim().toLowerCase();\n            if (el.tagName === \"INPUT\") {\n              const t = (el.type || \"text\").toLowerCase();\n              if (t === \"checkbox\") return \"checkbox\";\n              if (t === \"radio\") return \"radio\";\n              if (t === \"submit\" || t === \"button\" || t === \"reset\") return \"button\";\n              return \"textbox\";\n            }\n            return IMPLICIT[el.tagName] || null;\n          };\n              if (false) {\n            const ours = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => e.__acMarked);\n            ours.forEach((e) => { e.removeAttribute(\"data-ac-target\"); delete e.__acMarked; });\n            return JSON.stringify({ cleared: ours.length, count: 0, total: 0, url: location.href });\n          }\n          let matched = [], how = null;\n          if (spec.testid) {\n            how = \"testid\";\n            const q = [\"data-testid\", \"data-test-id\", \"data-test\", \"data-qa\"]\n              .map((a) => \"[\" + a + \"=\" + JSON.stringify(spec.testid) + \"]\").join(\",\");\n            matched = __acQA(q);\n          } else if (spec.role || spec.name) {\n            how = spec.role && spec.name ? \"role+name\" : spec.role ? \"role\" : \"name\";\n            const want = spec.name == null ? null : spec.name.trim();\n            matched = __acQA(\"*\").filter((el) => {\n              if (spec.role && roleOf(el) !== spec.role.toLowerCase()) return false;\n              if (want == null) return true;\n              const n = accName(el);\n              return n === want || n.includes(want);\n            });\n            // 이름이 부모에도 그대로 흐르면 조상까지 다 맞는다. 가장 안쪽만 남긴다.\n            matched = matched.filter((el) => !matched.some((o) => o !== el && el.contains(o)));\n          } else if (spec.sel) {\n            how = \"css\";\n            matched = __acQA(spec.sel);\n          } else {\n            return JSON.stringify({ error: \"locator가 비어 있다 — testid·role/name·sel 중 하나가 필요하다\" });\n          }\n          const total = matched.length;\n          const visible = matched.filter(vis);\n          // 여럿이 맞아도 보이는 것이 하나면 그것으로 좁힌다. 숨은 템플릿·닫힌 모달이 흔하기 때문이다.\n          let use = visible.length ? visible : matched;\n          if (spec.nth != null) use = use[spec.nth] ? [use[spec.nth]] : [];\n          const el = use.length === 1 ? use[0] : null;\n          const out = {\n            how, total, visibleCount: visible.length, count: use.length,\n            url: location.href, title: document.title,\n          };\n          if (el) {\n            const b = el.getBoundingClientRect();\n            const cx = b.left + b.width / 2, cy = b.top + b.height / 2;\n            const top = document.elementFromPoint(cx, cy);\n            out.tag = el.tagName.toLowerCase();\n            out.role = roleOf(el);\n            out.name = accName(el).slice(0, 120);\n            out.visible = vis(el);\n            out.inViewport = b.top < innerHeight && b.bottom > 0 && b.left < innerWidth && b.right > 0;\n            // 가려짐은 \"가운데 점에 있는 것이 나도 내 자손도 아니다\"로 본다. 좌표 클릭이 다른\n            // 요소에 떨어지는 경우가 정확히 이것이다.\n            out.occluded = !!(top && top !== el && !el.contains(top) && !top.contains(el));\n            out.text = (el.innerText || el.value || \"\").trim().slice(0, 120);\n            out.disabled = !!(el.disabled || el.getAttribute(\"aria-disabled\") === \"true\");\n            // 확정한 그 요소를 다음 명령이 그대로 집어야 한다. 이름·역할은 선택자로 고정할 수\n            // 없고, nth-child 경로로 고정하면 그 사이 화면이 다시 그려졌을 때 조용히 옆 요소를\n            // 누른다. 표식을 남기면 다시 그려질 때 표식도 함께 사라져 다음 명령이 명확히\n            // 실패한다. 조용히 틀리는 것보다 멈추는 것이 낫다.\n            if (false) {\n              // 페이지가 원래 이 속성을 쓰고 있으면 지우지 않는다. 기존 상태를 지우고 그 자리에\n              // 우리 표시를 넣으면 검사 대상이 이미 우리가 바꾼 페이지가 된다.\n              const foreign = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => !e.__acMarked);\n              if (foreign.length) { out.markRefused = \"페이지가 data-ac-target을 이미 쓰고 있다\"; }\n              else {\n                document.querySelectorAll(\"[data-ac-target]\").forEach((e) => {\n                  e.removeAttribute(\"data-ac-target\"); delete e.__acMarked;\n                });\n                el.setAttribute(\"data-ac-target\", \"\"); el.__acMarked = true;\n                out.css = \"[data-ac-target]\";\n              }\n            }\n          } else if (use.length > 1) {\n            out.candidates = use.slice(0, 6).map((e) => ({\n              tag: e.tagName.toLowerCase(), role: roleOf(e),\n              name: accName(e).slice(0, 60), visible: vis(e),\n            }));\n          }\n          return JSON.stringify(out);\n        })()",
+          "returnByValue": true
+        },
+        null
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "locate-iframe-ambiguous",
+    "cmd": "locate",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "how": "role+name",
+        "total": 2,
+        "visibleCount": 2,
+        "count": 2,
+        "url": "https://example.test/a",
+        "title": "예시",
+        "tag": "button",
+        "role": "button",
+        "name": "결제 취소",
+        "visible": true,
+        "inViewport": true,
+        "occluded": false,
+        "text": "",
+        "disabled": false,
+        "frames": 2,
+        "candidates": [],
+        "unique": false,
+        "reasons": [
+          "2개가 맞는다 — 어느 것을 뜻하는지 정해지지 않았다"
+        ],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "locate"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n          const spec = {\"testid\":null,\"role\":\"button\",\"name\":\"결제\",\"sel\":null,\"nth\":null};\n          const vis = (el) => {\n            const s = getComputedStyle(el), b = el.getBoundingClientRect();\n            return s.visibility !== \"hidden\" && s.display !== \"none\" && Number(s.opacity) > 0.01\n              && b.width > 0 && b.height > 0;\n          };\n          // 접근가능한 이름. 스냅샷이 쓰는 것과 같은 순서로 본다.\n          const accName = (el) => {\n            const lb = el.getAttribute(\"aria-label\");\n            if (lb) return lb.trim();\n            const by = el.getAttribute(\"aria-labelledby\");\n            if (by) {\n              const t = by.split(/\\s+/).map((id) => (document.getElementById(id) || {}).innerText || \"\").join(\" \").trim();\n              if (t) return t;\n            }\n            if (el.tagName === \"INPUT\" || el.tagName === \"SELECT\" || el.tagName === \"TEXTAREA\") {\n              if (el.labels && el.labels.length) return (el.labels[0].innerText || \"\").trim();\n              if (el.placeholder) return el.placeholder.trim();\n            }\n            if (el.tagName === \"IMG\") return (el.alt || \"\").trim();\n            return (el.innerText || el.textContent || \"\").trim();\n          };\n          const IMPLICIT = { A: \"link\", BUTTON: \"button\", INPUT: \"textbox\", SELECT: \"combobox\",\n            TEXTAREA: \"textbox\", H1: \"heading\", H2: \"heading\", H3: \"heading\", H4: \"heading\",\n            H5: \"heading\", H6: \"heading\", NAV: \"navigation\", MAIN: \"main\", TABLE: \"table\",\n            UL: \"list\", OL: \"list\", LI: \"listitem\", FORM: \"form\", DIALOG: \"dialog\" };\n          const roleOf = (el) => {\n            const explicit = el.getAttribute(\"role\");\n            if (explicit) return explicit.trim().toLowerCase();\n            if (el.tagName === \"INPUT\") {\n              const t = (el.type || \"text\").toLowerCase();\n              if (t === \"checkbox\") return \"checkbox\";\n              if (t === \"radio\") return \"radio\";\n              if (t === \"submit\" || t === \"button\" || t === \"reset\") return \"button\";\n              return \"textbox\";\n            }\n            return IMPLICIT[el.tagName] || null;\n          };\n              if (false) {\n            const ours = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => e.__acMarked);\n            ours.forEach((e) => { e.removeAttribute(\"data-ac-target\"); delete e.__acMarked; });\n            return JSON.stringify({ cleared: ours.length, count: 0, total: 0, url: location.href });\n          }\n          let matched = [], how = null;\n          if (spec.testid) {\n            how = \"testid\";\n            const q = [\"data-testid\", \"data-test-id\", \"data-test\", \"data-qa\"]\n              .map((a) => \"[\" + a + \"=\" + JSON.stringify(spec.testid) + \"]\").join(\",\");\n            matched = __acQA(q);\n          } else if (spec.role || spec.name) {\n            how = spec.role && spec.name ? \"role+name\" : spec.role ? \"role\" : \"name\";\n            const want = spec.name == null ? null : spec.name.trim();\n            matched = __acQA(\"*\").filter((el) => {\n              if (spec.role && roleOf(el) !== spec.role.toLowerCase()) return false;\n              if (want == null) return true;\n              const n = accName(el);\n              return n === want || n.includes(want);\n            });\n            // 이름이 부모에도 그대로 흐르면 조상까지 다 맞는다. 가장 안쪽만 남긴다.\n            matched = matched.filter((el) => !matched.some((o) => o !== el && el.contains(o)));\n          } else if (spec.sel) {\n            how = \"css\";\n            matched = __acQA(spec.sel);\n          } else {\n            return JSON.stringify({ error: \"locator가 비어 있다 — testid·role/name·sel 중 하나가 필요하다\" });\n          }\n          const total = matched.length;\n          const visible = matched.filter(vis);\n          // 여럿이 맞아도 보이는 것이 하나면 그것으로 좁힌다. 숨은 템플릿·닫힌 모달이 흔하기 때문이다.\n          let use = visible.length ? visible : matched;\n          if (spec.nth != null) use = use[spec.nth] ? [use[spec.nth]] : [];\n          const el = use.length === 1 ? use[0] : null;\n          const out = {\n            how, total, visibleCount: visible.length, count: use.length,\n            url: location.href, title: document.title,\n          };\n          if (el) {\n            const b = el.getBoundingClientRect();\n            const cx = b.left + b.width / 2, cy = b.top + b.height / 2;\n            const top = document.elementFromPoint(cx, cy);\n            out.tag = el.tagName.toLowerCase();\n            out.role = roleOf(el);\n            out.name = accName(el).slice(0, 120);\n            out.visible = vis(el);\n            out.inViewport = b.top < innerHeight && b.bottom > 0 && b.left < innerWidth && b.right > 0;\n            // 가려짐은 \"가운데 점에 있는 것이 나도 내 자손도 아니다\"로 본다. 좌표 클릭이 다른\n            // 요소에 떨어지는 경우가 정확히 이것이다.\n            out.occluded = !!(top && top !== el && !el.contains(top) && !top.contains(el));\n            out.text = (el.innerText || el.value || \"\").trim().slice(0, 120);\n            out.disabled = !!(el.disabled || el.getAttribute(\"aria-disabled\") === \"true\");\n            // 확정한 그 요소를 다음 명령이 그대로 집어야 한다. 이름·역할은 선택자로 고정할 수\n            // 없고, nth-child 경로로 고정하면 그 사이 화면이 다시 그려졌을 때 조용히 옆 요소를\n            // 누른다. 표식을 남기면 다시 그려질 때 표식도 함께 사라져 다음 명령이 명확히\n            // 실패한다. 조용히 틀리는 것보다 멈추는 것이 낫다.\n            if (false) {\n              // 페이지가 원래 이 속성을 쓰고 있으면 지우지 않는다. 기존 상태를 지우고 그 자리에\n              // 우리 표시를 넣으면 검사 대상이 이미 우리가 바꾼 페이지가 된다.\n              const foreign = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => !e.__acMarked);\n              if (foreign.length) { out.markRefused = \"페이지가 data-ac-target을 이미 쓰고 있다\"; }\n              else {\n                document.querySelectorAll(\"[data-ac-target]\").forEach((e) => {\n                  e.removeAttribute(\"data-ac-target\"); delete e.__acMarked;\n                });\n                el.setAttribute(\"data-ac-target\", \"\"); el.__acMarked = true;\n                out.css = \"[data-ac-target]\";\n              }\n            }\n          } else if (use.length > 1) {\n            out.candidates = use.slice(0, 6).map((e) => ({\n              tag: e.tagName.toLowerCase(), role: roleOf(e),\n              name: accName(e).slice(0, 60), visible: vis(e),\n            }));\n          }\n          return JSON.stringify(out);\n        })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n          const spec = {\"testid\":null,\"role\":\"button\",\"name\":\"결제\",\"sel\":null,\"nth\":null};\n          const vis = (el) => {\n            const s = getComputedStyle(el), b = el.getBoundingClientRect();\n            return s.visibility !== \"hidden\" && s.display !== \"none\" && Number(s.opacity) > 0.01\n              && b.width > 0 && b.height > 0;\n          };\n          // 접근가능한 이름. 스냅샷이 쓰는 것과 같은 순서로 본다.\n          const accName = (el) => {\n            const lb = el.getAttribute(\"aria-label\");\n            if (lb) return lb.trim();\n            const by = el.getAttribute(\"aria-labelledby\");\n            if (by) {\n              const t = by.split(/\\s+/).map((id) => (document.getElementById(id) || {}).innerText || \"\").join(\" \").trim();\n              if (t) return t;\n            }\n            if (el.tagName === \"INPUT\" || el.tagName === \"SELECT\" || el.tagName === \"TEXTAREA\") {\n              if (el.labels && el.labels.length) return (el.labels[0].innerText || \"\").trim();\n              if (el.placeholder) return el.placeholder.trim();\n            }\n            if (el.tagName === \"IMG\") return (el.alt || \"\").trim();\n            return (el.innerText || el.textContent || \"\").trim();\n          };\n          const IMPLICIT = { A: \"link\", BUTTON: \"button\", INPUT: \"textbox\", SELECT: \"combobox\",\n            TEXTAREA: \"textbox\", H1: \"heading\", H2: \"heading\", H3: \"heading\", H4: \"heading\",\n            H5: \"heading\", H6: \"heading\", NAV: \"navigation\", MAIN: \"main\", TABLE: \"table\",\n            UL: \"list\", OL: \"list\", LI: \"listitem\", FORM: \"form\", DIALOG: \"dialog\" };\n          const roleOf = (el) => {\n            const explicit = el.getAttribute(\"role\");\n            if (explicit) return explicit.trim().toLowerCase();\n            if (el.tagName === \"INPUT\") {\n              const t = (el.type || \"text\").toLowerCase();\n              if (t === \"checkbox\") return \"checkbox\";\n              if (t === \"radio\") return \"radio\";\n              if (t === \"submit\" || t === \"button\" || t === \"reset\") return \"button\";\n              return \"textbox\";\n            }\n            return IMPLICIT[el.tagName] || null;\n          };\n              if (false) {\n            const ours = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => e.__acMarked);\n            ours.forEach((e) => { e.removeAttribute(\"data-ac-target\"); delete e.__acMarked; });\n            return JSON.stringify({ cleared: ours.length, count: 0, total: 0, url: location.href });\n          }\n          let matched = [], how = null;\n          if (spec.testid) {\n            how = \"testid\";\n            const q = [\"data-testid\", \"data-test-id\", \"data-test\", \"data-qa\"]\n              .map((a) => \"[\" + a + \"=\" + JSON.stringify(spec.testid) + \"]\").join(\",\");\n            matched = __acQA(q);\n          } else if (spec.role || spec.name) {\n            how = spec.role && spec.name ? \"role+name\" : spec.role ? \"role\" : \"name\";\n            const want = spec.name == null ? null : spec.name.trim();\n            matched = __acQA(\"*\").filter((el) => {\n              if (spec.role && roleOf(el) !== spec.role.toLowerCase()) return false;\n              if (want == null) return true;\n              const n = accName(el);\n              return n === want || n.includes(want);\n            });\n            // 이름이 부모에도 그대로 흐르면 조상까지 다 맞는다. 가장 안쪽만 남긴다.\n            matched = matched.filter((el) => !matched.some((o) => o !== el && el.contains(o)));\n          } else if (spec.sel) {\n            how = \"css\";\n            matched = __acQA(spec.sel);\n          } else {\n            return JSON.stringify({ error: \"locator가 비어 있다 — testid·role/name·sel 중 하나가 필요하다\" });\n          }\n          const total = matched.length;\n          const visible = matched.filter(vis);\n          // 여럿이 맞아도 보이는 것이 하나면 그것으로 좁힌다. 숨은 템플릿·닫힌 모달이 흔하기 때문이다.\n          let use = visible.length ? visible : matched;\n          if (spec.nth != null) use = use[spec.nth] ? [use[spec.nth]] : [];\n          const el = use.length === 1 ? use[0] : null;\n          const out = {\n            how, total, visibleCount: visible.length, count: use.length,\n            url: location.href, title: document.title,\n          };\n          if (el) {\n            const b = el.getBoundingClientRect();\n            const cx = b.left + b.width / 2, cy = b.top + b.height / 2;\n            const top = document.elementFromPoint(cx, cy);\n            out.tag = el.tagName.toLowerCase();\n            out.role = roleOf(el);\n            out.name = accName(el).slice(0, 120);\n            out.visible = vis(el);\n            out.inViewport = b.top < innerHeight && b.bottom > 0 && b.left < innerWidth && b.right > 0;\n            // 가려짐은 \"가운데 점에 있는 것이 나도 내 자손도 아니다\"로 본다. 좌표 클릭이 다른\n            // 요소에 떨어지는 경우가 정확히 이것이다.\n            out.occluded = !!(top && top !== el && !el.contains(top) && !top.contains(el));\n            out.text = (el.innerText || el.value || \"\").trim().slice(0, 120);\n            out.disabled = !!(el.disabled || el.getAttribute(\"aria-disabled\") === \"true\");\n            // 확정한 그 요소를 다음 명령이 그대로 집어야 한다. 이름·역할은 선택자로 고정할 수\n            // 없고, nth-child 경로로 고정하면 그 사이 화면이 다시 그려졌을 때 조용히 옆 요소를\n            // 누른다. 표식을 남기면 다시 그려질 때 표식도 함께 사라져 다음 명령이 명확히\n            // 실패한다. 조용히 틀리는 것보다 멈추는 것이 낫다.\n            if (false) {\n              // 페이지가 원래 이 속성을 쓰고 있으면 지우지 않는다. 기존 상태를 지우고 그 자리에\n              // 우리 표시를 넣으면 검사 대상이 이미 우리가 바꾼 페이지가 된다.\n              const foreign = [...document.querySelectorAll(\"[data-ac-target]\")].filter((e) => !e.__acMarked);\n              if (foreign.length) { out.markRefused = \"페이지가 data-ac-target을 이미 쓰고 있다\"; }\n              else {\n                document.querySelectorAll(\"[data-ac-target]\").forEach((e) => {\n                  e.removeAttribute(\"data-ac-target\"); delete e.__acMarked;\n                });\n                el.setAttribute(\"data-ac-target\", \"\"); el.__acMarked = true;\n                out.css = \"[data-ac-target]\";\n              }\n            }\n          } else if (use.length > 1) {\n            out.candidates = use.slice(0, 6).map((e) => ({\n              tag: e.tagName.toLowerCase(), role: roleOf(e),\n              name: accName(e).slice(0, 60), visible: vis(e),\n            }));\n          }\n          return JSON.stringify(out);\n        })()",
+          "returnByValue": true
+        },
+        "frame-1"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "observe-default",
+    "cmd": "observe",
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/a",
+        "title": "예시",
+        "console": [
+          {
+            "level": "error",
+            "text": "x"
+          }
+        ],
+        "exceptions": [],
+        "network": [],
+        "dialogs": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ],
+        "nativeModal": null,
+        "downloadPlan": {
+          "dir": null,
+          "once": false,
+          "last": null
+        },
+        "counts": {
+          "consoleErrors": 1
+        },
+        "screenshot": "<RUN>/artifacts/shots/shot-<T>.png"
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "observe"
+      ],
+      [
+        "obs.observe",
+        "error",
+        40
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n        const QA = window.__acQA || ((s) => [...document.querySelectorAll(s)]);\n        const pw = QA('input[type=password]').filter((e) => e.offsetParent !== null);\n        if (!pw.length) return \"\";\n        return location.origin;\n      })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n      const vis = (e) => e && e.offsetParent !== null && e.getClientRects().length;\n      const QA = window.__acQA || ((s) => [...document.querySelectorAll(s)]);\n      const q = (sel) => QA(sel).filter(vis);\n      const hit = [];\n      if (q('input[autocomplete*=\"cc-number\"], input[name*=\"cardnum\" i], input[id*=\"cardnum\" i]').length) hit.push(\"카드 정보 입력\");\n      const payFrame = QA(\"iframe\").filter(vis)\n        .some((f) => /(checkout|payment|\\bpay\\b|3ds|acs|stripe|toss|portone|iamport|inicis|kcp|nicepay|eximbay)/i.test(f.src || \"\"));\n      if (payFrame) hit.push(\"결제 창\");\n      if (q('input[autocomplete=\"one-time-code\"], input[name*=\"otp\" i], input[id*=\"otp\" i]').length) hit.push(\"인증번호 입력\");\n      const cap = QA(\"iframe\").filter(vis)\n        .some((f) => /(recaptcha|hcaptcha|turnstile|captcha)/i.test(f.src || \"\"))\n        || q(\".g-recaptcha, #cf-turnstile, .h-captcha\").length > 0;\n      if (cap) hit.push(\"캡차\");\n      return hit;\n    })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "observe-no-screenshot-clear",
+    "cmd": "observe",
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/a",
+        "title": "예시",
+        "console": [],
+        "exceptions": [],
+        "network": [],
+        "dialogs": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ],
+        "nativeModal": {
+          "kind": "file-chooser",
+          "mode": "multiple"
+        },
+        "downloadPlan": {
+          "dir": "/d",
+          "once": true,
+          "last": null
+        },
+        "counts": {}
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "observe"
+      ],
+      [
+        "obs.observe",
+        "all",
+        5
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n        const QA = window.__acQA || ((s) => [...document.querySelectorAll(s)]);\n        const pw = QA('input[type=password]').filter((e) => e.offsetParent !== null);\n        if (!pw.length) return \"\";\n        return location.origin;\n      })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n      const vis = (e) => e && e.offsetParent !== null && e.getClientRects().length;\n      const QA = window.__acQA || ((s) => [...document.querySelectorAll(s)]);\n      const q = (sel) => QA(sel).filter(vis);\n      const hit = [];\n      if (q('input[autocomplete*=\"cc-number\"], input[name*=\"cardnum\" i], input[id*=\"cardnum\" i]').length) hit.push(\"카드 정보 입력\");\n      const payFrame = QA(\"iframe\").filter(vis)\n        .some((f) => /(checkout|payment|\\bpay\\b|3ds|acs|stripe|toss|portone|iamport|inicis|kcp|nicepay|eximbay)/i.test(f.src || \"\"));\n      if (payFrame) hit.push(\"결제 창\");\n      if (q('input[autocomplete=\"one-time-code\"], input[name*=\"otp\" i], input[id*=\"otp\" i]').length) hit.push(\"인증번호 입력\");\n      const cap = QA(\"iframe\").filter(vis)\n        .some((f) => /(recaptcha|hcaptcha|turnstile|captcha)/i.test(f.src || \"\"))\n        || q(\".g-recaptcha, #cf-turnstile, .h-captcha\").length > 0;\n      if (cap) hit.push(\"캡차\");\n      return hit;\n    })()"
+        },
+        null
+      ],
+      [
+        "obs.clear"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "observe-screenshot-fails",
+    "cmd": "observe",
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/a",
+        "title": "예시",
+        "console": [],
+        "exceptions": [],
+        "network": [],
+        "dialogs": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ],
+        "nativeModal": null,
+        "downloadPlan": {
+          "dir": null,
+          "once": false,
+          "last": null
+        },
+        "counts": {},
+        "screenshotError": "capture 불가"
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "observe"
+      ],
+      [
+        "obs.observe",
+        "error",
+        40
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n        const QA = window.__acQA || ((s) => [...document.querySelectorAll(s)]);\n        const pw = QA('input[type=password]').filter((e) => e.offsetParent !== null);\n        if (!pw.length) return \"\";\n        return location.origin;\n      })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n      const vis = (e) => e && e.offsetParent !== null && e.getClientRects().length;\n      const QA = window.__acQA || ((s) => [...document.querySelectorAll(s)]);\n      const q = (sel) => QA(sel).filter(vis);\n      const hit = [];\n      if (q('input[autocomplete*=\"cc-number\"], input[name*=\"cardnum\" i], input[id*=\"cardnum\" i]').length) hit.push(\"카드 정보 입력\");\n      const payFrame = QA(\"iframe\").filter(vis)\n        .some((f) => /(checkout|payment|\\bpay\\b|3ds|acs|stripe|toss|portone|iamport|inicis|kcp|nicepay|eximbay)/i.test(f.src || \"\"));\n      if (payFrame) hit.push(\"결제 창\");\n      if (q('input[autocomplete=\"one-time-code\"], input[name*=\"otp\" i], input[id*=\"otp\" i]').length) hit.push(\"인증번호 입력\");\n      const cap = QA(\"iframe\").filter(vis)\n        .some((f) => /(recaptcha|hcaptcha|turnstile|captcha)/i.test(f.src || \"\"))\n        || q(\".g-recaptcha, #cf-turnstile, .h-captcha\").length > 0;\n      if (cap) hit.push(\"캡차\");\n      return hit;\n    })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "diff-ok",
+    "cmd": "diff",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/diff-<T>.png",
+        "changed": 1,
+        "total": 2,
+        "ratio": 50,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "diff"
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/diff-<T>.png",
+        "bytes": "424d503a61306130613066663363336266666666"
+      },
+      {
+        "file": "a.png",
+        "bytes": "0a14"
+      },
+      {
+        "file": "b.png",
+        "bytes": "0a5a"
+      }
+    ]
+  },
+  {
+    "name": "diff-missing-file",
+    "cmd": "diff",
+    "response": {
+      "ok": false,
+      "error": "비교할 두 이미지 경로가 필요합니다(before·after)."
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "diff"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "screenshot-shown",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-path-dpr",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/work/out/custom.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 2,
+        "requestedDpr": 3,
+        "dprNote": "이 화면의 기기 배율 2까지만 찍힘",
+        "marked": 0,
+        "missing": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "out/custom.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-marks-caption",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 1,
+        "marked": 2,
+        "missing": [
+          "@e1",
+          "#none"
+        ],
+        "caption": "확인",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const all = __acQA(\"#save\");\n        const el = all[0] || all[0]; if (!el) return null;\n        const b = el.getBoundingClientRect();\n        return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const all = __acQA(\"#none\");\n        const el = all[0] || all[0]; if (!el) return null;\n        const b = el.getBoundingClientRect();\n        return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const all = __acQA(\"#pw\");\n        const el = all[0] || all[0]; if (!el) return null;\n        const b = el.getBoundingClientRect();\n        return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function (spec) {\n  const old = document.getElementById(\"__ac_marks__\"); if (old) old.remove();\n  const root = document.createElement(\"div\");\n  root.id = \"__ac_marks__\";\n  root.style.cssText = \"position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;\";\n  let n = 0;\n  for (const b of spec.boxes || []) {\n    const d = document.createElement(\"div\");\n    if (b.mask) {\n      d.style.cssText = `position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;background:#111;border-radius:3px;`;\n      root.appendChild(d); continue;\n    }\n    n++;\n    const c = b.color || \"#FF3B6B\";\n    d.style.cssText = `position:absolute;left:${b.x - 3}px;top:${b.y - 3}px;width:${b.w + 6}px;height:${b.h + 6}px;`\n      + `border:3px solid ${c};border-radius:5px;box-shadow:0 0 0 3px rgba(255,255,255,.75),0 4px 14px rgba(0,0,0,.35);`;\n    root.appendChild(d);\n    const tag = document.createElement(\"div\");\n    tag.textContent = b.label ? n + \". \" + b.label : String(n);\n    tag.style.cssText = `position:absolute;left:${b.x - 3}px;top:${Math.max(0, b.y - 31)}px;background:${c};color:#fff;`\n      + \"font:600 13px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:3px 9px;border-radius:5px;\"\n      + \"white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:70vw;overflow:hidden;text-overflow:ellipsis;\";\n    root.appendChild(tag);\n  }\n  if (spec.caption) {\n    const cap = document.createElement(\"div\");\n    cap.textContent = spec.caption;\n    cap.style.cssText = \"position:fixed;left:0;right:0;bottom:0;background:rgba(10,22,32,.94);color:#EAF3FA;\"\n      + \"font:500 14px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:11px 16px;\"\n      + \"border-top:3px solid #FF3B6B;white-space:pre-wrap;\";\n    root.appendChild(cap);\n  }\n  document.body.appendChild(root);\n  return n;\n})({\"boxes\":[{\"x\":1,\"y\":2,\"w\":30,\"h\":40,\"label\":\"저장\",\"color\":\"#1B6B4A\",\"mask\":false},{\"x\":1,\"y\":2,\"w\":30,\"h\":40,\"label\":\"\",\"color\":null,\"mask\":true}],\"caption\":\"확인\"})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-ref-no-snapshot",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [
+          "@zz (이 탭에서 먼저 snapshot을 실행하세요(ref 맵 없음).)"
+        ],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-ref-in-iframe-skipped",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [
+          "@e1"
+        ],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-element-missing",
+    "cmd": "screenshot",
+    "response": {
+      "ok": false,
+      "error": "요소를 찾지 못했습니다: #nope"
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const el = __acQ(\"#nope\"); if (!el) return null;\n              const b = el.getBoundingClientRect(); const pad = 8;\n              return { x: Math.max(0, b.left - pad), y: Math.max(0, b.top - pad), width: b.width + pad * 2, height: b.height + pad * 2, scale: 1 }; })()",
+          "returnByValue": true
+        },
+        null
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "screenshot-zoomed-page",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [],
+        "zoomRestored": "1.5 (원래대로 되돌림 — 배율은 dpr을 쓰세요)",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { document.body.style.zoom = \"\";\n        document.documentElement.style.zoom = \"\";\n        document.body.style.transform = \"\"; return 1; })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { document.body.style.zoom = \"1.5\";\n        document.documentElement.style.zoom = \"\";\n        document.body.style.transform = \"\"; return 1; })()"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-hidden-layout",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Emulation.setDeviceMetricsOverride",
+        {
+          "width": 1280,
+          "height": 900,
+          "deviceScaleFactor": 1,
+          "mobile": false
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Emulation.clearDeviceMetricsOverride",
+        {},
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-full-stitch",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "stitch",
+        "dpr": 1,
+        "fullPage": {
+          "width": 1280,
+          "height": 900,
+          "scale": 1,
+          "tiles": 15
+        },
+        "marked": 0,
+        "missing": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "cdp",
+        "Page.getLayoutMetrics",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "scrollY",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 0);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 60);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n            window.__acFixed = Array.prototype.filter.call(document.querySelectorAll(\"body *\"), (e) => {\n              const p = getComputedStyle(e).position; return p === \"fixed\" || p === \"sticky\"; });\n            window.__acFixed.forEach((e) => { e.setAttribute(\"data-ac-vis\", e.style.visibility || \"\"); e.style.visibility = \"hidden\"; });\n            return window.__acFixed.length; })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 120);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 180);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 240);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 300);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 360);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 420);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 480);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 540);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 600);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 660);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 720);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 780);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "new Promise((res) => { scrollTo(0, 840);\n          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => res(scrollY), 120))); })",
+          "awaitPromise": true,
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { (window.__acFixed || []).forEach((e) => {\n        e.style.visibility = e.getAttribute(\"data-ac-vis\") || \"\"; e.removeAttribute(\"data-ac-vis\"); });\n        window.__acFixed = null; return 1; })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "scrollTo(0, 0)"
+        },
+        null
+      ],
+      [
+        "hold",
+        false
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-held-fallback",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "held",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "hold",
+        false
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-all-fail-capturepage",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "capturePage",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png",
+          "fromSurface": false
+        },
+        null
+      ],
+      [
+        "screencastShot"
+      ],
+      [
+        "resetCdpSession"
+      ],
+      [
+        "wc.capturePage",
+        null
+      ],
+      [
+        "hold",
+        false
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-screencast",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "screencast",
+        "dpr": 1,
+        "marked": 0,
+        "missing": [],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png",
+          "fromSurface": false
+        },
+        null
+      ],
+      [
+        "screencastShot"
+      ],
+      [
+        "hold",
+        false
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-same-as",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/work/prev.png",
+        "same": true,
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "surface",
+        "dpr": 1,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "prev.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "screenshot-window-not-drawing",
+    "cmd": "screenshot",
+    "response": {
+      "ok": false,
+      "error": "이 탭을 담은 창이 최소화 상태라 화면을 그리지 않습니다 — screenshot 를 보내도 도달하지 않습니다. 창을 띄워 달라고 사람에게 부탁하고 다시 하세요(browser_ask_user).",
+      "code": "window_not_drawing"
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "screenshot"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "screenshot-nocdp",
+    "cmd": "screenshot",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/shot-<T>.png",
+        "url": "https://example.test/a",
+        "title": "예시",
+        "via": "capturePage",
+        "dpr": 1,
+        "note": "로그인 호스트라 CDP 없이 창 단위로 찍었습니다(표시·마스킹·전체 페이지 미지원).",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachAiSession"
+      ],
+      [
+        "wc.capturePage",
+        null
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "pdf-ok",
+    "cmd": "pdf",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "path": "<RUN>/artifacts/shots/page-<T>.pdf",
+        "bytes": 13,
+        "url": "https://example.test/a",
+        "title": "예시",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "pdf"
+      ],
+      [
+        "wc.printToPDF",
+        {
+          "printBackground": false,
+          "landscape": true,
+          "preferCSSPageSize": true,
+          "scale": 2,
+          "pageRanges": "1-2"
+        }
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/page-<T>.pdf",
+        "bytes": "255044462d312e342066616b65"
+      }
+    ]
+  },
+  {
+    "name": "pdf-empty",
+    "cmd": "pdf",
+    "response": {
+      "ok": false,
+      "error": "PDF를 만들지 못했습니다."
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "pdf"
+      ],
+      [
+        "wc.printToPDF",
+        {
+          "printBackground": true,
+          "landscape": false,
+          "preferCSSPageSize": true
+        }
+      ],
+      [
+        "ai.leave"
+      ]
+    ],
+    "files": []
+  },
+  {
+    "name": "shotsizes-default",
+    "cmd": "shotsizes",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "shots": [
+          {
+            "size": "모바일",
+            "width": 390,
+            "height": 844,
+            "path": "<RUN>/artifacts/shots/shot-<T>.png"
+          },
+          {
+            "size": "패드",
+            "width": 820,
+            "height": 1180,
+            "path": "<RUN>/artifacts/shots/shot-<T>.png"
+          },
+          {
+            "size": "데스크톱",
+            "width": 1440,
+            "height": 900,
+            "path": "<RUN>/artifacts/shots/shot-<T>.png"
+          }
+        ],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "shotsizes"
+      ],
+      [
+        "viewport.apply",
+        {
+          "width": 390,
+          "height": 844,
+          "dpr": 0
+        }
+      ],
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function (spec) {\n  const old = document.getElementById(\"__ac_marks__\"); if (old) old.remove();\n  const root = document.createElement(\"div\");\n  root.id = \"__ac_marks__\";\n  root.style.cssText = \"position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;\";\n  let n = 0;\n  for (const b of spec.boxes || []) {\n    const d = document.createElement(\"div\");\n    if (b.mask) {\n      d.style.cssText = `position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;background:#111;border-radius:3px;`;\n      root.appendChild(d); continue;\n    }\n    n++;\n    const c = b.color || \"#FF3B6B\";\n    d.style.cssText = `position:absolute;left:${b.x - 3}px;top:${b.y - 3}px;width:${b.w + 6}px;height:${b.h + 6}px;`\n      + `border:3px solid ${c};border-radius:5px;box-shadow:0 0 0 3px rgba(255,255,255,.75),0 4px 14px rgba(0,0,0,.35);`;\n    root.appendChild(d);\n    const tag = document.createElement(\"div\");\n    tag.textContent = b.label ? n + \". \" + b.label : String(n);\n    tag.style.cssText = `position:absolute;left:${b.x - 3}px;top:${Math.max(0, b.y - 31)}px;background:${c};color:#fff;`\n      + \"font:600 13px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:3px 9px;border-radius:5px;\"\n      + \"white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:70vw;overflow:hidden;text-overflow:ellipsis;\";\n    root.appendChild(tag);\n  }\n  if (spec.caption) {\n    const cap = document.createElement(\"div\");\n    cap.textContent = spec.caption;\n    cap.style.cssText = \"position:fixed;left:0;right:0;bottom:0;background:rgba(10,22,32,.94);color:#EAF3FA;\"\n      + \"font:500 14px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:11px 16px;\"\n      + \"border-top:3px solid #FF3B6B;white-space:pre-wrap;\";\n    root.appendChild(cap);\n  }\n  document.body.appendChild(root);\n  return n;\n})({\"boxes\":[],\"caption\":\"모바일 · 390×844\"})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()"
+        },
+        null
+      ],
+      [
+        "viewport.apply",
+        {
+          "width": 820,
+          "height": 1180,
+          "dpr": 0
+        }
+      ],
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function (spec) {\n  const old = document.getElementById(\"__ac_marks__\"); if (old) old.remove();\n  const root = document.createElement(\"div\");\n  root.id = \"__ac_marks__\";\n  root.style.cssText = \"position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;\";\n  let n = 0;\n  for (const b of spec.boxes || []) {\n    const d = document.createElement(\"div\");\n    if (b.mask) {\n      d.style.cssText = `position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;background:#111;border-radius:3px;`;\n      root.appendChild(d); continue;\n    }\n    n++;\n    const c = b.color || \"#FF3B6B\";\n    d.style.cssText = `position:absolute;left:${b.x - 3}px;top:${b.y - 3}px;width:${b.w + 6}px;height:${b.h + 6}px;`\n      + `border:3px solid ${c};border-radius:5px;box-shadow:0 0 0 3px rgba(255,255,255,.75),0 4px 14px rgba(0,0,0,.35);`;\n    root.appendChild(d);\n    const tag = document.createElement(\"div\");\n    tag.textContent = b.label ? n + \". \" + b.label : String(n);\n    tag.style.cssText = `position:absolute;left:${b.x - 3}px;top:${Math.max(0, b.y - 31)}px;background:${c};color:#fff;`\n      + \"font:600 13px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:3px 9px;border-radius:5px;\"\n      + \"white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:70vw;overflow:hidden;text-overflow:ellipsis;\";\n    root.appendChild(tag);\n  }\n  if (spec.caption) {\n    const cap = document.createElement(\"div\");\n    cap.textContent = spec.caption;\n    cap.style.cssText = \"position:fixed;left:0;right:0;bottom:0;background:rgba(10,22,32,.94);color:#EAF3FA;\"\n      + \"font:500 14px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:11px 16px;\"\n      + \"border-top:3px solid #FF3B6B;white-space:pre-wrap;\";\n    root.appendChild(cap);\n  }\n  document.body.appendChild(root);\n  return n;\n})({\"boxes\":[],\"caption\":\"패드 · 820×1180\"})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()"
+        },
+        null
+      ],
+      [
+        "viewport.apply",
+        {
+          "width": 1440,
+          "height": 900,
+          "dpr": 0
+        }
+      ],
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function (spec) {\n  const old = document.getElementById(\"__ac_marks__\"); if (old) old.remove();\n  const root = document.createElement(\"div\");\n  root.id = \"__ac_marks__\";\n  root.style.cssText = \"position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;\";\n  let n = 0;\n  for (const b of spec.boxes || []) {\n    const d = document.createElement(\"div\");\n    if (b.mask) {\n      d.style.cssText = `position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;background:#111;border-radius:3px;`;\n      root.appendChild(d); continue;\n    }\n    n++;\n    const c = b.color || \"#FF3B6B\";\n    d.style.cssText = `position:absolute;left:${b.x - 3}px;top:${b.y - 3}px;width:${b.w + 6}px;height:${b.h + 6}px;`\n      + `border:3px solid ${c};border-radius:5px;box-shadow:0 0 0 3px rgba(255,255,255,.75),0 4px 14px rgba(0,0,0,.35);`;\n    root.appendChild(d);\n    const tag = document.createElement(\"div\");\n    tag.textContent = b.label ? n + \". \" + b.label : String(n);\n    tag.style.cssText = `position:absolute;left:${b.x - 3}px;top:${Math.max(0, b.y - 31)}px;background:${c};color:#fff;`\n      + \"font:600 13px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:3px 9px;border-radius:5px;\"\n      + \"white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:70vw;overflow:hidden;text-overflow:ellipsis;\";\n    root.appendChild(tag);\n  }\n  if (spec.caption) {\n    const cap = document.createElement(\"div\");\n    cap.textContent = spec.caption;\n    cap.style.cssText = \"position:fixed;left:0;right:0;bottom:0;background:rgba(10,22,32,.94);color:#EAF3FA;\"\n      + \"font:500 14px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:11px 16px;\"\n      + \"border-top:3px solid #FF3B6B;white-space:pre-wrap;\";\n    root.appendChild(cap);\n  }\n  document.body.appendChild(root);\n  return n;\n})({\"boxes\":[],\"caption\":\"데스크톱 · 1440×900\"})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()"
+        },
+        null
+      ],
+      [
+        "viewport.apply",
+        {
+          "clear": true
+        }
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      },
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      },
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  },
+  {
+    "name": "shotsizes-custom-bad",
+    "cmd": "shotsizes",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "shots": [
+          {
+            "size": "1024x768",
+            "width": 1024,
+            "height": 768,
+            "path": "<RUN>/artifacts/shots/shot-<T>.png"
+          },
+          {
+            "size": "엉뚱",
+            "error": "모르는 크기 — 모바일·패드·데스크톱 또는 1024x768 형식"
+          }
+        ],
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ensureReady",
+        "shotsizes"
+      ],
+      [
+        "viewport.apply",
+        {
+          "width": 1024,
+          "height": 768,
+          "dpr": 2
+        }
+      ],
+      [
+        "ensureReady",
+        "screenshot"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const b = document.body, h = document.documentElement;\n    const s = { bz: b.style.zoom || \"\", hz: h.style.zoom || \"\", bt: b.style.transform || \"\" };\n    const on = !!(s.bz && s.bz !== \"1\" && s.bz !== \"100%\") || !!(s.hz && s.hz !== \"1\" && s.hz !== \"100%\") || !!s.bt;\n    return JSON.stringify({ ...s, on }); })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(function (spec) {\n  const old = document.getElementById(\"__ac_marks__\"); if (old) old.remove();\n  const root = document.createElement(\"div\");\n  root.id = \"__ac_marks__\";\n  root.style.cssText = \"position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;\";\n  let n = 0;\n  for (const b of spec.boxes || []) {\n    const d = document.createElement(\"div\");\n    if (b.mask) {\n      d.style.cssText = `position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;background:#111;border-radius:3px;`;\n      root.appendChild(d); continue;\n    }\n    n++;\n    const c = b.color || \"#FF3B6B\";\n    d.style.cssText = `position:absolute;left:${b.x - 3}px;top:${b.y - 3}px;width:${b.w + 6}px;height:${b.h + 6}px;`\n      + `border:3px solid ${c};border-radius:5px;box-shadow:0 0 0 3px rgba(255,255,255,.75),0 4px 14px rgba(0,0,0,.35);`;\n    root.appendChild(d);\n    const tag = document.createElement(\"div\");\n    tag.textContent = b.label ? n + \". \" + b.label : String(n);\n    tag.style.cssText = `position:absolute;left:${b.x - 3}px;top:${Math.max(0, b.y - 31)}px;background:${c};color:#fff;`\n      + \"font:600 13px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:3px 9px;border-radius:5px;\"\n      + \"white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:70vw;overflow:hidden;text-overflow:ellipsis;\";\n    root.appendChild(tag);\n  }\n  if (spec.caption) {\n    const cap = document.createElement(\"div\");\n    cap.textContent = spec.caption;\n    cap.style.cssText = \"position:fixed;left:0;right:0;bottom:0;background:rgba(10,22,32,.94);color:#EAF3FA;\"\n      + \"font:500 14px/1.5 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;padding:11px 16px;\"\n      + \"border-top:3px solid #FF3B6B;white-space:pre-wrap;\";\n    root.appendChild(cap);\n  }\n  document.body.appendChild(root);\n  return n;\n})({\"boxes\":[],\"caption\":\"1024x768 · 1024×768 — 반응형\"})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Page.captureScreenshot",
+        {
+          "format": "png"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()"
+        },
+        null
+      ],
+      [
+        "viewport.apply",
+        {
+          "clear": true
+        }
+      ]
+    ],
+    "files": [
+      {
+        "file": "shots/shot-<T>.png",
+        "bytes": "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+      }
+    ]
+  }
+]

@@ -27,7 +27,7 @@
 import { callHook, hasHook, provide } from "../core/hooks.js";
 import { bindingOf, matchBinding } from "../core/keymap.js";
 import { registerTabView } from "../core/tab-views.js";
-import { addTab, ensureTabSpace, getActiveTabId, getCenterSpace, getTabs, getTabSpaces, removeTab, setActiveTab, setCenterSpace } from "../center/tab-store.js";
+import { addTab, ensureTabSpace, getActiveTabId, isTabVisible, getCenterSpace, getTabs, getTabSpaces, removeTab, setActiveTab, setCenterSpace } from "../center/tab-store.js";
 import { notifyLayout, registerLayoutRegion } from "../core/layout-regions.js";
 import { noticeBlock } from "../panel/xterm-wiring.js";
 import { mountEmulatorPane } from "./pane.js";
@@ -294,7 +294,20 @@ async function detach(entry, restore = null) {
   savePlaces();
 }
 
-// 분리 창이 닫히면 탭을 원래 위치로 돌려놓는다.
+// 분리 창이 닫힘. 기기 패널에서 옮기려고 닫은 창만 원래 위치로 되돌리고, 사람이 닫은 창은 화면만 없앰.
+// 기기는 켜 둠(끄는 것은 전원 버튼뿐) — 이 화면(worktree)과 세션의 연결만 끊음
+function windowClosed(tabId) {
+  const entry = mounted.get(tabId);
+  if (!entry || !entry.detached) return;
+  if (entry.returning) { entry.returning = false; reattach(tabId); return; }
+  mounted.delete(tabId);
+  void host.rpc("emulator.unregisterActive", { worktree: emuKey(entry) }).catch(() => {});
+  renderGroups();
+  if (!mounted.size) stopWatching();
+  savePlaces();
+}
+
+// 분리 창을 닫은 탭을 원래 위치로 돌려놓는다.
 function reattach(tabId) {
   const entry = mounted.get(tabId);
   if (!entry || !entry.detached) return;
@@ -368,6 +381,23 @@ function reownDevices(devices, owner) {
   return moved;
 }
 
+// 세션이 등록에서 뺀 기기를 띄운 그 세션 소유 탭은 주인을 비운다. 남겨 두면 다른 세션이 그 기기를 등록해도
+// 남의 탭으로 보여 앱·QA 도구가 쓰지 못한다(2026-10-18 qa_run_resume 이 기기 할당에서 막힘).
+function releaseDevices(owner, keep) {
+  const kept = new Set(keep || []);
+  let released = 0;
+  for (const entry of mounted.values()) {
+    if (entry.tab.owner !== owner) continue;
+    const d = entryDevice(entry);
+    const ids = [d.udid, entry.tab.deviceId, entry.tab.deviceKey && `avd:${entry.tab.deviceKey}`].filter(Boolean);
+    if (!ids.length || ids.some((id) => kept.has(id))) continue;
+    entry.tab.owner = null;
+    released++;
+  }
+  if (released) savePlaces();
+  return released;
+}
+
 // 그 스페이스의 에뮬레이터 탭. 세로 열에 있는 탭도 탭 저장소에 없으므로 따로 본다.
 function emulatorTabOf(sp) {
   return [...mounted.values()].find(e => e.space === sp && !e.tab.owner && !e.detached)?.tab
@@ -378,7 +408,7 @@ function toStage(entry) {
   if (!stage || entry.detached || !mounted.has(entry.tab.id)) return;
   if (!entry.inStage) {
     entry.stageFrom = entry.inColumn ? "column" : "tab";
-    entry.wasActive = getActiveTabId(entry.space) === entry.tab.id;
+    entry.wasActive = isTabVisible(entry.space, entry.tab.id);
     if (!entry.inColumn) takeOutOfStrip(entry);
   }
   entry.inColumn = false; entry.inStage = true;
@@ -462,7 +492,7 @@ function closeEntry(tabId) {
 function sweep() {
   const panelHidden = !!panelEl()?.hidden;
   for (const [tabId, entry] of mounted) {
-    if (entry.detached) continue; // 분리한 탭은 탭 저장소에 없다. 창이 닫히면 되돌아온다.
+    if (entry.detached) continue; // 분리한 탭은 탭 저장소에 없음. 창이 닫히면 windowClosed 가 처리
     if (entry.inColumn) { if (entry.pane) entry.pane.setVisible(!entry.el.hidden && !inRail && layoutOn()); continue; }
     if (entry.inStage) { if (entry.pane) entry.pane.setVisible(inRail && !entry.el.hidden); continue; } // 무대의 탭도 탭 저장소에 없다
     if (!spaceOfTab(entry.tab)) { closeEntry(tabId); continue; }
@@ -538,6 +568,39 @@ function listTabs() {
     if (d.attached && d.udid) out.push({ space: entry.space, tab: entry.tab.id, udid: d.udid, name: d.name || entry.tab.label || "", owner: entry.tab.owner || null, persistentId: persistentDeviceId(entry, d.udid) });
   }
   return out;
+}
+
+// 에이전트에게 주는 기기 목록. 탭이 연결됨으로 남아도 기기가 꺼졌으면 제외(앱 재시작·외부 종료)
+// 제외된 기기는 다음 호출이 app-open 으로 다시 켬. 목록을 못 받으면 탭 보고 그대로
+// availability 는 Xcode·Android·카탈로그 점검까지 해서 수 초 걸림. 반응 관찰이 조회마다 부르므로 기기 목록만 사용
+async function deviceStates() {
+  const res = await host.rpc("emulator.listDevices", {}).catch(() => null);
+  const rows = res && res.ok && res.result;
+  return Array.isArray(rows) ? new Map(rows.map((d) => [d.id, d.state])) : null;
+}
+const bootedIn = (states, udid) => !states || !states.has(udid) || !states.get(udid) || states.get(udid) === "booted";
+async function deviceBooted(udid) {
+  return bootedIn(await deviceStates(), udid);
+}
+
+// 분리 창의 켜짐 표시는 창이 보고한 값이라 기기가 꺼져도 남음. 꺼졌으면 그 창에 켜기 요청 후 켜질 때까지 대기
+// 에이전트 요청이므로 창을 앞으로 가져오지 않음(focus:false)
+async function reconnectDetached(entry, udid, timeoutMs) {
+  if (!udid || await deviceBooted(udid)) return null;
+  const r = await host.openWindow({ space: emuKey(entry), tab: entry.tab.id, device: entry.tab.deviceKey || entry.tab.deviceId || udid, connect: true, focus: false });
+  if (!r || !r.ok) return { ok: false, error: (r && r.error) || "분리 창의 기기를 켜지 못했습니다." };
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (await deviceBooted(udid)) return null;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  }
+  return { ok: false, error: "기기가 제시간에 켜지지 않았습니다. Iris 에뮬레이터 창을 확인하세요." };
+}
+
+async function liveTabs() {
+  const tabs = listTabs();
+  const states = await deviceStates();
+  return tabs.filter((t) => bootedIn(states, t.udid));
 }
 
 function findDevice(devices, want) {
@@ -668,7 +731,20 @@ async function openForAgentRequest(space, want, timeoutMs, { owner = null, limit
   const existing = device ? findDeviceEntry(device) : null;
   if (existing && existing !== own) {
     const current = entryDevice(existing);
-    if (current.attached) return { ok: true, space: existing.space, tab: existing.tab.id, udid: current.udid, name: current.name, owner: existing.tab.owner || null };
+    // 세션이 지정한 기기가 소유자 없는 탭에 있으면 그 세션 소유로 옮김. 다른 세션 소유 탭과 다른 세션이 등록한 기기는 그대로
+    const reserved = reservedDevices.some(id => id === current.udid || id === existing.tab.deviceId || id === `avd:${existing.tab.deviceKey}`);
+    if (owner && want && !additional && !existing.tab.owner && !reserved) { existing.tab.owner = owner; savePlaces(); }
+    if (current.attached) {
+      // 연결됨으로 남은 탭도 기기가 꺼졌을 수 있음. 목록에서 꺼진 것이 확인되면 다시 켬
+      if (existing.detached) {
+        const failed = await reconnectDetached(existing, current.udid, timeoutMs);
+        if (failed) return failed;
+      } else if (existing.pane && !await deviceBooted(current.udid)) {
+        const r = await existing.pane.connect();
+        if (r && r.ok === false && !r.canceled) return { ok: false, error: r.error || "기기를 켜지 못했습니다." };
+      }
+      return { ok: true, space: existing.space, tab: existing.tab.id, udid: current.udid, name: current.name, owner: existing.tab.owner || null };
+    }
     if (existing.detached) return { ok: false, error: "지정한 기기는 외부 창에서 꺼져 있습니다. 그 창에서 켜세요." };
     return waitAgentDevice(existing.space, existing.tab, existing, device, timeoutMs);
   }
@@ -679,6 +755,8 @@ async function openForAgentRequest(space, want, timeoutMs, { owner = null, limit
     const d = entryDevice(away);
     if (!d.udid) return { ok: false, error: "이 스페이스의 에뮬레이터는 분리 창에 있고 기기가 붙어 있지 않습니다. 그 창에서 기기를 켜세요." };
     if (device && !matchesDevice(d, device)) return { ok: false, error: `이 스페이스의 에뮬레이터는 분리 창에서 ${d.name || d.udid} 를 보고 있습니다. 기기를 바꾸려면 그 창에서 바꾸세요.` };
+    const failed = away.running ? await reconnectDetached(away, d.udid, timeoutMs) : null;
+    if (failed) return failed;
     return { ok: true, space: sp, tab: away.tab.id, udid: d.udid, name: d.name || away.tab.label || "" };
   }
   let tab = device ? findDeviceEntry(device)?.tab : emulatorTabOf(sp);
@@ -721,7 +799,11 @@ async function openOwnedForAgent(sp, owner, entry, device, auto, timeoutMs, addi
     const d = entryDevice(entry);
     if (!device || matchesDevice(d, device)) {
       if (!entry.running) return { ok: false, error: "이 세션의 에뮬레이터 분리 창에서 기기가 꺼져 있습니다. 그 창에서 켜거나, 창을 닫으면 다음 호출에서 다시 켭니다." };
-      if (d.udid) return { ok: true, space: sp, tab: entry.tab.id, udid: d.udid, name: d.name || entry.tab.label || "", owner };
+      if (d.udid) {
+        const failed = await reconnectDetached(entry, d.udid, timeoutMs);
+        if (failed) return failed;
+        return { ok: true, space: sp, tab: entry.tab.id, udid: d.udid, name: d.name || entry.tab.label || "", owner };
+      }
     }
     return { ok: false, error: "이 세션의 에뮬레이터는 분리 창에 있습니다. 기기를 바꾸려면 그 창에서 바꾸세요." };
   }
@@ -756,7 +838,14 @@ async function openOwnedForAgent(sp, owner, entry, device, auto, timeoutMs, addi
 
 async function waitAgentDevice(sp, tab, entry, device, timeoutMs) {
   // 화면은 열 때 꺼진 기기를 켜지 않음. 에이전트가 요청한 기기는 여기서 켬
-  if (entry.pane && !entry.detached && !entryDevice(entry).attached) entry.pane.connect();
+  // 연결됨으로 남은 탭은 목록에서 꺼진 것이 확인되면 다시 켬. 끝날 때까지 대기(켜는 중에도 연결됨으로 보고되므로)
+  if (entry.pane && !entry.detached) {
+    if (!entryDevice(entry).attached) entry.pane.connect();
+    else if (!await deviceBooted(entryDevice(entry).udid)) {
+      const r = await entry.pane.connect();
+      if (r && r.ok === false && !r.canceled) return { ok: false, error: r.error || "기기를 켜지 못했습니다." };
+    }
+  }
   const until = Date.now() + timeoutMs;
   for (;;) {
     const d = entryDevice(entry);
@@ -776,11 +865,19 @@ async function waitAgentDevice(sp, tab, entry, device, timeoutMs) {
 async function onAsk(m) {
   const reply = (body) => ctx.wsSend({ type: "emulator-reply", id: m.id, ...body });
   try {
-    if (m.kind === "list") { reply({ ok: true, tabs: listTabs() }); return; }
+    if (m.kind === "list") { reply({ ok: true, tabs: await liveTabs() }); return; }
     if (m.kind === "reown") { reply({ ok: true, moved: m.owner ? reownDevices(m.devices, String(m.owner)) : 0 }); return; }
+    if (m.kind === "release") { reply({ ok: true, released: m.owner ? releaseDevices(String(m.owner), m.keep) : 0 }); return; }
     if (m.kind === "open") {
       reply(await openForAgent(m.space || null, m.device || null, Math.max(5000, Number(m.wait) || 120000),
         { owner: m.owner || null, limit: Number.isInteger(m.limit) ? m.limit : null, diskOk: m.diskOk !== false, additional: m.additional === true, reservedDevices: Array.isArray(m.reservedDevices) ? m.reservedDevices : [] }));
+      return;
+    }
+    if (m.kind === "viewport") {
+      if (!host?.viewport) { reply({ ok: false, error: "이 Iris 는 화면 비율 바꾸기를 지원하지 않습니다." }); return; }
+      if (![...mounted.values()].some((entry) => entryDevice(entry).udid === m.device)) { reply({ ok: false, error: "그 기기가 열린 에뮬레이터 탭이 없습니다." }); return; }
+      const r = await host.viewport({ device: m.device, op: m.op, preset: m.preset || null });
+      reply(r && r.ok ? { ok: true, data: r } : { ok: false, error: (r && r.error) || "화면 비율을 바꾸지 못했습니다." });
       return;
     }
     reply({ ok: false, error: "모르는 요청: " + m.kind });
@@ -856,6 +953,7 @@ async function moveDevice(device, location) {
   if (location === "external") { await detach(entry); return; }
   if (entry.detached) {
     entry.detachHome = inRail ? "stage" : "column";
+    entry.returning = true; // 창 닫힘을 되돌리기로 처리(사람이 닫은 창은 화면만 없앰)
     await host.closeWindow({ tab: entry.tab.id });
     return;
   }
@@ -881,6 +979,23 @@ async function stopDevice(device) {
     if (entry) entry.running = false;
   }
   savePlaces();
+}
+
+async function deleteDevice(device) {
+  const result = await host.deleteDevice({ platform: device.runtime === "Android" ? "android" : "ios", device: device.udid, persistentId: device.persistentId || device.udid });
+  if (!result?.ok || !result.deleted) return result;
+  const deletedIds = new Set([device.udid, result.device.udid, result.device.persistentId]);
+  pendingPlaces = pendingPlaces.filter(rec => !deletedIds.has(restoreDevice(rec)));
+  for (const entry of [...mounted.values()]) {
+    const current = entryDevice(entry);
+    if (!matchesDevice(current, device) && entry.tab.deviceKey !== result.device.persistentId && entry.tab.deviceId !== device.udid) continue;
+    if (entry.detached) await host.closeWindow({ tab: entry.tab.id });
+    removeTab(entry.space, entry.tab);
+    closeEntry(entry.tab.id);
+  }
+  savePlaces();
+  ctx.renderTabs(); ctx.showActiveTab();
+  return result;
 }
 
 function mountColumn() {
@@ -999,7 +1114,7 @@ function enterRail() {
   devicePanel = mountDevicePanel(body, {
     host,
     onOpenDevice: startDevice,
-    onMoveDevice: moveDevice, onStopDevice: stopDevice, deviceLocation,
+    onMoveDevice: moveDevice, onStopDevice: stopDevice, onDeleteDevice: host.deleteDevice ? deleteDevice : null, deviceLocation,
     headTools: root.querySelector(".emu-rail-head"),
     currentUdid,
   });
@@ -1037,7 +1152,7 @@ function savePlaces() {
     current.push(placeRecord(entry, {
       key: ctx.spk ? ctx.spk(entry.space) : entry.space,
       index: away ? (entry.awayIndex ?? -1) : getTabs(entry.space).indexOf(entry.tab),
-      active: entry.inColumn || entry.inStage ? groups.get(entry.group || "emulator")?.active === entry.tab.id : !away && getActiveTabId(entry.space) === entry.tab.id,
+      active: entry.inColumn || entry.inStage ? groups.get(entry.group || "emulator")?.active === entry.tab.id : !away && isTabVisible(entry.space, entry.tab.id),
       running: entryRunning(entry, d),
       name: d.name || entry.tab.label || "",
     }));
@@ -1121,7 +1236,7 @@ export function initCapability(c) {
   if (!host) return {};
   registerTabView({ kind: KIND, panelId: PANEL_ID, render: (t) => renderTab(t) });
   // 앱 종료 때 닫히는 분리 창은 되돌리지 않음(분리 창 자리 기록 유지)
-  host.onWindowClosed((m) => { if (!quitting && !(m && m.quitting)) reattach(m && m.tab); });
+  host.onWindowClosed((m) => { if (!quitting && !(m && m.quitting)) windowClosed(m && m.tab); });
   host.onQuitting?.(() => { quitting = true; });
   host.onWindowBounds?.((m) => {
     const entry = mounted.get(m && m.tab);

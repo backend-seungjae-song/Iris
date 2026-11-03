@@ -66,6 +66,20 @@ test('Windows setup는 UTF8 BOM·리터럴 경로·cmd 지연 확장 차단을 �
   assert.match(fs.readFileSync(path.join(root, 'setup.cmd'), 'utf8'), /setlocal DisableDelayedExpansion/i);
 });
 
+test('Windows 전체 설치는 worker 교체와 같은 deployment.lock을 사용한다', () => {
+  const acquire = functionSource('Acquire-DeploymentLock');
+  const release = functionSource('Release-DeploymentLock');
+  assert.match(acquire, /Join-Path \$stateDir 'deployment\.lock'/);
+  assert.match(acquire, /Get-Process -Id/);
+  assert.match(acquire, /\$age -lt 30/);
+  assert.match(release, /owner\.token -ne \$lock\.Token/);
+  assert.match(source, /try \{ Install-WindowsApp[^\n]+\}\s*\nfinally \{ Release-DeploymentLock/);
+  const nodeLock = fs.readFileSync(path.join(root, 'scripts/mcp-worker/deployment-lock.mjs'), 'utf8');
+  const shellLock = fs.readFileSync(path.join(root, 'scripts/mcp-worker/deployment-lock.sh'), 'utf8');
+  assert.match(nodeLock, /path\.join\(stateDir, "deployment\.lock"\)/);
+  assert.match(shellLock, /"\$1\/deployment\.lock"/);
+});
+
 test('Windows CI herdr 탐침은 성공 응답만 통과시키고 오류·비정상 응답·시간 초과를 거부한다', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/windows.yml'), 'utf8').replace(/\r\n/g, '\n');
   const probe = workflow.match(/const net = require\("net"\)[\s\S]+?(?=\n\s*'@)/)?.[0];

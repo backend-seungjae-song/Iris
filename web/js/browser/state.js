@@ -81,5 +81,7 @@ export function setBrowserActiveTab(space, tabId) {
 }
 
 export const boundSpace = () => configuredBoundSpace || (browserState && browserState.activeSpace) || null;
+// 결속하지 않은 분리 창이 공유 스페이스를 따라간 상태. 공유 탭은 공유 창만 띄움(dock.js hostShared)
+export const followsSharedSpace = () => !configuredBoundSpace && boundSpace() === "__shared__";
 export const bmTabs = () => (browserState && browserState.tabsBySpace && browserState.tabsBySpace[boundSpace()]) || [];
 export const bmActiveId = () => (browserState && browserState.activeBySpace && browserState.activeBySpace[boundSpace()]) || null;

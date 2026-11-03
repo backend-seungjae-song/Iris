@@ -21,7 +21,7 @@
 //   handoff/profiles/autofill 화면, startup의 파티션 UA 복원이다. 일치하지 않으면 인증·쿠키·비밀번호·UA가 함께 어긋난다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/chrome-handoff-ipc.cjs
 
-const { baseDomain, inScope } = require("./chrome-auth.cjs");
+const { baseDomain, inScope, openInBrowserProfile } = require("./chrome-auth.cjs");
 
 function createChromeHandoffIpc({
   app, BrowserWindow, screen, ipcMain, shell, session, isTrustedSender, isProfilePartition,
@@ -83,18 +83,20 @@ function createChromeHandoffIpc({
       });
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   });
-  // 패스키 로그인 등 이 창에서 끝낼 수 없는 흐름을 기본 브라우저로 넘긴다. http(s)만 허용한다.
-  // 아직 이 채널을 부르는 버튼은 없다. 하드닝(신뢰 발신자·http(s) 한정)과 전용 회귀 검사가
-  // 붙어 있어 의도적으로 남긴 통로로 읽히므로 유지한다.
-  // 버튼을 달지, 통로째 제거할지는 아직 정하지 않았다.
-  // file:·커스텀 스킴을 그대로 넘기면 임의 앱 실행 통로가 된다. 창 생성 함수가 아니라 모듈 최상위에
+  // 탭 메뉴 '크롬으로 열기'. { url, source } 면 그 탭과 짝지은 실제 Chrome 프로필 창에서, 주소 문자열이면 기본 브라우저로.
+  // http(s)만 허용. file:·커스텀 스킴을 그대로 넘기면 임의 앱 실행 통로가 된다. 창 생성 함수가 아니라 모듈 최상위에
   // 두어야 창 수만큼 중복 등록되지 않는다.
-  ipcMain.on("ac-open-in-chrome", (e, url) => {
+  ipcMain.on("ac-open-in-chrome", (e, request) => {
     try {
       if (!isTrustedSender(e)) return;
-      const u = new URL(String(url || ""));
+      const profileRequest = request && typeof request === "object";
+      const u = new URL(String((profileRequest ? request.url : request) || ""));
       if (u.protocol !== "http:" && u.protocol !== "https:") return;
-      shell.openExternal(u.href);
+      if (!profileRequest) { shell.openExternal(u.href); return; }
+      const source = String(request.source || "");
+      let entry = null;
+      if (source) { try { entry = cookieImport.listChromeProfiles().find((profile) => chromeProfileCid(profile) === source) || null; } catch {} }
+      if (!openInBrowserProfile(u.href, entry)) shell.openExternal(u.href);
     } catch {}
   });
   ipcMain.on("ac-ensure-profile", (e, partition) => {

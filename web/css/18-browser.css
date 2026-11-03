@@ -33,6 +33,10 @@ body.browser-mode #wv-dock { display:grid; }
    사이트가 자기 배경을 칠하면 그것이 이 위를 덮으므로 다크 테마 사이트는 그대로 다크로 보인다. */
 .wv-wrap webview { position:absolute; inset:0; width:100%; height:100%; display:none; border:0; background:#fff; }
 .wv-wrap webview.active { display:flex; }
+/* QA 회차가 잡은 탭도 사람이 앞에 띄우면 그대로 누르고 입력한다. 뒤에 깔린 QA 탭만 입력을 받지 않는다. */
+.wv-wrap webview.qa-owned:not(.active) { pointer-events:none; }
+.wv-wrap webview.qa-owned:not(.active) { display:flex; z-index:0; }
+.wv-wrap webview.active { z-index:1; }
 .browserview.picking .wv-wrap { outline:2px solid var(--focus); outline-offset:-2px; }
 /* 크기를 지정하면 크롬 기기 모드와 같다. 화면 자체가 그 크기가 되어 가운데 놓이고, 남는 공간은
    빈 배경이다. 확대·축소는 걸지 않는다(배율을 걸면 크기 조절이 아니라 줌이 된다). */
@@ -80,7 +84,8 @@ body.browser-mode #wv-dock { display:grid; }
 /* 좁은 가운데(1180 창에 도킹)에서는 도구 묶음이 다음 줄로 내려간다. 주소칸은 최소 폭을 지켜 입력칸이 사라지지 않는다. */
 .urlbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex:none; padding:8px 10px; border-bottom:1px solid var(--line); }
 .ub-nav { display:flex; gap:2px; color:var(--muted); flex:none; }
-.ub-tools { display:flex; align-items:center; gap:2px; flex:none; }
+/* 좁은 칸(분할 등)에서 칸 밖으로 넘치지 않게 줄바꿈 */
+.ub-tools { display:flex; flex-wrap:wrap; align-items:center; gap:2px; flex:none; max-width:100%; }
 .ub-sep { width:1px; height:16px; background:var(--line); flex:none; margin:0 2px; }
 .urlbar svg { width:14px; height:14px; flex:none; display:block; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
 /* 크기를 지정해 둔 상태. 지금 보는 것이 실제 크기가 아니라는 표시라 값을 글자로 붙이고 눈에 띄게 둔다. */
@@ -105,7 +110,7 @@ body.browser-mode #wv-dock { display:grid; }
 /* 포커스는 칸 테두리(:focus-within)가 보여 준다. 안쪽 입력칸에 전역 링까지 그리면 두 겹이 된다. */
 .urlbar input:focus-visible { box-shadow:none; }
 /* 별은 주소 끝에 붙는다. 누르는 자리는 20px 이고 음수 여백으로 그림 폭(14px)만큼만 차지한다. */
-.urlbar .ico.in-url { width:20px; height:20px; padding:0; margin:0 -3px 0 auto; letter-spacing:inherit; color:var(--faint); cursor:auto; }
+.urlbar .ico.in-url { display:grid; width:20px; height:20px; padding:0; margin:0 -3px 0 auto; letter-spacing:inherit; color:var(--faint); cursor:auto; }
 .urlbar .ico.in-url:hover { background:none; color:var(--fg); }
 #wv-bookmark.on { color:var(--pal-yellow-pop); }
 #url-sug { position:absolute; z-index:60; top:100%; left:-1px; right:-1px; margin-top:4px; max-height:260px; overflow:auto;

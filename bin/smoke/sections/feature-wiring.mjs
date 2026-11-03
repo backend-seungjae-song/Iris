@@ -35,10 +35,13 @@ for (const [name, re, source = web] of [
   ["분리창 요소 릴레이", /"pickrec\.deliver": \(m\) =>/, pickBoot],
   ["분리창 선택모드는 서버 방송을 따름", /"pick-mode": \(m\) => applyPickMode\(!!m\.on\)/, pickBoot],
   // 쿨다운 중 포커스 변경을 버리면 머리 이름과 실제 입력 대상이 어긋난다. 동작 검사는 test/herdr-sync.mjs
-  ["herdr 역동기화(focused)", /clearTimeout\(herdrSyncTimer\);[\s\S]*herdrSyncPane = paneId && paneId !== getCurTarget\(\) \? paneId : null;[\s\S]*Math\.max\(300, lastUserSelect \+ 1500 - Date\.now\(\)\)[\s\S]*setTimeout\(\(\) => applyHerdrFocus\(herdrSyncPane\), wait\);[\s\S]*if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*Date\.now\(\) - lastUserSelect < 1500\) \{ scheduleHerdrSync\(paneId\); return; \}[\s\S]*const a = agentByPane\(paneId\);[\s\S]*if \(!a\) return/, herdrSync],
+  ["herdr 역동기화(focused)", /clearTimeout\(herdrSyncTimer\);[\s\S]*herdrSyncPane = paneId && paneId !== getCurTarget\(\) \? paneId : null;[\s\S]*Math\.max\(100, lastUserSelect \+ 1500 - Date\.now\(\)\)[\s\S]*setTimeout\(\(\) => applyHerdrFocus\(herdrSyncPane\), wait\);[\s\S]*if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*Date\.now\(\) - lastUserSelect < 1500\) \{ scheduleHerdrSync\(paneId\); return; \}[\s\S]*const a = agentByPane\(paneId\);[\s\S]*if \(!a\) return/, herdrSync],
   // 위 동기화는 에이전트 pane 만 따라가서, 셸만 있는 스페이스로 시작하거나 선택한 스페이스가 herdr 에서 닫히면
   // 탐색기·실행·메모가 비거나 닫힌 스페이스에 남는다.
   ["에이전트 없는 포커스 스페이스도 선택", /scheduleHerdrSync\(foc\.paneId\);[^\n]*\n(?:\s*\/\/[^\n]*\n)+\s*else if \(!BROWSER_MODE && !getSpaces\(\)\.some\(\(s\) => s\.id === selectedSpaceId\)\) \{ const w = getSpaces\(\)\.find\(\(x\) => x\.focused\); if \(w\) switchToSpaceOf\(\{ workspaceId: w\.id \}\); \}/, mainJs],
+  // 포커스 요청과 겹쳐 만든 상태는 옛 focused 를 담을 수 있다. 그 방송으로 선택을 바꾸면 고른 세션이 직전 세션으로 돌아간다.
+  ["포커스 요청과 겹친 상태로는 역동기화하지 않음", /if \(!m\.focusStale\) scheduleHerdrSync\(foc\.paneId\);/, mainJs],
+  ["서버가 포커스 겹침을 방송에 표시", /focusStale: !!next\.focusStale/, read("server/index.js")],
   // 깃 화면은 앱에서 저장한 파일만 다시 물었다. 터미널·외부 편집기 변경은 폴더 감시 알림으로만 알 수 있다.
   ["폴더 변경 알림이 깃 화면도 갱신", /function handleDirChangedMessage\(m\) \{[\s\S]{0,500}?callHook\("git\.refreshFor", m\.dir\);/, mainJs],
   ["프로필 안정 id 파티션", /persist:acprof:/, webviewFactory],

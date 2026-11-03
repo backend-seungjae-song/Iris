@@ -1,10 +1,12 @@
 // 주소창 번역과 자동 번역 설정.
 // 소유 범위: webview 수명, 번역 상태, 프로필별 설정, 번역 메뉴 hook.
 // 제공 API: initCapability, autoTranslatePreferenceKey, findGuestWebview, normalizedResult.
-// 의존 대상: page-translate-ui/settings, core/hooks, acHost.pageTranslate와 webview 목록.
+// 의존 대상: page-translate-ui/settings, core/hooks, browser/webview(QA 탭 판별), acHost.pageTranslate와 webview 목록.
 // 유지 조건: 번역 클릭 또는 저장한 자동 번역 설정이 있을 때만 본문을 외부로 보낸다.
+// 유지 조건: QA 회차 탭은 자동 번역·번역 제안 제외(번역이 판정 대상 글자와 입력값을 바꿈)
 // 영향 범위: native/electron/page-translate.cjs, core/capabilities.js, 페이지 번역 검사.
 import { provide } from "../core/hooks.js";
+import { qaOwnedTab } from "./webview.js";
 import { createTranslateControls } from "./page-translate-ui.js";
 import { TRANSLATE_SETTINGS_PREFIX, languageCode, languageOptions, translationSettings, saveTranslationSettings, detectPageLanguage } from "./page-translate-settings.js";
 
@@ -142,7 +144,7 @@ export function initCapability(ctx) {
   }
   function maybeOffer(webview, state) {
     const settings = prefs(webview);
-    if (!state.hasText || state.suppressed || excluded(webview, state, settings) || state.source === state.target) return;
+    if (!state.hasText || state.suppressed || excluded(webview, state, settings) || state.source === state.target || qaOwnedTab(state.tabId)) return;
     if (!state.attempted && (settings.always.includes(state.source) || legacyEnabled(webview))) {
       state.attempted = true;
       void run(webview, "translate");
@@ -179,10 +181,10 @@ export function initCapability(ctx) {
       listeners.delete(webview);
       states.delete(webview);
     }
-    for (const [, record] of records) {
+    for (const [tabId, record] of records) {
       const webview = record?.el;
       if (!webview?.addEventListener || states.has(webview)) continue;
-      const state = { target: prefs(webview).target, generation: 0, detectAttempts: 0, source: "auto", hasText: false, status: "idle", manual: false, offered: false, attempted: false, suppressed: false, pending: null, timer: null };
+      const state = { tabId, target: prefs(webview).target, generation: 0, detectAttempts: 0, source: "auto", hasText: false, status: "idle", manual: false, offered: false, attempted: false, suppressed: false, pending: null, timer: null };
       states.set(webview, state);
       const removers = [];
       listeners.set(webview, removers);

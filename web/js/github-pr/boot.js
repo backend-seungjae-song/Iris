@@ -5,7 +5,7 @@
 // 영향 범위: source-control의 githubpr.branch hook, 서버 githubpr.* 메시지.
 import { provide, callHook, hasHook } from "../core/hooks.js";
 import { registerTabView } from "../core/tab-views.js";
-import { addTab, ensureTabSpace, getActiveTabId, getCenterSpace, getTabs, setActiveTab, setCenterSpace } from "../center/tab-store.js";
+import { addTab, ensureTabSpace, isTabVisible, getCenterSpace, getTabs, setActiveTab, setCenterSpace } from "../center/tab-store.js";
 import { openInSpaceBrowser } from "../center/file-routing.js";
 import { esc, prState, renderGithubPrView } from "./view.js";
 
@@ -19,7 +19,7 @@ const latestStatus = new Map();
 
 function keyOf(root, branch) { return `${root}\n${branch}`; }
 function requestId() { return `gpr-${Date.now()}-${++sequence}`; }
-function visible(tab) { return getCenterSpace() === tab.spaceId && getActiveTabId(tab.spaceId) === tab.id; }
+function visible(tab) { return getCenterSpace() === tab.spaceId && isTabVisible(tab.spaceId, tab.id); }
 function redraw(tab) { if (visible(tab)) renderTab(tab); }
 
 

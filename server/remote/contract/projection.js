@@ -6,7 +6,7 @@ const REF = /^[0-9a-f]{32}$/;
 const AGENT_KINDS = new Set(["claude", "codex", "other", "terminal"]);
 const AGENT_STATUSES = new Set(["working", "idle", "done", "blocked", "unknown"]);
 const ITEM_ROLES = new Set(["user", "assistant", "tool"]);
-const REQUEST_KINDS = new Set(["claude-permission", "claude-question", "browser-user"]);
+const REQUEST_KINDS = new Set(["claude-permission", "claude-question", "browser-user", "terminal-prompt"]);
 
 function timestamp(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -22,9 +22,12 @@ function modifiers(value) {
 }
 
 function terminalKey(value) {
-  return hasExactKeys(value, ["id", "label", "key", "modifiers"])
+  return hasExactKeys(value, ["id", "label", "key", "modifiers"], ["then"])
     && isString(value.id, 1, 32) && /^[A-Za-z0-9_-]+$/.test(value.id)
-    && isString(value.label, 1, 24) && isString(value.key, 1, 24) && modifiers(value.modifiers);
+    && isString(value.label, 1, 24) && isString(value.key, 1, 24) && modifiers(value.modifiers)
+    && (value.then === undefined || Array.isArray(value.then) && value.then.length >= 1 && value.then.length <= 7
+      && value.then.every((step) => hasExactKeys(step, ["key", "modifiers"])
+        && isString(step.key, 1, 24) && modifiers(step.modifiers)));
 }
 
 function browserSpace(value) {
@@ -129,6 +132,29 @@ export function isItemProjection(value) {
     && (value.at === undefined || timestamp(value.at));
 }
 
+const PROMPT_VARIANTS = new Set(["command", "edit", "network", "permissions", "tool", "plan", "trust", "review", "approval", "choice"]);
+const PROMPT_ROLES = new Set(["allow", "allowAlways", "deny", "text", "choice", "chat"]);
+
+function isPromptBody(body) {
+  const p = body?.screen;
+  if (hasExactKeys(body, ["questions", "screen"]) && p === null) return Array.isArray(body.questions)
+    && (body.questions.length === 0 || isQuestionBody({ questions: body.questions }));
+  return hasExactKeys(body, ["questions", "screen"]) && isQuestionBody({ questions: body.questions })
+    && hasExactKeys(p, ["question", "options", "selectedRow", "multiSelect", "hash", "columns", "rows"], ["title", "detail", "variant", "step", "steps", "tool", "target"])
+    && (p.step === undefined || (Number.isSafeInteger(p.step) && p.step >= 1 && p.step <= 20))
+    && (p.steps === undefined || (Number.isSafeInteger(p.steps) && p.steps >= 2 && p.steps <= 20))
+    && (p.title === undefined || isString(p.title, 0, 400)) && (p.detail === undefined || isString(p.detail, 0, 4000))
+    && (p.tool === undefined || isString(p.tool, 1, 128)) && (p.target === undefined || isString(p.target, 1, 300))
+    && (p.variant === undefined || PROMPT_VARIANTS.has(p.variant))
+    && isString(p.question, 1, 1000) && /^[0-9a-f]{64}$/.test(p.hash)
+    && Number.isSafeInteger(p.columns) && p.columns > 0 && p.columns <= 4096
+    && Number.isSafeInteger(p.rows) && p.rows > 0 && p.rows <= 4096
+    && typeof p.multiSelect === "boolean" && Array.isArray(p.options) && p.options.length >= 2 && p.options.length <= 12
+    && p.options.every(o => hasExactKeys(o, ["row", "text", "selectable"], ["role", "description", "checked"]) && (o.checked === undefined || typeof o.checked === "boolean") && (o.description === undefined || isString(o.description, 0, 300)) && (o.role === undefined || PROMPT_ROLES.has(o.role)) && Number.isSafeInteger(o.row)
+      && o.row > 0 && o.row <= p.rows && isString(o.text, 1, 300) && typeof o.selectable === "boolean")
+    && p.options.some(o => o.row === p.selectedRow);
+}
+
 function isQuestionBody(body) {
   return hasExactKeys(body, ["questions"]) && Array.isArray(body.questions) && body.questions.length > 0
     && body.questions.every((question) => hasExactKeys(question, ["question", "header", "multiSelect", "options"])
@@ -156,6 +182,7 @@ export function isRequestProjection(value) {
     && REF.test(value.ref) && REF.test(value.agent) && REQUEST_KINDS.has(value.kind)
     && timestamp(value.createdAt) && timestamp(value.expiresAt) && value.expiresAt > value.createdAt
     && (value.kind === "claude-permission" ? isPermissionBody(value.body)
+      : value.kind === "terminal-prompt" ? isPromptBody(value.body)
       : value.kind === "claude-question" ? isQuestionBody(value.body) : isBrowserUserBody(value.body));
 }
 
@@ -174,6 +201,11 @@ export function isOperationProjection(value) {
   }
   if (hasExactKeys(value, ["type", "requests"]) && value.type === "requests") {
     return Array.isArray(value.requests) && value.requests.every(isRequestProjection);
+  }
+  if (hasExactKeys(value, ["type", "questions"]) && value.type === "terminal.questions") {
+    return Array.isArray(value.questions) && value.questions.length <= 32
+      && Buffer.byteLength(JSON.stringify(value.questions)) <= 32 * 1024
+      && value.questions.every((question) => isRequestProjection(question) && ["claude-question", "terminal-prompt"].includes(question.kind));
   }
   if (hasExactKeys(value, ["type", "rid", "agent", "items", "before"]) && value.type === "transcript") {
     return isRequestId(value.rid) && REF.test(value.agent) && Array.isArray(value.items)
@@ -204,7 +236,7 @@ export function isOperationProjection(value) {
       && (value.columns === undefined || Number.isSafeInteger(value.columns) && value.columns > 0 && value.columns <= 4096)
       && (value.rows === undefined || Number.isSafeInteger(value.rows) && value.rows > 0 && value.rows <= 4096)
       && (value.mouseMode === undefined || typeof value.mouseMode === "boolean")
-      && (value.error === undefined || ["terminal-frame-too-large", "terminal-layout-unavailable", "terminal-read-unavailable"].includes(value.error));
+      && (value.error === undefined || ["terminal-frame-too-large", "terminal-layout-unavailable", "terminal-read-unavailable", "terminal-read-timeout", "terminal-screen-stale"].includes(value.error));
   }
   if (hasExactKeys(value, ["type", "agent", "revision", "text", "truncated"], ["hash", "columns", "rows", "mouseMode", "error"])
       && value.type === "terminal.frame") {
@@ -214,7 +246,7 @@ export function isOperationProjection(value) {
       && (value.columns === undefined || Number.isSafeInteger(value.columns) && value.columns > 0 && value.columns <= 4096)
       && (value.rows === undefined || Number.isSafeInteger(value.rows) && value.rows > 0 && value.rows <= 4096)
       && (value.mouseMode === undefined || typeof value.mouseMode === "boolean")
-      && (value.error === undefined || ["terminal-frame-too-large", "terminal-layout-unavailable", "terminal-read-unavailable"].includes(value.error));
+      && (value.error === undefined || ["terminal-frame-too-large", "terminal-layout-unavailable", "terminal-read-unavailable", "terminal-read-timeout", "terminal-screen-stale"].includes(value.error));
   }
   if (hasExactKeys(value, ["type", "rid", "agent", "text", "columns", "lineCount"]) && value.type === "terminal.scrollback.result") {
     return isRequestId(value.rid) && REF.test(value.agent) && isString(value.text, 0, 49152)
@@ -235,6 +267,10 @@ export function isOperationProjection(value) {
   }
   if (hasExactKeys(value, ["type", "rid", "tab", "watching"]) && value.type === "browser.frame.watch.result") {
     return isRequestId(value.rid) && REF.test(value.tab) && value.watching === true;
+  }
+  if (hasExactKeys(value, ["type", "tab", "error"]) && value.type === "browser.frame.status") {
+    return REF.test(value.tab) && (value.error === null || ["browser-frame-unavailable", "browser-tab-unavailable",
+      "browser-controller-unavailable", "browser-command-unavailable"].includes(value.error));
   }
   if (hasExactKeys(value, ["type", "tab", "seq", "width", "height", "jpeg"])
       && value.type === "browser.frame") {

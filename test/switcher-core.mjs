@@ -10,6 +10,12 @@ const {
   pick,
   unpick,
   movePicked,
+  groupPicked,
+  leavePicked,
+  ungroup,
+  planStops,
+  stopIdOf,
+  findOwnWindow,
   selectTarget,
   serialize,
   deserialize,
@@ -138,6 +144,103 @@ test("고른 창을 옮기면 selectTarget이 새 순서로 돈다", () => {
 
   assert.deepEqual(ordered, [1, 3, 2]);
   assert.deepEqual(selectTarget({ ordered, resolved: ordered, front: 1, cursor: null, dir: 1 }), { id: 3 });
+});
+
+function fourPicked(groups = []) {
+  return {
+    version: 1,
+    picked: [1, 2, 3, 4].map((cgId, index) => {
+      const item = saved({ cgId, matchTitle: `창${cgId}` });
+      if (groups[index]) item.group = groups[index];
+      return item;
+    }),
+    cursor: null,
+  };
+}
+const ids = (state) => state.picked.map((item) => item.cgId);
+const groupsOf = (state) => state.picked.map((item) => item.group || "");
+
+const keysOf = (state, ...cgIds) => state.picked.filter((item) => cgIds.includes(item.cgId)).map((item) => item.pickKey);
+
+test("고른 창들을 묶으면 첫 번째로 고른 창이 있던 차례 자리에 목록 순서대로 모인다", () => {
+  const state = fourPicked();
+  const grouped = groupPicked({ state, pickKeys: keysOf(state, 2, 4) });
+  assert.deepEqual(ids(grouped), [1, 2, 4, 3]);
+  assert.deepEqual(groupsOf(grouped), ["", "g1", "g1", ""]);
+  const fromGroup = fourPicked(["g1", "g1", "g1", ""]);
+  const regrouped = groupPicked({ state: fromGroup, pickKeys: keysOf(fromGroup, 2, 4) });
+  assert.deepEqual(ids(regrouped), [2, 4, 1, 3]);
+  assert.deepEqual(groupsOf(regrouped), ["g2", "g2", "g1", "g1"]);
+  assert.strictEqual(groupPicked({ state, pickKeys: keysOf(state, 2) }), state);
+  assert.strictEqual(groupPicked({ state, pickKeys: ["없는 키", "또 없는 키"] }), state);
+});
+
+test("고른 창을 묶음에서 빼면 그 묶음 바로 뒤에 원래 순서대로 혼자 선다", () => {
+  const state = fourPicked(["g1", "g1", "g1", ""]);
+  const out = leavePicked({ state, pickKeys: keysOf(state, 1, 2) });
+  assert.deepEqual(ids(out), [3, 1, 2, 4]);
+  assert.deepEqual(groupsOf(out), ["", "", "", ""]);
+  const one = leavePicked({ state, pickKeys: keysOf(state, 2) });
+  assert.deepEqual(ids(one), [1, 3, 2, 4]);
+  assert.deepEqual(groupsOf(one), ["g1", "g1", "", ""]);
+  const single = fourPicked();
+  assert.strictEqual(leavePicked({ state: single, pickKeys: keysOf(single, 2) }), single);
+});
+
+test("묶음 풀기는 순서를 그대로 두고 그 묶음만 푼다", () => {
+  const out = ungroup({ state: fourPicked(["g1", "g1", "g2", "g2"]), id: 2 });
+  assert.deepEqual(ids(out), [1, 2, 3, 4]);
+  assert.deepEqual(groupsOf(out), ["", "", "g2", "g2"]);
+});
+
+test("혼자인 창과 묶음은 이웃 차례를 통째로 넘어가고, 묶음 안 창은 묶음 안에서만 움직인다", () => {
+  const grouped = fourPicked(["", "g1", "g1", ""]);
+  assert.deepEqual(ids(movePicked({ state: grouped, id: 4, dir: -1 })), [1, 4, 2, 3]);
+  assert.deepEqual(ids(movePicked({ state: grouped, id: 1, dir: 1 })), [2, 3, 1, 4]);
+  const groupUp = movePicked({ state: grouped, id: 3, dir: -1, unit: "stop" });
+  assert.deepEqual(ids(groupUp), [2, 3, 1, 4]);
+  assert.deepEqual(groupsOf(groupUp), ["g1", "g1", "", ""]);
+  assert.deepEqual(ids(movePicked({ state: grouped, id: 3, dir: -1 })), [1, 3, 2, 4]);
+  assert.strictEqual(movePicked({ state: grouped, id: 2, dir: -1 }), grouped);
+  assert.strictEqual(movePicked({ state: grouped, id: 3, dir: 1 }), grouped);
+});
+
+test("떨어진 같은 묶음 이름과 하나 남은 묶음은 정리된다", () => {
+  const removed = unpick({ state: fourPicked(["g1", "g1", "", ""]), id: 2 });
+  assert.deepEqual(groupsOf(removed), ["", "", ""]);
+  const restored = deserialize(JSON.stringify(serialize(fourPicked(["g1", "g1", "", "g1"]))));
+  assert.deepEqual(groupsOf(restored), ["g1", "g1", "", ""]);
+  const split = deserialize(serialize(fourPicked(["g1", "g1", "x", "g1"])));
+  assert.deepEqual(groupsOf(split), ["g1", "g1", "", ""]);
+  const twoRuns = deserialize(serialize({
+    version: 1,
+    picked: [1, 2, 3, 4, 5].map((cgId) => ({
+      ...saved({ cgId, matchTitle: `창${cgId}` }),
+      ...(cgId === 3 ? {} : { group: "g1" }),
+    })),
+    cursor: null,
+  }));
+  assert.deepEqual(groupsOf(twoRuns), ["g1", "g1", "", "g2", "g2"]);
+});
+
+test("저장과 불러오기는 묶음을 유지하고, 묶음 필드가 없는 예전 저장본도 그대로 읽는다", () => {
+  const roundTrip = deserialize(JSON.stringify(serialize(fourPicked(["g1", "g1", "", ""]))));
+  assert.deepEqual(groupsOf(roundTrip), ["g1", "g1", "", ""]);
+  const legacy = deserialize(JSON.stringify(serialize(fourPicked())));
+  assert.deepEqual(ids(legacy), [1, 2, 3, 4]);
+  assert.deepEqual(groupsOf(legacy), ["", "", "", ""]);
+});
+
+test("planStops는 묶음을 한 차례로 만들고, 묶음이 없으면 창 목록과 같은 차례를 만든다", () => {
+  const plain = planStops([{ id: 1 }, { id: 2 }, { id: 3 }]);
+  assert.deepEqual(plain.ordered, [1, 2, 3]);
+  const grouped = planStops([{ id: 1 }, { id: 2, group: "g1" }, { id: 3, group: "g1" }, { id: 4 }]);
+  assert.deepEqual(grouped.ordered, [1, 2, 4]);
+  assert.deepEqual(grouped.stops[1].members, [2, 3]);
+  assert.equal(stopIdOf(grouped, 3), 2);
+  assert.equal(stopIdOf(grouped, 99), null);
+  assert.deepEqual(selectTarget({ ordered: grouped.ordered, resolved: grouped.ordered,
+    front: stopIdOf(grouped, 3), cursor: null, dir: 1 }), { id: 4 });
 });
 
 test("T9 재시작은 순번으로 메모 둘째 창을 붙이고 제목이 달라진 Chrome은 버린다", () => {
@@ -513,4 +616,18 @@ test("모든 함수는 전달받은 객체와 배열을 바꾸지 않는다", ()
   deserialize(state);
 
   assert.equal(JSON.stringify({ windows, state, alive, ordered, resolved }), before);
+});
+
+test("같은 제목의 이 앱 창이 둘이면 창 번호로 고른 창을 찾고, 번호가 없으면 제목과 위치로 찾는다", () => {
+  const candidates = [
+    { id: 3497, title: "Iris — 에뮬레이터", bounds: [10, 32, 400, 900] },
+    { id: 3498, title: "Iris — 에뮬레이터", bounds: [1441, 32, 477, 993] },
+    { id: 3490, title: "Iris — 콘솔", bounds: [2, 32, 1916, 993] },
+  ];
+  const picked = { cgId: 3498, matchTitle: "Iris — 에뮬레이터", bounds: [1441, 32, 477, 993] };
+  assert.equal(findOwnWindow(picked, candidates), 1);
+  assert.equal(findOwnWindow({ ...picked, cgId: 9999 }, candidates), 1, "번호가 바뀌면 제목과 위치");
+  assert.equal(findOwnWindow({ cgId: null, matchTitle: "Iris — 콘솔", bounds: [0, 0, 1, 1] }, candidates), 2, "제목이 하나뿐이면 제목");
+  assert.equal(findOwnWindow({ cgId: null, matchTitle: "Iris — 에뮬레이터", bounds: [0, 0, 1, 1] }, candidates), -1, "제목이 둘이고 위치도 다르면 찾지 못함");
+  assert.equal(findOwnWindow({ cgId: null, matchTitle: "없는 창", bounds: [10, 32, 1, 1] }, candidates), 0, "마지막으로 위치");
 });

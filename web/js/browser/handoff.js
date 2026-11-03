@@ -19,12 +19,12 @@
 //
 // 유지 조건 (이어서)
 //   이 파일을 앱 셸이 정적으로 import 하면 "끈 기능은 로드되지 않는다"가 깨진다. 앱 셸은 훅 이름만
-//   부른다: handoff.tabItem · handoff.webauthnNotice · handoff.botCheckNotice.
+//   부른다: handoff.webauthnNotice · handoff.botCheckNotice.
 //   이 기능은 본 창과 분리 브라우저 창 둘 다에서 동작한다(표의 windows). 한쪽만 적으면 그 창에서
 //   동작하지 않는다. 분리 창에서 로그인 벽을 만나는 경우가 오히려 흔하다.
 //
 // 영향 범위
-//   browser webview 이벤트 중 ac-webauthn·ac-botcheck 처리, 탭 우클릭의 Chrome 이어가기,
+//   browser webview 이벤트 중 ac-webauthn·ac-botcheck 처리와 Chrome 인증 안내,
 //   연결된 Chrome profile source 기록, autofill 조작 잠금, 공용 toast.
 //   화면은 web/css/22-handoff.css 가 가진다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/handoff.js
@@ -277,11 +277,16 @@ export function initCapability(ctx) {
     getProfileChromeSource: ctx.getProfileChromeSource,
     autofillBlocked: ctx.autofillBlocked, blog: ctx.blog,
   });
-  // 탭 우클릭 메뉴의 한 줄. 넘길 수 없는 탭이면 아무것도 내주지 않고, 앱 셸이 빈 항목을 거른다.
-  provide("handoff.tabItem", (rec) => (handoffCheck(rec).ok ? {
-    label: "Chrome에서 이어서 진행",
-    act: () => handoffToChrome(rec, "이 탭을 Chrome에서 이어서 진행합니다. 끝나면 로그인을 가져옵니다."),
-  } : null));
+  // 탭과 짝지은 실제 Chrome 프로필 id. 탭 메뉴 '크롬으로 열기'가 같은 프로필로 열 때 씀
+  provide("handoff.chromeSource", (rec) => handoffCheck(rec).src || "");
+  // 탭 메뉴 '크롬으로 열기': 짝지은 프로필이 있으면 창을 닫을 때 그 사이트 로그인을 Iris 로 가져옴
+  // 넘긴 경우 true. 짝지은 프로필이 없거나 AI 가 조작 중인 탭은 false(호출부가 그냥 엶)
+  provide("handoff.openSynced", (rec) => {
+    const chk = handoffCheck(rec);
+    if (!chk.ok || !chk.src || autofillBlocked(rec && rec.tabId)) return false;
+    handoffToChrome(rec, "Chrome에서 엽니다. 그 창을 닫으면 로그인을 가져옵니다.", false, true);
+    return true;
+  });
   provide("handoff.webauthnNotice", (m, tabUrl, partition, wv, rec) => webauthnNotice(m, tabUrl, partition, wv, rec));
   provide("handoff.botCheckNotice", (m, rec) => botCheckNotice(m, rec));
   return {};

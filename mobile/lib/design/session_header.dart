@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:iris_remote/design/agent_tile.dart';
 import 'package:iris_remote/design/buttons.dart';
+import 'package:iris_remote/design/chat_header.dart';
 import 'package:iris_remote/design/icon.dart';
 import 'package:iris_remote/design/logo.dart';
 import 'package:iris_remote/design/tokens.dart';
@@ -24,6 +25,8 @@ class IrisSessionHeader extends StatelessWidget {
     this.onBrowser,
     this.onGitHub,
     this.githubFailed = false,
+    this.status = 'idle',
+    this.kindLabel,
     super.key,
   });
 
@@ -41,9 +44,28 @@ class IrisSessionHeader extends StatelessWidget {
   final VoidCallback? onBrowser;
   final VoidCallback? onGitHub;
   final bool githubFailed;
+  // 대화 머리에서만 쓰는 상태 모양과 종류 이름
+  final String status;
+  final String? kindLabel;
 
   @override
   Widget build(BuildContext context) {
+    if (mode == SessionMode.chat) {
+      return IrisChatHeader(
+        title: title,
+        subtitle: subtitle,
+        status: status,
+        kindLabel: kindLabel,
+        chips: tabs,
+        onBack: onBack,
+        canTerminal: canTerminal,
+        canBrowser: canBrowser,
+        onTerminal: onTerminal,
+        onBrowser: onBrowser,
+        onGitHub: onGitHub,
+        githubFailed: githubFailed,
+      );
+    }
     final hasModes = canTerminal || canBrowser;
     return SizedBox(
       key: const Key('session-header'),

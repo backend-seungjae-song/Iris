@@ -86,6 +86,7 @@ void main() {
     );
     await tester.scrollUntilVisible(find.text('하나 · 세션 A'), 250);
     expect(find.text('하나 · 세션 A'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('하나 · 사용자 탭'), 250);
     expect(find.text('하나 · 사용자 탭'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('하나 · 세션 A')).dy,
@@ -106,7 +107,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('하나 · 터미널'), findsOneWidget);
+    expect(
+      find.byKey(const Key('agent-row-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
+      findsOneWidget,
+    );
     await tester.tap(
       find.byKey(const Key('agent-row-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
     );
@@ -119,6 +123,7 @@ void main() {
       true,
     );
     await tester.enterText(find.byKey(const Key('terminal-input')), 'pwd');
+    await tester.pump();
     await tester.tap(find.byTooltip('보내기'));
     await tester.pumpAndSettle();
     expect(
@@ -127,6 +132,8 @@ void main() {
           .single['text'],
       'pwd',
     );
+    expect(find.text('보냈습니다'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
     await tester.pumpWidget(const SizedBox());
     remote.state.dispose();
     await remote.session.disconnect();
@@ -152,7 +159,7 @@ void main() {
     expect(request['url'], 'https://example.test/doc.pdf');
     expect(request['agent'], a);
     expect(request['space'], s);
-    expect(find.text('Mac 브라우저에서 열었습니다'), findsOneWidget);
+    expect(find.text('컴퓨터 브라우저에서 열었습니다'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     remote.state.dispose();
     await remote.session.disconnect();
@@ -212,13 +219,13 @@ void main() {
       );
       if (kind == 'unsafe') {
         expect(requests, isEmpty);
-        expect(find.text('이 주소는 Mac 브라우저에서 열 수 없습니다.'), findsOneWidget);
+        expect(find.text('이 주소는 컴퓨터 브라우저에서 열 수 없습니다.'), findsOneWidget);
       } else if (kind == 'file') {
         expect(requests.single['media'], b);
         expect(requests.single.containsKey('url'), false);
       } else if (kind == 'failure') {
         expect(
-          find.text('Mac에서 이 항목을 더 이상 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 선택하세요.'),
+          find.text('컴퓨터에서 이 항목을 더 이상 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 선택하세요.'),
           findsOneWidget,
         );
       } else {
@@ -233,6 +240,10 @@ void main() {
 
 Widget app(Widget child) => MaterialApp(
   theme: ThemeData(extensions: [IrisColors.dark]),
+  builder: (context, child) => MediaQuery(
+    data: MediaQuery.of(context).copyWith(disableAnimations: true),
+    child: child!,
+  ),
   home: child,
 );
 ({RemoteState state, ActiveRemoteSession session, Wire connection}) setup(

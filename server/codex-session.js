@@ -25,8 +25,8 @@ let scanCache = { at: 0, byPid: new Map(), children: new Map() };
 let scanning = null;
 let fileIndex = { root: null, at: 0, promise: null };
 
-async function sessionFromId(id) {
-  if (!ID_RE.test(id || "")) return null;
+// codex 기록 폴더의 rollout 파일 색인. TTL 이 지났으면 새로 훑기 시작하고 진행 중인 약속을 돌려준다.
+function rolloutIndex() {
   const root = codexHome("sessions");
   if (fileIndex.root !== root || Date.now() - fileIndex.at >= SCAN_TTL_MS) {
     const promise = fs.promises.readdir(root, { recursive: true, withFileTypes: true }).then((entries) => {
@@ -42,7 +42,12 @@ async function sessionFromId(id) {
     }).catch(() => new Map());
     fileIndex = { root, at: Date.now(), promise };
   }
-  const file = (await fileIndex.promise).get(id.toLowerCase());
+  return fileIndex.promise;
+}
+
+async function sessionFromId(id) {
+  if (!ID_RE.test(id || "")) return null;
+  const file = (await rolloutIndex()).get(id.toLowerCase());
   return file ? codexSessionFromPath(file, id) : null;
 }
 
@@ -151,12 +156,14 @@ function findCodexDescendant(children, rootPid) {
 }
 
 // pane 하나의 codex 세션. 찾지 못하면 null 이고, 그때는 보관이 차단된다.
-export async function resolveCodexSession(herdr, paneId) {
+// knownPane: agent.list 가 이미 돌려준 그 pane 의 항목. agent·agent_session 이 pane.get 과 같은 값이라
+// 재계산마다 codex pane 수만큼 herdr 왕복을 보내지 않아도 된다.
+export async function resolveCodexSession(herdr, paneId, knownPane = null) {
   if (!paneId) return null;
   try {
     const reported = agentSessionPathFor(paneId, "codex");
-    if (typeof herdr.paneGet === "function") {
-      const pane = await herdr.paneGet(paneId);
+    if (knownPane || typeof herdr.paneGet === "function") {
+      const pane = knownPane || await herdr.paneGet(paneId);
       if (pane?.agent !== "codex") return null;
       if (pane?.agent_session?.kind === "id") {
         const id = pane.agent_session.value;
@@ -191,11 +198,20 @@ export async function resolveCodexSession(herdr, paneId) {
 }
 
 // 관제 상태의 codex 항목에 세션 키를 채운다. herdr가 제공하는 항목(claude)은 변경하지 않는다.
-export async function attachCodexSessions(state, herdr) {
+// herdr 왕복을 기다리는 동안 lsof·ps 와 rollout 파일 색인을 먼저 돌려 둔다. 결과는 각 캐시로 들어가
+// attachCodexSessions 가 그대로 쓴다.
+export function prewarmCodexScan() {
+  rolloutIndex().catch(() => {});
+  if (process.platform === "win32") return;
+  scan().catch(() => {});
+}
+
+export async function attachCodexSessions(state, herdr, rawAgents = []) {
   const need = (state || []).filter((s) => String(s.agent || "").toLowerCase() === "codex" && !s.sessionFile);
   if (!need.length) return state;
+  const rawByPane = new Map((rawAgents || []).filter((a) => a?.pane_id && a.agent_session).map((a) => [a.pane_id, a]));
   await Promise.all(need.map(async (s) => {
-    const hit = await resolveCodexSession(herdr, s.paneId);
+    const hit = await resolveCodexSession(herdr, s.paneId, rawByPane.get(s.paneId) || null);
     if (hit) { s.sessionUuid = hit.uuid; s.sessionFile = hit.file; }
   }));
   return state;

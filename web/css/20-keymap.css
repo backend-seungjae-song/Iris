@@ -51,6 +51,28 @@
 .km-seg button + button { border-left:1px solid var(--line-strong); }
 .km-seg button:hover { background:var(--hover); color:var(--fg); }
 .km-seg button[aria-pressed="true"] { background:var(--raised); color:var(--fg); font-weight:600; }
+.km-link-target { margin-top:8px; }
+/* 링크별 계정 규칙: 입력 한 줄(주소·계정·추가) + 그 아래 즉시 안내 + 규칙 목록 */
+.lk-head { margin-top:14px; border-top:1px solid var(--line); }
+.lk-add { display:flex; align-items:center; gap:8px; }
+.lk-add .lk-input { flex:1; width:auto; }
+.lk-add #lk-add { height:26px; min-width:56px; justify-content:center; }
+.lk-input-k { font-size:var(--fs-xs); color:var(--faint); flex:none; }
+.lk-acct { flex:none; width:150px; }
+.lk-row .lk-acct { width:150px; }
+.lk-hint { min-height:24px; display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; margin:6px 2px 8px;
+  font-size:var(--fs-s); color:var(--muted); line-height:1.45; }
+.lk-hint b { color:var(--fg); font-weight:600; }
+.lk-hint-t.err { color:var(--pal-danger); }
+.lk-hint .km-btn { height:22px; }
+.lk-pat { font-family:var(--mono); font-size:var(--fs-s); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lk-undo { display:flex; align-items:center; gap:10px; padding:5px 8px; margin-bottom:6px; border:1px solid var(--line);
+  border-radius:var(--r); font-size:var(--fs-s); color:var(--muted); }
+.lk-undo b { color:var(--fg); font-family:var(--mono); font-weight:500; }
+.lk-undo .km-btn { margin-left:auto; }
+/* 방금 추가·변경한 줄: 어디에 들어갔는지 한 번 표시(정렬된 목록이라 끝에 붙지 않음) */
+.lk-fresh { animation:lk-fresh 900ms cubic-bezier(.23, 1, .32, 1); }
+@keyframes lk-fresh { from { background:rgb(var(--pal-yellow-pop-rgb) / .14); } to { background:transparent; } }
 
 .km-sw { width:28px; height:16px; border:0; border-radius:8px; background:var(--line-strong); position:relative; flex:none; font:inherit; color:inherit; cursor:pointer; }
 .km-sw i { position:absolute; left:2px; top:2px; width:12px; height:12px; border-radius:50%; background:var(--muted);
@@ -153,6 +175,21 @@ button.km-keys:active { transform:scale(.97); }
 .km-sw-reason::before { content:"·"; margin-right:6px; }
 .km-sw-order { display:flex; gap:2px; }
 .km-sw-blocked-note { margin-top:8px; }
+/* 모든 줄이 같은 칸을 쓴다: 선택 16 · 그림 22 · 글 · 순서 단추 · 끝 48(스위치나 풀기) */
+.km-sw-sel { width:16px; flex:none; display:grid; place-items:center; }
+.km-sw-sel input { width:14px; height:14px; margin:0; accent-color:var(--accent); cursor:pointer; }
+.km-sw-end { width:48px; flex:none; display:flex; justify-content:flex-end; }
+.km-sw-blank { background:none; }
+/* 묶음: 네 변이 같은 중립색 테두리와 옅은 바탕의 상자 하나. 강조색 선은 쓰지 않음
+   안쪽 줄 좌우 여백은 테두리 1px 만큼 줄여서 밖의 줄과 칸 위치가 같다 */
+.km-sw-group { margin:6px 0; border:1px solid var(--line-strong); border-radius:var(--r); background:var(--hover); }
+.km-sw-group .km-sw-row { padding-left:7px; padding-right:7px; border-bottom:0; }
+.km-sw-group-head { min-height:30px; border-bottom:1px solid var(--line) !important; }
+.km-sw-group-t { font:600 var(--fs-s)/1 var(--sans); color:var(--fg-2); }
+.km-sw-selbar { position:sticky; bottom:8px; display:flex; align-items:center; gap:8px; margin:-6px 0 14px; padding:6px 8px;
+  border:1px solid var(--line-strong); border-radius:var(--r); background:var(--raised); box-shadow:var(--menu-shadow); }
+.km-sw-selbar-n { font-size:var(--fs-s); color:var(--fg); }
+.km-sw-selbar-hint { font-size:var(--fs-s); color:var(--muted); }
 
 /* 부산물. 종류를 눌러 펼치면 날짜가 나오고, 날짜를 눌러 펼치면 그날 항목이 나온다. */
 .art-kind { display:flex; align-items:center; gap:12px; min-height:34px; padding:5px 8px; border-bottom:1px solid var(--line); color:var(--fg-2); }

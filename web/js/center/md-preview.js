@@ -1,70 +1,76 @@
-// 마크다운 미리보기. 텍스트 탭의 다른 표시 형태다.
-//
-// 소유 범위
-//   .md 파일을 열었을 때 막대에 표시되는 「원문 · 미리보기」 두 버튼과, 미리보기로 바꿨을 때
-//   본문 대신 표시되는 영역. 그 영역의 클래스(.md-body)는 이 기능의 것이 아니다. 메모도 같은
-//   이름으로 같은 모습을 그리므로 그 이름은 앱 셸이 정의하고(17-editor-bar.css) 여기서는 빌려 쓴다.
-//
-// 제공 API
-//   initCapability(ctx): 훅 넷을 채운다.
-//   mdpreview.barHtml(t): 막대에 넣을 버튼. 마크다운이 아니면 빈 문자열.
-//   mdpreview.paneHtml(t): 미리보기 영역의 뼈대. 마크다운이 아니면 빈 문자열.
-//   mdpreview.render(t, wrap): 미리보기로 그렸으면 true. 그때 텍스트 편집기는 감춘다.
-//   mdpreview.click(target, t): 두 버튼 중 하나를 눌렀으면 true. 다시 그리는 것은 앱 셸이 한다.
-//
-// 의존 대상
-//   ctx 의 $ 와 앱 셸의 mdToHtml(core/markdown.js). 탭 객체의 mdMode 필드에 현재 표시 형태를 적는다.
-//
-// 유지 조건
-//   끄면 버튼도 영역도 없이 텍스트 편집기만 남아야 한다. 훅을 아무도 채우지 않으면 그렇게 된다.
-//   미리보기는 저장하지 않은 편집(draft)을 우선해 그린다. 그러지 않으면 방금 입력한 내용이 보이지 않는다.
-//   앱 셸이 mdToHtml 을 직접 호출하는 자리를 만들지 않는다. 그러면 기능을 끈 뒤에도 미리보기가 남는다.
-//
-// 영향 범위
-//   훅 이름을 바꾸면 호출하는 쪽은 web/js/center/text-editor.js 하나다.
-//   .md-body 의 모양을 바꾸면 같은 이름을 쓰는 메모의 미리보기도 함께 바뀐다.
+// 소유 범위: 칸별 마크다운 모드·미리보기·입력 지연 갱신
+// 제공 API: initCapability와 mdpreview 막대·본문·모드·변경·정리 훅
+// 의존 대상: hooks·markdown·탭과 칸 상태·파일 확장자
+// 유지 조건: 기능 해제 시 원문 편집, 칸별 모드, draft 우선, 해당 칸 안 DOM 탐색
+// 영향 범위: center/text-editor.js·tabs.js의 렌더·외부 변경·모델 폐기
 import { provide } from "../core/hooks.js";
 import { mdToHtml, isMarkdownExtension } from "../core/markdown.js";
-// 확장자 판정은 앱 셸의 것을 그대로 쓴다. 여기서 다시 구현하면 점 없는 이름·숨김 파일에서 결과가 달라진다.
 import { extOf } from "../explorer/tree.js";
+import { getCenterSpace, getCurrentTabs } from "./tab-store.js";
+import { paneLayout } from "./pane-store.js";
 
-const isMd = (t) => {
-  const ext = extOf(String((t && t.path) || ""));
-  return isMarkdownExtension(ext);
-};
+const modes = new WeakMap();
+const previews = new Map();
+const pending = new Map();
+const focusedPane = () => paneLayout(getCenterSpace())?.focus || 0;
+const isMd = (t) => isMarkdownExtension(extOf(String(t?.path || "")));
+function mode(t, pane) { return modes.get(t)?.get(pane) ?? t.mdMode ?? "raw"; }
+function draw(entry) {
+  if (entry.preview.isConnected === false || mode(entry.tab, entry.pane) !== "preview") return;
+  entry.preview.innerHTML = mdToHtml(entry.tab.draft != null ? entry.tab.draft : entry.tab.content);
+}
 
-export function initCapability(ctx) {
-  const { $ } = ctx;
-
-  provide("mdpreview.barHtml", (t) => (isMd(t)
-    ? `<button data-md="raw" class="${t.mdMode !== "preview" ? "on" : ""}">원문</button>`
-      + `<button data-md="preview" class="${t.mdMode === "preview" ? "on" : ""}">미리보기</button>`
+export function initCapability() {
+  provide("mdpreview.barHtml", (t, pane = focusedPane()) => (isMd(t)
+    ? `<button data-md="raw" class="${mode(t, pane) !== "preview" ? "on" : ""}">원문</button>`
+      + `<button data-md="preview" class="${mode(t, pane) === "preview" ? "on" : ""}">미리보기</button>`
     : ""));
 
-  provide("mdpreview.paneHtml", (t) => (isMd(t) ? `<div class="md-body" id="md-preview" hidden></div>` : ""));
+  provide("mdpreview.paneHtml", (t) => (isMd(t) ? `<div class="md-body" data-md-preview hidden></div>` : ""));
 
-  provide("mdpreview.render", (t, wrap) => {
-    if (!isMd(t) || t.mdMode !== "preview") return false;
-    const pv = $("#md-preview");
-    if (!pv) return false;
-    pv.hidden = false;
-    // 저장하지 않은 편집이 있으면 그것을 그린다. 디스크 내용을 그리면 방금 입력한 내용이 보이지 않는다.
-    pv.innerHTML = mdToHtml(t.draft != null ? t.draft : t.content);
-    if (wrap) wrap.classList.add("hidden");
+  provide("mdpreview.render", (t, wrap, pane = focusedPane()) => {
+    previews.delete(pane);
+    if (!isMd(t) || mode(t, pane) !== "preview") return false;
+    const preview = wrap?.parentElement?.querySelector("[data-md-preview]");
+    if (!preview) return false;
+    const entry = { tab: t, preview, pane };
+    previews.set(pane, entry);
+    preview.hidden = false;
+    draw(entry);
+    wrap.classList.add("hidden");
     return true;
   });
 
-  // 현재 이 탭의 화면을 이 기능이 그리고 있는가. 외부에서 파일이 바뀌면 앱 셸이 이것을 확인하고
-  // 맞으면 다시 그린다. 미리보기는 Monaco 모델이 아니라 자체 DOM 을 표시하므로, 모델만 교체하면
-  // 화면이 이전 내용으로 남는다. 이 기능이 로드되지 않았으면 undefined 가 반환되고 false 와 같다.
-  provide("mdpreview.presents", (t) => isMd(t) && t.mdMode === "preview");
+  provide("mdpreview.presents", (t, pane = focusedPane()) => isMd(t) && mode(t, pane) === "preview");
 
-  provide("mdpreview.click", (target, t) => {
-    const md = target && target.closest && target.closest("[data-md]");
-    if (!md) return false;
-    t.mdMode = md.dataset.md;
+  provide("mdpreview.click", (target, t, pane = focusedPane()) => {
+    const md = target?.closest?.("[data-md]");
+    if (!md || !isMd(t)) return false;
+    if (!modes.has(t)) modes.set(t, new Map());
+    modes.get(t).set(pane, md.dataset.md);
     return true;
   });
 
+  provide("mdpreview.changed", (t) => {
+    if (!isMd(t)) return;
+    clearTimeout(pending.get(t.path));
+    pending.set(t.path, setTimeout(() => {
+      pending.delete(t.path);
+      for (const entry of previews.values()) if (entry.tab.path === t.path) draw(entry);
+    }, 120));
+  });
+  provide("mdpreview.paneCollapsed", (from) => {
+    for (const tab of getCurrentTabs()) {
+      if (!isMd(tab)) continue;
+      const previous = mode(tab, from);
+      if (!modes.has(tab)) modes.set(tab, new Map());
+      modes.get(tab).set(0, previous);
+    }
+    previews.delete(from);
+  });
+  provide("mdpreview.closed", (path) => {
+    clearTimeout(pending.get(path)); pending.delete(path);
+    for (const [pane, entry] of previews) if (entry.tab.path === path) previews.delete(pane);
+  });
   return {};
 }

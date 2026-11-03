@@ -5,22 +5,67 @@
 //   없으면 기능이 없는 것과 같고, 연결만 있고 판정이 틀리면 다른 창이 같은 탭을 다시 만든다.
 // 영향 범위: 러너가 동적 import 로 이 run 을 부른다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs bin/smoke/sections/tab-wake.mjs
-import { check, checkAsync } from "../core.mjs";
+import { check, checkAsync, read } from "../core.mjs";
 import { aiTabs, browserCommands, browserRuntime, browserExtensionsSource, installAppScript, main as electronMainSource, mainJs, preloadSource, serverIndexSource, webviewLifecycleSource } from "../sources.mjs";
+import { createWorkerBrowserService } from "../../../server/mcp-worker/browser-service.js";
 
 export default async function run() {
 console.log("[2h3] 잠든 탭 깨우기");
+const workerBrowser = read("server/mcp-worker/browser-service.js");
+const currentHost = read("server/mcp-host/current-server.js");
 
 // 재우기는 메모리를 아끼려는 기능이다. 잠들었다는 이유로 명령을 실패시키면 그 기능이 자동화를
 // 중단시킨다.
-check("잠든 탭에 명령이 오면 실패시키지 않고 깨워서 다시 태운다", () =>
-  /wakeSleepingTab\(asleep\)/.test(browserCommands)
-  && /waitForTabWc\(asleep, 12000\)\.then\(\(wc\) => \{[\s\S]{0,400}?runBrowserCmd\(cmd, args, session, true, runId\)/
-    .test(browserCommands));
+await checkAsync("잠든 탭에 명령이 오면 실패시키지 않고 깨워서 다시 태운다", async () => {
+  const calls = [];
+  let targetCalls = 0;
+  const service = createWorkerBrowserService({
+    hostApi: {
+      withCommand: (_command, run) => run(),
+      call: async (operation, input) => {
+        calls.push([operation, input]);
+        if (operation === "journal.accept") return {};
+        if (operation === "journal.trace") return {};
+        if (operation === "browser.commandGuard") return { qaOwned: false };
+        if (operation === "browser.commandTargetState") {
+          targetCalls += 1;
+          return targetCalls === 1
+            ? { wakeTab: "sleeping-1", wakeHandle: "t1", stateRevision: 4 }
+            : { target: { tabId: "sleeping-1", targetToken: "target-1" } };
+        }
+        if (operation === "browser.tabWake") return { awake: true };
+        if (operation === "browser.executeWithDialog") return { ok: true, data: { text: "awake" } };
+        throw new Error(`예상하지 않은 host 연산: ${operation}`);
+      },
+    },
+    activity: { run: (_kind, _id, run) => run() },
+  });
+  const result = await service.dispatch({ command: "text", args: { tab: "t1" },
+    identity: { session: "smoke-tab-wake" }, commandId: "smoke-tab-wake-1" });
+  const wake = calls.find(([operation]) => operation === "browser.tabWake");
+  return result.ok === true && targetCalls === 2 && wake?.[1]?.tabId === "sleeping-1"
+    && wake?.[1]?.timeoutMs === 12000;
+});
 
 // 깨우지 못한 채 다시 태우면 wc 없는 대상으로 떨어져 "탭이 없다"고 답한다. 탭은 있고 깨우지 못한 것이다.
-check("깨우지 못하면 그 사실을 알린다", () =>
-  /if \(!wc\) \{\s*resolve\(\{ ok: false, error: `잠든 탭 @[^`]*깨우지 못했습니다/.test(browserCommands));
+await checkAsync("깨우지 못하면 그 사실을 알린다", async () => {
+  const service = createWorkerBrowserService({
+    hostApi: {
+      withCommand: (_command, run) => run(),
+      call: async (operation) => {
+        if (operation === "journal.accept" || operation === "journal.trace") return {};
+        if (operation === "browser.commandGuard") return { qaOwned: false };
+        if (operation === "browser.commandTargetState") return { wakeTab: "sleeping-2", wakeHandle: "t2", stateRevision: 1 };
+        if (operation === "browser.tabWake") throw new Error("wake failed");
+        throw new Error(`예상하지 않은 host 연산: ${operation}`);
+      },
+    },
+    activity: { run: (_kind, _id, run) => run() },
+  });
+  const result = await service.dispatch({ command: "text", args: { tab: "t2" },
+    identity: { session: "smoke-tab-wake" }, commandId: "smoke-tab-wake-2" });
+  return result.ok === false && result.data?.sleeping === true && /깨우지 못했습니다/.test(result.error);
+});
 
 // 새 탭도 만든 직후에는 활성 탭도 최근 명령 대상도 아니다. 깨우라고 알리지 않으면 사용자가 다른
 // 스페이스를 보고 있을 때 아무 창도 띄우지 않아 생성이 시간 초과로 끝난다.
@@ -30,12 +75,13 @@ check("새 탭은 만들자마자 깨우라고 알린다", () =>
 // 잠든 탭은 두 경로로 들어온다. 지목(--tab)이면 tg.tabId 로, 고정·그룹이면 resolveTarget 이
 // notReady 를 반환해 tg.waitTab 으로 들어온다. 한쪽만 처리하면 나머지 절반이 실패한다.
 check("지목 경로와 고정·그룹 경로를 모두 본다", () =>
-  /tg\.tabId && !wcOfTabId\(tg\.tabId\) \? tg\.tabId : \(tg\.notReady \? tg\.waitTab : null\)/
-    .test(browserCommands));
+  /resolved\.tabId && !wcOfTabId\(resolved\.tabId\) \? resolved\.tabId : \(resolved\.notReady \? resolved\.waitTab : null\)/
+    .test(currentHost));
 
 // 깨우고 다시 태우는데 그 재진입에서 또 깨우면 요청이 끝나지 않는다.
 check("깨우기는 한 번만 돈다", () =>
-  /const asleep = noAutoTab \|\| tg\.staleP \|\| tg\.needTab/.test(browserCommands));
+  /const asleep = input\.noAutoTab \|\| resolved\.staleP \|\| resolved\.needTab/.test(currentHost)
+  && /executeOne\(command, args, identity, true\)/.test(workerBrowser));
 
 // 생성은 창이 담당한다. webview 는 렌더러 소유이고, 어느 창이 소유자인지는 도킹 상태로 갈린다.
 check("서버는 알리기만 하고 만들지 않는다", () => {
@@ -94,7 +140,7 @@ check("깨우기는 떠 있는 webview 의 wc 를 다시 보고하거나, 멈춘
 
 // 종료 대기가 끝난 직후에 앱이 꺼지면 교체도 재실행도 하지 않은 채 앱이 없는 상태로 남는다.
 check("설치 중 교체를 포기하면 꺼진 앱을 다시 연다", () =>
-  /앱이 종료되지 않아 교체하지 않습니다[^\n]*\n[\s\S]{0,200}?running \|\| installed_env open -a "\$APP"/.test(installAppScript));
+  /앱이 종료되지 않아 교체하지 않습니다[^\n]*\n(?:(?!\n {2}exit 1)[\s\S]){0,800}?\n {2}installed_env open -a "\$APP"/.test(installAppScript));
 
 // 뒤늦게 뜬 분리 창은 앞서 보낸 알림을 받지 못했다. 탭 목록보다 먼저 받으면 대상 탭을 찾지 못한다.
 check("새로 연결된 창에 대기 중인 깨우기를 탭 목록 뒤에 다시 보낸다", () =>

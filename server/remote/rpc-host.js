@@ -29,8 +29,8 @@ const RESTART_DELAYS = Object.freeze([1_000, 2_000, 4_000, 8_000]);
 const FAILURE_WINDOW_MS = 5 * 60_000;
 const FAILURE_LIMIT = 5;
 const PREAUTH_RATE = 5;
-const AUTHENTICATED_RATE = 10;
-const AUTHENTICATED_BURST = 30;
+const AUTHENTICATED_RATE = 50;
+const AUTHENTICATED_BURST = 90;
 
 export function createRemoteRpcHost(options) {
   const serverInstance = options?.serverInstance;
@@ -101,6 +101,7 @@ export function createRemoteRpcHost(options) {
       onAudit({ type: "conn.closed", connId, reason });
     }
     connections.clear();
+    options.onPhoneSessionsChanged?.();
     bySequence.clear();
   }
 
@@ -153,6 +154,7 @@ export function createRemoteRpcHost(options) {
     const entry = connections.get(connId);
     if (!entry) return false;
     connections.delete(connId);
+    options.onPhoneSessionsChanged?.();
     auth?.close(connId);
     operations.closeConnection(connId);
     bySequence.delete(entry.gwSeq);
@@ -215,8 +217,11 @@ export function createRemoteRpcHost(options) {
   }
 
   const operations = options.operations || createRemoteOperations({
+    auth,
+    unregisterDevice: options.onDeviceUnregister,
     agents,
     requests,
+    terminalQuestions: options.terminalQuestions,
     transcripts,
     messages,
     getHerdr: options.getHerdr,
@@ -319,6 +324,7 @@ export function createRemoteRpcHost(options) {
   function completeAuthentication(entry, timestamp, accepted) {
     entry.authenticated = true;
     entry.deviceAuthenticated = true;
+    options.onPhoneSessionsChanged?.();
     resetTokenBucket(entry, timestamp, AUTHENTICATED_BURST);
     if (!sendControl({ type: "conn.authenticated", connId: entry.connId }, entry.connId)
       || !sendRemote(entry.connId, projectAuthResult(accepted.resumeToken, accepted.pinIdleMinutes))) {
@@ -471,6 +477,7 @@ export function createRemoteRpcHost(options) {
     }
     if (message.type === "conn.close") {
       connections.delete(entry.connId);
+      options.onPhoneSessionsChanged?.();
       auth?.close(entry.connId);
       operations.closeConnection(entry.connId);
       bySequence.delete(entry.gwSeq);
@@ -596,6 +603,7 @@ export function createRemoteRpcHost(options) {
     start,
     stop,
     closeConnection,
+    authenticatedCount: () => [...connections.values()].filter((entry) => entry.authenticated).length,
     status: () => ({ active, generation, listening: listening && { ...listening }, connections: connections.size,
       restartScheduled: !!restartTimer, failures: failures.length, queue: queue?.status() || null, child: !!child }),
   };

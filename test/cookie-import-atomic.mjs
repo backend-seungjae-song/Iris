@@ -9,12 +9,16 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const Module = require("node:module");
 const { cookieKey, cookieFingerprint } = require("../native/electron/cookie-sync-policy.cjs");
+// 실패 기록(cookie-import.log)이 설치 앱 상태 폴더(~/.iris)에 쓰이지 않게 검사용 폴더로
+const STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "iris-cookie-atomic-state-"));
+process.env.IRIS_STATE_DIR = STATE_DIR;
+test.after(() => fs.rmSync(STATE_DIR, { recursive: true, force: true }));
 
 function cookie(name, value, domain = ".example.com") {
   return { name, value, domain, path: "/", secure: true, httpOnly: true, sameSite: "unspecified" };
 }
 
-function loadImporter(before, { failOnce, rawStore = false } = {}) {
+function loadImporter(before, { failOnce, rawStore = false, keychain } = {}) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "iris-cookie-atomic-"));
   const jar = new Map(before.map((item) => [cookieKey(item), item]));
   let failed = false;
@@ -58,6 +62,14 @@ function loadImporter(before, { failOnce, rawStore = false } = {}) {
   const reload = () => {
     const originalLoad = Module._load;
     Module._load = function mockedLoad(request, parent, isMain) {
+      if (request === "node:child_process" && keychain) {
+        const actual = originalLoad.call(this, request, parent, isMain);
+        return { ...actual, execFile: (file, args, options, callback) => {
+          assert.equal(file, "/usr/bin/security");
+          assert.equal(options.timeout, 30000);
+          return keychain(callback);
+        } };
+      }
       if (request === "electron") return {
         app: { getPath: () => userData }, dialog: {}, session: { fromPartition: () => sess },
       };
@@ -76,6 +88,49 @@ function loadImporter(before, { failOnce, rawStore = false } = {}) {
     cleanup: () => fs.rmSync(userData, { recursive: true, force: true }) };
 }
 
+test("키체인 대기는 비동기이며 시간 초과 후 다시 가져올 수 있다", async (t) => {
+  let finish, requests = 0;
+  const h = loadImporter([cookie("session", "keep")], { keychain: callback => { requests++; finish = callback; } });
+  t.after(h.cleanup);
+  const source = path.join(h.userData, "source-cookies");
+  execFileSync("/usr/bin/sqlite3", [source], { input: `CREATE TABLE cookies(
+    host_key TEXT,name TEXT,path TEXT,value BLOB,encrypted_value BLOB,
+    is_secure INTEGER,is_httponly INTEGER,samesite INTEGER,expires_utc INTEGER);
+    INSERT INTO cookies VALUES('.example.com','session','/','',X'76313000',1,1,0,0);` });
+  const entry = { dbPath: source, profile: "Default", browser: { id: "chrome", service: "test", account: "test" } };
+  const pending = h.importer.importCookiesFromChrome(entry, "persist:acprof:test");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests, 1);
+  assert.deepEqual([...h.jar.values()].map(c => c.value), ["keep"]);
+  finish(Object.assign(new Error("timeout"), { killed: true }));
+  assert.match((await pending).error, /대기 시간이 지났습니다/);
+  const retry = h.importer.importCookiesFromChrome(entry, "persist:acprof:test");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests, 2);
+  finish(new Error("denied"));
+  assert.match((await retry).error, /거절되었거나 취소/);
+  assert.deepEqual([...h.jar.values()].map(c => c.value), ["keep"]);
+});
+
+test("Chrome 프로필 가져오기는 Iris 에 없는 쿠키만 넣고 있던 쿠키는 값이 달라도 그대로 둔다", async (t) => {
+  const h = loadImporter([cookie("SID", "iris"), cookie("only-iris", "keep")]);
+  t.after(h.cleanup);
+  const source = path.join(h.userData, "source-cookies");
+  execFileSync("/usr/bin/sqlite3", [source], { input: `CREATE TABLE cookies(
+    host_key TEXT,name TEXT,path TEXT,value BLOB,encrypted_value BLOB,
+    is_secure INTEGER,is_httponly INTEGER,samesite INTEGER,expires_utc INTEGER);
+    INSERT INTO cookies VALUES('.example.com','SID','/','chrome',X'',1,1,0,0);
+    INSERT INTO cookies VALUES('.example.com','NEW','/','chrome',X'',1,1,0,0);` });
+  const entry = { dbPath: source, profile: "Default", browser: { id: "chrome", service: "test", account: "test" } };
+  const res = await h.importer.importCookiesFromChrome(entry, "persist:acprof:test");
+  assert.equal(res.error, undefined);
+  assert.equal(res.imported, 1);
+  assert.equal(res.kept, 1);
+  assert.deepEqual([...h.jar.values()].map((item) => [item.name, item.value]).sort(), [
+    ["NEW", "chrome"], ["SID", "iris"], ["only-iris", "keep"],
+  ]);
+});
+
 test("handoff live cohort rolls back every cookie when one set fails", async (t) => {
   const h = loadImporter([cookie("SID", "old"), cookie("legacy", "keep")], { failOnce: "HSID" });
   t.after(h.cleanup);
@@ -84,6 +139,11 @@ test("handoff live cohort rolls back every cookie when one set fails", async (t)
   assert.deepEqual([...h.jar.values()].map((item) => [item.name, item.value]).sort(), [
     ["SID", "old"], ["legacy", "keep"],
   ]);
+  // 바로 적용 실패 이유는 상태 폴더 기록에 남음
+  const last = fs.readFileSync(path.join(STATE_DIR, "cookie-import.log"), "utf8").trim().split("\n").pop();
+  const entry = JSON.parse(last.replace(/^\S+ /, ""));
+  assert.equal(entry.outcome, "put");
+  assert.equal(entry.reason.message, "set rejected");
 });
 
 test("handoff replacement keeps local Cloudflare and Google integrity cookies", async (t) => {
