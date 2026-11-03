@@ -34,6 +34,35 @@ test("분기한 Claude의 hook id를 파일 끝의 session_id가 유일한 실�
   assert.equal(indexProjects(f.projects).get(hookId)?.file, fs.realpathSync(file));
 });
 
+test("반복 색인은 기록 끝에 새로 붙은 hook id를 다시 읽고 256KB 밖의 id는 쓰지 않는다", (t) => {
+  const f = fixture(t);
+  const fileId = "b998c615-968f-4fba-b2bc-79706aff9dc2";
+  const oldId = "11111111-1111-4111-8111-111111111111";
+  const newId = "2f228987-0bf3-4c75-9213-40063259b3de";
+  const file = path.join(f.project, `${fileId}.jsonl`);
+  fs.writeFileSync(file, `${JSON.stringify({ session_id: oldId })}\n`);
+  assert.equal(indexProjects(f.projects).get(oldId)?.file, fs.realpathSync(file));
+  fs.appendFileSync(file, `${JSON.stringify({ pad: "x".repeat(256 * 1024) })}\n${JSON.stringify({ session_id: newId })}\n`);
+  const idx = indexProjects(f.projects);
+  assert.equal(idx.get(newId)?.file, fs.realpathSync(file));
+  assert.equal(idx.get(oldId), undefined);
+});
+
+test("기록 파일이 수천 개여도 반복 색인은 바뀌지 않은 파일을 다시 읽지 않는다", (t) => {
+  const f = fixture(t);
+  for (let i = 0; i < 3000; i++) {
+    const id = `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+    fs.writeFileSync(path.join(f.project, `${id}.jsonl`), `${JSON.stringify({ session_id: id })}\n`);
+  }
+  indexProjects(f.projects);
+  let reads = 0;
+  const { readSync } = fs;
+  fs.readSync = (...args) => { reads++; return readSync(...args); };
+  t.after(() => { fs.readSync = readSync; });
+  indexProjects(f.projects);
+  assert.equal(reads, 0);
+});
+
 test("같은 Claude hook id를 가진 파일이 둘이면 어느 파일도 고르지 않는다", (t) => {
   const f = fixture(t);
   const hookId = "2f228987-0bf3-4c75-9213-40063259b3de";
@@ -59,6 +88,31 @@ test("hook 경로가 있으면 Claude 파일명과 session id가 달라도 그 p
     agent: "claude", agent_status: "idle", agent_session: { kind: "id", value: hookId } }]);
   assert.equal(state.sessionUuid, hookId);
   assert.equal(state.transcriptFile, fs.realpathSync(file));
+});
+
+test("모든 Claude 세션이 경로를 보고했으면 기록 폴더 색인을 만들지 않는다", (t) => {
+  const f = fixture(t);
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = f.claudeHome;
+  t.after(() => previous === undefined ? delete process.env.CLAUDE_CONFIG_DIR : process.env.CLAUDE_CONFIG_DIR = previous);
+  const id = "b998c615-968f-4fba-b2bc-79706aff9dc2";
+  const file = path.join(f.project, `${id}.jsonl`);
+  fs.writeFileSync(file, `${JSON.stringify({ session_id: id })}\n`);
+  assert.equal(runSessionCmd("prompt-targets", { markers: [], agentSession: { agent: "claude", sessionId: id, transcriptPath: file } }, "w1:p1").ok, true);
+  const { readdirSync } = fs;
+  const scanned = [];
+  fs.readdirSync = (...args) => { if (String(args[0]) === f.projects) scanned.push(args[0]); return readdirSync(...args); };
+  t.after(() => { fs.readdirSync = readdirSync; });
+  const [state] = buildMonitorState([{ pane_id: "w1:p1", workspace_id: "w1", terminal_id: "t1",
+    agent: "claude", agent_status: "idle", agent_session: { kind: "id", value: id } }]);
+  assert.equal(state.transcriptFile, fs.realpathSync(file));
+  assert.deepEqual(scanned, [], "보고된 경로가 있으면 projects 폴더를 훑지 않는다");
+  // 보고가 없으면 색인이 필요하고 그때는 훑는다.
+  resetAgentSessionPathsForTest();
+  const [fallback] = buildMonitorState([{ pane_id: "w1:p2", workspace_id: "w1", terminal_id: "t2",
+    agent: "claude", agent_status: "idle", agent_session: { kind: "id", value: id } }]);
+  assert.equal(fallback.transcriptFile, fs.realpathSync(file));
+  assert.equal(scanned.length, 1);
 });
 
 test("실제 파일과 허용 루트와 상태 폴더를 모두 확인한다", (t) => {

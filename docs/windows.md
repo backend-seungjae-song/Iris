@@ -19,7 +19,7 @@ pnpm install --frozen-lockfile
 pnpm dist:win
 ```
 
-`pnpm install:app`은 Windows에서 새 앱을 빌드한 뒤 실행 중인 앱의 정상 종료를 기다리고 사용자 계정에 설치합니다. 새 에이전트 연결을 추가하려면 `setup.cmd`를 실행하세요. macOS에서는 기존 설치 절차를 사용합니다.
+`pnpm install:app --full`은 Windows에서 새 앱을 빌드한 뒤 실행 중인 앱의 정상 종료를 기다리고 사용자 계정에 설치합니다. 새 에이전트 연결을 추가하려면 `setup.cmd`를 실행하세요. macOS에서는 기존 설치 절차를 사용합니다.
 
 현재 Windows 배포는 x64입니다. [herdr 공식 릴리스 목록](https://herdr.dev/latest.json)의 0.9.3에는 Windows x86_64 바이너리만 있으며 Windows ARM64 바이너리는 없습니다(2026-10-06 확인). Windows ARM64 전용 빌드와 x64 에뮬레이션 실행은 검증하지 않았습니다.
 

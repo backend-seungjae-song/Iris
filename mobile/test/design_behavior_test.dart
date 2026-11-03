@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:iris_remote/design/action_bar.dart';
 import 'package:iris_remote/design/markdown_text.dart';
 import 'package:iris_remote/design/sheet.dart';
 import 'package:iris_remote/remote/protocol.dart';
@@ -16,12 +17,20 @@ import 'design_fixture.dart';
 
 const _screenSize = Size(394, 854);
 
+// IrisActionBar 는 버튼 key 를 넘기지 않아 맨 오른쪽(주 버튼)을 위치로 찾음
+Finder get _barPrimary => find
+    .descendant(
+      of: find.byType(IrisActionBar),
+      matching: find.byType(TextButton),
+    )
+    .last;
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadDesignReferenceFont);
 
   testWidgets('허용 성공 후 요청 줄이 320ms 동안 접힌다', (tester) async {
-    await _pump(tester, designHome(extended: false));
+    await _pump(tester, designHome(extended: false), disableAnimations: true);
     final hierarchy = find.byKey(const Key('home-space-$irisAgentSpaceRef'));
     final before = tester.getTopLeft(hierarchy).dy;
 
@@ -55,7 +64,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('question-option-first')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('question-next')));
+    await tester.tap(_barPrimary);
     await tester.pumpAndSettle();
 
     expect(_questionText(tester), '잠금 파일을 새로 만들까요?');
@@ -67,16 +76,22 @@ void main() {
     expect(directInput, findsOneWidget);
     await tester.enterText(directInput, '기존 파일을 유지해 줘');
     await tester.pump();
-    expect(find.text('보내기'), findsOneWidget);
+    expect(find.text('확인하고 제출'), findsOneWidget);
 
     await tester.tap(find.text('이전'));
     await tester.pumpAndSettle();
     expect(_questionText(tester), '어떤 패키지를 올릴까요?');
 
-    await tester.tap(find.byKey(const Key('question-next')));
+    await tester.tap(_barPrimary);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('question-next')));
+    await tester.tap(_barPrimary);
     await tester.pumpAndSettle();
+    expect(find.text('이대로 보낼까요?'), findsOneWidget);
+    expect(sent, isNull);
+    await tester.tap(_barPrimary);
+    await tester.pump();
+    // 오류 알림 타이머(2.2초 + 퇴장 0.26초)가 끝날 때까지 진행
+    await tester.pump(const Duration(seconds: 3));
     expect(sent, hasLength(2));
     expect(sent!.first, isA<QuestionLabels>());
     expect(sent![1], isA<QuestionText>());
@@ -115,18 +130,16 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('터미널 카드의 전체 출력을 펼치고 접는다', (tester) async {
-    await _pump(tester, designSession());
-    await tester.tap(find.text('출력 전체 38줄'));
+  testWidgets('도구 표 줄을 눌러 출력을 펼치고 접는다', (tester) async {
+    await _pump(tester, designSession(), disableAnimations: true);
+    expect(find.byKey(const Key('session-tool-detail')), findsNothing);
+    await tester.tap(find.byKey(const Key('session-tool-row-0')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('line 38'), findsOneWidget);
-    expect(find.text('출력 접기'), findsOneWidget);
+    expect(find.textContaining('line 38', findRichText: true), findsOneWidget);
 
-    await tester.ensureVisible(find.text('출력 접기'));
+    await tester.tap(find.byKey(const Key('session-tool-row-0')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('출력 접기'));
-    await tester.pumpAndSettle();
-    expect(find.text('출력 전체 38줄'), findsOneWidget);
+    expect(find.byKey(const Key('session-tool-detail')), findsNothing);
   });
 
   testWidgets('대화를 올리면 맨 아래 버튼이 나타나고 누르면 사라진다', (tester) async {
@@ -155,7 +168,7 @@ void main() {
     final buttonRect = tester.getRect(
       find.byKey(const Key('session-scroll-bottom')),
     );
-    expect(buttonRect.top, closeTo(chatRect.top + 12, 0.1));
+    expect(buttonRect.bottom, closeTo(chatRect.bottom - 12, 0.1));
     expect(buttonRect.right, closeTo(chatRect.right - 16, 0.1));
 
     update(() => messageCount++);
@@ -430,7 +443,7 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     expect(find.byKey(const Key('browser-cursor')), findsOneWidget);
 
@@ -457,7 +470,7 @@ void main() {
       isNotEmpty,
     );
     expect(remote!.state.composerDraftsFor(humanAgentRef), hasLength(1));
-    expect(find.text('요소 선택'), findsOneWidget);
+    expect(find.byKey(const Key('browser-tool-pick')), findsOneWidget);
     expect(find.byKey(const Key('browser-cursor')), findsOneWidget);
   });
 
@@ -473,7 +486,7 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     await tester.tapAt(
       tester.getCenter(find.byKey(const Key('browser-frame'))),
@@ -549,19 +562,19 @@ void main() {
       DesignRemoteScene(builder: (_, value) => designBrowserScene(value)),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     await _moveBrowserCursor(tester);
     expect(find.byKey(const Key('browser-element-highlight')), findsOneWidget);
 
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     expect(find.byKey(const Key('browser-element-highlight')), findsNothing);
 
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     await _moveBrowserCursor(tester);
-    await tester.tap(find.text('조작 기록'));
+    await tester.tap(find.byKey(const Key('browser-tool-record')));
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.byKey(const Key('browser-element-highlight')), findsNothing);
   });
@@ -572,7 +585,7 @@ void main() {
       DesignRemoteScene(builder: (_, value) => designBrowserScene(value)),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     await _moveBrowserCursor(tester);
     expect(find.byKey(const Key('browser-element-highlight')), findsOneWidget);
@@ -588,7 +601,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(const Key('browser-element-highlight')), findsNothing);
 
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     await _moveBrowserCursor(tester);
     expect(find.byKey(const Key('browser-element-highlight')), findsOneWidget);
@@ -611,14 +624,14 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     final gate = Completer<void>();
     remote!.connection.browserHoverGate = gate;
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     final frame = find.byKey(const Key('browser-frame'));
     final gesture = await tester.startGesture(tester.getCenter(frame));
     await gesture.moveBy(const Offset(40, 12));
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 200));
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     gate.complete();
     await tester.pump(const Duration(milliseconds: 400));
@@ -637,7 +650,7 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('요소 선택'));
+    await tester.tap(find.byKey(const Key('browser-tool-pick')));
     await tester.pump();
     await _moveBrowserCursor(tester);
     expect(find.byKey(const Key('browser-element-highlight')), findsOneWidget);
@@ -980,6 +993,38 @@ void main() {
     );
   });
 
+  test('확대 직후에는 한 번에 커서를 화면 안쪽 여백까지 따라가고 기본 화면은 가운데 고정이다', () {
+    const size = Size(394, 540);
+    const frame = Size(394, 648);
+    final step = browserCursorFollowPan(
+      size: size,
+      frameSize: frame,
+      zoom: 3,
+      pan: Offset.zero,
+      cursor: const Offset(0.95, 0.5),
+    );
+    final full = browserCursorFollowPan(
+      size: size,
+      frameSize: frame,
+      zoom: 3,
+      pan: Offset.zero,
+      cursor: const Offset(0.95, 0.5),
+      gain: 1,
+    );
+    expect(full.dx, lessThan(step.dx));
+    expect(
+      browserCursorFollowPan(
+        size: size,
+        frameSize: frame,
+        zoom: 1,
+        pan: Offset.zero,
+        cursor: const Offset(0.95, 0.5),
+        gain: 1,
+      ),
+      Offset.zero,
+    );
+  });
+
   testWidgets('두 번 누르기와 길게 누른 채 이동은 좌표 마우스 동작을 보낸다', (tester) async {
     DesignRemote? remote;
     await _pump(
@@ -1126,13 +1171,14 @@ void main() {
       safeBottom: 48,
     );
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('더보기'));
+    await tester.tap(find.byKey(const Key('browser-tool-more')));
     await tester.pumpAndSettle();
 
-    expect(find.text('앞으로'), findsOneWidget);
+    expect(find.text('새로고침'), findsOneWidget);
     final bounds = tester.getRect(find.byKey(const Key('iris-sheet-bounds')));
     expect(bounds.top, greaterThanOrEqualTo(16));
-    expect(bounds.bottom, lessThanOrEqualTo(484));
+    // 시트는 화면 아래에 붙고 시스템 하단 영역은 시트 안쪽 패딩
+    expect(bounds.bottom, lessThanOrEqualTo(540));
     final profiles = find.byKey(const Key('browser-profile-list'));
     expect(profiles, findsOneWidget);
     await tester.scrollUntilVisible(
@@ -1146,7 +1192,7 @@ void main() {
     expect(find.text('임시'), findsOneWidget);
   });
 
-  testWidgets('더보기에서 직접 누르기로 바꾸면 손가락 위치를 기존 요청으로 보낸다', (tester) async {
+  testWidgets('조작은 트랙패드로 고정되고 더보기에 입력 방식 선택이 없다', (tester) async {
     DesignRemote? remote;
     await _pump(
       tester,
@@ -1158,20 +1204,30 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('더보기'));
+    await tester.tap(find.byKey(const Key('browser-tool-more')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('직접 누르기'));
+    expect(find.text('직접 누르기'), findsNothing);
+    expect(find.text('터치패드'), findsNothing);
+    await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('browser-cursor')), findsNothing);
+    expect(find.byKey(const Key('browser-cursor')), findsOneWidget);
     final frame = find.byKey(const Key('browser-frame'));
-    final target = tester.getTopLeft(frame) + const Offset(90, 190);
-    await tester.tapAt(target);
+    await tester.tapAt(tester.getTopLeft(frame) + const Offset(90, 190));
     await tester.pump(const Duration(milliseconds: 400));
-    final pointer = remote!.connection.sent.lastWhere(
-      (message) => message['type'] == 'browser.pointer',
+    expect(
+      remote!.connection.sent.where(
+        (message) => message['type'] == 'browser.pointer',
+      ),
+      isEmpty,
     );
-    expect(pointer['x'] as double, isNot(moreOrLessEquals(197, epsilon: 1)));
+    expect(
+      remote!.connection.sent.where(
+        (message) =>
+            message['type'] == 'browser.mouse' && message['action'] == 'click',
+      ),
+      isNotEmpty,
+    );
   });
 
   testWidgets('홈 브라우저 줄과 세션 지구본이 브라우저 화면을 연다', (tester) async {
@@ -1184,6 +1240,7 @@ void main() {
           onUnregister: () {},
         ),
       ),
+      disableAnimations: true,
     );
     await tester.pump(const Duration(milliseconds: 400));
     final homeTab = find.byKey(const Key('browser-tab-$browserTabRef'));
@@ -1225,6 +1282,7 @@ void main() {
           onUnregister: () {},
         ),
       ),
+      disableAnimations: true,
     );
     await tester.pump(const Duration(milliseconds: 400));
     final row = find.byKey(const Key('agent-row-$mobileAgentRef'));
@@ -1284,7 +1342,11 @@ void main() {
   });
 
   testWidgets('Iris 순서는 스페이스와 부모를 유지하고 최근 활동순은 평평하다', (tester) async {
-    await _pump(tester, designHome(withRequests: false));
+    await _pump(
+      tester,
+      designHome(withRequests: false),
+      disableAnimations: true,
+    );
     final irisSpace = find.byKey(const Key('home-space-$irisAgentSpaceRef'));
     final parent = tester.getTopLeft(
       find.byKey(const Key('agent-tile-$mobileAgentRef')),
@@ -1317,7 +1379,12 @@ void main() {
   });
 
   testWidgets('하단 영역 48에서 대화와 터미널 입력이 내비게이션 바 위에 있다', (tester) async {
-    await _pump(tester, designSession(), safeBottom: 48);
+    await _pump(
+      tester,
+      designSession(),
+      safeBottom: 48,
+      disableAnimations: true,
+    );
     expect(
       tester.getBottomRight(find.byKey(const Key('session-input'))).dy,
       lessThanOrEqualTo(806),
@@ -1350,7 +1417,13 @@ void main() {
   });
 
   testWidgets('키보드가 올라오면 대화 입력이 키보드 위에 있다', (tester) async {
-    await _pump(tester, designSession(), safeBottom: 0, viewInsetBottom: 300);
+    await _pump(
+      tester,
+      designSession(),
+      safeBottom: 0,
+      viewInsetBottom: 300,
+      disableAnimations: true,
+    );
     expect(
       tester.getBottomRight(find.byKey(const Key('session-input'))).dy,
       lessThanOrEqualTo(554),

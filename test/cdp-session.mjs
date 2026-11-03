@@ -28,8 +28,12 @@ function fixture(extra = {}) {
   const chooserStates = [];
   const resets = [];
   const origins = [];
+  const dialogs = [];
+  const dialogPlans = [];
+  const generations = [];
   let debuggerAttached = false;
   let observationPrimes = 0;
+  let openDialog = null;
 
   const dbg = {
     isAttached: () => debuggerAttached,
@@ -61,8 +65,9 @@ function fixture(extra = {}) {
       recordException() {},
       recordNetwork() {},
       setFileChooser: (_id, value) => chooserStates.push(value),
-      closeDialog() {},
-      openDialog: (_id, record) => record,
+      closeDialog: () => { openDialog = null; },
+      openDialog: (_id, record) => { openDialog = record; return record; },
+      dialogOpen: () => openDialog,
       noteRequest() {},
       requestUrl: () => "",
     },
@@ -86,6 +91,9 @@ function fixture(extra = {}) {
     deviceEmulation: { forget() {} },
     ctlSend: (message) => {
       if (message.type === "browser-frame-origins") origins.push(message.origins);
+      if (message.type === "browser-dialog-open" || message.type === "browser-dialog-closed") dialogs.push(message);
+      if (message.type === "browser-dialog-plan") dialogPlans.push(message);
+      if (message.type === "browser-target-generation") generations.push(message);
     },
     tagError: (error, code) => Object.assign(error, { code }),
     sessionDetachedCode: "session_detached",
@@ -100,7 +108,7 @@ function fixture(extra = {}) {
 
   return {
     session, wc, dbg, debuggerHandlers, wcHandlers, sent, rootPrimers, childPrimers,
-    rootOverlays, childOverlays, chooserCalls, chooserStates, resets, origins,
+    rootOverlays, childOverlays, chooserCalls, chooserStates, resets, origins, dialogs, dialogPlans, generations,
     observationPrimes: () => observationPrimes,
     emitMessage: (method, params) => debuggerHandlers.message?.({}, method, params),
     emitDetach: () => {
@@ -210,6 +218,7 @@ test("tool recovery reset은 document와 observation을 복원하고 session 자
   assert.equal(f.observationPrimes(), 2);
   assert.deepEqual(f.session.childrenOf(f.wc.id), new Set());
   assert.deepEqual(f.resets.map(([kind]) => kind), ["viewport", "overlay", "ref"]);
+  assert.ok(f.generations.some((entry) => entry.reason === "reset"));
 
   f.emitMessage("Target.attachedToTarget", {
     sessionId: "child-b",
@@ -230,6 +239,74 @@ test("destroy는 child primer와 frame origin 장부까지 버린다", () => {
   f.session.noteFrameOrigin(f.wc.id, "https://one.example/b");
   assert.deepEqual(f.childPrimers, []);
   assert.deepEqual(f.origins, [["https://one.example"], ["https://one.example"]]);
+});
+
+test("실행기 재등록은 이미 알려진 frame origin과 열린 dialog 전체 상태를 다시 보낸다", () => {
+  const f = fixture();
+  f.session.primeSession(f.wc);
+  f.session.noteFrameOrigin(f.wc.id, "https://one.example/a");
+  const plan = f.session.planFor(f.wc.id);
+  plan.queue.push("ok", "cancel");
+  plan.text = "reply";
+  f.emitMessage("Page.javascriptDialogOpening", { type: "confirm", message: "continue?" });
+  f.origins.length = 0;
+  f.dialogs.length = 0;
+  f.dialogPlans.length = 0;
+
+  f.session.replayExecutorState();
+
+  assert.deepEqual(f.origins, [["https://one.example"]]);
+  assert.deepEqual(f.dialogs, [{
+    type: "browser-dialog-open", wc: f.wc.id, kind: "confirm", message: "continue?", byAi: false,
+  }]);
+  assert.deepEqual(f.dialogPlans, [{
+    type: "browser-dialog-plan", wc: f.wc.id, plan: { queue: ["cancel"] }, text: "reply",
+  }]);
+});
+
+test("실행기 재등록은 열린 dialog가 없다는 상태도 다시 보낸다", () => {
+  const f = fixture();
+  f.session.primeSession(f.wc);
+  f.dialogs.length = 0;
+
+  f.session.replayExecutorState();
+
+  assert.deepEqual(f.dialogs, [{ type: "browser-dialog-closed", wc: f.wc.id }]);
+});
+
+test("실행기 재등록은 debugger를 붙이지 않은 등록 guest의 target 세대도 다시 보낸다", () => {
+  const f = fixture();
+  f.generations.length = 0;
+
+  f.session.replayExecutorState();
+
+  assert.deepEqual(f.generations, [{
+    type: "browser-target-generation",
+    wc: f.wc.id,
+    reason: "executor-register",
+    documentGeneration: 1,
+    debuggerGeneration: 0,
+  }]);
+  assert.equal(f.dbg.isAttached(), false);
+});
+
+test("연결, 탐색, detach는 target 세대를 올리고 이전 child session을 폐기한다", () => {
+  const f = fixture();
+  assert.deepEqual(f.session.targetGenerations(f.wc.id), { documentGeneration: 1, debuggerGeneration: 0 });
+  f.session.primeSession(f.wc);
+  f.emitMessage("Target.attachedToTarget", { sessionId: "child-a", targetInfo: { type: "iframe" } });
+  assert.equal(f.session.ownsChildSession(f.wc.id, "child-a"), true);
+  assert.deepEqual(f.session.targetGenerations(f.wc.id), { documentGeneration: 1, debuggerGeneration: 1 });
+
+  f.session.noteDocumentNavigation(f.wc.id);
+  assert.equal(f.session.ownsChildSession(f.wc.id, "child-a"), false);
+  assert.deepEqual(f.session.targetGenerations(f.wc.id), { documentGeneration: 2, debuggerGeneration: 1 });
+
+  f.emitDetach();
+  assert.deepEqual(f.session.targetGenerations(f.wc.id), { documentGeneration: 2, debuggerGeneration: 2 });
+  assert.ok(f.generations.some((entry) => entry.reason === "connect"));
+  assert.ok(f.generations.some((entry) => entry.reason === "navigation"));
+  assert.ok(f.generations.some((entry) => entry.reason === "detach"));
 });
 
 test("부착 관문이 거짓이면 어떤 경로도 debugger 를 붙이지 않고 cdp_blocked 로 거절한다", () => {

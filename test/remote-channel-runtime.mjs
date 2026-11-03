@@ -6,18 +6,15 @@ import test from "node:test";
 
 import { createChannelRuntime } from "../server/remote/channel-runtime.js";
 
-test("채널 설정은 절대 경로를 저장하고 원격 수명 동안 Claude 실행에만 옵션을 붙인다", async (t) => {
+test("채널 설정은 절대 경로를 저장하고 실행 옵션은 붙이지 않는다", async (t) => {
   const stateDir = await fsp.mkdtemp(path.join(os.tmpdir(), "iris-channel-runtime-"));
   t.after(() => fsp.rm(stateDir, { recursive: true, force: true }));
-  let provider = null;
-  let unregistered = 0;
   const runtime = createChannelRuntime({
     stateDir,
     socketPath: path.join(stateDir, "remote", "agent.sock"),
     scriptPath: "/absolute/iris-channel.mjs",
     nodePath: "/absolute/node",
     asNode: false,
-    registerLaunchOptions(value) { provider = value; return () => { provider = null; unregistered++; }; },
   });
   await runtime.start();
   const config = JSON.parse(await fsp.readFile(runtime.configPath, "utf8"));
@@ -27,10 +24,9 @@ test("채널 설정은 절대 경로를 저장하고 원격 수명 동안 Claude
     command: "/absolute/node",
     args: ["/absolute/iris-channel.mjs", path.join(stateDir, "remote", "agent.sock")],
   } } });
-  assert.deepEqual(provider("claude"), ["--mcp-config", runtime.configPath,
-    "--dangerously-load-development-channels", "server:iris-remote"]);
-  assert.deepEqual(provider("codex"), []);
+  const { agentArgv } = await import("../server/agent-launch.js");
+  assert.deepEqual(agentArgv("claude"), ["claude"]);
+  assert.equal(runtime.active(), true);
   runtime.stop();
-  assert.equal(provider, null);
-  assert.equal(unregistered, 1);
+  assert.equal(runtime.active(), false);
 });

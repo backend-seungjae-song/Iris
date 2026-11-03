@@ -136,7 +136,7 @@ function androidFixture(t, preference = null) {
     calls.push({ file, args, options });
     return args[0] === 'list' ? 'id: 0 or "pixel_7"\n    Name: Pixel 7\n    OEM : Google\n' : '';
   } });
-  return { manager, calls, imageId, avd };
+  return { manager, calls, imageId, avd, home, sdk };
 }
 
 test('Android 한 대 더는 같은 시스템 이미지·기종에 별도 AVD를 만들고 원본 데이터는 보존한다', async t => {
@@ -189,4 +189,85 @@ test('동시에 두 번 추가하면 중복 생성 명령을 실행하지 않는
   const pending = manager.create({ platform: 'ios', modelId: model, runtimeId: runtime });
   await assert.rejects(manager.create({ platform: 'ios', modelId: model, runtimeId: runtime }), /추가하는 중/);
   release(); await pending;
+});
+
+test('iOS 삭제 확인 전에는 종료하지 않으며 취소하면 삭제하지 않는다', async () => {
+  const { manager, calls } = iosManager();
+  const canceled = await manager.remove({ platform: 'ios', device: source }, { confirm: async () => false, stop: async () => assert.fail('취소한 기기 종료') });
+  assert.equal(canceled.canceled, true);
+  assert.equal(calls.some(c => c.args.includes('delete')), false);
+  const events = [];
+  const deleted = await manager.remove({ platform: 'ios', device: source }, { confirm: async d => { events.push(['confirm', d.name]); return true; }, stop: async d => events.push(['stop', d.udid]) });
+  assert.equal(deleted.deleted, true);
+  assert.deepEqual(events, [['confirm', 'Custom phone'], ['stop', source]]);
+  assert.deepEqual(calls.at(-1).args, ['simctl', 'delete', source]);
+});
+
+test('런타임을 설치하지 않은 iOS 기기도 삭제하고 종료 실패는 삭제를 막는다', async () => {
+  const data = iosData(); data.devices[runtime][0].state = 'Shutdown'; data.runtimes[0].isAvailable = false;
+  const { manager, calls } = iosManager(data);
+  const [row] = manager.annotate([{ udid: source, runtime, isAvailable: false }], await manager.catalog(), {});
+  assert.equal(row.canDelete, true);
+  await manager.remove({ platform: 'ios', device: source }, { confirm: async () => true, stop: async () => assert.fail('꺼진 기기 종료') });
+  assert.deepEqual(calls.at(-1).args, ['simctl', 'delete', source]);
+  const live = iosManager();
+  await assert.rejects(live.manager.remove({ platform: 'ios', device: source }, { confirm: async () => true, stop: async () => { throw Error('종료 실패'); } }), /종료 실패/);
+  assert.equal(live.calls.some(c => c.args.includes('delete')), false);
+});
+
+test('Android 삭제는 AVD 이름을 확인하고 실행 중인 기기가 종료된 뒤 삭제한다', async t => {
+  const { home, sdk } = androidFixture(t);
+  let running = true;
+  const calls = [];
+  const manager = createDeviceManager({ home, env: {}, platform: 'linux', getSettings: () => ({ androidSdkPath: sdk }), run: async (file, args) => {
+    calls.push({ file, args });
+    if (args[0] === 'devices') return running ? 'List of devices attached\nemulator-5554\tdevice\nreal-phone\tdevice\n' : 'List of devices attached\nreal-phone\tdevice\n';
+    if (args.includes('name')) return 'Original\nOK\n';
+    return '';
+  } });
+  const result = await manager.remove({ platform: 'android', device: 'emulator-5554' }, { confirm: async d => { assert.equal(d.name, 'Original'); return true; }, stop: async d => { calls.push({ args: ['stop', d.udid] }); running = false; } });
+  assert.equal(result.deleted, true);
+  assert.equal(result.device.persistentId, 'Original');
+  assert.deepEqual(calls.at(-1).args, ['delete', 'avd', '--name', 'Original']);
+  const stopAt = calls.findIndex(c => c.args[0] === 'stop');
+  assert.ok(stopAt >= 0 && calls.slice(stopAt + 1).some(c => c.args[0] === 'devices'));
+});
+
+test('실제 Android 기기·없는 기기는 확인 창과 삭제 명령을 실행하지 않는다', async t => {
+  const { manager, calls } = androidFixture(t);
+  for (const device of ['real-phone', 'emulator-5554', '../Original', 'unknown']) {
+    await assert.rejects(manager.remove({ platform: 'android', device }, { confirm: async () => assert.fail('없는 가상 기기 확인') }), /가상 기기/);
+  }
+  const inventory = await manager.catalog();
+  const [physical] = manager.annotate([{ udid: 'real-phone', name: 'Original', runtime: 'Android' }], inventory, {});
+  assert.equal(physical.canDelete, false);
+  assert.equal(calls.some(c => c.args[0] === 'delete'), false);
+});
+
+test('확인 중 Android 시리얼의 AVD가 바뀌면 삭제하지 않는다', async t => {
+  const { home, sdk } = androidFixture(t);
+  let name = 'Original';
+  const commands = [];
+  const manager = createDeviceManager({ home, env: {}, platform: 'linux', getSettings: () => ({ androidSdkPath: sdk }), run: async (file, args) => {
+    commands.push(args);
+    if (args[0] === 'devices') return 'emulator-5554\tdevice\n';
+    if (args.includes('name')) return name + '\nOK\n';
+    return '';
+  } });
+  await assert.rejects(manager.remove({ platform: 'android', device: 'emulator-5554', persistentId: 'Other' }, { confirm: async () => assert.fail('다른 AVD 확인') }), error => error.code === 'device_changed');
+  await assert.rejects(manager.remove({ platform: 'android', device: 'emulator-5554' }, { confirm: async () => { name = 'Other'; return true; } }), /가상 기기|목록이 바뀌었습니다/);
+  assert.equal(commands.some(args => args[0] === 'delete'), false);
+});
+
+test('삭제 확인 중에는 중복 삭제와 추가 요청을 거부한다', async () => {
+  const { manager, calls } = iosManager();
+  let entered, release;
+  const confirmed = new Promise(resolve => { entered = resolve; });
+  const response = new Promise(resolve => { release = resolve; });
+  const pending = manager.remove({ platform: 'ios', device: source }, { confirm: async () => { entered(); return response; } });
+  await confirmed;
+  await assert.rejects(manager.remove({ platform: 'ios', device: source }), /진행 중/);
+  await assert.rejects(manager.create({ platform: 'ios', sourceDevice: source }), /삭제하는 중/);
+  release(false); await pending;
+  assert.equal(calls.some(c => c.args.includes('delete') || c.args.includes('create')), false);
 });

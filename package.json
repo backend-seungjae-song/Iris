@@ -44,6 +44,16 @@
     "appId": "app.iris.console",
     "productName": "Iris",
     "afterPack": "scripts/after-pack.cjs",
+    "protocols": [
+      {
+        "name": "웹 링크",
+        "schemes": [
+          "http",
+          "https"
+        ],
+        "role": "Viewer"
+      }
+    ],
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -52,6 +62,9 @@
       "bin/agent-context.mjs",
       "bin/iris-session.mjs",
       "bin/agent-run.mjs",
+      "bin/iris-qa.mjs",
+      "bin/mcp/**/*",
+      "scripts/mcp-worker/**/*",
       "native/**/*",
       "server/**/*",
       "web/**/*",
@@ -62,6 +75,9 @@
       "bin/agent-context.mjs",
       "bin/iris-session.mjs",
       "bin/agent-run.mjs",
+      "bin/iris-qa.mjs",
+      "bin/mcp/**/*",
+      "scripts/mcp-worker/**/*",
       "package.json",
       "server/**",
       "web/**",
@@ -147,7 +163,7 @@
   },
   "devDependencies": {
     "docx": "^9.7.1",
-    "electron": "^43.7.0",
+    "electron": "^43.8.6",
     "electron-builder": "^26.15.3",
     "esbuild": "0.28.2",
     "serve-sim": "0.1.40"

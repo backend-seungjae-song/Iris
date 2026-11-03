@@ -1,0 +1,769 @@
+[
+  {
+    "name": "ordinary",
+    "args": {},
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/order",
+        "title": "주문서",
+        "refCount": 6,
+        "snapshot": "[Header] \"banner\"\n  [@e1] link \"홈\"\nheading \"주문서\"\n[@e2] text input \"이메일\"\n[@e3] button \"저장\"\n[@e4] button \"저장 (2nd)\"\ntext \"안내 문구\"\n[@e5] checkbox \"동의\"\n[@e6] clickable \"더보기\"",
+        "lines": 9,
+        "shown": 9,
+        "bytes": 208
+      }
+    },
+    "refs": [
+      [
+        "@e1",
+        {
+          "backendDOMNodeId": 101,
+          "role": "link",
+          "name": "홈",
+          "sid": null
+        }
+      ],
+      [
+        "@e2",
+        {
+          "backendDOMNodeId": 102,
+          "role": "text input",
+          "name": "이메일",
+          "sid": null
+        }
+      ],
+      [
+        "@e3",
+        {
+          "backendDOMNodeId": 103,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 1
+        }
+      ],
+      [
+        "@e4",
+        {
+          "backendDOMNodeId": 104,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 2
+        }
+      ],
+      [
+        "@e5",
+        {
+          "backendDOMNodeId": 105,
+          "role": "checkbox",
+          "name": "동의",
+          "sid": null
+        }
+      ],
+      [
+        "@e6",
+        {
+          "backendDOMNodeId": 5000,
+          "role": "clickable",
+          "name": "더보기",
+          "sid": null
+        }
+      ]
+    ]
+  },
+  {
+    "name": "iframe",
+    "args": {},
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/frame",
+        "title": "프레임 페이지",
+        "refCount": 7,
+        "snapshot": "[Header] \"banner\"\n  [@e1] link \"홈\"\nheading \"주문서\"\n[@e2] text input \"이메일\"\n[@e3] button \"저장\"\n[@e4] button \"저장 (2nd)\"\ntext \"안내 문구\"\n[@e5] checkbox \"동의\"\n  [@e6] button \"결제하기\"\n  [@e7] text input \"카드\"",
+        "lines": 10,
+        "shown": 10,
+        "bytes": 238,
+        "frames": 2,
+        "humanHint": "사람만 할 수 있는 자리다(결제 창). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. 답을 받은 뒤 화면을 다시 확인하고 이어 간다."
+      }
+    },
+    "refs": [
+      [
+        "@e1",
+        {
+          "backendDOMNodeId": 101,
+          "role": "link",
+          "name": "홈",
+          "sid": null
+        }
+      ],
+      [
+        "@e2",
+        {
+          "backendDOMNodeId": 102,
+          "role": "text input",
+          "name": "이메일",
+          "sid": null
+        }
+      ],
+      [
+        "@e3",
+        {
+          "backendDOMNodeId": 103,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 1
+        }
+      ],
+      [
+        "@e4",
+        {
+          "backendDOMNodeId": 104,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 2
+        }
+      ],
+      [
+        "@e5",
+        {
+          "backendDOMNodeId": 105,
+          "role": "checkbox",
+          "name": "동의",
+          "sid": null
+        }
+      ],
+      [
+        "@e6",
+        {
+          "backendDOMNodeId": 201,
+          "role": "button",
+          "name": "결제하기",
+          "sid": "frame-1"
+        }
+      ],
+      [
+        "@e7",
+        {
+          "backendDOMNodeId": 202,
+          "role": "text input",
+          "name": "카드",
+          "sid": "frame-1"
+        }
+      ]
+    ]
+  },
+  {
+    "name": "longList",
+    "args": {
+      "budget": 700
+    },
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/list",
+        "title": "긴 목록",
+        "refCount": 68,
+        "snapshot": "heading \"구역 0\"\n[@e1] button \"항목 1\"\n[@e2] button \"항목 2\"\n[@e3] button \"항목 3\"\n[@e4] button \"항목 4\"\n[@e5] button \"항목 6\"\n[@e6] button \"항목 7\"\n[@e7] button \"항목 8\"\n[@e8] button \"항목 9\"\nheading \"구역 10\"\n[@e9] button \"항목 11\"\n[@e10] button \"항목 12\"\n[@e11] button \"항목 13\"\n[@e12] button \"항목 14\"\n[@e13] button \"항목 15\"\n[@e14] button \"항목 16\"\n[@e15] button \"항목 17\"\n[@e16] button \"항목 18\"\n[@e17] button \"항목 19\"\nheading \"구역 20\"\n[@e18] button \"항목 21\"\n[@e19] button \"항목 22\"\n[@e20] button \"항목 23\"\n[@e21] button \"항목 24\"\n[@e22] button \"항목 26\"\n[@e23] button \"항목 27\"\n[@e24] button \"항목 28\"\n[@e25] button \"항목 29\"\n\n[잘린 구간의 경고·상태·제목 5개]\n  heading \"구역 30\"\n  heading \"구역 40\"\n  heading \"구역 50\"\n  heading \"구역 60\"\n  heading \"구역 70\"\n\n[700바이트에서 끊었다. 이어 보려면 cursor=28 — 또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]",
+        "lines": 76,
+        "shown": 28,
+        "bytes": 1000,
+        "truncated": true,
+        "cursor": 28
+      }
+    },
+    "refs": [
+      [
+        "@e1",
+        {
+          "backendDOMNodeId": 1001,
+          "role": "button",
+          "name": "항목 1",
+          "sid": null
+        }
+      ],
+      [
+        "@e2",
+        {
+          "backendDOMNodeId": 1002,
+          "role": "button",
+          "name": "항목 2",
+          "sid": null
+        }
+      ],
+      [
+        "@e3",
+        {
+          "backendDOMNodeId": 1003,
+          "role": "button",
+          "name": "항목 3",
+          "sid": null
+        }
+      ],
+      [
+        "@e4",
+        {
+          "backendDOMNodeId": 1004,
+          "role": "button",
+          "name": "항목 4",
+          "sid": null
+        }
+      ],
+      [
+        "@e5",
+        {
+          "backendDOMNodeId": 1006,
+          "role": "button",
+          "name": "항목 6",
+          "sid": null
+        }
+      ],
+      [
+        "@e6",
+        {
+          "backendDOMNodeId": 1007,
+          "role": "button",
+          "name": "항목 7",
+          "sid": null
+        }
+      ],
+      [
+        "@e7",
+        {
+          "backendDOMNodeId": 1008,
+          "role": "button",
+          "name": "항목 8",
+          "sid": null
+        }
+      ],
+      [
+        "@e8",
+        {
+          "backendDOMNodeId": 1009,
+          "role": "button",
+          "name": "항목 9",
+          "sid": null
+        }
+      ],
+      [
+        "@e9",
+        {
+          "backendDOMNodeId": 1011,
+          "role": "button",
+          "name": "항목 11",
+          "sid": null
+        }
+      ],
+      [
+        "@e10",
+        {
+          "backendDOMNodeId": 1012,
+          "role": "button",
+          "name": "항목 12",
+          "sid": null
+        }
+      ],
+      [
+        "@e11",
+        {
+          "backendDOMNodeId": 1013,
+          "role": "button",
+          "name": "항목 13",
+          "sid": null
+        }
+      ],
+      [
+        "@e12",
+        {
+          "backendDOMNodeId": 1014,
+          "role": "button",
+          "name": "항목 14",
+          "sid": null
+        }
+      ],
+      [
+        "@e13",
+        {
+          "backendDOMNodeId": 1015,
+          "role": "button",
+          "name": "항목 15",
+          "sid": null
+        }
+      ],
+      [
+        "@e14",
+        {
+          "backendDOMNodeId": 1016,
+          "role": "button",
+          "name": "항목 16",
+          "sid": null
+        }
+      ],
+      [
+        "@e15",
+        {
+          "backendDOMNodeId": 1017,
+          "role": "button",
+          "name": "항목 17",
+          "sid": null
+        }
+      ],
+      [
+        "@e16",
+        {
+          "backendDOMNodeId": 1018,
+          "role": "button",
+          "name": "항목 18",
+          "sid": null
+        }
+      ],
+      [
+        "@e17",
+        {
+          "backendDOMNodeId": 1019,
+          "role": "button",
+          "name": "항목 19",
+          "sid": null
+        }
+      ],
+      [
+        "@e18",
+        {
+          "backendDOMNodeId": 1021,
+          "role": "button",
+          "name": "항목 21",
+          "sid": null
+        }
+      ],
+      [
+        "@e19",
+        {
+          "backendDOMNodeId": 1022,
+          "role": "button",
+          "name": "항목 22",
+          "sid": null
+        }
+      ],
+      [
+        "@e20",
+        {
+          "backendDOMNodeId": 1023,
+          "role": "button",
+          "name": "항목 23",
+          "sid": null
+        }
+      ],
+      [
+        "@e21",
+        {
+          "backendDOMNodeId": 1024,
+          "role": "button",
+          "name": "항목 24",
+          "sid": null
+        }
+      ],
+      [
+        "@e22",
+        {
+          "backendDOMNodeId": 1026,
+          "role": "button",
+          "name": "항목 26",
+          "sid": null
+        }
+      ],
+      [
+        "@e23",
+        {
+          "backendDOMNodeId": 1027,
+          "role": "button",
+          "name": "항목 27",
+          "sid": null
+        }
+      ],
+      [
+        "@e24",
+        {
+          "backendDOMNodeId": 1028,
+          "role": "button",
+          "name": "항목 28",
+          "sid": null
+        }
+      ],
+      [
+        "@e25",
+        {
+          "backendDOMNodeId": 1029,
+          "role": "button",
+          "name": "항목 29",
+          "sid": null
+        }
+      ]
+    ]
+  },
+  {
+    "name": "longListNext",
+    "args": {
+      "budget": 700,
+      "cursor": 20
+    },
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/list",
+        "title": "긴 목록",
+        "refCount": 68,
+        "snapshot": "[@e18] button \"항목 21\"\n[@e19] button \"항목 22\"\n[@e20] button \"항목 23\"\n[@e21] button \"항목 24\"\n[@e22] button \"항목 26\"\n[@e23] button \"항목 27\"\n[@e24] button \"항목 28\"\n[@e25] button \"항목 29\"\nheading \"구역 30\"\n[@e26] button \"항목 31\"\n[@e27] button \"항목 32\"\n[@e28] button \"항목 33\"\n[@e29] button \"항목 34\"\n[@e30] button \"항목 35\"\n[@e31] button \"항목 36\"\n[@e32] button \"항목 37\"\n[@e33] button \"항목 38\"\n[@e34] button \"항목 39\"\nheading \"구역 40\"\n[@e35] button \"항목 41\"\n[@e36] button \"항목 42\"\n[@e37] button \"항목 43\"\n[@e38] button \"항목 44\"\n[@e39] button \"항목 46\"\n[@e40] button \"항목 47\"\n[@e41] button \"항목 48\"\n[@e42] button \"항목 49\"\n\n[잘린 구간의 경고·상태·제목 3개]\n  heading \"구역 50\"\n  heading \"구역 60\"\n  heading \"구역 70\"\n\n[700바이트에서 끊었다. 이어 보려면 cursor=47 — 또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]",
+        "lines": 76,
+        "shown": 27,
+        "bytes": 954,
+        "truncated": true,
+        "cursor": 47
+      }
+    },
+    "refs": [
+      [
+        "@e18",
+        {
+          "backendDOMNodeId": 1021,
+          "role": "button",
+          "name": "항목 21",
+          "sid": null
+        }
+      ],
+      [
+        "@e19",
+        {
+          "backendDOMNodeId": 1022,
+          "role": "button",
+          "name": "항목 22",
+          "sid": null
+        }
+      ],
+      [
+        "@e20",
+        {
+          "backendDOMNodeId": 1023,
+          "role": "button",
+          "name": "항목 23",
+          "sid": null
+        }
+      ],
+      [
+        "@e21",
+        {
+          "backendDOMNodeId": 1024,
+          "role": "button",
+          "name": "항목 24",
+          "sid": null
+        }
+      ],
+      [
+        "@e22",
+        {
+          "backendDOMNodeId": 1026,
+          "role": "button",
+          "name": "항목 26",
+          "sid": null
+        }
+      ],
+      [
+        "@e23",
+        {
+          "backendDOMNodeId": 1027,
+          "role": "button",
+          "name": "항목 27",
+          "sid": null
+        }
+      ],
+      [
+        "@e24",
+        {
+          "backendDOMNodeId": 1028,
+          "role": "button",
+          "name": "항목 28",
+          "sid": null
+        }
+      ],
+      [
+        "@e25",
+        {
+          "backendDOMNodeId": 1029,
+          "role": "button",
+          "name": "항목 29",
+          "sid": null
+        }
+      ],
+      [
+        "@e26",
+        {
+          "backendDOMNodeId": 1031,
+          "role": "button",
+          "name": "항목 31",
+          "sid": null
+        }
+      ],
+      [
+        "@e27",
+        {
+          "backendDOMNodeId": 1032,
+          "role": "button",
+          "name": "항목 32",
+          "sid": null
+        }
+      ],
+      [
+        "@e28",
+        {
+          "backendDOMNodeId": 1033,
+          "role": "button",
+          "name": "항목 33",
+          "sid": null
+        }
+      ],
+      [
+        "@e29",
+        {
+          "backendDOMNodeId": 1034,
+          "role": "button",
+          "name": "항목 34",
+          "sid": null
+        }
+      ],
+      [
+        "@e30",
+        {
+          "backendDOMNodeId": 1035,
+          "role": "button",
+          "name": "항목 35",
+          "sid": null
+        }
+      ],
+      [
+        "@e31",
+        {
+          "backendDOMNodeId": 1036,
+          "role": "button",
+          "name": "항목 36",
+          "sid": null
+        }
+      ],
+      [
+        "@e32",
+        {
+          "backendDOMNodeId": 1037,
+          "role": "button",
+          "name": "항목 37",
+          "sid": null
+        }
+      ],
+      [
+        "@e33",
+        {
+          "backendDOMNodeId": 1038,
+          "role": "button",
+          "name": "항목 38",
+          "sid": null
+        }
+      ],
+      [
+        "@e34",
+        {
+          "backendDOMNodeId": 1039,
+          "role": "button",
+          "name": "항목 39",
+          "sid": null
+        }
+      ],
+      [
+        "@e35",
+        {
+          "backendDOMNodeId": 1041,
+          "role": "button",
+          "name": "항목 41",
+          "sid": null
+        }
+      ],
+      [
+        "@e36",
+        {
+          "backendDOMNodeId": 1042,
+          "role": "button",
+          "name": "항목 42",
+          "sid": null
+        }
+      ],
+      [
+        "@e37",
+        {
+          "backendDOMNodeId": 1043,
+          "role": "button",
+          "name": "항목 43",
+          "sid": null
+        }
+      ],
+      [
+        "@e38",
+        {
+          "backendDOMNodeId": 1044,
+          "role": "button",
+          "name": "항목 44",
+          "sid": null
+        }
+      ],
+      [
+        "@e39",
+        {
+          "backendDOMNodeId": 1046,
+          "role": "button",
+          "name": "항목 46",
+          "sid": null
+        }
+      ],
+      [
+        "@e40",
+        {
+          "backendDOMNodeId": 1047,
+          "role": "button",
+          "name": "항목 47",
+          "sid": null
+        }
+      ],
+      [
+        "@e41",
+        {
+          "backendDOMNodeId": 1048,
+          "role": "button",
+          "name": "항목 48",
+          "sid": null
+        }
+      ],
+      [
+        "@e42",
+        {
+          "backendDOMNodeId": 1049,
+          "role": "button",
+          "name": "항목 49",
+          "sid": null
+        }
+      ]
+    ]
+  },
+  {
+    "name": "query",
+    "args": {
+      "role": "button",
+      "name": "저장"
+    },
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/order",
+        "title": "주문서",
+        "refCount": 5,
+        "snapshot": "[@e3] button \"저장\"\n[@e4] button \"저장 (2nd)\"",
+        "lines": 8,
+        "shown": 2,
+        "bytes": 49,
+        "query": {
+          "role": "button",
+          "name": "저장",
+          "region": null
+        }
+      }
+    },
+    "refs": [
+      [
+        "@e3",
+        {
+          "backendDOMNodeId": 103,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 1
+        }
+      ],
+      [
+        "@e4",
+        {
+          "backendDOMNodeId": 104,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 2
+        }
+      ]
+    ]
+  },
+  {
+    "name": "login",
+    "args": {},
+    "response": {
+      "ok": true,
+      "data": {
+        "url": "https://example.test/login",
+        "title": "로그인",
+        "refCount": 5,
+        "snapshot": "[Header] \"banner\"\n  [@e1] link \"홈\"\nheading \"주문서\"\n[@e2] text input \"이메일\"\n[@e3] button \"저장\"\n[@e4] button \"저장 (2nd)\"\ntext \"안내 문구\"\n[@e5] checkbox \"동의\"",
+        "lines": 8,
+        "shown": 8,
+        "bytes": 180,
+        "loginHint": "로그인 칸 있음(https://example.test) — 사람에게 넘기기 전에 login 먼저. 허용된 계정이 없으면 그때 사람 차례.",
+        "humanHint": "사람만 할 수 있는 자리다(인증번호 입력 · 캡차). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. 답을 받은 뒤 화면을 다시 확인하고 이어 간다."
+      }
+    },
+    "refs": [
+      [
+        "@e1",
+        {
+          "backendDOMNodeId": 101,
+          "role": "link",
+          "name": "홈",
+          "sid": null
+        }
+      ],
+      [
+        "@e2",
+        {
+          "backendDOMNodeId": 102,
+          "role": "text input",
+          "name": "이메일",
+          "sid": null
+        }
+      ],
+      [
+        "@e3",
+        {
+          "backendDOMNodeId": 103,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 1
+        }
+      ],
+      [
+        "@e4",
+        {
+          "backendDOMNodeId": 104,
+          "role": "button",
+          "name": "저장",
+          "sid": null,
+          "nth": 2
+        }
+      ],
+      [
+        "@e5",
+        {
+          "backendDOMNodeId": 105,
+          "role": "checkbox",
+          "name": "동의",
+          "sid": null
+        }
+      ]
+    ]
+  }
+]

@@ -30,7 +30,7 @@ const GLOBALS = new Set([
   "var", "let", "const", "new", "delete", "void", "in", "of", "do", "else", "throw", "yield",
   "Array", "Object", "String", "Number", "Boolean", "Symbol", "BigInt", "Date", "RegExp",
   "Map", "Set", "WeakMap", "WeakSet", "Promise", "Proxy", "Reflect", "JSON", "Math", "Error",
-  "TypeError", "RangeError", "Intl", "Uint8Array", "Uint16Array", "Uint32Array", "Int8Array",
+  "TypeError", "RangeError", "AggregateError", "Intl", "Uint8Array", "Uint16Array", "Uint32Array", "Int8Array",
   "Float32Array", "Float64Array", "ArrayBuffer", "DataView", "TextEncoder", "TextDecoder",
   "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent", "decodeURIComponent",
   "encodeURI", "decodeURI", "structuredClone", "queueMicrotask", "atob", "btoa", "fetch",

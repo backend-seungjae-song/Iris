@@ -6,7 +6,6 @@
 // 제공 API
 //   monitorSlots(displays) · matchMonitorSlots(savedSlots, currentSlots) ·
 //   rectToRatio(rect, area) · ratioToRect(ratio, area) ·
-//   computeEdges(rect, area, thresholdPx) · pinEdges(rect, area, edges) ·
 //   pairAppWindows(saved, current) · layoutSignature(windows).
 //
 // 의존 대상
@@ -19,8 +18,6 @@
 // 영향 범위
 //   store.cjs(저장 서명·가져오기 변환)·mac.cjs(복원 좌표 계산)·host.cjs(모니터 변경 판정)가 이 파일을 쓴다.
 //   현재 목록 확인: node bin/importers.mjs native/electron/desk-layout/geometry.cjs
-
-const EDGE_THRESHOLD_PX = 2;
 
 function center(bounds) {
   return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
@@ -92,33 +89,14 @@ function rectToRatio(rect, area) {
   };
 }
 
+// 네 변을 각각 반올림한다. 같은 workArea 면 저장 px 가 그대로 나오고, 다른 크기의 workArea 에서도 비율 합이 1인
+// 변(모서리에 붙은 창)은 모서리에 정확히 닿는다. x 와 width 를 따로 반올림하면 오른쪽 변이 1px 넘칠 수 있다.
 function ratioToRect(ratio, area) {
-  return {
-    x: Math.round(area.x + ratio.x * area.width),
-    y: Math.round(area.y + ratio.y * area.height),
-    width: Math.round(ratio.w * area.width),
-    height: Math.round(ratio.h * area.height),
-  };
-}
-
-// 창 모서리가 workArea 모서리에서 threshold(px) 이내인지. 저장 때 호출한다.
-function computeEdges(rect, area, thresholdPx = EDGE_THRESHOLD_PX) {
-  return {
-    l: Math.abs(rect.x - area.x) <= thresholdPx,
-    t: Math.abs(rect.y - area.y) <= thresholdPx,
-    r: Math.abs(rect.x + rect.width - (area.x + area.width)) <= thresholdPx,
-    b: Math.abs(rect.y + rect.height - (area.y + area.height)) <= thresholdPx,
-  };
-}
-
-// edges 가 true 인 변을 workArea 모서리에 정확히 붙인다(반올림 오차로 1~2px 뜨는 것 방지).
-function pinEdges(rect, area, edges) {
-  const out = { ...rect };
-  if (edges && edges.l) out.x = area.x;
-  if (edges && edges.t) out.y = area.y;
-  if (edges && edges.r) out.x = area.x + area.width - out.width;
-  if (edges && edges.b) out.y = area.y + area.height - out.height;
-  return out;
+  const x = Math.round(area.x + ratio.x * area.width);
+  const y = Math.round(area.y + ratio.y * area.height);
+  const right = Math.round(area.x + (ratio.x + ratio.w) * area.width);
+  const bottom = Math.round(area.y + (ratio.y + ratio.h) * area.height);
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 // 창 기록의 좌표는 rect 안에 있다(저장본은 비율, 지금 창은 전역 px). 두 목록은 각자 안에서만 정렬하므로 단위가 달라도 된다.
@@ -164,18 +142,29 @@ function pairAppWindows(saved, current) {
   }
 
   // 3단계: 저장 순서(slot, y, x)와 지금 순서(y, x)를 나란히 짝짓는다.
-  const orderedSaved = afterTier2.slice().sort((a, b) => compareTuples(orderKeySaved(a), orderKeySaved(b)));
-  const leftoverCurrentIdx = currentList.map((c, i) => i).filter((i) => !usedCurrent.has(i))
-    .sort((a, b) => compareTuples(orderKeyCurrent(currentList[a]), orderKeyCurrent(currentList[b])));
+  // Iris 자기 창은 제목이 창마다 고정이라, 같은 제목끼리만 짝지음(제목이 다르면 다른 창).
+  // 앱을 막 켜서 일부 창이 아직 없을 때 남은 자리를 제목이 다른 창이 차지해 창끼리 자리가 바뀜
+  const titled = (w) => !!(w && w.own && w.title);
   const unmatchedSaved = [];
-  for (let i = 0; i < orderedSaved.length; i += 1) {
-    if (i < leftoverCurrentIdx.length) {
-      pairs.push({ saved: orderedSaved[i], current: currentList[leftoverCurrentIdx[i]] });
-      usedCurrent.add(leftoverCurrentIdx[i]);
-    } else {
-      unmatchedSaved.push(orderedSaved[i]);
+  const pairInOrder = (savedPart, currentIdx) => {
+    const orderedSaved = savedPart.slice().sort((a, b) => compareTuples(orderKeySaved(a), orderKeySaved(b)));
+    const orderedIdx = currentIdx.slice()
+      .sort((a, b) => compareTuples(orderKeyCurrent(currentList[a]), orderKeyCurrent(currentList[b])));
+    for (let i = 0; i < orderedSaved.length; i += 1) {
+      if (i < orderedIdx.length) {
+        pairs.push({ saved: orderedSaved[i], current: currentList[orderedIdx[i]] });
+        usedCurrent.add(orderedIdx[i]);
+      } else {
+        unmatchedSaved.push(orderedSaved[i]);
+      }
     }
+  };
+  const leftoverIdx = () => currentList.map((c, i) => i).filter((i) => !usedCurrent.has(i));
+  for (const title of new Set(afterTier2.filter(titled).map((w) => w.title))) {
+    pairInOrder(afterTier2.filter((w) => titled(w) && w.title === title),
+      leftoverIdx().filter((i) => titled(currentList[i]) && currentList[i].title === title));
   }
+  pairInOrder(afterTier2.filter((w) => !titled(w)), leftoverIdx().filter((i) => !titled(currentList[i])));
   const unmatchedCurrent = currentList.filter((c, i) => !usedCurrent.has(i));
   return { pairs, unmatchedSaved, unmatchedCurrent };
 }
@@ -201,8 +190,6 @@ module.exports = {
   matchMonitorSlots,
   rectToRatio,
   ratioToRect,
-  computeEdges,
-  pinEdges,
   pairAppWindows,
   layoutSignature,
 };

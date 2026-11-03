@@ -1,40 +1,41 @@
+import { HerdrClient } from "./herdr.js";
 import crypto from "node:crypto";
-import qaExpiry from "./qa-expiry-guard.cjs";
 
 import { reportAgentSessionPath } from "./agent-session-path.js";
 import { MAX_APP_TARGETS, appTargetsFor, readAppTargets, setAppTargets } from "./app-targets.js";
 import { emulatorCapacity } from "./emulator-capacity.js";
-import { bulkPolicy } from "./bulk-fill.js";
 import { activatePromptTargets, MAX_PROMPT_TARGET_MARKERS } from "./prompt-targets.js";
 import {
   MAX_PINS,
   absorbIntoSessionGroup,
   addPin,
-  answerDialogAsk,
   broadcastAiTargets,
   cdpExecutorReady,
+  closedTabsWire,
+  controlOwnerOf,
   dropPin,
   ensureSessionGroup,
   getLastTab,
-  goneReply,
   grantTab,
   grantTabIdsOf,
+  grantedByTabId,
   groupExists,
   groupHandleFor,
   groupTabIds,
   handleFor,
   hasProfiles,
   hasTab,
-  markControl,
   persistGrants,
   pinsOf,
   primaryPin,
   profileNames,
   profileRefToId,
+  recordClosedTab,
+  removeClosedTab,
   requestCdp,
   replaceDesignatedGroups,
   replaceDesignatedTabs,
-  resolveTarget,
+  rememberQaPane,
   revokeTab,
   sessionGroupId,
   sessionGroupName,
@@ -50,28 +51,19 @@ import {
   wakeSleepingTab,
   wcOfTabId,
 } from "./browser-runtime.js";
-import { mutate as bsMutate, wire as bsWire } from "./browser-state-owner.js";
-import { humanPathDeny } from "./human-path.js";
+import { mutate as bsMutate, wire as bsWire, storageSpaceOfTab } from "./browser-state-owner.js";
+import { qaOwner, claimQaTab, releaseQaTabIfOwner } from "./qa-ownership.js";
 import { askEmulator } from "./emulator-bridge.js";
-import {
-  handleQaSessionCmd,
-  isActCmd,
-  noteRunAccepted,
-  noteRunEvent,
-  recordFrame,
-  runFor,
-  noteTrace,
-  runSurfaces,
-} from "./qa-journal.js";
+import { handleQaSessionCmd } from "./qa-journal.js";
 import * as spaceKey from "./space-key.js";
 
 // 브라우저·세션 명령 실행과 사용자 호출 대기/응답 쌍의 단일 소유 모듈.
 //
 // 소유 범위
-//   세션 명령, 탭 생성·재사용, CDP 전송·재시도, human-path/bulk gate와 ask coordinator.
+//   세션 상태 명령, 탭 생성·재사용, app 명령과 ask coordinator.
 //
 // 제공 API
-//   initBrowserCommands, runBrowserCmd/runBrowserCmdResilient/runSessionCmd, 직접 wc 실행 port,
+//   initBrowserCommands, runBrowserCmd/runSessionCmd, 직접 wc 실행 port,
 //   pick 기록 함수와 answerUserAsk. 원시 Map·Set·timer는 노출하지 않는다.
 //
 // 의존 대상
@@ -79,7 +71,7 @@ import * as spaceKey from "./space-key.js";
 //   broadcast는 composition root에서 주입받으며 inbound handler나 transport를 import하지 않는다.
 //
 // 유지 조건
-//   명령 이름·대상 해석·재시도 순서와 sent 판정, 탭 생성/재사용 조건, human-path gate 위치,
+//   명령 이름, 탭 생성/재사용 조건,
 //   browser_ask_user가 사용자가 끝낼 때까지 같은 id·session·tab 쌍을 유지하는 시간 계약.
 //
 // 영향 범위
@@ -101,6 +93,7 @@ export function noteBrowserPick(pane, tabId, pick) {
   list.push({ t: Date.now(), tab: tabId ? handleFor(tabId) || tabId : null, tabId: tabId || null, pick });
   while (list.length > 10) list.shift();
   pickLog.set(key, list);
+  return pick?.pid || null;
 }
 
 export function noteAppPick(pane, pick) {
@@ -109,6 +102,7 @@ export function noteAppPick(pane, pick) {
   list.push({ t: Date.now(), pick });
   while (list.length > 10) list.shift();
   appPickLog.set(key, list);
+  return pick?.pid || null;
 }
 export function runSessionCmd(cmd, args, session, runId) {
   const qa = handleQaSessionCmd(cmd, args, session, runId);
@@ -125,6 +119,8 @@ export function runSessionCmd(cmd, args, session, runId) {
     if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음)." };
     try {
       const devices = setAppTargets(session, Array.isArray(args?.devices) ? args.devices : []);
+      // 등록에서 뺀 기기의 이 세션 소유 탭도 놓는다(web/js/emulator/boot.js releaseDevices)
+      askEmulator("release", { owner: session, keep: devices }, 3000).catch(() => {});
       return { ok: true, data: { session, devices } };
     } catch (error) {
       return { ok: false, error: `기기 등록을 저장하지 못했습니다: ${String(error?.message || error)}` };
@@ -304,12 +300,43 @@ function reusableTabFor(session) {
   const mine = sessionSpace(session); if (!mine) return null;
   const gid = sessionGroupId(session);
   const ids = groupExists(mine, gid) ? groupTabIds(mine, gid) : [];
-  const live = ids.filter((id) => wcOfTabId(id));
+  const live = ids.filter((id) => wcOfTabId(id) && !qaOwner(id));
   if (!live.length) return null;
   const last = getLastTab(session);
   return last && live.includes(last) ? last : live[live.length - 1];
 }
-function createTabForSession(args, session) {
+// 닫기는 이 세션 그룹의 탭만. 사용자가 지목해 준 탭·다른 그룹 탭은 사람 것이라 제외
+function closeTabForSession(args, session) {
+  if (!session) return { ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음) — 탭 닫기는 herdr pane 안에서만 가능합니다." };
+  if (!args || args.tab == null || args.tab === "") return { ok: false, error: "닫을 탭 핸들(tab)을 지정하세요. browser_tabs 로 확인합니다." };
+  const id = tabIdOfRef(args.tab);
+  if (id == null) return { ok: false, error: `그런 탭 핸들이 없습니다: ${args.tab}.` };
+  const gate = tabAllowed(session, id);
+  if (!gate.ok) return { ok: false, error: gate.why };
+  const space = storageSpaceOfTab(id);
+  const handle = handleFor(id) || id;
+  if (!space || grantedByTabId(session, id) || controlOwnerOf(space, id) !== sessionGroupId(session)) {
+    return { ok: false, error: `@${handle}은(는) 이 세션 그룹의 탭이 아니라 닫지 않습니다 — 사용자가 지목해 준 탭은 사용자가 닫습니다.` };
+  }
+  if (!closeBrowserTab(id)) return { ok: false, error: `@${handle}을(를) 닫지 못했습니다.` };
+  return { ok: true, data: { closed: handle, remaining: visibleTabsFor(session).map((t) => t.handle || t.tabId) } };
+}
+
+// 화면에서 닫을 때(handleBrowserSync)와 같은 순서: 복원 기록 → 지목·고정 회수 → 상태에서 제거. ⌘⇧T 로 되살릴 수 있음
+export function closeBrowserTab(id, options = {}) {
+  if (options.qaRunId && qaOwner(id) !== options.qaRunId) return false;
+  const space = storageSpaceOfTab(id);
+  if (!space) return false;
+  const recorded = recordClosedTab(id);
+  removeClosedTab(id);
+  if (!bsMutate({ op: "tab.close", space, id })) return false;
+  if (options.qaRunId && !releaseQaTabIfOwner(id, options.qaRunId).released) return false;
+  if (recorded) broadcast(closedTabsWire());
+  broadcast({ type: "browser-state", state: bsWire() });
+  return true;
+}
+
+function createTabForSession(args, session, qaRunId = null) {
   return new Promise((resolve) => {
     if (!session) { resolve({ ok: false, error: "세션을 알 수 없습니다(HERDR_PANE_ID 없음) — 탭 생성은 herdr pane 안에서만 가능합니다." }); return; }
     // 예외에 해당하지 않으면 만들지 않고 쓰던 탭을 그대로 쓴다.
@@ -321,14 +348,12 @@ function createTabForSession(args, session) {
         const url = args && args.url ? String(args.url) : null;
         const cover = coverWarning(session, reuse, url);
         if (cover) { resolve({ ok: false, error: cover }); return; }
-        const done = (r) => resolve({ ok: true, data: { handle: handleFor(reuse), tabId: reuse, reused: true,
+        resolve({ ok: true, data: { handle: handleFor(reuse), tabId: reuse, reused: true,
           space: sessionSpace(session), url: url || (tabMeta(reuse) || {}).url || "",
           note: `새로 만들지 않고 이 세션이 쓰던 탭 @${handleFor(reuse) || reuse}을(를) 씁니다. 두 페이지를 동시에 띄워야 하거나 다른 계정으로 열어야 하면 parallel:true를 주세요.`,
-          ...(r && r.ok === false ? { navError: r.error } : {}) } });
-        // entry: 사람 경로를 건너뛴 것이 아니라 이 주소를 열라는 요청 자체다.
-        // 사람 경로 게이트가 이것을 막으면 browser_new_tab 전체가 동작하지 않는다(외부 인자에는 없는 표시).
-        if (url) { runBrowserCmd("goto", { url, tab: reuse, entry: true }, session, true).then(done); return; }
-        setLastTab(String(session), reuse); done(null); return;
+          ...(url ? { _navigate: url } : {}) } });
+        setLastTab(String(session), reuse);
+        return;
       }
     }
     const mine = sessionSpace(session);
@@ -339,7 +364,8 @@ function createTabForSession(args, session) {
     // 화면이 세션 밖으로 나간다. 그래서 file: 도 허용한다. 확인 결과:
     // 이 줄이 file: 을 막으면 openInIris가 조용히 실패하고(호출부가 오류를 무시한다),
     // 소스 형태 검사만 통과한 채 실제로는 열리지 않는다.
-    if (!/^(https?|file):\/\//i.test(url)) { resolve({ ok: false, error: "http(s)·file 주소만 열 수 있습니다: " + url }); return; }
+    // about:blank: QA 진입 전 크기 고정용 빈 탭에만 허용
+    if (!/^(https?|file):\/\//i.test(url) && !(qaRunId && url === "about:blank")) { resolve({ ok: false, error: "http(s)·file 주소만 열 수 있습니다: " + url }); return; }
     const id = newTabId("browser:ai.");
     const title = String((args && args.title) || "").slice(0, 40) || ("에이전트 " + session);
     const gid = ensureSessionGroup(session); // 이 세션의 그룹. 없으면 여기서 만든다
@@ -359,6 +385,7 @@ function createTabForSession(args, session) {
       ...(profileId != null ? { profile: profileId } : {}) })) {
       resolve({ ok: false, error: "탭 상태 반영 실패(space=" + mine + ")." }); return;
     }
+    if (qaRunId) claimQaTab(id, qaRunId);
     broadcast({ type: "browser-state", state: bsWire() });
     // 창은 보고 있는 활성 탭과 AI 가 최근 명령을 보낸 탭만 띄운다. 방금 만든 탭은 둘 다 아니라서
     // 사용자가 다른 스페이스를 보고 있으면 아무도 띄우지 않는다. 잠든 탭과 같은 경로로 깨운다.
@@ -379,82 +406,86 @@ function createTabForSession(args, session) {
     });
   });
 }
+export async function createQaEntry(session, url, runId) {
+  const pane = await new HerdrClient().paneGet(session);
+  if (pane?.pane_id !== session || !pane.workspace_id) return { ok: false, error: "실행 중인 QA 세션을 확인하지 못했습니다." };
+  rememberQaPane(session, pane.workspace_id);
+  // 최초 목적지 탐색 전 크기 고정: 사전 관찰 중 숨은 탭 재배치 방지
+  return prepareQaEntryNavigation({
+    createBlank: () => createTabForSession({ url: "about:blank", parallel: true, title: "QA" }, session, runId),
+    getWc: (tabId) => wcOfTabId(tabId),
+    cdp: requestCdp,
+    url,
+  });
+}
+
+// 최초 목적지 탐색의 선행 조건: QA 모드 적용 성공
+// 페이지 크기는 바꾸지 않음. 크기 확인은 qa_viewport 로만(사용자 2026-10-29)
+// QA 탭은 세션 브라우저의 그 세션 탭 그룹에 둠(사용자 2026-10-28). 사용자 포커스는 입력 때만 빌림(user-focus.cjs)
+export async function prepareQaEntryNavigation({ createBlank, getWc, cdp, url }) {
+  const created = await createBlank();
+  if (!created?.ok) return created;
+  const tabId = created.data?.tabId;
+  const wc = tabId && getWc(tabId);
+  if (!wc) return { ok: false, error: "QA 탭 webview를 준비하지 못했습니다." };
+  const mode = await cdp("qa-mode", { enabled: true }, wc, 10000);
+  if (!mode?.ok) return mode;
+  const target = await cdp("goto", { url }, wc, 30000);
+  if (!target?.ok) return target;
+  return { ...created, data: { ...created.data, url } };
+}
+// 이어받을 탭 분류
+// - 어디에도 없는 탭: qa_close_tab 밖에서 닫힘. 닫힌 것으로 빼고 이어받음(qa_close_tab 은 이어받은 뒤에만 가능)
+// - 있는데 이 세션 그룹 밖이거나 다른 회차 소유면 거절
+export function splitQaRestoreTabs(tabs, runId, { own, exists, ownerOf }) {
+  const gone = tabs.filter((tab) => !own.has(tab) && !exists(tab));
+  const live = tabs.filter((tab) => !gone.includes(tab));
+  if (live.some((tab) => !own.has(tab))) return { ok: false, error: "복구할 탭이 이 세션 탭 그룹 밖에 있습니다." };
+  if (live.some((tab) => ownerOf(tab) && ownerOf(tab) !== runId)) return { ok: false, error: "복구할 탭을 다른 QA 회차가 소유합니다." };
+  return { ok: true, live, gone };
+}
+export async function restoreQaTabs(session, tabs, runId) {
+  const pane = await new HerdrClient().paneGet(session);
+  if(pane?.pane_id !== session || !pane.workspace_id) return {ok:false,error:"실행 중인 QA 세션이 없습니다."};
+  // 앱 재시작 뒤 pane·스페이스 등록이 비어 있으므로 소유 탭 계산 전에 등록
+  rememberQaPane(session,pane.workspace_id);
+  const ownTabs = new Set(groupTabIds(sessionSpace(session),sessionGroupId(session)));
+  // 재시작 직후 화면 밖 탭은 잠든 상태라 등록 전: 이 세션 그룹 탭만 깨운 뒤 판정
+  await Promise.all(tabs.filter(tab=>ownTabs.has(tab) && !hasTab(tab)).map(tab=>{wakeSleepingTab(tab);return waitForTabWc(tab,12000);}));
+  const split = splitQaRestoreTabs(tabs, runId, { own: ownTabs, exists: (tab) => hasTab(tab) || tabExistsInState(tab), ownerOf: qaOwner });
+  if(!split.ok) return split;
+  const live = split.live;
+  // 앱 재시작 직후에는 창이 아직 탭을 만들지 못해 깨우기 대기가 끝날 수 있음. 실측: 같은 호출을 다시 하면 복구됨
+  if(live.some(tab=>!hasTab(tab))) return {ok:false,error:"복구할 탭이 아직 열리지 않았습니다(앱 재시작 직후일 수 있음). 잠시 뒤 qa_run_resume을 다시 호출하세요."};
+  for(const tab of live) if(!qaOwner(tab)) claimQaTab(tab,runId);
+  publishQaTabs();
+  return {ok:true,data:{tabs:live,gone:split.gone}};
+}
+export function notifyHostUser(args, session) { return notifyUser(args, session); }
+export function progressHostUser(args, session) { return progressUser(args, session); }
+export async function openQaReport(session, url) {
+  // 관제 재계산이 에이전트 없는 pane의 등록을 지우므로 진입과 같이 다시 등록
+  const pane = await new HerdrClient().paneGet(session);
+  if (pane?.pane_id !== session || !pane.workspace_id) return { ok: false, error: "실행 중인 QA 세션을 확인하지 못했습니다." };
+  rememberQaPane(session, pane.workspace_id);
+  return createTabForSession({ url, parallel: true, title: "QA 보고서" }, session);
+}
+export async function runQaAppCommand(cmd, args, session) {
+  // 기기 탭의 소유 판정과 여는 스페이스도 pane 등록 기준이라 보고서와 같이 다시 등록
+  const pane = await new HerdrClient().paneGet(session);
+  if (pane?.pane_id !== session || !pane.workspace_id) return { ok: false, error: "실행 중인 QA 세션을 확인하지 못했습니다." };
+  rememberQaPane(session, pane.workspace_id);
+  return runBrowserCmd(cmd, args, session);
+}
+export function publishQaTabs() { broadcast({ type: "browser-state", state: bsWire() }); }
+
 // 세션 해석을 거치지 않고 특정 탭으로 바로 보낸다. 확인 창 자동 닫기처럼 서버가 직접 수행하는 작업에 쓴다.
 export function execOnWc(cmd, args, wc) {
   return requestCdp(cmd, args, wc, 10000);
 }
-// 일시적 단절(앱 재시작·절전 복귀·tailnet 불안정)은 곧 복구된다. 한 번 실패로 끝내지 않고 간격을 두고
-// 다섯 번까지 재시도한다. 다만 전송 후 응답이 없는 경우는 이미 실행됐을 수 있으므로 반복해도
-// 안전한 읽기 명령만 재시도한다. 클릭·입력을 다시 보내면 두 번 실행된다.
-const RETRY_DELAYS = [700, 1200, 2000, 3000];       // 최초 1회 + 재시도 4회 = 5회
-// 앱 자체가 종료된 경우에만 쓰는 긴 재시도 간격(합 60초). 재시작·업데이트 시간을 견딘다.
-const APP_GONE_DELAYS = [500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000, 10000, 10000, 9000];
-const READONLY_CMDS = new Set(["url", "text", "snapshot", "screenshot", "observe", "tabs", "console", "network", "history", "locate"]);
-// 전송 사실은 문자열로 판별하지 않는다. 페이지가 던진 예외 메시지에 같은 말이 들어 있으면
-// 미전송으로 오판해 이미 발생한 부수효과를 반복 실행한다. 서버가 직접 만든
-// 응답에 sent 플래그를 달아 구조로 판별한다(sent:false = 미전송, true = 전송 후 응답 없음).
-const SENT_UNKNOWN_RE = /timeout\(30s\)/;   // 플래그가 없는 이전 경로 보완
-export async function runBrowserCmdResilient(cmd, args, session, runId) {
-  const commandRun = runFor(session, runId);
-  let commandUse, outputUse;
-  try {
-    commandUse = commandRun ? qaExpiry.acquireRun(commandRun.runId, "browser-command") : null;
-    outputUse = qaExpiry.acquirePaths([args?.path], "browser-output");
-  } catch (e) {
-    if (commandUse) commandUse.release();
-    return { ok: false, error: String(e.message) };
-  }
-  try {
-  // 보내기 전에 먼저 기록한다. 이 줄이 있어야 전송 후 응답이 없는 구간이 로그에 남는다.
-  const callId = noteRunAccepted(cmd, args, session, runId);
-  // 조작은 직전·직후 화면을 남긴다. 회차가 열려 있을 때만 남기며, 회차 밖의 단발 조작까지 찍으면
-  // 사용하지 않는 이미지가 쌓인다.
-  const recRun = isActCmd(cmd) ? runFor(session, runId) : null;
-  const shoot = (a) => runBrowserCmd("screenshot", a, session, false, runId);
-  if (recRun) { try { await recordFrame(recRun, args && args.tab, "before", shoot); } catch {} }
-  let last = null, tries = 0, step = 0, longWait = false;
-  for (let i = 0; ; i++) {
-    last = await runBrowserCmd(cmd, args, session, false, runId);
-    tries = i + 1;
-    noteTrace(cmd, args, session, last);
-    if (last && last.ok) {
-      const out = i ? { ...last, data: { ...(last.data || {}), retried: i } } : last;
-      noteRunEvent(callId, cmd, args, session, out, tries, runId, commandRun);
-      // 조작으로 시작된 렌더링이 끝난 뒤의 화면. 촬영이 실패해도 조작 결과는 그대로 반환한다.
-      // 기록 실패가 이미 실행된 조작을 무효로 만들지 않는다.
-      if (recRun) { try { await recordFrame(recRun, args && args.tab, "after", shoot); } catch {} }
-      return out;
-    }
-    const why = String((last && last.error) || "");
-    const notSent = last && last.sent === false;
-    const sentUnknown = (last && last.sent === true) || SENT_UNKNOWN_RE.test(why);
-    const retryable = notSent || (sentUnknown && READONLY_CMDS.has(cmd));
-    // 앱이 종료된 동안은 더 길게 기다린다. 이 명령은 아직 전송되지 않았으므로 무엇을 다시 보내도
-    // 안전하고, 앱은 곧 복구된다(재시작 확인 결과 1.9초). 여기서 중단하면 앱 재시작에 걸친
-    // 작업이 전부 실패한다. 탭은 정체성으로 복원되므로 기다렸다가 이어 가면 된다.
-    // 앱이 종료됐을 때만 긴 간격을 쓴다. 대기 이유가 바뀌면 재시도 횟수도 그 기준으로 다시 계산한다.
-    // 그러지 않으면 앱이 복구된 직후(탭 복원 대기)에 남은 횟수가 없어 즉시 중단된다.
-    const gone = !!(last && last.appGone);
-    if (gone !== longWait) { longWait = gone; step = 0; }
-    const ladder = longWait ? APP_GONE_DELAYS : RETRY_DELAYS;
-    if (!retryable || step >= ladder.length) break;
-    await new Promise((r) => setTimeout(r, ladder[step++]));
-  }
-  // 재시도해도 실패하면 시도 횟수까지 함께 알린다. 단순 실패와 대기 후에도 복구되지 않은 경우는 다르다.
-  if (last && !last.ok && tries > 1) last = { ...last, error: `${last.error} (${tries}회 시도)` };
-  // 실패도 기록한다. 실패를 빼면 로그와 그로부터 만든 보고서가 실제 결과를 반영하지 못한다.
-  noteRunEvent(callId, cmd, args, session, last, tries, runId, commandRun);
-  return last;
-  } finally {
-    try { outputUse.release(); } finally { if (commandUse) commandUse.release(); }
-  }
-}
-// AI가 대신할 수 없는 단계(결제·본인확인·캡차·약관 동의)에서 사용자를 호출한다. 화면을 가져오지 않는다.
-// 호출하고 그 탭으로 가는 경로를 제공한 뒤, 사용자가 이동했는지만 반환한다. 완료 여부는 페이지를 보고 판단한다.
+// 이전 화면 알림 방식의 대기 질문 장부. askUser 가 더 만들지 않음(콘솔 질문). 앱·폰의 답 수신 경로가 읽음
 const pendingAsks = new Map();   // id → { resolve, timer }
 const askOwner = new Map();      // id → 대기 알림과 호출의 소유자
-const askByKey = new Map();
-const startingAsks = new Set(); // 화면 확인 중인 질문도 중복 호출을 막는다.
 const askGoing = new Map();      // session → id. 사용자가 이동한 호출
 const askAnswers = new Map();    // id → answer. 대기 중인 호출이 없는 사이에 사용자가 누른 응답
 const focusedUi = new Set();
@@ -496,217 +527,14 @@ export function pendingUserNotices() {
     approveLabel: item.approveLabel, denyLabel: item.denyLabel,
   }));
 }
-// 받침이 있으면 "을", 없으면 "를". 선택한 답을 그대로 문장에 넣으면 "승인를"이 되므로
-// 조사를 맞춘다.
-function 을를(word) {
-  const last = String(word || "").trim().slice(-1);
-  const c = last.charCodeAt(0);
-  if (!(c >= 0xac00 && c <= 0xd7a3)) return "를";   // 한글이 아니면 기본형
-  return (c - 0xac00) % 28 ? "을" : "를";
+// 사람에게 묻는 요청(ask·approve)은 그 세션 콘솔에서 묻는다(사용자 2026-10-28)
+// 브라우저 알림 카드·macOS 알림·폰 알림을 띄우지 않고 바로 반환. AI 가 대화에서 묻고 답을 받음
+export function consoleAsk(kind, text, choices) {
+  const options = choices && choices.length ? ` (선택지: ${choices.join(" / ")})` : "";
+  return { console: true, answered: false, question: text, ...(choices ? { choices } : {}),
+    ...(kind === "approve" ? { approved: false } : { done: false, answer: null }),
+    note: `사람에게 알림을 보내지 않았습니다. 지금 이 세션 대화에서 사용자에게 직접 물으세요: "${text}"${options}. 답을 받기 전에는 이 단계를 진행하지 마세요.` };
 }
-function askNote(answer, going, where) {
-  const 자리 = where === "app" ? "그 앱" : "그 탭";
-  if (answer === "다 했음") return "사람이 끝났다고 했습니다. 화면을 다시 확인하고 이어서 진행하세요.";
-  if (answer === "못 했음") return "사람이 못 하겠다고 했습니다. 무엇이 막혔는지 화면에서 확인하고 사용자에게 알리세요.";
-  if (answer === "나중에") return "사람이 지금은 안 하겠다고 했습니다. 이 단계는 사람 없이 넘어갈 수 없습니다.";
-  if (answer === "갔음") return `사람이 ${자리}으로 갔습니다.`;
-  // 호출한 쪽이 만든 답은 서버가 의미를 알 수 없으므로 선택한 값을 그대로 전달한다.
-  if (answer) return `사람이 "${answer}"${을를(answer)} 골랐습니다. 그 뜻대로 이어서 진행하세요.`;
-  if (going) return `사람이 ${자리}으로 갔지만 아직 끝났다는 답이 없습니다. 화면을 확인하고, 아직이면 같은 인자로 이 도구를 다시 불러 계속 기다리세요`
-    + "(알림은 다시 뜨지 않고 그 부름을 이어받습니다). 여기서 턴을 끝내지 마세요.";
-  return "사람이 아직 응답하지 않았습니다. 화면을 확인하고, 필요하면 같은 인자로 다시 불러 기다리세요. 여기서 턴을 끝내지 마세요.";
-}
-// 호출 전에 AI가 채울 수 있는데 비어 있는 칸이 남았는지 화면에서 확인한다. 사용자 호출은
-// 마지막 수단이어야 한다. 배송지·받는 사람처럼 AI가 채울 수 있는 칸을 남겨 두고 호출하면
-// 사용자가 AI의 몫까지 하게 된다. 비밀 칸(비밀번호·카드·인증번호)은 사용자 몫이라 세지 않는다.
-const UNFILLED_PROBE = `(() => {
-  const vis = (e) => e && e.offsetParent !== null && e.getClientRects().length;
-  const secret = (e) => {
-    const s = ((e.type || "") + " " + (e.name || "") + " " + (e.id || "") + " " + (e.autocomplete || "")).toLowerCase();
-    return /password|cc-|card|cvc|cvv|expiry|one-time|otp|captcha|보안|카드/.test(s);
-  };
-  const labelOf = (e) => {
-    let t = "";
-    if (e.id) { const l = document.querySelector('label[for="' + CSS.escape(e.id) + '"]'); if (l) t = l.textContent; }
-    if (!t) { const l = e.closest("label"); if (l) t = (l.textContent || "").replace(e.textContent || "", ""); }
-    if (!t) t = e.getAttribute("aria-label") || e.placeholder || e.name || e.id || "";
-    return String(t).replace(/\\s+/g, " ").replace(/[*:·\\s]+$/, "").trim().slice(0, 24);
-  };
-  const req = (e) => {
-    if (e.required || e.getAttribute("aria-required") === "true") return true;
-    const box = e.closest("label, .form-group, .field, li, tr, div");
-    return !!(box && /필수|required|\\*/.test((box.textContent || "").slice(0, 120)));
-  };
-  const out = { required: [], optional: [] };
-  const els = [...document.querySelectorAll("input, textarea, select")].filter(vis)
-    .filter((e) => !e.disabled && !e.readOnly && !secret(e))
-    .filter((e) => !/^(submit|button|image|reset|file|hidden|checkbox|radio)$/i.test(e.type || ""));
-  for (const e of els) {
-    const empty = e.tagName === "SELECT"
-      ? (!e.value || e.selectedIndex <= 0)
-      : !String(e.value || "").trim();
-    if (!empty) continue;
-    const name = labelOf(e); if (!name) continue;
-    (req(e) ? out.required : out.optional).push(name);
-  }
-  out.required = [...new Set(out.required)].slice(0, 8);
-  out.optional = [...new Set(out.optional)].slice(0, 8);
-  return out;
-})()`;
-function unfilledOn(wc) {
-  if (!wc) return Promise.resolve(null);
-  return execOnWc("eval", { expression: UNFILLED_PROBE }, wc)
-    .then((r) => (r && r.ok && r.data && r.data.value) || null)
-    .catch(() => null);
-}
-function askUser(args, session) {
-  return new Promise((resolve) => {
-    const kind = args && args._kind === "approve" ? "approve" : "ask";
-    const skey = String(session || "");
-    const rawWait = args?.wait == null ? (kind === "approve" ? 240 : 180) : Number(args.wait);
-    if (!Number.isFinite(rawWait) || rawWait < 30 || rawWait > 240) {
-      resolve({ ok: false, error: "wait는 30~240초여야 합니다. 기다리지 않는 알림은 notify를 쓰세요." });
-      return;
-    }
-    const providedId = kind === "ask" ? String(args?.ask_id || "").trim() : "";
-    const resumed = providedId ? askOwner.get(providedId) : null;
-    if (providedId && !resumed) {
-      resolve({ ok: false, error: "이어받을 부름을 찾을 수 없습니다. 새 요청은 ask_id 없이 보내세요." }); return;
-    }
-    if (resumed && (resumed.session !== skey || resumed.kind !== kind)) {
-      resolve({ ok: false, error: "이 부름을 이어받을 수 없습니다." }); return;
-    }
-    const choices = kind === "approve"
-      ? resumed?.choices || [String(args.approve_label || "승인"), String(args.deny_label || "취소")]
-      : resumed?.choices || (Array.isArray(args?.choices) ? args.choices.map((value) => String(value).trim()) : null);
-    if (kind === "ask" && choices && (choices.length < 2 || choices.length > 4 || choices.some((value) => !value))) {
-      resolve({ ok: false, error: "choices는 비어 있지 않은 답 2~4개여야 합니다." }); return;
-    }
-    if (kind === "approve" && args?.total != null && (!Number.isFinite(Number(args.total)) || Number(args.total) < 0)) {
-      resolve({ ok: false, error: "total은 0 이상의 수여야 합니다." }); return;
-    }
-    const text = resumed?.text || String(kind === "approve" ? args?.summary || "" : args?.message || "").trim().slice(0, 300);
-    if (!text) {
-      resolve({ ok: false, error: kind === "approve" ? "summary를 적어 주세요." : "message를 적어 주세요." }); return;
-    }
-    const requestedTitle = String(args?.title || "").trim();
-    if (kind === "approve" && !resumed && !requestedTitle) {
-      resolve({ ok: false, error: "title을 적어 주세요." }); return;
-    }
-    const requestedDevice = args?.device != null ? String(args.device).trim() : "";
-    const requestedTab = args?.tab != null ? String(args.tab).trim() : "";
-    if (!resumed && requestedDevice && requestedTab) {
-      resolve({ ok: false, error: "tab과 device는 하나만 적어 주세요." }); return;
-    }
-    const device = resumed?.device || requestedDevice;
-    const ref = !resumed && requestedTab ? tabIdOfRef(requestedTab) : null;
-    const tabId = resumed ? resumed.tabId : device && !ref ? null
-      : (ref || (session ? (resolveTarget(session).tabId || primaryPin(session)) : null));
-    if (!resumed && tabId && !tabAllowed(session, tabId).ok) {
-      resolve({ ok: false, error: "이 세션이 쓸 수 있는 탭이 아닙니다." }); return;
-    }
-    if (kind === "ask" && !tabId && !device && !choices) {
-      resolve({ ok: false, error: "대상 탭이나 기기가 없으면 choices를 2~4개 적어 주세요." }); return;
-    }
-    const key = resumed?.key || skey + ":" + kind + ":" + (providedId || [text, tabId || "", device].join("\u0000"));
-    if (startingAsks.has(key)) {
-      resolve({ ok: false, error: "같은 부름을 이미 준비하는 호출이 있습니다." }); return;
-    }
-    let record = resumed || askOwner.get(askByKey.get(key));
-    if (record && (record.session !== skey || record.kind !== kind)) record = null;
-    const start = Date.now();
-    const waitMs = rawWait * 1000;
-    const done = (answer) => {
-      clearTimeout(pendingAsks.get(record.id)?.timer);
-      pendingAsks.delete(record.id);
-      const answered = answer != null;
-      const approved = kind === "approve" && answer === record.choices[0];
-      const finished = answered || kind === "approve";
-      if (finished) {
-        askOwner.delete(record.id); askByKey.delete(record.key); askAnswers.delete(record.id);
-        if (askGoing.get(skey) === record.id) askGoing.delete(skey);
-        if (kind === "approve" && !answered) record.expired = true;
-        broadcast({ type: "ai-ask-closed", id: record.id, expired: record.expired,
-          kind: record.kind, title: record.title, text: record.text });
-      } else {
-        record.deadline = null;
-        if (askGoing.get(skey) === record.id) askGoing.delete(skey);
-        broadcast({ type: "ai-ask", ...pendingUserNotices().find((item) => item.id === record.id) });
-      }
-      const data = { id: record.id, answered, round: record.round, went: !!record.went,
-        waitedSeconds: Number(((Date.now() - start) / 1000).toFixed(3)), waitLimitSeconds: rawWait };
-      if (kind === "approve") {
-        data.approved = approved;
-      } else {
-        data.done = record.choices ? answer === record.choices[0] : answer === "다 했음";
-        data.answer = answer || "응답 없음";
-        data.tab = tabId ? handleFor(tabId) || tabId : null;
-        if (device) data.device = device;
-        data.note = askNote(answer, record.went, device ? "app" : "tab");
-        if (!answered) data.resume = "같은 ask_id로 다시 부르세요";
-      }
-      resolve({ ok: true, data });
-    };
-    const waitOn = () => {
-      const buffered = askAnswers.get(record.id);
-      if (buffered !== undefined) { askAnswers.delete(record.id); done(buffered); return; }
-      const ms = Math.max(0, record.deadline - Date.now());
-      if (!ms) { done(null); return; }
-      pendingAsks.set(record.id, { timer: setTimeout(() => done(null), ms), resolve: (answer) => {
-        clearTimeout(pendingAsks.get(record.id)?.timer);
-        pendingAsks.delete(record.id);
-        if (answer === "갔음") { waitOn(); return; }
-        done(answer);
-      } });
-    };
-    if (record) {
-      if (pendingAsks.has(record.id)) {
-        resolve({ ok: false, error: "같은 부름을 이미 기다리는 호출이 있습니다.", data: { id: record.id } }); return;
-      }
-      record.round += 1;
-      record.deadline = Date.now() + waitMs;
-      if (askAnswers.has(record.id)) { waitOn(); return; }
-      broadcast({ type: "ai-ask", ...pendingUserNotices().find((item) => item.id === record.id) });
-      waitOn();
-      return;
-    }
-    const meta = tabId ? tabMeta(tabId) || {} : {};
-    const proceed = (unfilled) => {
-      const id = "ask-" + crypto.randomUUID();
-      record = { id, key, kind, session: skey, tabId, space: meta.space || null, device,
-        title: String(requestedTitle || "AI가 사람을 부릅니다").slice(0, 60),
-        text: text + (unfilled?.length ? "\n(AI가 못 채운 칸: " + unfilled.join(" · ") + ")" : ""),
-        choices, round: 1, went: false, deadline: Date.now() + waitMs,
-        items: kind === "approve" && Array.isArray(args?.items) ? args.items.slice(0, 10).map(String) : undefined,
-        total: kind === "approve" ? Number(args?.total || 0) : undefined,
-        irreversible: kind === "approve" && !!args?.irreversible,
-        approveLabel: kind === "approve" ? choices[0] : undefined,
-        denyLabel: kind === "approve" ? choices[1] : undefined };
-      askOwner.set(id, record); askByKey.set(key, id);
-      if (wc) execOnWc("handoff", {}, wc).catch(() => {});
-      broadcast({ type: "ai-ask", ...pendingUserNotices().find((item) => item.id === id) });
-      waitOn();
-    };
-    const wc = tabId ? wcOfTabId(tabId) : null;
-    if (kind === "approve" || (device && !tabId)) { proceed([]); return; }
-    startingAsks.add(key);
-    unfilledOn(wc).then((unfilled) => {
-      startingAsks.delete(key);
-      const left = unfilled?.required || [];
-      if (left.length && !args?.ready) {
-        resolve({ ok: false, error: "아직 네가 채울 수 있는 칸이 남았습니다: " + left.join(" · ")
-          + ". 사람을 부르기 전에 채우세요. 사람만 할 부분이면 ready:true로 다시 부르세요.",
-          data: { unfilled: left, optional: unfilled?.optional || [] } });
-        return;
-      }
-      proceed(left);
-    });
-  });
-}
-// 여러 탭을 한 번에. 그룹으로 탭을 묶어 두는 이유가 여럿을 함께 다루기 위해서인데, 명령이 한
-// 번에 하나만 받으면 그 묶음을 쓸 수가 없다. 대상 목록은 배열로도, 쉼표로도
-// 받는다. 상한을 두는 이유는 동시에 네 화면까지가 결과를 확인할 수 있는 범위이기 때문이다.
-const MAX_TARGETS = 4;
 const notifyRecent = new Map();
 const notifyKeys = new Map();
 const progressItems = new Map();
@@ -723,16 +551,21 @@ function notifyUser(args, session) {
   const tabId = requestedTab ? tabIdOfRef(requestedTab) : null;
   if (requestedTab && !tabId) return { ok: false, error: "관련 탭을 찾을 수 없습니다." };
   if (tabId && !tabAllowed(session, tabId).ok) return { ok: false, error: "이 세션이 쓸 수 있는 탭이 아닙니다." };
+  // review: 사람이 확인할 화면을 띄운 탭. 그 탭으로 가는 단추가 알림의 목적이라 탭이 꼭 필요
+  const review = args?.review === true;
+  if (review && !tabId) return { ok: false, error: "review 알림은 확인할 화면을 띄운 tab이 필요합니다." };
   const now = Date.now();
   const recent = (notifyRecent.get(skey) || []).filter((item) => now - item.at < 10000);
   const key = args?.key ? skey + ":" + String(args.key).slice(0, 100) : "";
   const existing = key && notifyKeys.get(key);
   if (existing) {
     broadcast({ type: "ai-notify", id: existing, level, title, body: String(args.body || "").slice(0, 300),
-      detail: String(args.detail || "").slice(0, 2000), session: skey, tab: tabId, device: device || undefined });
+      detail: String(args.detail || "").slice(0, 2000), session: skey, tab: tabId, device: device || undefined,
+      ...(review ? { review: true } : {}) });
     return { ok: true, data: { id: existing, shown: "merged" } };
   }
-  if (recent.length >= 3) {
+  // "외 N건"으로 합치면 탭이 빠지므로 review 는 합치지 않음
+  if (recent.length >= 3 && !review) {
     const last = recent[2];
     last.extra = (last.extra || 0) + 1;
     notifyRecent.set(skey, recent);
@@ -748,8 +581,10 @@ function notifyUser(args, session) {
     while (notifyKeys.size > 200) notifyKeys.delete(notifyKeys.keys().next().value);
   }
   broadcast({ type: "ai-notify", id, level, title, body: String(args.body || "").slice(0, 300),
-    detail: String(args.detail || "").slice(0, 2000), session: skey, tab: tabId, device: device || undefined });
-  return { ok: true, data: { id, shown: (level === "warn" || level === "err") && focusedUi.size === 0 ? "both" : "app" } };
+    detail: String(args.detail || "").slice(0, 2000), session: skey, tab: tabId, device: device || undefined,
+    ...(review ? { review: true } : {}) });
+  return { ok: true, data: { id, shown: (review || level === "warn" || level === "err") && focusedUi.size === 0 ? "both" : "app",
+    ...(review ? { tab: handleFor(tabId) || tabId } : {}) } };
 }
 function progressUser(args, session) {
   const op = String(args?.op || "");
@@ -795,52 +630,26 @@ function progressUser(args, session) {
   }
   return { ok: false, error: "op(start/update/end)과 end의 result(ok/err)를 확인하세요." };
 }
-function refList(tab) {
-  if (tab == null) return null;
-  const arr = (Array.isArray(tab) ? tab : String(tab).split(","))
-    .map((s) => String(s).trim()).filter(Boolean);
-  return [...new Set(arr)];   // 같은 탭을 두 번 적어도 두 번 돌리지 않는다
-}
 export function runBrowserCmd(cmd, args, session, noAutoTab, runId) {
   return new Promise((resolve) => {
-    if (cmd === "notify") { resolve(notifyUser(args, session)); return; }
-    if (cmd === "progress") { resolve(progressUser(args, session)); return; }
-    if (cmd === "approve") { askUser({ ...args, _kind: "approve" }, session).then(resolve); return; }
-    // 대상이 여럿이면 하나씩 처리하는 기존 경로를 반복해서 사용한다. 권한 검사·그룹 편입·오류
-    // 문구가 모두 그 경로에 있어, 여기서 나눠 실행하면 대상마다 동일하게 적용된다.
-    const targets = args && args.tab != null ? refList(args.tab) : null;
-    if (targets && targets.length !== 1) {
-      if (!targets.length) { resolve({ ok: false, error: "대상 탭이 비어 있습니다." }); return; }
-      if (targets.length > MAX_TARGETS) {
-        resolve({ ok: false, error: `한 번에 최대 ${MAX_TARGETS}개까지 조작합니다(요청 ${targets.length}개).` });
-        return;
-      }
-      Promise.all(targets.map((t) => runBrowserCmd(cmd, { ...(args || {}), tab: t }, session, noAutoTab, runId)))
-        .then((rs) => {
-          const per = targets.map((t, i) => ({ tab: t, ...(rs[i] || { ok: false, error: "결과 없음" }) }));
-          const okCount = per.filter((r) => r.ok).length;
-          resolve({
-            ok: okCount === per.length,          // 하나라도 실패하면 전체 실패. 절반만 성공한 것을 성공으로 보고하지 않는다
-            multi: true, count: per.length, okCount,
-            error: okCount === per.length ? undefined
-              : per.filter((r) => !r.ok).map((r) => `${r.tab}: ${r.error || "실패"}`).join(" / "),
-            targets: per,
-          });
-        });
-      return;
-    }
-    if (targets) args = { ...(args || {}), tab: targets[0] };   // 쉼표 하나짜리도 정규화해 아래로 넘긴다
     if (cmd === "newtab") { createTabForSession(args, session).then(resolve); return; }
-    if (cmd === "ask") { askUser(args, session).then(resolve); return; }
+    if (cmd === "closetab") { resolve(closeTabForSession(args, session)); return; }
     // MCP 앱 도구의 대상은 Iris 에뮬레이터 탭에 열린 기기뿐이다. 어느 탭이 이 세션 스페이스의 것인지는 여기서 표시한다.
     if (cmd === "app-devices") {
       askEmulator("list", {}, 5000).then((r) => {
         if (!r || r.ok === false) { resolve(r || { ok: false, error: "응답 없음" }); return; }
         const mine = sessionSpace(session);
         // 세션 소유 탭은 그 세션만의 것이다. 같은 스페이스의 다른 세션 탭을 mine 으로 보지 않는다.
-        resolve({ ok: true, data: { space: mine, tabs: (r.tabs || []).map((t) => ({ ...t,
+        resolve({ ok: true, data: { space: mine, tabs: (r.tabs || []).map((t) => ({ ...t, qaRun: qaOwner("device:" + (t.persistentId || t.udid)),
           mine: t.owner ? t.owner === String(session || "") : !!mine && spaceKey.sameStorageSpace(t.space, mine) })) } });
       });
+      return;
+    }
+    // 기기 안 앱의 화면 비율. 그 기기가 열린 에뮬레이터 탭이 처리한다(Electron 쪽 device-preview.cjs)
+    if (cmd === "app-viewport") {
+      askEmulator("viewport", { device: String((args && args.device) || ""), op: args && args.op === "apply" ? "apply" : "list",
+        preset: typeof args?.preset === "string" ? args.preset : "" }, 15000)
+        .then((r) => resolve(r && r.ok ? { ok: true, data: r.data } : (r || { ok: false, error: "응답 없음" })));
       return;
     }
     if (cmd === "app-open") {
@@ -866,124 +675,6 @@ export function runBrowserCmd(cmd, args, session, noAutoTab, runId) {
     }
     const local = runSessionCmd(cmd, args, session, runId);
     if (local) { resolve(local); return; }
-    if (!cdpExecutorReady()) { resolve({ ok: false, error: "브라우저 제어기(앱)가 연결 안 됨 — Iris 앱을 실행하세요(pnpm app).", sent: false, appGone: true }); return; }
-    // --tab 이 오면 그 명령만 그 탭에서 실행한다. 여러 탭을 지목받았을 때 고정을 계속 갈아끼우지 않아도 된다.
-    const want = args && args.tab != null ? tabIdOfRef(args.tab) : null;
-    if (args && args.tab != null && want == null) {
-      const r = goneReply(null, session);
-      resolve({ ...r, error: `그런 탭 핸들이 없습니다: ${args.tab}.` + r.error.replace(/^이 세션에 고정된 탭이 없습니다\./, "") });
-      return;
-    }
-    if (want != null) {
-      const gate = tabAllowed(session, want);
-      if (!gate.ok) {
-        // 지정한 탭이 사라진 경우는 실패가 아니라 상태 변화이므로 남은 탭을 함께 반환한다.
-        if (!hasTab(want)) { const r = goneReply(null, session); resolve({ ...r, error: `지정한 탭 @${handleFor(want) || want}이(가) 없습니다(닫혔거나 다른 창).` + r.error.replace(/^이 세션에 고정된 탭이 없습니다\./, "") }); return; }
-        resolve({ ok: false, error: gate.why });
-        return;
-      }
-      // 명시적으로 지정한 탭은 이 세션 그룹에 포함시킨다(같은 스페이스·그룹 밖일 때만). 그래야 다음 명령부터
-      // 지정 없이도 여기로 오고, 어느 탭이 이 세션 것인지 화면에서도 보인다.
-      const wmeta = tabMeta(want);
-      // --tab은 이번 명령에만 적용된다. 여기서 기본 대상까지 바꾸면 다음 무지정 명령의 대상이 바뀐다.
-      if (wmeta && spaceKey.sameStorageSpace(wmeta.space, sessionSpace(session))) absorbIntoSessionGroup(session, want);
-    }
-    const tg = want != null ? { tabId: want, pinned: false, adhoc: true } : resolveTarget(session);
-    // 잠든 탭이면 깨워서 쓴다. 재우기는 메모리를 아끼기 위한 기능인데, 잠들었다는 이유로 명령을
-    // 실패시키면 자동화가 중단된다. 잠든 탭은 상태에는 있지만 wc 가 없는 형태로 보인다. 지목 경로면
-    // tg.tabId 로, 고정·그룹 경로면 tg.waitTab 으로 온다(resolveTarget 이 wc 없는 탭을 notReady 로
-    // 내린다). 깨운 뒤에는 대상 지정을 그대로 둔 채 다시 실행한다. args 를 수정하면 --tab 의 이번
-    // 명령 한정 의미가 바뀐다. noAutoTab 이 재진입 표시라 이 분기는 한 번만 실행된다.
-    const asleep = noAutoTab || tg.staleP || tg.needTab
-      ? null
-      : (tg.tabId && !wcOfTabId(tg.tabId) ? tg.tabId : (tg.notReady ? tg.waitTab : null));
-    if (asleep && tabExistsInState(asleep)) {
-      wakeSleepingTab(asleep);
-      waitForTabWc(asleep, 12000).then((wc) => {
-        // 다시 태우면 wc 없는 대상으로 떨어져 "탭이 없다"는 오류가 난다. 탭은 있고 깨우지 못한 것이다.
-        if (!wc) {
-          resolve({ ok: false, error: `잠든 탭 @${handleFor(asleep) || asleep}을(를) 깨우지 못했습니다 — 이 탭을 띄울 브라우저 창(공유 탭이면 공유 브라우저 창)이 열려 있는지 확인하세요.`, data: { tab: handleFor(asleep) || asleep, sleeping: true } });
-          return;
-        }
-        runBrowserCmd(cmd, args, session, true, runId).then(resolve);
-      });
-      return;
-    }
-    // 여기서 한 번만 정체성을 실행 핸들로 변환한다. 이 아래로만 wc가 전달된다.
-    const wc = tg.tabId ? wcOfTabId(tg.tabId) : null;
-    if (!wc) {
-      if (tg.staleP) { resolve(goneReply(tg.deadTab, session)); return; }
-      // 이 세션이 아직 쓸 탭이 없다 → 사용자가 보고 있는 탭을 빼앗지 않고 자기 그룹에 하나 만든다.
-      // 탭 지정이 없으면 그룹과 탭을 새로 만든다. 지목받은 탭이 있으면 그것부터 감싼다.
-      if (tg.needTab) {
-        const granted = [...(grantTabIdsOf(session) || [])]
-          .filter((id) => spaceKey.sameStorageSpace((tabMeta(id) || {}).space, tg.space));
-        if (granted.length) {
-          // 지목받은 탭은 그 자체로 허용된다. 그룹 편입은 부수적이고(다른 그룹에 있으면
-          // 편입되지 않는다), 편입됐다고 가정하고 처음부터 다시 호출하면 같은 분기로 되돌아와
-          // 요청이 끝나지 않는다. 편입은 시도하되 대상은 여기서 확정한다.
-          for (const id of granted) absorbIntoSessionGroup(session, id);
-          const pick = granted[granted.length - 1];
-          setLastTab(String(session), pick);
-          // 대상을 명시해 다시 실행한다. 명시 경로는 이 분기로 되돌아오지 않으므로 재귀가 끝난다.
-          runBrowserCmd(cmd, { ...(args || {}), tab: pick }, session, true, runId).then(resolve);
-          return;
-        }
-        if (noAutoTab) { // 방금 만들었는데도 또 비어 있다면 만들기를 반복하지 않는다
-          resolve({ ok: false, error: "이 세션 몫의 탭을 만들었지만 브라우저가 아직 띄우지 못했습니다 — 잠시 뒤 다시 시도하세요.", sent: false });
-          return;
-        }
-        createTabForSession({}, session).then((r) => {
-          if (!r.ok) { resolve(r); return; }
-          runBrowserCmd(cmd, args, session, true, runId).then((r2) => {
-            resolve(r2.ok ? { ...r2, data: { ...(r2.data || {}), createdTab: r.data.handle, note: r.data.note } } : r2);
-          });
-        });
-        return;
-      }
-      if (tg.notReady) { resolve({ ok: false, sent: false, error: "고정한 탭이 아직 브라우저에 뜨지 않았습니다(앱 기동 중일 수 있음) — 고정은 그대로 두었습니다. 잠시 뒤 다시 시도하세요.", data: { tab: handleFor(tg.waitTab) || tg.waitTab, pending: true } }); return; }
-      resolve({ ok: false, error: tg.noSession
-        ? "세션 식별자가 없어(HERDR_PANE_ID·IRIS_SESSION 둘 다 없음) 어느 탭을 쓸지 정할 수 없습니다. 임의로 고르지 않습니다 — herdr pane 안에서 실행하거나, 위임 프로세스라면 IRIS_SESSION에 부모 pane id(예: w3:pS)를 넘겨주세요."
-        : tg.noSpace
-        ? "이 세션의 스페이스를 알 수 없어 조작할 탭을 정할 수 없습니다 — 앱에서 탭을 지목해 고정해 주세요."
-        : tg.sharedBlocked
-        ? "공유 브라우저 창은 지목 없이 쓰지 않습니다 — 앱에서 그 탭을 직접 지목해 주세요."
-        : tg.space
-        ? `스페이스 ${tg.space}에 열린 브라우저 탭이 없습니다 — 이 스페이스에서 브라우저를 열거나 탭을 지목해 고정하세요.`
-        : "제어할 브라우저 탭이 없습니다 — 앱에서 브라우저를 열거나, 탭을 지목해 고정하세요(`iris-browser tabs`)." });
-      return;
-    }
-    // 가로챈 질문(페이지가 동기 XHR로 답을 기다리는 중)이 있으면 CDP로 가지 않고 여기서 푼다.
-    if (cmd === "dialog") {
-      const ans = args && args.answer === "ok" ? "ok" : "cancel";
-      const answered = answerDialogAsk(wc, ans, args && args.text);
-      if (answered) {
-        resolve({ ok: true, data: { answered: ans, ...answered, via: "intercepted" } });
-        return;
-      }
-    }
-    // 사람 경로 게이트는 실행기로 나가기 직전 한 곳에서만 확인한다. 모든 명령이 이 지점을 지난다.
-    // sent 필드를 붙이지 않는다: 붙이면 재시도 사다리가 같은 거부를 네 번 더 굴린다.
-    const denied = humanPathDeny(cmd, args, (tabMeta(tg.tabId) || {}).url || "");
-    if (denied) { resolve({ ok: false, error: denied }); return; }
-    // 대량 기입은 여기서 한 번 더 거른다. 로컬이면 그대로 보내고, 원격이면 사용자가
-    // 승인한 것만 보낸다. 기준은 되돌릴 수 있는지이고 개수가 아니다.
-    if (cmd === "bulkfill") {
-      const surfaces = runSurfaces(session, runId);
-      const pol = bulkPolicy({
-        url: (tabMeta(tg.tabId) || {}).url || "",
-        values: (args && args.values) || [],
-        where: (args && args.where) || "",
-        surfaces,
-        approved: !!(args && args.approved),
-        allowFormula: !!(args && args.allowFormula),
-      });
-      if (pol.mode !== "free") {
-        resolve({ ok: false, error: pol.reason, need: pol.mode, cap: pol.cap });
-        return;
-      }
-    }
-    markControl(tg.tabId, session); // 이 탭을 이 세션이 조작 중임을 표시해 해당 탭만 강조한다
-    requestCdp(cmd, args, wc, 30000).then(resolve);
+    resolve({ ok: false, error: "브라우저 실행 명령은 MCP 작업 프로세스에서 처리합니다." });
   });
 }

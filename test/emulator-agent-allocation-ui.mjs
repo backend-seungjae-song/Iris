@@ -26,7 +26,7 @@ const host={
   if(method==='emulator.attach') {if(failAttach)return {ok:false,error:{message:'attach failed'}};const d=devices.find(d=>d.udid===args.device);d.state='Booted';return {ok:true,result:{attached:true,info:{deviceUdid:d.udid,displayName:d.name,state:'Booted'}}};}
   return {ok:true,result:{}};
  },
- useVolume:async()=>({ok:true,volume:1,muted:false}),openWindow:async()=>({ok:true}),closeWindow:async()=>({ok:true}),
+ useVolume:async()=>({ok:true,volume:1,muted:false}),openWindow:async args=>{calls.push({method:'openWindow',args});if(args&&args.connect){const d=devices.find(d=>d.udid===args.device);if(d)d.state='Booted';}return {ok:true};},closeWindow:async()=>({ok:true}),
  onWindowClosed(){},onQuitting(){},onWindowBounds(){},onControlRequest(){},setPickState(){},setRecordState(){},onSessionStopped(fn){stopListeners.push(fn);return()=>{};}
 };
 document.querySelector('#emu-panel').innerHTML=panelHtml;
@@ -178,4 +178,22 @@ test('공용 기기 재사용 연결이 실패하면 소유 예약을 해제해 
  await page.evaluate(()=>failAttach=false);
  assert.equal((await request(page,'next',{owner:'next-agent'})).udid,'A');
  assert.equal(await page.evaluate(()=>creations.length),0);
+}));
+
+test('연결됨으로 남은 탭의 기기가 꺼지면 목록에서 빼고 다시 열 때 켠다',async()=>withPage(async page=>{
+ const list=async id=>{
+  await page.evaluate(id=>feature.ws['emulator-ask']({kind:'list',id}),id);
+  await page.waitForFunction(id=>messages.some(m=>m.id===id),{},id);
+  return page.evaluate(id=>messages.find(m=>m.id===id).tabs.map(t=>t.udid),id);
+ };
+ assert.equal((await request(page,'boot',{device:'A'})).udid,'A');
+ assert.deepEqual(await list('before'),['A']);
+ // 앱 재시작처럼 종료 알림 없이 기기만 꺼진 상태
+ await page.evaluate(()=>{devices[0].state='Shutdown';});
+ assert.deepEqual(await list('after'),[]);
+ const again=await request(page,'again',{device:'A'});
+ assert.equal(again.ok,true);
+ // 에이전트가 연 기기는 분리 창에 있으므로 그 창에 포커스 없이 켜기 요청
+ assert.equal(await page.evaluate(()=>calls.some(c=>c.method==='openWindow'&&c.args.connect===true&&c.args.focus===false)),true);
+ assert.equal(await page.evaluate(()=>devices[0].state),'Booted');
 }));

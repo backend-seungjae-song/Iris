@@ -1,7 +1,7 @@
 // 브라우저 정체성과 Google 인증 호환. Orca browser-session-ua.ts에서 이식.
-// 일반 사이트에는 실제 Electron 엔진의 UA·Client Hints를 유지한다. Google 인증 예외는
-// google-auth-user-agent.cjs와 공유해 요청 헤더·페이지·기기 미리보기가 같은 값을 사용한다.
-const { rewriteGoogleAuthHeaders } = require("./google-auth-user-agent.cjs");
+// 일반 사이트에는 실제 Electron 엔진의 UA·Client Hints를 유지한다. Google 인증 예외의 요청 헤더는
+// google-auth-rules.cjs 의 내부 확장 규칙이, 페이지·기기 미리보기는 google-auth-user-agent.cjs 가 같은 값으로 맞춘다.
+const { googleAuthRules } = require("./google-auth-rules.cjs");
 
 // 모바일 판별 라이브러리가 Iris 제품명을 휴대폰으로 오인하므로 앱 토큰만 뺀다.
 // 실제 런타임인 Electron 토큰이나 엔진 버전은 바꾸지 않는다.
@@ -12,19 +12,13 @@ function cleanUserAgent(ua) {
 let nativeUserAgent = null;
 function setNativeUserAgent(ua) { nativeUserAgent = cleanUserAgent(ua); }
 
-// 엔진이 보내는 힌트는 그대로 둔다. Google 인증 문서가 보내는 요청만 호환 UA와 맞춘다.
-function setupClientHints(sess) {
-  sess.webRequest.onBeforeSendHeaders({ urls: ["https://*/*"] }, (details, cb) => {
-    rewriteGoogleAuthHeaders(details.requestHeaders, details.url, details);
-    cb({ requestHeaders: details.requestHeaders });
-  });
-}
 
 function applyHardening(sess) {
   try {
     const ua = nativeUserAgent || cleanUserAgent(sess.getUserAgent());
     sess.setUserAgent(ua);
-    setupClientHints(sess);
+    // 세션에 session.webRequest 리스너를 두지 않음. 있으면 Electron 이 확장의 차단 규칙·webRequest 를 건너뜀
+    void googleAuthRules().load(sess);
     return ua;
   } catch { return null; }
 }
@@ -183,4 +177,4 @@ function dialogScript(wcId, port) {
 } catch(e){}})();`;
 }
 
-module.exports = { cleanUserAgent, setupClientHints, applyHardening, isAudioInputPermission, setNativeUserAgent, WEBAUTHN_SCRIPT, BOTCHECK_SCRIPT, OPENER_SCRIPT, dialogScript };
+module.exports = { cleanUserAgent, applyHardening, isAudioInputPermission, setNativeUserAgent, WEBAUTHN_SCRIPT, BOTCHECK_SCRIPT, OPENER_SCRIPT, dialogScript };

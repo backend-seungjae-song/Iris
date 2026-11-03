@@ -1,4 +1,4 @@
-// 소유 범위: bin/iris-mcp.mjs 가 그리는 보고서 페이지. 결론 위치·장면 배치·사진 없는 통과·인쇄 판정·색인.
+// 소유 범위: bin/mcp/report.mjs 보고서 페이지. 결론 위치·장면 배치·사진 없는 통과·인쇄 판정·색인.
 // 제공 API: 러너가 한 번 부르는 비동기 기본 run.
 // 의존 대상: core 의 공유 검사·파일 도구, sources 의 공유 소스, Node 파일·경로·모듈 API.
 // 유지 조건: 검사 이름과 본문. 40-qa-evidence.mjs 를 기능별로 분리한 것이고,
@@ -39,7 +39,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
   const shot = (n) => { const p = path.join(tmp, n + ".png"); writeFileSync(p, png); return p; };
   const { buildReport, addReceipt, receiptsOfRun, coverGaps, pairProblems, unshotClaims,
     unverifiedOutsideLedger } =
-    await import(path.join(ROOT, "bin/iris-mcp.mjs"));
+    await import(path.join(ROOT, "bin/mcp/report.mjs"));
   const rA = addReceipt({ expected: "탭 세 개", got: "탭 세 개", pass: true, shot: shot("a") });
   const rB = addReceipt({ expected: "주문번호", got: "빈 화면", pass: false, shot: shot("b") });
   const rC = addReceipt({ expected: "쿠폰 적용", got: "쿠폰 적용", pass: true, shot: null });
@@ -85,7 +85,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
   // 증거가 디스크에 있는데 "사진 없음"이 찍힌다.
   check("영수증 장면은 저절로 실린다", () => {
     const c = card(1);
-    return /class="req case pass two/.test(c) && /<img src="data:image\/png;base64,/.test(c)
+    return /class="req case pass two/.test(c) && /<img src="data:image\/(?:png|jpeg);base64,/.test(c)
       && !c.includes("글로만 적힌 것이다");
   });
   // 참고는 요구가 아니므로 사진이 없어도 경고하지 않는다.
@@ -169,11 +169,11 @@ console.log("\n[10h2] 보고서 렌더 결과");
     const g = readFileSync(p2, "utf8");
     // 앞선 검사들이 만든 영수증도 함께 실리므로 rz의 순번은 계산하지 않고,
     // "그림으로 실렸는가"와 "회차 폴더로 옮겼는가"만 확인한다.
-    const store = path.join(out2.store, "shots");
-    const carried = readdirSync(store).filter((f) => /^miss\d+\.png$/.test(f));
+    const store = path.join(out2.store, "derived");
+    const carried = readdirSync(store).filter((f) => /^[a-f0-9]{40}\.png$/.test(f));
     return g.includes(rz.id)
       && /<figure class="miss bad">/.test(g)              // 안 된 것은 테두리로 먼저 보인다
-      && /class="misses">[\s\S]*?<img src="data:image\/png/.test(g)  // 글줄이 아니라 그림
+      && /class="misses">[\s\S]*?<img src="data:image\/(?:png|jpeg)/.test(g)  // 글줄이 아니라 그림
       && carried.length > 0;                              // 정리에 먹히지 않게 옮겼는가
   });
 
@@ -268,9 +268,9 @@ console.log("\n[10h2] 보고서 렌더 결과");
       run: { agreed: [{ what: "본 것", covers: ["본 것"] }] },
       steps: [{ name: "본 것", expected: "보인다", verdict: "info", after: shot("mw") }] });
     const g = readFileSync(p2, "utf8");
-    const files = readdirSync(path.join(out2.store, "shots")).filter((f) => /^miss\d+\.png$/.test(f));
-    // 둘 다 회차 폴더에 있고, 페이지에는 안 된 것만 그림으로 실린다.
-    return files.length >= 2 && g.includes(rP.id) && g.includes(rF.id)
+    const files = readdirSync(path.join(out2.store, "derived")).filter((f) => /^[a-f0-9]{40}\.png$/.test(f));
+    // 같은 PNG 입력은 사본 하나를 공유하고 실패한 확인만 그림으로 표시.
+    return files.length === 1 && readFileSync(path.join(out2.store, "derived", files[0])).equals(png) && g.includes(rP.id) && g.includes(rF.id)
       && /class="miss bad">\s*<img src="data:image/.test(g)
       && /class="miss">\s*<div class="gone">장면은 회차 폴더에 있음/.test(g)
       && /지면 무게 때문에 안 실림/.test(g);
@@ -366,6 +366,9 @@ console.log("\n[10h2] 보고서 렌더 결과");
     const big = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAIAAAABc2X6AAAAc0lEQVR4nO3PAQ0AIAzAsPvXhihcnGS0CrY5n5nXAdsM1xmuM1xnuM5wneE6w3WG6wzXGa4zXGe4znCd4TrDdYbrDNcZrjNcZ7jOcJ3hOsN1husM1xmuM1xnuM5wneE6w3WG6wzXGa4zXGe4znCd4TrDdRfRQMd2eVIu+QAAAABJRU5ErkJggg==", "base64");
     const bigShot = (n) => { const q = path.join(tmp, n + ".png"); writeFileSync(q, big); return q; };
+    // 판정 장면은 다른 무늬. 같은 그림이면 기본 지면이 거의 같은 자동 장면으로 뺌
+    const stripes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAIAAAABc2X6AAAAaklEQVR42u3PMREAAAgDsfo3DQoqAC6//5BML727V4CBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYE/gRcXwhkoHydfgAAAAABJRU5ErkJggg==", "base64");
     const J = path.join(home, "journal.jsonl");
     const put = (o) => appendFileSync(J, JSON.stringify({ source: "server", run_id: "ledplain", ...o }) + "\n");
     put({ kind: "run_begin", runKind: "proof" });
@@ -378,7 +381,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     }
     put({ kind: "assertion", source: "browser", id: "r7", row: "P1", path_: "정상", url: "http://localhost:3002/list",
       selector: "[data-testid=qty]", expected: "[data-testid=qty] = \"3\"", mode: "equals", want: "3", label: "수량 칸", got: "3", pass: true,
-      shot: bigShot("plain-rc") });
+      shot: (() => { const q = path.join(tmp, "plain-rc.png"); writeFileSync(q, stripes); return q; })() });
     put({ kind: "assertion", source: "browser", id: "r8", row: "P1", path_: "정상",
       selector: "[data-testid=other]", mode: "exists", got: null, pass: false, shot: bigShot("plain-voided") });
     put({ kind: "void", receipt: "r8", why: "질문 오류", row: "P1", path_: "정상" });
@@ -409,8 +412,8 @@ console.log("\n[10h2] 보고서 렌더 결과");
       && plain.indexOf("기능과 구현") < plain.indexOf('class="sum"')   // 추적표가 케이스 표보다 먼저
       && /관리자 로그인/.test(plain) && /사용자 결정 저장 유지/.test(plain) // 조건·기대 근거
       && /<em>수량 칸<\/em>&#39;3&#39; 일치|<em>수량 칸<\/em>'3' 일치/.test(plain) // 대상·기대값
-      && /장면 설명 13/.test(plain) && scenes === 14                  // 13장 + 판정 1장, 무효 장면 없음
-      && /잘못 설정한 확인 제외 · 사유 질문 오류/.test(plain)   // 무효 사실과 사유는 남는다
+      && /장면 설명 1 \/ 장면 설명 2 \/[^<]*장면 설명 13/.test(plain) && scenes === 2 // 같은 그림 13장은 한 장, 설명 13개는 모두 남음 + 판정 1장, 무효 장면 없음
+      && /잘못 설정한 확인 제외<\/summary><p>사유: 질문 오류/.test(plain)   // 무효 사실과 사유는 남는다(사유는 펼쳐 봄)
       && /<em>버튼 ‘저장’<\/em>/.test(plain)                          // 이름표 없으면 요소 이름
       && /자동 저장/.test(plain) && /확인 후 저장/.test(plain)         // 경로에 남긴 선택지
       && /<li>저장 알림 표시<\/li>/.test(plain)                      // 문자 그대로 적힌 \n 도 줄로 나뉜다
@@ -419,7 +422,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
       && /\br7\b/.test(dev) && /data-testid/.test(dev);
     if (!ok) console.log("      기본 지면 검사:", { scenes, flow: /<li>목록 화면<\/li><li>저장 버튼 클릭<\/li>/.test(plain),
       meta: /관리자 로그인/.test(plain) && /사용자 결정 저장 유지/.test(plain),
-      check: (plain.match(/<em>[^<]*<\/em>[^<]*/) || [""])[0], voidNote: /잘못 설정한 확인 제외 · 사유 질문 오류/.test(plain),
+      check: (plain.match(/<em>[^<]*<\/em>[^<]*/) || [""])[0], voidNote: /잘못 설정한 확인 제외<\/summary><p>사유: 질문 오류/.test(plain),
       el: /<em>버튼 ‘저장’<\/em>/.test(plain), picks: /확인 후 저장/.test(plain),
       nl: /<li>저장 알림 표시<\/li>/.test(plain), s13: /장면 설명 13/.test(plain), car: /class="car"/.test(plain) && /class="arw next"/.test(plain), dev: /\br7\b/.test(dev) && /data-testid/.test(dev), dp: res.devPath === devOf(out), leak: (plain.match(/\br7\b|\br8\b|data-testid|localhost/) || [""])[0] });
     rmSync(home, { recursive: true, force: true });
@@ -760,7 +763,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
       && u([{ name: "a", verdict: "info" }]).length === 0                       // 주장 없음
       && unshotClaims([{ name: "a", expected: "보인다" }], true).length === 0;  // 안내서 면제
   });
-  check("사진 없는 주장은 보고서가 만들어지기 전에 막힌다", () => {
+  check("사진 없는 주장은 판정과 무관하게 찾는다", () => {
     // 확인 결과 회차 17개 349단계 중 사진 없는 44단계가 expected를 달고 있었고
     // 그중 26이 info였다. 표시가 pass에만 붙으니 주장이 전부 info로 몰렸다. 그래서
     // 판정이 아니라 "화면을 주장했는가"로 구분한다.
@@ -769,9 +772,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     return /String\(s\.expected \|\| ""\)\.trim\(\)/.test(src)   // 주장한 단계만 본다
       && /!s\.from/.test(src)                                       // 이어받은 것은 이번 것이 아니다
       && /String\(s\.noShot \|\| ""\)\.trim\(\)/.test(src)      // 사유를 적으면 통과
-      && !/verdict/.test(src)                                       // 판정으로 가르지 않는다
-      && /const unshot = unshotClaims\(steps, String\(a\.kind \|\| ""\) === "handoff"\)/.test(mcp)
-      && /if \(unshot\.length\) return \{ ok: false/.test(mcp);
+      && !/verdict/.test(src);                                      // 판정으로 가르지 않는다
   });
   check("사진 없음 딱지는 판정으로 피할 수 없다", () => {
     const p2 = path.join(tmp, "unshot.html");

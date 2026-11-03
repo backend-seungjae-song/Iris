@@ -42,4 +42,11 @@ function count(id) {
   return holdCounts.get(id) || 0;
 }
 
-module.exports = { update, clear, count };
+// 보이는 탭은 이미 합성 중이라 올릴 필요 없음
+// - 올리면 사용자가 보는 탭이 화면 전체 크기·투명으로 바뀌어 깜박이고 크기가 바뀜
+// - 호출부는 hold 가 true 일 때만 해제를 부르므로 false 를 돌려주면 짝이 맞음
+function needsHold(on, shown) {
+  return !(on && shown);
+}
+
+module.exports = { update, clear, count, needsHold };

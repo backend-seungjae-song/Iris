@@ -7,6 +7,7 @@ import { createTerminalFeature } from "../server/remote/features/terminal.js";
 import { installFeatureOperations } from "../server/remote/ops/features.js";
 import { createMessageOperation } from "../server/remote/ops/message.js";
 import { createStopOperation } from "../server/remote/ops/stop.js";
+import { createUnregisterOperation } from "../server/remote/ops/unregister.js";
 import { createWatchOperation } from "../server/remote/ops/watch.js";
 import { createRequestStore } from "../server/remote/requests.js";
 
@@ -207,7 +208,7 @@ test("watch는 최초 목록을 보내고 500ms 안의 변경을 한 번에 합�
     setTimer(fn, delay) { const timer = { fn, delay, unref() {} }; timers.push(timer); return timer; }, clearTimer() {} });
   const initial = watch.handle({ connId: "c" }, { rid: "w1" });
   assert.deepEqual(initial.map((value) => value.type), ["agents", "requests"]);
-  assert.equal(watch.handle({ connId: "c" }, { rid: "w2" }).error.code, "invalid-request");
+  assert.deepEqual(watch.handle({ connId: "c" }, { rid: "w2" }).map((value) => value.type), ["agents", "requests"]);
   runtime.state[0].status = "idle";
   changed();
   requests.add({ agent: agents.list()[0].ref, kind: "claude-permission", createdAt: 1, expiresAt: 10,
@@ -276,4 +277,19 @@ test("snapshot이 오래됐어도 Codex 종료나 native 대화 변경 뒤에는
   assert.equal((await send({}, { rid: "current", agent, text: "본문" })).result, "sent");
   assert.deepEqual(calls, [["secret-pane", "\x1b[200~본문\x1b[201~\r"]]);
   agents.close();
+});
+
+test("기기 삭제 요청은 인증된 연결의 기기만 지우고 실패하면 unavailable을 돌려준다", async () => {
+  const removed = [];
+  const auth = { get: (connId) => connId === "c1" ? { deviceId: "d".repeat(32) } : null };
+  const handle = createUnregisterOperation({
+    auth,
+    unregisterDevice: async (deviceId, connId) => { removed.push([deviceId, connId]); return { ok: true }; },
+  });
+  assert.deepEqual(await handle({ connId: "c1" }, { rid: "u1" }), { type: "remote.action.result", rid: "u1", result: "done" });
+  assert.deepEqual(removed, [["d".repeat(32), "c1"]]);
+  assert.deepEqual(await handle({ connId: "c2" }, { rid: "u2" }), { type: "error", rid: "u2", error: { code: "unavailable" } });
+  const failing = createUnregisterOperation({ auth, unregisterDevice: async () => ({ ok: false }) });
+  assert.deepEqual(await failing({ connId: "c1" }, { rid: "u3" }), { type: "error", rid: "u3", error: { code: "unavailable" } });
+  assert.equal(removed.length, 1);
 });

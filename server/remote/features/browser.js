@@ -448,6 +448,15 @@ export function createBrowserFeature(options) {
   }
 
   async function captureJpeg(tab, width, desktop, record) {
+    if ((options.platform || process.platform) !== "win32") {
+      const result = await command(tab.ref, "remoteframe", { width: desktop ? Math.max(width, 720) : width }, 2500);
+      if (!result.ok) return result;
+      const bytes = Buffer.from(result.data.jpeg || "", "base64");
+      const dimensions = jpegDimensions(bytes);
+      return dimensions && bytes.length <= MAX_BROWSER_FRAME_JPEG_BYTES
+        ? { ok: true, bytes, ...dimensions, captureMs: result.data.captureMs, conversionMs: result.data.conversionMs }
+        : { ok: false, code: "browser-frame-unavailable" };
+    }
     const result = await command(tab.ref, "screenshot", { settle: 0 });
     const source = result.ok && result.data?.path;
     if (!result.ok) return result;
@@ -467,45 +476,77 @@ export function createBrowserFeature(options) {
         return dimensions && bytes.length <= MAX_BROWSER_FRAME_JPEG_BYTES
           ? { ok: true, bytes, ...dimensions } : { ok: false, code: "browser-frame-unavailable" };
       }
-      for (const scale of [1, 0.85, 0.7, 0.55]) {
-        const target = Math.max(240, Math.round((desktop ? Math.max(width, 720) : width) * scale));
-        for (const quality of [78, 68, 58, 48]) {
-          await runner("/usr/bin/sips", ["--resampleWidth", String(target), "-s", "format", "jpeg",
-            "-s", "formatOptions", String(quality), source, "--out", destination], { timeout: 3_000, maxBuffer: 64 * 1024 });
-          const bytes = fs.readFileSync(destination);
-          if (bytes.length <= MAX_BROWSER_FRAME_JPEG_BYTES) return { ok: true, bytes,
-            ...(jpegDimensions(bytes) || { width: target, height: target }) };
-        }
-      }
       return { ok: false, code: "browser-frame-unavailable" };
     } catch { return { ok: false, code: "browser-frame-unavailable" }; }
     finally { try { fs.unlinkSync(destination); } catch {} }
   }
 
+  function scheduleFrame(record, delay) {
+    if (fileWatches.get(record.connId) !== record || record.timer) return;
+    record.timer = setTimer(() => { record.timer = null; void pollFrame(record); }, delay);
+    record.timer?.unref?.();
+  }
+
+  function refreshFrame(connId, tabRef) {
+    const record = fileWatches.get(connId);
+    if (!record || record.tabRef !== tabRef) return;
+    record.activeUntil = now() + 800;
+    record.force = true;
+    if (record.timer) { clearTimer(record.timer); record.timer = null; }
+    if (!record.reading) scheduleFrame(record, 0);
+  }
+
   async function pollFrame(record, scheduleNext = true) {
-    if (fileWatches.get(record.connId) !== record || record.reading) {
-      return { ok: false, code: "browser-frame-unavailable" };
-    }
+    if (fileWatches.get(record.connId) !== record || record.reading) return { ok: false, code: "browser-frame-unavailable" };
     record.reading = true;
-    const tab = resolveTab(record.tabRef);
-    const frame = tab ? await captureFrame(tab, record.width, record.desktop, record) : null;
-    record.reading = false;
-    if (fileWatches.get(record.connId) !== record) return { ok: false, code: "browser-frame-unavailable" };
-    if (frame?.bytes) {
+    const started = now();
+    const force = record.force;
+    record.force = false;
+    let result = { ok: true };
+    try {
+      const tab = resolveTab(record.tabRef);
+      let deadline;
+      const frame = tab ? await Promise.race([
+        captureFrame(tab, record.width, record.desktop, record),
+        new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error("frame-timeout")), options.captureTimeoutMs || 3000); }),
+      ]).finally(() => clearTimeout(deadline)) : null;
+      if (fileWatches.get(record.connId) !== record) return { ok: false, code: "browser-frame-unavailable" };
+      if (!frame?.bytes || !Number.isSafeInteger(frame.width) || frame.width <= 0 || !Number.isSafeInteger(frame.height) || frame.height <= 0 || frame.bytes.length > MAX_BROWSER_FRAME_JPEG_BYTES) {
+        result = { ok: false, code: frame?.code || "browser-frame-unavailable" };
+        if (record.fast) send(record.connId, { type: "browser.frame.status", tab: record.tabRef, error: result.code });
+        record.failed = true;
+        return result;
+      }
+      const captured = now();
       const hash = createHash("sha256").update(frame.bytes).digest("hex");
-      if (hash !== record.hash) {
+      const changed = hash !== record.hash;
+      if (changed || force || record.failed) {
         record.hash = hash; record.seq++;
         send(record.connId, { type: "browser.frame", tab: record.tabRef, seq: record.seq,
           width: frame.width, height: frame.height, jpeg: frame.bytes.toString("base64") });
+        if (changed) record.activeUntil = now() + 300;
       }
-    } else {
-      return frame?.ok === false ? frame : { ok: false, code: "browser-frame-unavailable" };
+      if (record.failed && record.fast) send(record.connId, { type: "browser.frame.status", tab: record.tabRef, error: null });
+      record.failed = false;
+      record.samples++;
+      record.ms[0] += frame.captureMs ?? captured - started;
+      record.ms[1] += frame.conversionMs ?? 0;
+      record.ms[2] += now() - captured;
+      if (record.samples % (options.frameLogEvery || 30) === 0) {
+        (options.log || console.log)(`[remote] browser-frame ms=${record.ms.map(value => Math.round(value / (options.frameLogEvery || 30))).join("/")}`);
+        record.ms = [0, 0, 0];
+      }
+      return result;
+    } catch {
+      record.failed = true;
+      if (record.fast && fileWatches.get(record.connId) === record) send(record.connId,
+        { type: "browser.frame.status", tab: record.tabRef, error: "browser-frame-unavailable" });
+      return { ok: false, code: "browser-frame-unavailable" };
+    } finally {
+      record.reading = false;
+      if (scheduleNext) scheduleFrame(record, record.force ? 0 : record.failed ? 500
+        : Math.max(0, Math.ceil(1000 / (record.fast && now() > record.activeUntil ? 2 : record.fps)) - (now() - started)));
     }
-    if (scheduleNext) {
-      record.timer = setTimer(() => { record.timer = null; void pollFrame(record); }, Math.ceil(1000 / record.fps));
-      record.timer?.unref?.();
-    }
-    return { ok: true };
   }
 
   function createDraft(entry, agentRef, kind, summary, body, display = body) {
@@ -546,10 +587,11 @@ export function createBrowserFeature(options) {
       const ready = await readyTab(request.tab);
       if (!ready.ok) return ready;
       const record = { connId: entry.connId, tabRef: request.tab, width: request.width, fps: request.fps,
-        desktop: request.desktop, seq: 0, hash: null, timer: null, reading: false };
+        desktop: request.desktop, fast: request.type === "browser.frame.fast", seq: 0, hash: null, timer: null, reading: false,
+        samples: 0, ms: [0, 0, 0], activeUntil: now() + 800, force: true, failed: false };
       fileWatches.set(entry.connId, record);
       const first = await pollFrame(record, false);
-      if (!first.ok) {
+      if (!first.ok && !record.fast) {
         if (fileWatches.get(entry.connId) === record) fileWatches.delete(entry.connId);
         return first;
       }
@@ -559,11 +601,19 @@ export function createBrowserFeature(options) {
       }
       return { ok: true };
     },
+    async wheel(entry, request) {
+      const point = await pagePoint(request.tab, request);
+      if (!point.ok) return point;
+      const result = await command(request.tab, "remotewheel", { x: point.x, y: point.y, dx: request.dx, dy: request.dy });
+      if (result.ok) { note(entry.connId, `휠 · ${request.dx},${request.dy}px`); refreshFrame(entry.connId, request.tab); }
+      return result;
+    },
     async pointer(entry, request) {
       const found = await locate(request.tab, request);
       if (!found.ok || !found.element?.selector) return found;
       const result = await command(request.tab, request.action === "double" ? "dblclick" : "click", { sel: found.element.selector });
       if (result.ok) note(entry.connId, `${request.action === "double" ? "더블 클릭" : "클릭"} · ${found.element.text || found.element.selector}`);
+      if (result.ok) refreshFrame(entry.connId, request.tab);
       return result;
     },
     async mouse(entry, request) {
@@ -576,6 +626,7 @@ export function createBrowserFeature(options) {
       if (result.ok && request.action === "click") note(entry.connId, `좌표 클릭 · ${Math.round(point.x)},${Math.round(point.y)}`);
       if (result.ok && request.action === "double") note(entry.connId, `좌표 더블 클릭 · ${Math.round(point.x)},${Math.round(point.y)}`);
       if (result.ok && request.action === "wheel") note(entry.connId, `휠 · ${request.dy}px`);
+      if (result.ok) refreshFrame(entry.connId, request.tab);
       return result;
     },
     async hoverElement(tabRef, request) { return pickAt(tabRef, request); },
@@ -591,9 +642,9 @@ export function createBrowserFeature(options) {
       if (result.ok) note(entry.connId, `키 · ${value}`); return result;
     },
     async scroll(entry, request) { const result = await command(request.tab, "scroll", { amount: String(request.dy) });
-      if (result.ok) note(entry.connId, `스크롤 · ${request.dy}px`); return result; },
+      if (result.ok) { note(entry.connId, `스크롤 · ${request.dy}px`); refreshFrame(entry.connId, request.tab); } return result; },
     async history(entry, request) { const result = await command(request.tab, request.action);
-      if (result.ok) note(entry.connId, `브라우저 · ${request.action}`); return result; },
+      if (result.ok) { note(entry.connId, `브라우저 · ${request.action}`); refreshFrame(entry.connId, request.tab); } return result; },
     async navigate(entry, request) { const result = await command(request.tab, "goto", { url: request.url, entry: true });
       if (result.ok) note(entry.connId, `주소 이동 · ${request.url}`); return result; },
     async newTab(request) {

@@ -55,6 +55,13 @@ export const RAIL_ITEMS = [
     canDisable: true, disabledReason: "",
   },
   {
+    id: "bookmarkmgr", label: "북마크",
+    title: "북마크 관리: 북마크마다 열 계정",
+    icon: "<path d=\"M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z\"/>",
+    body: "bkm-active", panel: "bookmarkmgr-panel", layout: "full",
+    canDisable: true, disabledReason: "",
+  },
+  {
     id: "localdev", label: "서버",
     title: "로컬 데브 (*.test 라우트·포트)",
     icon: "<rect x=\"3\" y=\"4\" width=\"18\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"13\" width=\"18\" height=\"7\" rx=\"1.5\"/><path d=\"M7 7.5h.01\"/><path d=\"M7 16.5h.01\"/>",

@@ -10,7 +10,7 @@
 // 제공 API
 //   mountDevicePanel(container, opts) → { dispose(), refresh(), render() }. 목록 표기 deviceLabel · runtimeLabel ·
 //   devicePlatform. opts: host · onOpenDevice(device) · headTools(머리 줄. 제목 뒤에 개수·상태·새로 고침을 붙이고 dispose 때 뗀다) ·
-//   currentUdid() · deviceLocation(udid) · onMoveDevice(device, location) · onStopDevice(device).
+//   currentUdid() · deviceLocation(udid) · onMoveDevice(device, location) · onStopDevice(device) · onDeleteDevice(device).
 //
 // 의존 대상
 //   host(window.acHost.emulator) RPC(emulator.availability)와 getSettings/setSettings/
@@ -95,7 +95,7 @@ export function deviceReadiness(device) {
 }
 
 export function mountDevicePanel(container, opts) {
-  const { host, onOpenDevice, onMoveDevice, onStopDevice, deviceLocation, headTools, currentUdid } = opts;
+  const { host, onOpenDevice, onMoveDevice, onStopDevice, onDeleteDevice, deviceLocation, headTools, currentUdid } = opts;
   let disposed = false;
   let availability = null;
   let refreshing = false;
@@ -203,6 +203,7 @@ export function mountDevicePanel(container, opts) {
       const result = await action();
       if (result?.ok === false) throw new Error(result.error?.message || result.error || "기기 작업을 마치지 못했습니다.");
       await refresh();
+      if (result?.warning) setupError = result.warning;
     } catch (error) { setupError = error?.message || "기기 작업을 마치지 못했습니다."; }
     finally { deviceBusy = false; busyLabel = ""; render(); }
   }
@@ -338,6 +339,12 @@ export function mountDevicePanel(container, opts) {
       if (d.canDuplicate === false) plus.title = "이 기기의 원본 기종과 설치된 런타임을 확인할 수 없습니다.";
       plus.addEventListener("click", () => duplicate(d));
       actions.append(placement.el, power, plus);
+    }
+    if (d.canDelete && onDeleteDevice) {
+      const remove = button("emu-btn emu-btn-danger", "삭제");
+      remove.disabled = deviceBusy;
+      remove.addEventListener("click", () => void deviceAction("기기 삭제 중…", () => onDeleteDevice(d)));
+      actions.append(remove);
     }
     wrap.append(actions);
     return wrap;

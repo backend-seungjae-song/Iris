@@ -54,16 +54,14 @@ test("실 프로필 수확은 현재 사이트 도메인 경계를 벗어나지 
   assert.equal(baseDomain("example.com:443"), "");
 });
 
-test("Chrome 프로필 가져오기는 Orca처럼 기존 쿠키 jar를 전체 교체한다", () => {
+test("Chrome 프로필 가져오기는 Iris 에 없는 쿠키만 넣고 다음 실행 전체 교체를 등록하지 않는다", () => {
   const importer = fs.readFileSync(path.join(root, "native/electron/cookie-import.cjs"), "utf8");
-  const staging = sliceBetween(importer, "function stageCookieRows", "function targetCookiesPath", "쿠키 임시 보관");
   const direct = sliceBetween(importer, "async function importCookiesFromChrome", "// require 시점", "쿠키 직접 가져오기");
 
-  assert.match(staging, /DELETE FROM cookies;/);
-  assert.match(direct, /replaceCookieSnapshot/);
+  assert.match(direct, /addMissingCookies/);
+  assert.doesNotMatch(direct, /replaceCookieSnapshot/);
   assert.doesNotMatch(direct, /clearStorageData\(\{ storages: \["cookies"\] \}\)/);
-  assert.match(direct, /registerPendingCookieImport/);
-  assert.match(direct, /discardStagingDatabase\(staging\)[\s\S]*stageCookieRows\(liveCookiesPath, importList/);
+  assert.doesNotMatch(direct, /registerPendingCookieImport/);
   assert.match(importer, /mode === "replace" \|\| mode === "replace-scoped" \? \{ cas: true \}/);
   assert.match(importer, /INTEGRITY_COOKIE_NAMES/);
 });

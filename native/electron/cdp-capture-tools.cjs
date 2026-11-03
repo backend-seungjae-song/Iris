@@ -80,9 +80,9 @@ function createCdpCaptureTools({ refRegistry, fs, path, nativeImage, BrowserWind
   // 지금 보이는 영역(배율 캡처용 clip). captureBeyondViewport와 scale은 같이 못 쓰므로 화면 몫만.
   async function viewportClip(send) {
     const r = await send("Runtime.evaluate", {
-      expression: "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight})", returnByValue: true,
+      expression: "JSON.stringify({x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,ratio:devicePixelRatio})", returnByValue: true,
     });
-    try { return JSON.parse(r.result.value); } catch { return { x: 0, y: 0, width: 1280, height: 800 }; }
+    try { return JSON.parse(r.result.value); } catch { return { x: 0, y: 0, width: 1280, height: 800, ratio: 1 }; }
   }
   // 전체 페이지는 화면 한 장씩 내려가며 찍어 이어 붙인다. 뷰포트 밖까지 그리게 하는
   // captureBeyondViewport도, 화면 크기를 문서 높이로 바꾸는 방법도 이 임베딩에서는 동작하지

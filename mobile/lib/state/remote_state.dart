@@ -26,6 +26,7 @@ class RemoteState extends ChangeNotifier {
 
   List<RemoteAgent> _agents = const [];
   List<RemoteRequest> _requests = const [];
+  List<RemoteRequest> _terminalQuestions = const [];
   List<TranscriptItem> _transcript = const [];
   List<BrowserSpace> _browserSpaces = const [];
   List<BrowserTab> _browserTabs = const [];
@@ -43,6 +44,9 @@ class RemoteState extends ChangeNotifier {
 
   List<RemoteAgent> get agents => _agents;
   List<RemoteRequest> get requests => _requests;
+  List<RemoteRequest> get terminalQuestions => _terminalQuestions;
+
+  Future<void> refreshSessions() => session.refreshSessions();
   List<TranscriptItem> get transcript => _transcript;
   List<BrowserSpace> get browserSpaces => _browserSpaces;
   List<BrowserTab> get browserTabs => _browserTabs;
@@ -122,6 +126,12 @@ class RemoteState extends ChangeNotifier {
         notifyListeners();
       }),
     );
+    _subscriptions.add(
+      session.terminalQuestions.listen((questions) {
+        _terminalQuestions = questions;
+        notifyListeners();
+      }),
+    );
     _subscriptions.add(session.transcriptAppends.listen(_appendTranscript));
     session.watch();
     if (supports('browser.tabs')) unawaited(refreshBrowserTabs());
@@ -141,6 +151,28 @@ class RemoteState extends ChangeNotifier {
       if (tab.ref == ref) return tab;
     }
     return null;
+  }
+
+  // 에이전트의 스페이스에서 열 브라우저 탭: 그 세션이 쓰는 탭, 없으면 스페이스의 활성 탭
+  Future<BrowserTab?> browserTabForAgent(String agentRef) async {
+    if (browserTabs.isEmpty) await refreshBrowserTabs();
+    final target = agent(agentRef);
+    if (target == null) return null;
+    final sessionTabs = browserTabs.where(
+      (item) =>
+          item.space == target.spaceRef && item.sessions.contains(target.ref),
+    );
+    if (sessionTabs.isNotEmpty) {
+      return sessionTabs.where((item) => item.active).firstOrNull ??
+          sessionTabs.first;
+    }
+    final spaceTabs = browserTabs.where((item) {
+      final space = browserSpace(item.space);
+      return item.space == target.spaceRef ||
+          (target.spaceRef.isEmpty && space?.name == target.space);
+    });
+    return spaceTabs.where((item) => item.active).firstOrNull ??
+        spaceTabs.firstOrNull;
   }
 
   Future<void> refreshBrowserTabs() async {

@@ -1,32 +1,37 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:iris_remote/design/agent_tile.dart';
+import 'package:iris_remote/design/action_bar.dart';
 import 'package:iris_remote/design/buttons.dart';
 import 'package:iris_remote/design/icon.dart';
 import 'package:iris_remote/design/markdown_text.dart';
-import 'package:iris_remote/design/sheet.dart';
+import 'package:iris_remote/design/toast.dart';
 import 'package:iris_remote/design/tokens.dart';
+import 'package:iris_remote/format/result_text.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
+import 'package:iris_remote/screens/response_host.dart';
+import 'package:iris_remote/screens/response_kit.dart';
 import 'package:iris_remote/state/remote_state.dart';
 
-Future<void> showHumanTurnSheet({
+Future<String?> showHumanTurnSheet({
   required BuildContext context,
   required RemoteState state,
   required RemoteRequest request,
   required RemoteAgent agent,
   required VoidCallback onOpenTab,
-}) => showIrisSheet<void>(
-  context: context,
-  builder: (_) => HumanTurnSheet(
+}) {
+  return showResponseHost(
+    context: context,
     state: state,
     request: request,
-    agent: agent,
-    onOpenTab: onOpenTab,
-  ),
-);
+    agentName: agent.name,
+    agentKind: agent.kind,
+    space: agent.space,
+  );
+}
 
 class HumanTurnSheet extends StatefulWidget {
   const HumanTurnSheet({
@@ -36,15 +41,26 @@ class HumanTurnSheet extends StatefulWidget {
     required this.onOpenTab,
     this.previewImage,
     this.previewUrl,
+    this.nav,
+    this.closedAs,
+    this.initialChoice,
+    this.onChoice,
     super.key,
   });
 
   final RemoteState state;
   final RemoteRequest request;
   final RemoteAgent agent;
+  // 탭 열기 버튼은 미리보기 확대로 바뀌어 쓰지 않음. 호출부 시그니처만 유지
   final VoidCallback onOpenTab;
   final ui.Image? previewImage;
   final String? previewUrl;
+  final ResponseNav? nav;
+  // 목록에서 사라진 요청. gone 은 이유 불명, gone-expired 는 만료 시각이 지난 경우
+  final String? closedAs;
+  // 요청 사이를 오가도 고른 답을 보존
+  final String? initialChoice;
+  final ValueChanged<String>? onChoice;
 
   @override
   State<HumanTurnSheet> createState() => _HumanTurnSheetState();
@@ -52,8 +68,10 @@ class HumanTurnSheet extends StatefulWidget {
 
 class _HumanTurnSheetState extends State<HumanTurnSheet> {
   StreamSubscription<BrowserFrame>? _frames;
-  BrowserFrame? _frame;
-  String? _result;
+  final _jpeg = ValueNotifier<Uint8List?>(null);
+  // 'done' 또는 'unable'
+  late String? _choice = widget.initialChoice;
+  String? _gone;
   bool _busy = false;
 
   BrowserUserRequestBody get _body =>
@@ -65,7 +83,7 @@ class _HumanTurnSheetState extends State<HumanTurnSheet> {
     final tab = _body.tab;
     if (tab != null && widget.state.supports('browser.frame.watch')) {
       _frames = widget.state.session.browserFrames.listen((frame) {
-        if (mounted && frame.tab == tab) setState(() => _frame = frame);
+        if (mounted && frame.tab == tab) _jpeg.value = frame.jpeg;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -84,18 +102,27 @@ class _HumanTurnSheetState extends State<HumanTurnSheet> {
     try {
       await widget.state.session.watchBrowserFrame(tab, width: width);
     } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      if (mounted) {
+        showIrisToast(context, error.message, tone: IrisToastTone.error);
+      }
     }
   }
 
   @override
   void dispose() {
     _frames?.cancel();
+    _jpeg.dispose();
     super.dispose();
   }
 
-  Future<void> _answer(String choice) async {
-    if (_busy) return;
+  void _pick(String choice) {
+    setState(() => _choice = choice);
+    widget.onChoice?.call(choice);
+  }
+
+  Future<void> _answer() async {
+    final choice = _choice;
+    if (_busy || choice == null) return;
     setState(() => _busy = true);
     try {
       final response = await widget.state.answerBrowserUser(
@@ -103,205 +130,308 @@ class _HumanTurnSheetState extends State<HumanTurnSheet> {
         choice: choice,
       );
       if (!mounted) return;
-      setState(() => _result = response.result);
-      if (const {
-        'delivered',
-        'already-answered',
-        'expired',
-      }.contains(response.result)) {
-        Navigator.of(context).pop();
+      switch (response.result) {
+        case 'delivered':
+          showIrisToast(context, '에이전트에게 보냈습니다');
+          Navigator.of(context).pop();
+        case 'already-answered' || 'expired':
+          setState(() => _gone = response.result);
+        default:
+          showIrisToast(
+            context,
+            requestAnswerResultText(response.result),
+            tone: IrisToastTone.error,
+          );
       }
     } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      if (mounted) {
+        showIrisToast(context, error.message, tone: IrisToastTone.error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  Widget? _image(Uint8List? jpeg, BoxFit fit, Alignment alignment) {
+    if (widget.previewImage != null) {
+      return RawImage(
+        image: widget.previewImage,
+        fit: fit,
+        alignment: alignment,
+      );
+    }
+    if (jpeg != null) {
+      return Image.memory(jpeg, fit: fit, alignment: alignment);
+    }
+    return null;
+  }
+
+  void _zoom() {
+    if (widget.previewImage == null && _jpeg.value == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _FrameZoom(
+          jpeg: _jpeg,
+          builder: (jpeg) =>
+              _image(jpeg, BoxFit.contain, Alignment.center) ??
+              const SizedBox.shrink(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final gone = _gone ?? (_busy ? null : widget.closedAs);
+    if (gone != null) return _answered(context, gone);
+    final colors = context.iris;
     final tab = _body.tab == null ? null : widget.state.browserTab(_body.tab!);
     final previewUrl = widget.previewUrl ?? tab?.url;
-    return Column(
-      key: const Key('human-turn-sheet'),
-      mainAxisSize: MainAxisSize.min,
+    final label = _busy
+        ? '보내는 중…'
+        : (_choice == null
+              ? '답을 고르세요'
+              : (_choice == 'done' ? '‘다 했음’ 보내기' : '‘못 하겠음’ 보내기'));
+    return ResponseFrame(
+      header: ResponseHeader.titledNext,
+      title: widget.agent.name,
+      space: widget.agent.space,
+      agentKind: widget.agent.kind,
+      nav: widget.nav,
+      bar: IrisActionBar(
+        buttons: [
+          IrisButton(
+            key: const Key('human-turn-later'),
+            label: '나중에',
+            tone: IrisButtonTone.ghost,
+            onPressed: _busy ? null : () => Navigator.of(context).maybePop(),
+          ),
+          IrisButton(
+            key: const Key('human-turn-send'),
+            label: label,
+            tone: IrisButtonTone.primary,
+            onPressed: _choice == null || _busy ? null : _answer,
+          ),
+        ],
+      ),
       children: [
-        const IrisSheetGrabber(barKey: Key('human-turn-grabber')),
+        ResponseKindRow(
+          label: '사람이 할 일',
+          tone: ResponseTone.human,
+          icon: 'hand-pointing',
+          time: responseAgo(widget.request.createdAt),
+        ),
+        ResponseTitle(
+          key: const Key('human-turn-title'),
+          _body.title,
+          child: (style) =>
+              IrisMarkdown(_body.title, compact: true, baseStyle: style),
+        ),
+        if (_body.text.isNotEmpty)
+          IrisMarkdown(
+            _body.text,
+            compact: true,
+            baseStyle: responseLeadStyle(context),
+            textColor: colors.muted,
+          ),
         const SizedBox(height: 14),
-        SizedBox(
-          key: const Key('human-turn-header'),
-          height: 35,
-          child: Row(
-            children: [
-              SizedBox(
-                width: 32,
-                height: 30,
-                child: Center(
-                  child: IrisAgentTile(
-                    kind: widget.agent.kind,
-                    status: 'blocked',
-                    small: true,
-                  ),
-                ),
+        _preview(context, tab?.title ?? widget.agent.space, previewUrl),
+        const ResponseSectionLabel('답'),
+        ResponseOption(
+          key: const Key('human-turn-done'),
+          title: '다 했음',
+          description: '에이전트가 다음 단계로 진행합니다',
+          selected: _choice == 'done',
+          onTap: _busy ? null : () => _pick('done'),
+        ),
+        const SizedBox(height: 8),
+        ResponseOption(
+          key: const Key('human-turn-unable'),
+          title: '못 하겠음',
+          description: '에이전트가 이 단계를 건너뛰고 다른 방법을 찾습니다',
+          negative: true,
+          selected: _choice == 'unable',
+          onTap: _busy ? null : () => _pick('unable'),
+        ),
+      ],
+    );
+  }
+
+  // 페이지 미리보기. 누르면 전체 화면 확대 뷰
+  Widget _preview(BuildContext context, String title, String? url) {
+    final colors = context.iris;
+    return GestureDetector(
+      key: const Key('human-turn-frame'),
+      onTap: _zoom,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: colors.level1,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colors.line2),
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: colors.separator)),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '사람 차례 · ${widget.agent.name}',
-                      style: TextStyle(
-                        color: context.iris.foreground2,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        height: 1.2,
-                      ),
+              child: Row(
+                children: [
+                  IrisIcon('lock-simple', size: 14, color: colors.foreground2),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: colors.foreground2, fontSize: 13),
                     ),
-                    Text(
-                      '${tab?.title ?? widget.agent.space} 탭 · ${_relativeTime(widget.request.createdAt)} 전',
-                      style: TextStyle(
-                        color: context.iris.muted,
-                        fontSize: 13,
-                        height: 1.2,
+                  ),
+                  if (url?.isNotEmpty == true) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        _publicLocation(url!),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: IrisType.mono.copyWith(
+                          color: colors.muted,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          key: const Key('human-turn-title'),
-          padding: const EdgeInsets.only(top: 14),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: IrisMarkdown(
-              _body.title,
-              compact: true,
-              baseStyle: TextStyle(
-                color: context.iris.foreground,
-                fontSize: 21,
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-                letterSpacing: -0.42,
+                ],
               ),
             ),
-          ),
-        ),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 140),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.only(top: 4),
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: IrisMarkdown(
-                _body.text,
-                compact: true,
-                baseStyle: TextStyle(
-                  color: context.iris.muted,
-                  fontSize: 14.5,
-                  height: 1.5,
-                ),
-                textColor: context.iris.muted,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          key: const Key('human-turn-frame'),
-          height: 150,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: const Color(0xfff7f7f5),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (widget.previewImage != null || _frame != null)
-                widget.previewImage != null
-                    ? RawImage(image: widget.previewImage, fit: BoxFit.cover)
-                    : Image.memory(_frame!.jpeg, fit: BoxFit.cover)
-              else
-                const Center(
-                  child: IrisIcon('globe', size: 28, color: Color(0xff56717f)),
-                ),
-              if (previewUrl?.isNotEmpty == true)
-                Positioned(
-                  right: 8,
-                  top: 9,
-                  child: Container(
-                    height: 26,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: const Color(0xbf0a1620),
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: Row(
-                      children: [
-                        const IrisIcon(
-                          'lock-simple',
-                          size: 12,
-                          color: Color(0xffeaf3fa),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _publicLocation(previewUrl!),
-                          style: const TextStyle(
-                            color: Color(0xffeaf3fa),
-                            fontSize: 12.5,
+            SizedBox(
+              height: 200,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  const ColoredBox(color: Color(0xffF7F9FB)),
+                  ValueListenableBuilder<Uint8List?>(
+                    valueListenable: _jpeg,
+                    builder: (context, jpeg, _) =>
+                        _image(jpeg, BoxFit.fitWidth, Alignment.topCenter) ??
+                        const Center(
+                          child: IrisIcon(
+                            'globe',
+                            size: 28,
+                            color: Color(0xff56717f),
                           ),
                         ),
-                      ],
+                  ),
+                  Positioned(
+                    right: 10,
+                    top: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xbf1B2630),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'Mac 화면',
+                        style: TextStyle(color: Colors.white, fontSize: 11),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _answered(BuildContext context, String gone) {
+    final remaining = gone.startsWith('gone')
+        ? (widget.nav?.count ?? 0)
+        : ((widget.nav?.count ?? 1) - 1).clamp(0, 99);
+    return ResponseFrame(
+      header: ResponseHeader.titledNext,
+      title: widget.agent.name,
+      space: widget.agent.space,
+      agentKind: widget.agent.kind,
+      bar: responseAnsweredBar(
+        onHome: () => Navigator.of(context).pop(),
+        remaining: remaining,
+        onNext: widget.nav?.onNext,
+      ),
+      children: [
+        ResponseAnswered(
+          title: responseGoneText(gone).$1,
+          detail: responseGoneText(gone).$2,
+          badge: responseGoneBadge(gone),
+          kindLabel: '사람이 할 일',
+          kindIcon: 'hand-pointing',
+          kindTone: ResponseTone.human,
+          ghost: responseGhostCode(context, _body.title),
+        ),
+      ],
+    );
+  }
+}
+
+// 미리보기 확대 뷰. 두 손가락으로 확대·축소, 왼쪽 위 X 로 닫음
+class _FrameZoom extends StatelessWidget {
+  const _FrameZoom({required this.jpeg, required this.builder});
+
+  final ValueNotifier<Uint8List?> jpeg;
+  final Widget Function(Uint8List? jpeg) builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      key: const Key('human-turn-zoom'),
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          InteractiveViewer(
+            minScale: 1,
+            maxScale: 6,
+            child: ValueListenableBuilder<Uint8List?>(
+              valueListenable: jpeg,
+              builder: (context, value, _) => Center(child: builder(value)),
+            ),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: GestureDetector(
+                  key: const Key('human-turn-zoom-close'),
+                  onTap: () => Navigator.of(context).pop(),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(
+                      color: Color(0x99000000),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: IrisIcon('x', size: 22, color: Colors.white),
                     ),
                   ),
                 ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            IrisButton(
-              label: '탭 열기',
-              icon: 'globe',
-              tone: IrisButtonTone.primary,
-              onPressed:
-                  _body.tab == null ||
-                      !widget.state.supports('browser.frame.watch')
-                  ? null
-                  : widget.onOpenTab,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            IrisButton(
-              label: '다 했음',
-              onPressed: _busy ? null : () => _answer('done'),
-            ),
-            const SizedBox(width: 10),
-            IrisButton(
-              label: '못 하겠음',
-              onPressed: _busy ? null : () => _answer('unable'),
-            ),
-          ],
-        ),
-        if (_result != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              _result!,
-              style: TextStyle(color: context.iris.muted, fontSize: 13),
+              ),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -310,10 +440,4 @@ String _publicLocation(String value) {
   final uri = Uri.tryParse(value);
   if (uri == null || uri.host.isEmpty) return value;
   return '${uri.host}${uri.path == '/' ? '' : uri.path}';
-}
-
-String _relativeTime(int timestamp) {
-  final minutes = ((DateTime.now().millisecondsSinceEpoch - timestamp) / 60000)
-      .round();
-  return minutes <= 0 ? '방금' : '$minutes분';
 }

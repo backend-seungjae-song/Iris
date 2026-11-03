@@ -1,0 +1,44 @@
+
+
+⏺ Write(new.md)
+  ⎿  Wrote 1 line to new.md
+      1 hello
+
+⏺ 4단계: WebFetch로 https://example.com을 가져옵니다. 도구 스키마를
+  먼저 불러옵니다.
+
+⏺ Fetch(https://example.com)
+  ⎿  Received 577 bytes (200 OK)
+
+⏺ 4단계 완료: https://example.com의 제목은 "Example Domain"이고,
+  문서 예제용 도메인이라는 내용이었습니다.
+
+  5단계: AskUserQuestion으로 단일 선택 질문을 하나 합니다.
+
+⏺ User answered Claude's questions:
+  ⎿  · 테스트 5단계입니다. 단일 선택으로 가장 가까운 답을 골라
+     주세요. → A (Recommended)
+
+⏺ 5단계 완료: 단일 선택 질문에 A (Recommended)가 선택됐습니다.
+
+  6단계: AskUserQuestion으로 다중 선택 질문을 하나 합니다.
+
+⏺ 6단계는 사용자 응답 없이 끝났습니다(The user did not answer the
+  questions.). 테스트 목적상 다음 단계로 넘어가고, 필요하면 나중에
+  다시 실행하겠습니다.
+
+  7단계: AskUserQuestion으로 질문 두 개를 한 번에 냅니다.
+───────────────────────────────────────────────────────────────────
+←  ☒ 질문 1  ☐ 질문 2  ✔ Submit  →
+
+테스트 7단계 질문 2입니다. 동물을 고르세요.
+
+❯ 1. 고양이
+     고양이를 고릅니다.
+  2. 강아지
+     강아지를 고릅니다.
+  3. Type something.
+───────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

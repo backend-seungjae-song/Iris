@@ -213,14 +213,15 @@ check("앱 재접속 후에도 같은 탭으로 복귀", () => {
     && !/pinnedTabsByPane\.clear\(\)/.test(seg) && !/dropPin\(/.test(seg);
 });
 // 렌더러: 보고 있지 않은 스페이스라도 최근에 AI 가 쓴 탭은 살아 있어야 조작이 된다.
-// 기준은 하나다. held 와 영구 표식(t.ai)을 함께 보면 두 신호 모두 만료되지 않아,
+// QA 회차가 소유한 탭은 유지한다. 일반 탭은 최근 사용만 보고 held·영구 표식(t.ai)은 쓰지 않는다.
+// held 와 영구 표식은 만료되지 않아,
 // 과거에 한 번 쓴 탭이 앱을 켤 때마다 다시 살아난다(저장된 탭 84개 중 24개).
 // 지금은 최근 5분 사용 하나로 좁히고, 쓰지 않으면 재우되 다시 쓰면 깨운다.
-check("띄우는 기준은 최근 사용 하나 — 쥔 탭·영구 표식으로는 안 되살린다", () => {
+check("QA 소유 탭과 최근 사용 탭만 띄운다 — 쥔 탭·영구 표식으로는 안 되살린다", () => {
   const bareAi = aiTabs.replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n").map((line) => line.replace(/\/\/.*$/, "")).join("\n");
   return /function reconcileAiTabs/.test(aiTabs) && /reconcileAiTabs\(\);\s+\/\/ 에이전트 탭/.test(aiTabs)
-    && /if \(t && protectedIds && protectedIds\.has\(t\.id\)\) out\.push/.test(bareAi)
+    && /if \(t && \(t\.qaRunId \|\| \(protectedIds && protectedIds\.has\(t\.id\)\)\)\) out\.push/.test(bareAi)
     && !/t\.ai\s*\|\|/.test(bareAi)
     && !/held\.has\(/.test(bareAi);   // 띄우는 기준과 안 재우는 기준이 갈라지면 만들자마자 재워진다
 });
@@ -245,7 +246,8 @@ check("창 띄우기 요청은 탭당 한 번(포커스 탈취 방지)", () => /
 check("CLI·MCP 양쪽에 노출", () => {
   const cli = read("bin/iris-browser.mjs"), m = read("bin/iris-mcp.mjs");
   return /case "newtab"/.test(cli) && /name: "browser_new_tab"/.test(m)
-    && /NO_TAB = new Set\(\["browser_tabs", "browser_target", "browser_new_tab", "browser_report", "browser_trace", "browser_picks", "app_picks"\]\)/.test(m);
+    && /case "closetab"/.test(cli) && /name: "browser_close_tab"/.test(m)
+    && /NO_TAB = new Set\(\["browser_tabs", "browser_target", "browser_new_tab", "browser_close_tab", "browser_trace", "browser_picks", "app_picks"\]\)/.test(m);
 });
 
 }

@@ -21,9 +21,13 @@ import {
   webviewFactory, webviewLifecycleSource, webviewStore,
 } from "../sources.mjs";
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
+import { createWorkerBrowserService } from "../../../server/mcp-worker/browser-service.js";
+import { createCurrentServerHostPorts } from "../../../server/mcp-host/current-server.js";
 
 export default async function run() {
 console.log("[2e] 스페이스 격리 계약");
+const workerBrowser = read("server/mcp-worker/browser-service.js");
+const currentHost = read("server/mcp-host/current-server.js");
 // AI 제어가 자기 스페이스를 넘지 않는 것이 핵심 불변식이다. 확인 결과 pane w3:pS가 다른 스페이스 탭 16개와
 // 공유 창 탭 3개를 모두 조회·조작할 수 있었다. 그 상태로 돌아가지 않도록 계약으로 강제한다.
 check("세션(pane)→스페이스 해석이 존재", () => /const spaceByPane = new Map\(\)/.test(browserRuntime) && /agent\.pane_id && agent\.workspace_id/.test(browserRuntime));
@@ -59,9 +63,8 @@ check("같은 프로젝트의 runtime workspace를 MCP 경계에서 임의로 �
   return /spaceKey\.sameStorageSpace\(meta\.space, mine\)/.test(allowed)
     && /controlOwnerOf\(mine, tabId\)/.test(allowed)
     && /spaceKey\.sameStorageSpace\(a\.space, sessionSpace\(session\)\)/.test(browserRuntime)
-    && /spaceKey\.sameStorageSpace\(meta\.space, sessionSpace\(session\)\)/.test(browserCommands)
-    && /spaceKey\.sameStorageSpace\(wmeta\.space, sessionSpace\(session\)\)/.test(browserCommands)
-    && /spaceKey\.sameStorageSpace\(\(tabMeta\(id\) \|\| \{\}\)\.space, tg\.space\)/.test(browserCommands)
+    && /spaceKey\.sameStorageSpace\(meta\.space, sessionSpace\(identity\.session\)\)/.test(currentHost)
+    && /spaceKey\.sameStorageSpace\(\(tabMeta\(id\) \|\| \{\}\)\.space, resolved\.space\)/.test(currentHost)
     && /function groupGranted[\s\S]{0,500}spaceKey\.sameStorageSpace/.test(browserRuntime);
 });
 check("사람이 고른 runtime workspace는 같은 프로젝트의 첫 항목으로 되돌아가지 않음", () =>
@@ -78,7 +81,7 @@ check("세션을 모르면 대상을 고르지 않는다", () => {
     && !/activeWcBySpace\.get\(sp\)/.test(seg);
 });
 check("거부 사유가 무엇을 하면 풀리는지까지 말해준다", () =>
-  /tg\.noSession/.test(browserCommands) && /IRIS_SESSION/.test(browserCommands));
+  /resolved\.noSession/.test(currentHost) && /IRIS_SESSION/.test(currentHost));
 // wc 번호는 회수 후 다른 탭에 재발급된다. 그래서 고정은 wc를 보관하지 않고 식별자만 남긴다.
 // 명령을 보내기 직전에 한 번 핸들로 변환한다. 식별자는 재발급되지 않는다.
 check("고정은 정체성만 들고 있다", () =>
@@ -94,11 +97,50 @@ check("핸들은 서버 재시작을 견딘다", () =>
 check("사용자 지목은 누적(여러 탭 동시 사용)", () => /ts\.add\(tabId\)/.test(browserRuntime) && /function grantedByTabId/.test(browserRuntime));
 check("명령마다 대상 탭 지정 가능(--tab)", () => {
   const cli = read("bin/iris-browser.mjs"), mcp = read("bin/iris-mcp.mjs");
-  return /args\.tab != null \? tabIdOfRef\(args\.tab\)/.test(browserCommands) && /"--tab"/.test(cli) && /TAB_PARAM/.test(mcp);
+  return /tabRef: args\.tab/.test(workerBrowser) && /"--tab"/.test(cli) && /TAB_PARAM/.test(mcp);
 });
-check("--tab도 같은 경계 검사를 통과해야 함", () => {
-  const seg = sliceFrom(browserCommands, "const want = args && args.tab", 400, "--tab도 같은 경계 검사를 통과해야 함");
-  return /tabAllowed\(session, want\)/.test(seg);
+await checkAsync("--tab도 같은 경계 검사를 통과해야 함", async () => {
+  const calls = [];
+  const service = createWorkerBrowserService({
+    hostApi: {
+      withCommand: (_command, run) => run(),
+      call: async (operation, input) => {
+        calls.push([operation, input]);
+        if (operation === "journal.accept" || operation === "journal.trace") return {};
+        if (operation === "browser.commandGuard") return { qaOwned: false };
+        if (operation === "browser.commandTargetState") {
+          return { response: { ok: false, error: "이 세션에 허용되지 않은 탭입니다." } };
+        }
+        throw new Error(`경계 거부 뒤 실행된 host 연산: ${operation}`);
+      },
+    },
+    activity: { run: (_kind, _id, run) => run() },
+  });
+  const result = await service.dispatch({ command: "text", args: { tab: "foreign-tab" },
+    identity: { session: "smoke-space" }, commandId: "smoke-space-1" });
+  const target = calls.find(([operation]) => operation === "browser.commandTargetState");
+  return result.ok === false && /허용되지 않은 탭/.test(result.error)
+    && target?.[1]?.tabRef === "foreign-tab"
+    && !calls.some(([operation]) => operation === "browser.executeWithDialog");
+});
+await checkAsync("실제 host port가 허용 탭과 거절 탭을 구분", async () => {
+  const ports = createCurrentServerHostPorts({
+    targetTokenFor: ({ wcId }) => ({ wcId, documentGeneration: 1, debuggerGeneration: 1 }),
+    browserState: {
+      tabIdOfRef: value => String(value),
+      tabAllowed: (_session, tabId) => tabId === "allowed" ? { ok: true } : { ok: false, why: "다른 세션 탭" },
+      qaOwner: () => null,
+      wcOfTabId: () => 101,
+      tabMeta: tabId => ({ tabId, space: "fixture" }),
+      handleFor: tabId => tabId,
+      sessionResponse: () => ({ ok: true, data: { tabs: [] } }),
+    },
+  });
+  const allowed = await ports.browser.resolveForCommand({ identity: { session: "A" }, input: { tabRef: "allowed" } });
+  let denied = null;
+  try { await ports.browser.resolveForCommand({ identity: { session: "A" }, input: { tabRef: "denied" } }); }
+  catch (error) { denied = error; }
+  return allowed.tabId === "allowed" && allowed.wcId === 101 && denied?.code === "SESSION_DENIED";
 });
 check("탭이 닫히면 지목도 정리", () => /for \(const grants of userGrantTabs\.values\(\)\) grants\.delete\(tabId\)/.test(browserRuntime));
 

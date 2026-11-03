@@ -153,9 +153,6 @@ export function handleArchive(ws, msg) {
   }
 }
 
-// 셸에 그대로 입력하는 문자열이라 인용을 직접 처리한다. 폴더 이름에 공백·따옴표가 있어도 안전하다.
-function shq(s) { return "'" + String(s).replace(/'/g, `'\\''`) + "'"; }
-
 // 복원 규칙:
 //   스페이스 → 그 스페이스와 안의 세션 전부
 //   세션     → 그 스페이스가 보관 중이면 스페이스도 함께 복원하고, 세션은 해당 항목만
@@ -233,8 +230,8 @@ async function reviveAgent(wsId, spareRef, e) {
   if (!argv) throw new Error(`${e.agent} 세션을 잇는 방법을 모릅니다.`);
   const slot = await takeTab(wsId, spareRef, e.name);
   // 탭은 스페이스 폴더에서 시작한다. 세션이 그 아래 다른 폴더에 있었으면 먼저 옮긴다.
-  // 실행 파일까지 인용(셸 별칭 미적용, 기존 복원 동작 유지)
-  const cmd = process.platform === "win32" ? await commandForPane(herdr, slot.paneId, argv, sameDir(e.cwd, slot.cwd) ? null : e.cwd) : (sameDir(e.cwd, slot.cwd) || !e.cwd ? "" : `cd ${shq(e.cwd)} && `) + argv.map(shq).join(" ");
+  // 새 탭과 같은 명령 글자(shellCommand)
+  const cmd = process.platform === "win32" ? await commandForPane(herdr, slot.paneId, argv, sameDir(e.cwd, slot.cwd) ? null : e.cwd) : (sameDir(e.cwd, slot.cwd) || !e.cwd ? "" : `${shellCommand(["cd", "--", e.cwd])} && `) + shellCommand(argv);
   await herdr.paneSendText(slot.paneId, cmd + "\r");
   archive.remove(e.id);
   return slot.tabId;

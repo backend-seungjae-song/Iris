@@ -336,3 +336,85 @@ test("server trust boundary revalidates history without writing state", async ()
     await rm(isolatedState, { recursive: true, force: true });
   }
 });
+
+test("복원 뒤 Chromium 이 현재 페이지의 pageState 를 다시 만들어도 복원 성공으로 보고 새로 불러오지 않는다", async () => {
+  const handlers = new Map();
+  const app = new EventEmitter();
+  const ipcMain = new EventEmitter();
+  ipcMain.handle = (channel, fn) => handlers.set(channel, fn);
+  const host = new EventEmitter();
+  host.getType = () => "window";
+  const history = { entries: [
+    { url: "https://one.test/", title: "one", pageState: P0 },
+    { url: "https://two.test/", title: "two", pageState: P1 },
+  ], index: 1 };
+  let native = { entries: [], index: -1 };
+  const loads = [];
+  const guest = {
+    getType: () => "webview",
+    hostWebContents: host,
+    loadURL: (url) => { loads.push(url); return Promise.resolve(); },
+    navigationHistory: {
+      getAllEntries: () => native.entries,
+      getActiveIndex: () => native.index,
+      restore: async (value) => {
+        native = structuredClone(value);
+        native.entries[value.index].pageState = P2;   // 불러온 문서가 상태를 새로 씀
+      },
+    },
+  };
+  createBrowserNavigationHistory({
+    app, ipcMain, webContentsFromId: () => guest,
+    isTrustedSender: (event) => event.sender === host,
+    isAllowedTarget: () => true,
+    randomToken: () => "rewrite_token",
+  });
+  app.emit("web-contents-created", {}, host);
+  const event = { sender: host, returnValue: null };
+  ipcMain.emit("ac-browser-history-stage", event, history);
+  const params = { src: event.returnValue.src };
+  host.emit("will-attach-webview", {}, {}, params);
+  app.emit("web-contents-created", {}, guest);
+  host.emit("did-attach-webview", {}, guest);
+  assert.deepEqual(await handlers.get("ac-browser-history-finish")({ sender: host }, event.returnValue.token), { ok: true });
+  assert.deepEqual(loads, [], "현재 주소를 새로 불러오면 스크롤·입력값이 사라짐");
+});
+
+test("지난 페이지의 pageState 가 다르면 복원 실패로 본다", async () => {
+  const handlers = new Map();
+  const app = new EventEmitter();
+  const ipcMain = new EventEmitter();
+  ipcMain.handle = (channel, fn) => handlers.set(channel, fn);
+  const host = new EventEmitter();
+  host.getType = () => "window";
+  const history = { entries: [
+    { url: "https://one.test/", title: "one", pageState: P0 },
+    { url: "https://two.test/", title: "two", pageState: P1 },
+  ], index: 1 };
+  let native = { entries: [], index: -1 };
+  const guest = {
+    getType: () => "webview",
+    hostWebContents: host,
+    loadURL: () => Promise.resolve(),
+    navigationHistory: {
+      getAllEntries: () => native.entries,
+      getActiveIndex: () => native.index,
+      restore: async (value) => { native = structuredClone(value); native.entries[0].pageState = P2; },
+    },
+  };
+  createBrowserNavigationHistory({
+    app, ipcMain, webContentsFromId: () => guest,
+    isTrustedSender: (event) => event.sender === host,
+    isAllowedTarget: () => true,
+    randomToken: () => "past_token",
+  });
+  app.emit("web-contents-created", {}, host);
+  const event = { sender: host, returnValue: null };
+  ipcMain.emit("ac-browser-history-stage", event, history);
+  const params = { src: event.returnValue.src };
+  host.emit("will-attach-webview", {}, {}, params);
+  app.emit("web-contents-created", {}, guest);
+  host.emit("did-attach-webview", {}, guest);
+  const result = await handlers.get("ac-browser-history-finish")({ sender: host }, event.returnValue.token);
+  assert.equal(result.ok, false);
+});

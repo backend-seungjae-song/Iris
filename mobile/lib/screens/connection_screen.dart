@@ -1,13 +1,19 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:iris_remote/design/buttons.dart';
-import 'package:iris_remote/design/flow.dart';
+import 'package:iris_remote/design/icon.dart';
 import 'package:iris_remote/design/sheet.dart';
+import 'package:iris_remote/design/status_chip.dart';
 import 'package:iris_remote/design/tokens.dart';
 import 'package:iris_remote/remote/keepalive.dart' as remote_keepalive;
 import 'package:iris_remote/remote/session.dart';
+import 'package:iris_remote/remote/tailscale_store.dart';
+import 'package:iris_remote/remote/response_notifications.dart';
+import 'package:iris_remote/screens/notification_navigation.dart';
 import 'package:iris_remote/screens/agent_list_screen.dart';
 import 'package:iris_remote/state/remote_state.dart';
 import 'package:iris_remote/store/pairing_store.dart';
@@ -18,9 +24,12 @@ class ConnectionScreen extends StatefulWidget {
     required this.remoteSession,
     required this.onUnregister,
     this.initialConnection,
+    this.store,
     super.key,
   });
 
+  // 재접속 토큰을 저장·읽는 곳. 없으면 매번 PIN 으로 연결
+  final PairingStore? store;
   final PairingSettings settings;
   final RemoteSession remoteSession;
   final ActiveRemoteSession? initialConnection;
@@ -39,13 +48,17 @@ class _ConnectionScreenState extends State<ConnectionScreen>
   RemoteState? _state;
   bool _busy = false;
   String _status = '연결 안 됨';
-  int _lastRequestCount = -1;
+  String _macName = 'Mac';
+  ResponseNotifications _notifications = ResponseNotifications();
+  int _responseFocus = 0;
+  int _lastNotificationCount = -1;
   Timer? _retryTimer;
   DateTime? _retryUntil;
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _keepAlive.onOpenResponses(null);
     _retryTimer?.cancel();
     super.dispose();
   }
@@ -86,17 +99,75 @@ class _ConnectionScreenState extends State<ConnectionScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(const TailscaleStore().setActive(true));
+    _keepAlive.onOpenResponses(_openResponses);
+    unawaited(_takeOpenResponses());
     final initial = widget.initialConnection;
     if (initial != null) {
       _busy = true;
       _status = '연결 준비 중…';
       WidgetsBinding.instance.addPostFrameCallback((_) => _activate(initial));
+    } else if (widget.store != null) {
+      unawaited(_resumeStored());
     }
+  }
+
+  // 앱을 다시 열었을 때 마지막 행동 뒤 10분 안이면 PIN 없이 이어서 연결
+  Future<void> _resumeStored() async {
+    final store = widget.store!;
+    final token = await store.loadResumeToken();
+    if (token == null || !mounted) return;
+    setState(() {
+      _busy = true;
+      _status = '이전 연결을 이어 가는 중…';
+    });
+    // 앱을 열면서 Tailscale 을 켜는 중이라 처음 몇 번은 통신이 안 될 수 있어 잠시 기다리며 다시 시도
+    for (var attempt = 0; mounted; attempt++) {
+      try {
+        final connection = await widget.remoteSession.resume(
+          widget.settings,
+          token: token,
+          onResumeToken: store.saveResumeToken,
+        );
+        await _activate(connection);
+        break;
+      } on RemoteFailure catch (error) {
+        // 기한이 지났거나 거절된 토큰만 지우고, 잠깐의 통신 실패에는 남겨 다시 열 때 이어 감
+        if (error.requiresPin) await store.saveResumeToken(null);
+        final waiting =
+            !error.requiresPin && error.retryAfter == null && attempt < 4;
+        if (mounted) {
+          setState(
+            () => _status = error.requiresPin
+                ? 'PIN 기한이 지나 다시 확인이 필요합니다. 접속 PIN을 입력하세요.'
+                : waiting
+                ? 'Tailscale 연결을 기다리는 중…'
+                : error.message,
+          );
+        }
+        if (!waiting) break;
+        await Future<void>.delayed(Duration(seconds: 2 + attempt));
+      }
+    }
+    if (mounted && _connection == null) setState(() => _busy = false);
+  }
+
+  // 화면을 하나씩 닫다가 맨 처음 화면에서 뒤로가기를 누르면 앱을 완전히 종료.
+  // 백그라운드 연결과 Tailscale 도 함께 끔. 홈 키로 나가는 경우는 해당 없음
+  @override
+  Future<bool> didPopRoute() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return false;
+    final connection = _connection;
+    _connection = null;
+    unawaited(_keepAlive.stop().catchError((_) {}));
+    if (connection != null) unawaited(connection.disconnect());
+    return const TailscaleStore().exitApp();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final foreground = state == AppLifecycleState.resumed;
+    if (foreground) unawaited(const TailscaleStore().setActive(true));
     _connection?.setForeground(foreground);
   }
 
@@ -118,12 +189,13 @@ class _ConnectionScreenState extends State<ConnectionScreen>
     _clearRetry();
     setState(() {
       _busy = true;
-      _status = '폰 잠금을 확인한 뒤 PIN을 확인합니다.';
+      _status = 'PIN을 확인하는 중…';
     });
     try {
       final connection = await widget.remoteSession.connect(
         widget.settings,
         pin: pin,
+        onResumeToken: widget.store?.saveResumeToken,
       );
       await _activate(connection);
       return _connection == null ? _status : null;
@@ -152,7 +224,9 @@ class _ConnectionScreenState extends State<ConnectionScreen>
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
       );
       _state = state;
-      _lastRequestCount = -1;
+      _macName = state.macName;
+      _notifications = ResponseNotifications();
+      _lastNotificationCount = -1;
       state.addListener(_onRemoteStateChanged);
       _onRemoteStateChanged();
       setState(() {
@@ -184,22 +258,48 @@ class _ConnectionScreenState extends State<ConnectionScreen>
     }
   }
 
+  Future<void> _takeOpenResponses() async {
+    if (await _keepAlive.takeOpenResponses() && mounted) _openResponses();
+  }
+
+  void _openResponses() {
+    if (!mounted) return;
+    NotificationNavigation.instance.openResponses();
+    setState(() => _responseFocus++);
+  }
+
   void _onRemoteStateChanged() {
-    final count = _state?.requests.length ?? 0;
-    if (count == _lastRequestCount) return;
-    _lastRequestCount = count;
-    unawaited(_keepAlive.update(count).catchError((_) {}));
+    final state = _state;
+    if (state == null) return;
+    final update = _notifications.update(
+      responseItems(
+        requests: state.requests,
+        terminalQuestions:
+            state.supports('terminal.watch') && state.supports('terminal.key')
+            ? state.terminalQuestions
+            : const [],
+        agents: state.supports('terminal.watch') ? state.agents : const [],
+      ),
+      foreground:
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      visibleAgent: NotificationNavigation.instance.visibleAgent,
+    );
+    if (!update.alert && update.count == _lastNotificationCount) return;
+    _lastNotificationCount = update.count;
+    unawaited(
+      _keepAlive.update(update.count, alert: update.alert).catchError((_) {}),
+    );
   }
 
   void _watchDisconnection(ActiveRemoteSession connection) {
     connection.disconnected.then((_) async {
       if (!mounted || !identical(_connection, connection)) return;
       _clearState();
-      await _keepAlive.stop(disconnected: true);
+      await _keepAlive.stop();
       if (mounted) {
         setState(() {
           _connection = null;
-          _status = connection.disconnectReason?.message ?? '컴퓨터과 연결이 끊겼습니다.';
+          _status = connection.disconnectReason?.message ?? '연결이 끊겼습니다.';
         });
       }
     });
@@ -245,7 +345,7 @@ class _ConnectionScreenState extends State<ConnectionScreen>
     state.removeListener(_onRemoteStateChanged);
     state.dispose();
     _state = null;
-    _lastRequestCount = -1;
+    _notifications = ResponseNotifications();
   }
 
   @override
@@ -253,12 +353,14 @@ class _ConnectionScreenState extends State<ConnectionScreen>
     final state = _state;
     if (_connection != null && state != null) {
       return AgentListScreen(
+        responseFocus: _responseFocus,
         state: state,
         onDisconnect: () => unawaited(_disconnect()),
         onUnregister: () => unawaited(_unregister()),
       );
     }
     return DisconnectedView(
+      name: _macName,
       busy: _busy,
       status: _visibleStatus,
       retrySeconds: _retrySeconds,
@@ -268,6 +370,7 @@ class _ConnectionScreenState extends State<ConnectionScreen>
   }
 }
 
+// 연결 안 된 홈. 머리글(이름 + 연결 끊김 칩) 아래 안내 카드, 맨 아래 등록 해제
 class DisconnectedView extends StatelessWidget {
   const DisconnectedView({
     required this.busy,
@@ -275,6 +378,7 @@ class DisconnectedView extends StatelessWidget {
     required this.onConnect,
     required this.onUnregister,
     this.retrySeconds = 0,
+    this.name = 'Mac',
     super.key,
   });
 
@@ -283,27 +387,50 @@ class DisconnectedView extends StatelessWidget {
   final VoidCallback onConnect;
   final VoidCallback onUnregister;
   final int retrySeconds;
+  final String name;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.iris;
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            const IrisFlowHeader(title: 'Iris 원격'),
+            Container(
+              constraints: const BoxConstraints(minHeight: 64),
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      name,
+                      key: const Key('connection-name'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.foreground,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.44,
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const IrisStatusChip(IrisStatus.off),
+                ],
+              ),
+            ),
             Expanded(
               child: ListView(
                 children: [
-                  IrisConnectionPanel(
+                  _OfflineBanner(
                     key: const Key('connection-panel'),
-                    title: busy ? '연결 준비 중' : '컴퓨터과 연결 안 됨',
-                    message: status,
-                    actionLabel: retrySeconds > 0
-                        ? '$retrySeconds초 후 다시 시도'
-                        : '컴퓨터에 연결',
-                    icon: busy ? 'lock-simple' : 'wifi-slash',
                     busy: busy,
-                    onAction: retrySeconds > 0 ? null : onConnect,
+                    message: status == '연결 안 됨' ? null : status,
+                    retrySeconds: retrySeconds,
+                    onConnect: onConnect,
                   ),
                 ],
               ),
@@ -322,6 +449,153 @@ class DisconnectedView extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// 연결 끊김 안내 카드. 분홍 면 + 끊김 아이콘, 연결 중에는 진행 막대
+class _OfflineBanner extends StatefulWidget {
+  const _OfflineBanner({
+    required this.busy,
+    required this.message,
+    required this.retrySeconds,
+    required this.onConnect,
+    super.key,
+  });
+
+  final bool busy;
+  final String? message;
+  final int retrySeconds;
+  final VoidCallback onConnect;
+
+  @override
+  State<_OfflineBanner> createState() => _OfflineBannerState();
+}
+
+class _OfflineBannerState extends State<_OfflineBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _bar = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 4),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final move = widget.busy && !MediaQuery.disableAnimationsOf(context);
+    if (move && !_bar.isAnimating) {
+      _bar.repeat();
+    } else if (!move) {
+      _bar.stop();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_OfflineBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    didChangeDependencies();
+  }
+
+  @override
+  void dispose() {
+    _bar.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    final waiting = widget.retrySeconds > 0;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: colors.dangerTint,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.pink.withValues(alpha: .3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: IrisIcon(
+                  widget.busy ? 'lock-simple' : 'wifi-slash',
+                  size: 20,
+                  color: colors.dangerText,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.busy ? '연결 준비 중' : '연결이 끊겼습니다',
+                      style: TextStyle(
+                        color: colors.foreground,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
+                    if (widget.message != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          widget.message!,
+                          style: TextStyle(
+                            color: colors.foreground2,
+                            fontSize: 13,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (widget.busy) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: Container(
+                height: 4,
+                color: colors.pink.withValues(alpha: .25),
+                alignment: Alignment.centerLeft,
+                child: AnimatedBuilder(
+                  animation: _bar,
+                  builder: (_, _) => FractionallySizedBox(
+                    widthFactor: .4 + .6 * _bar.value,
+                    child: Container(color: colors.dangerText),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              IrisButton(
+                expand: false,
+                label: waiting
+                    ? '${widget.retrySeconds}초 후 다시 시도'
+                    : widget.busy
+                    ? '연결 중…'
+                    : '다시 연결',
+                icon: waiting || widget.busy ? null : 'arrow-clockwise',
+                onPressed: waiting || widget.busy ? null : widget.onConnect,
+                height: 36,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

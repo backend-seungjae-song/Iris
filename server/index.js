@@ -8,9 +8,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { stateHome } from "./state-home.cjs";
+import { startMemoryDiagnostics } from "./memory-diagnostics.js";
 import { windowsServerPidState } from "./windows-state-lock.cjs";
 import { readHiddenSync } from "./feature-state-read.cjs";
 import { createCapabilityHost } from "./capabilities.js";
+import {
+  createCurrentServerHostPorts,
+  createHostIdentityAuthority,
+  createIndexUserPorts,
+  createMcpHostDispatcher,
+  createMcpHostExecutionCoordinator,
+  createMcpHostHandlers,
+} from "./mcp-host/index.js";
+// 계약: docs/mcp-worker.md
+import { createMcpWorkerSupervisor } from "./mcp-worker/supervisor.js";
 
 // 상태 폴더. 개발 인스턴스와 설치된 앱이 같은 폴더를 쓰면 개발 회차의 QA 장부·매크로·탭
 // 기록이 설치된 앱의 것과 섞여, 각 기록이 어느 환경의 것인지 구분할 수 없다.
@@ -77,6 +88,7 @@ import {
   broadcastAiTargets,
   broadcastTabHandles,
   cdpExecutorReady,
+  cdpExecutorInfo,
   closeDialogAsk,
   closedTabsWire,
   controlMessage,
@@ -113,6 +125,8 @@ import {
   profileRefToId,
   regTab,
   registerCdpExecutor,
+  requestWorkerGeneration,
+  requestWorkerRelay,
   removeClosedTab,
   replacePaneSpaces,
   requestCdp,
@@ -158,7 +172,9 @@ import {
   initBrowserCommands,
   noteAppPick,
   noteBrowserPick,
-  runBrowserCmdResilient,
+  consoleAsk,
+  notifyHostUser,
+  progressHostUser,
 } from "./browser-commands.js";
 import {
   handleBrowserMessage,
@@ -345,10 +361,30 @@ const capabilityContext = {
 const capabilityHost = createCapabilityHost(readHiddenSync(IRIS_HOME), capabilityContext);
 capabilityHost.init(true); // 스페이스 키 이관 참여자는 저장소 초기화 위치에 둔다.
 
+const herdr = new HerdrClient();
+const targetGenerations = new Map();
+export let workerSupervisor;
+
 initBrowserRuntime({
   broadcast: (message) => broadcast(message),
   getHerdr: () => herdr,
   relayToOneConsole: (message) => relayToOneConsole(message),
+  onTargetGeneration: (message) => {
+    if (message?.reset === true) {
+      targetGenerations.clear();
+      return;
+    }
+    if (!message?.wc) return;
+    const target = {
+      wcId: Number(message.wc),
+      documentGeneration: message.documentGeneration,
+      debuggerGeneration: message.debuggerGeneration,
+      ...(message.childSessionId ? { childSessionId: message.childSessionId } : {}),
+    };
+    targetGenerations.set(Number(message.wc), target);
+  },
+  onRelayEvent: event => workerSupervisor?.relayEvent(event),
+  onExecutorRegistered: () => workerSupervisor?.executorRegistered(),
 });
 
 initBrowserCommands({ broadcast: (message) => broadcast(message) });
@@ -357,9 +393,62 @@ initBrowserMessageHandlers({
   broadcastLocal: (message) => broadcastLocal(message),
 });
 
+const identityAuthority = createHostIdentityAuthority();
+const targetTokenFor = ({ wcId }) => targetGenerations.get(Number(wcId)) || null;
+const hostExecution = createMcpHostExecutionCoordinator();
+const executeRelay = ({ target, relay, request }) => requestWorkerRelay({
+  workerGeneration: request.workerGeneration,
+  commandId: request.commandId,
+  callId: request.callId,
+  targetToken: target?.targetToken || null,
+  command: relay.command,
+  args: relay.args,
+  wc: target?.wcId || null,
+  unit: relay.unit,
+  timeoutMs: relay.timeoutMs || 30000,
+});
+const hostPorts = createCurrentServerHostPorts({
+  targetTokenFor,
+  executeRelay,
+  delegateHostTask: request => hostExecution.runUnlocked(() => workerSupervisor?.hostTask(request)),
+  status: () => ({ executor: cdpExecutorInfo() }),
+  serial: hostExecution.serial,
+});
+const hostHandlers = createMcpHostHandlers({
+  ...hostPorts,
+  user: createIndexUserPorts({ consoleAsk, notifyHostUser, progressHostUser }),
+});
+workerSupervisor = createMcpWorkerSupervisor({
+  stateDir: IRIS_HOME,
+  sourceRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  bundleId: process.env.IRIS_BUNDLE_ID || "development",
+  legacyRevision: process.env.IRIS_QA_LEGACY_REVISION || "",
+  identityAuthority,
+  releaseHostGeneration: generation => hostHandlers.releaseWorkerGeneration(generation),
+  hostDispatcher: (workerGeneration, child) => createMcpHostDispatcher({
+    workerGeneration,
+    identityAuthority,
+    handlers: hostHandlers,
+    execution: hostExecution,
+    authorizeWorker: connection => connection === child,
+  }),
+  relay: {
+    accept: (generation, options) => cdpExecutorReady()
+      ? requestWorkerGeneration("worker.accept", generation, options) : Promise.resolve({ ok: true, pending: true }),
+    retire: (generation, options) => cdpExecutorReady()
+      ? requestWorkerGeneration("worker.retire", generation, options) : Promise.resolve({ ok: true, pending: true }),
+  },
+});
+
 const server = hardenHeaderParsing(http.createServer(createHttpHandler({
   irisHome: IRIS_HOME,
   capabilityHost,
+  workerSupervisor,
+  healthInfo: () => ({
+    appPath: process.env.IRIS_APP_PATH || path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+    mainPid: Number(process.env.IRIS_MAIN_PID) || process.ppid,
+    serverRoot: process.env.IRIS_SERVER_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  }),
 })));
 
 
@@ -372,7 +461,6 @@ initWsTransport({
   heartbeatMs: HB_MS,
   isLocalRequest: isLoopbackRequest,
 });
-const herdr = new HerdrClient();
 // 실제 터미널: node-pty로 herdr session attach를 그대로 사용한다(재구현이 아니다).
 const ptyMgr = new PtyManager();
 initHerdrHandlers({ herdr, ptyManager: ptyMgr, broadcastLocal: (message) => broadcastLocal(message) });
@@ -397,7 +485,7 @@ async function recomputeNow() {
     // 스페이스 경계를 정하는 데는 이 값이 맞다.
     replace({ state: next.state, workspaces: next.workspaces, tabs: next.tabs, allowedRoots: next.allowedRoots });
     const runtime = snapshot();
-    broadcast({ type: "state", agents: runtime.state, workspaces: runtime.workspaces, tabs: runtime.tabs, ts: Date.now() });
+    broadcast({ type: "state", agents: runtime.state, workspaces: runtime.workspaces, tabs: runtime.tabs, ts: Date.now(), focusStale: !!next.focusStale });
     // 스페이스가 생기거나 사라지면 저장분을 내보내는 투영(폴더 키 → workspace_id)이 통째로 달라진다.
     // 다시 보내지 않으면 창이 이전 투영을 유지해, 복원한 스페이스가 자기 탭·북마크·메모를 찾지 못한다
     // (확인 결과: 보관 후 복원한 직후 탭이 0개로 표시됐다). 스페이스 구성이 바뀐 회차에만 보낸다.
@@ -504,6 +592,10 @@ attachWs({
       || msg.type === "pick-mode"
       || msg.type === "cdp-executor-register"
       || msg.type === "cdp-result"
+      || msg.type === "worker.accepted"
+      || msg.type === "worker.retired"
+      || msg.type === "relay-event"
+      || msg.type === "browser-target-generation"
       || msg.type === "browser-active-wc"
       || msg.type === "ai-login-note"
       || msg.type === "browser-dialog-plan"
@@ -571,6 +663,7 @@ if (process.platform === "win32") {
   process.on("SIGINT", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
   process.on("SIGTERM", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
 }
+startMemoryDiagnostics({ dir: path.join(IRIS_HOME, "diagnostics") });
 // Windows: 앱이 SIGTERM 대신 IPC 로 보내는 종료 요청. 앱이 먼저 꺼져 IPC 가 끊긴 경우도 같은 종료
 // macOS: IPC 채널 없음(process.send 없음)
 if (typeof process.send === "function") {
@@ -646,6 +739,7 @@ server.on("error", (e) => {
 });
 server.listen(PORT, HOST, () => {
   console.log(`Iris → http://127.0.0.1:${PORT}`);
+  workerSupervisor.start().catch(error => console.error(`[mcp-worker] 시작 실패: ${error.message}`));
   // 기존 원격 설정 지정 시 경고만. 바인딩은 루프백 유지
   const ignored = ignoredRemoteEnv();
   if (ignored.length) console.warn(`  ${ignored.join("·")} 설정 무시: 이 서버는 127.0.0.1 에서만 접속을 받습니다. 휴대폰 접속은 원격 게이트웨이를 사용합니다.`);

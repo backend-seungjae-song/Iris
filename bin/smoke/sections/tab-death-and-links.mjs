@@ -30,9 +30,13 @@ check("해제 후 남은 탭만 돌려줌(없으면 사용자에게)", () => {
 check("목록과 안내가 같은 가시성 정의를 씀", () => {
   // 두 곳이 갈리면 "목록엔 있는데 못 쓰는 탭"이 생긴다.
   const n = (allServer.match(/visibleTabsFor\(/g) || []).length;
-  return /function visibleTabsFor/.test(browserRuntime) && n === 3; // 정의 + tabs 명령 + goneReply
+  return /function visibleTabsFor/.test(browserRuntime) && n === 4; // 정의 + tabs 명령 + goneReply + closetab 결과
 });
-check("--tab 이 죽은 탭이어도 남은 탭 안내", () => /if \(!hasTab\(want\)\) \{ const r = goneReply/.test(browserCommands));
+check("--tab 이 죽은 탭이어도 남은 탭 안내", () => {
+  const host = read("server/mcp-host/current-server.js");
+  return /if \(!hasTab\(want\)\) \{[\s\S]{0,120}const reply = goneReply/.test(host)
+    && /response: \{ \.\.\.reply, error: `지정한 탭/.test(host);
+});
 // 요소 선택 모드가 창마다 갈려 상태가 어긋나던 문제는, 상태를 서버 한 곳으로 옮겨 막는다.
 // 요소를 고르는 것과 탭을 지목하는 것은 다른 행위다. 같은 경로로 처리하면 요소를 고를 때마다
 // 제어 대상이 그 탭으로 넘어가고 지목 알림이 한 벌 더 붙는다.

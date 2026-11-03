@@ -1,4 +1,6 @@
-import { requestRecompute as recompute } from "./runtime-state.js";
+import { beginFocus, endFocus } from "./focus-epoch.js";
+import { replace, requestRecompute as recompute, snapshot } from "./runtime-state.js";
+import { createTerminalInputTrace } from "./terminal-input-trace.js";
 
 // Herdr relay·control/focus와 실제 PTY WebSocket handler의 단일 소유 모듈.
 //
@@ -10,8 +12,8 @@ import { requestRecompute as recompute } from "./runtime-state.js";
 //   relay 함수와 workspace runtime용 scroll 기억/해제 함수, 연결 종료용 closeHerdrClient.
 //
 // 의존 대상
-//   runtime-state의 recompute port에 의존하고, Herdr·PtyManager·broadcastLocal은 composition root에서
-//   주입받으며 다른 handler를 import하지 않는다.
+//   runtime-state의 recompute port·snapshot과 focus-epoch에 의존하고, Herdr·PtyManager·broadcastLocal은
+//   composition root에서 주입받으며 다른 handler를 import하지 않는다.
 //
 // 유지 조건
 //   로컬 gate, 실제 PTY 바이트 전달, 마지막 입력 콘솔 우선 relay, pane scroll 검증과 응답 순서,
@@ -29,6 +31,11 @@ let focusQueue = Promise.resolve();
 // 사용자가 마지막으로 입력한 콘솔 창. 분리 창에서 온 내용을 어느 채팅에 붙일지 정할 때 쓴다.
 // 콘솔이 여럿이면 직전까지 입력하던 창이 사용자가 가리키는 채팅이다.
 let lastTypedConsole = null;
+// 휠·포커스 입력 기록. 보내는 시점의 포커스 pane 을 출처로 남김
+const traceTerminalInput = createTerminalInputTrace();
+function focusedPaneId() {
+  return (snapshot().state || []).find((a) => a.focused)?.paneId || "?";
+}
 
 export function initHerdrHandlers(deps) {
   herdr = deps.herdr;
@@ -87,9 +94,33 @@ export async function handleControl(ws, msg) {
   }
 }
 
+// 포커스 요청이 herdr 에 반영된 직후, 재계산(herdr 왕복 한 번 + 색인)을 기다리지 않고 그 결과를 먼저 방송한다.
+// 요청이 가리킨 pane·탭·스페이스가 focused 가 된다는 것은 herdr 에 묻지 않아도 안다. 바로 뒤 재계산이 실제 값으로 덮는다.
+// 탭·스페이스만 고른 요청은 어느 pane 이 focused 가 될지 모르므로 pane 의 focused 를 모두 내려, 창이 옛 pane 으로 역동기화하지 않게 한다.
+function publishFocusGuess(guess) {
+  if (!guess) return;
+  const cur = snapshot();
+  const paneId = guess.paneId || null;
+  const tabId = guess.tabId || (paneId ? cur.state.find((s) => s.paneId === paneId)?.tabId : null) || null;
+  const wsOfTab = tabId ? Object.keys(cur.tabs).find((w) => (cur.tabs[w] || []).some((t) => t.tabId === tabId)) : null;
+  const workspaceId = guess.workspaceId || wsOfTab || (paneId ? cur.state.find((s) => s.paneId === paneId)?.workspaceId : null) || null;
+  if (!workspaceId) return;
+  const state = cur.state.map((s) => ({ ...s, focused: !!paneId && s.paneId === paneId }));
+  const tabs = tabId
+    ? Object.fromEntries(Object.entries(cur.tabs).map(([w, list]) => [w, w === workspaceId ? list.map((t) => ({ ...t, focused: t.tabId === tabId })) : list]))
+    : cur.tabs;
+  const workspaces = cur.workspaces.map((w) => ({ ...w, focused: w.id === workspaceId }));
+  replace({ state, tabs, workspaces });
+  const runtime = snapshot();
+  if (typeof broadcastLocal === "function") broadcastLocal({ type: "state", agents: runtime.state, workspaces: runtime.workspaces, tabs: runtime.tabs, ts: Date.now(), focusStale: false });
+}
+
 // herdr 화면은 공유 상태다. 빠른 선택 요청이 역순 완료되어 옛 pane이 남지 않도록 순서를 지킨다.
+// begin/end 사이에 만들어진 snapshot 은 옛 포커스를 담을 수 있어 focus-epoch 가 그 구간을 센다.
+// operation 이 돌려준 {paneId, tabId, workspaceId} 는 재계산 전에 먼저 방송한다.
 function enqueueFocus(ws, operation) {
-  const pending = focusQueue.then(operation).then(() => recompute());
+  beginFocus();
+  const pending = focusQueue.then(operation).finally(endFocus).then((guess) => { publishFocusGuess(guess); return recompute(); });
   focusQueue = pending.catch((e) => {
     if (ws.readyState === 1) ws.send(JSON.stringify({ type: "control-error", message: String(e.message || e) }));
   });
@@ -103,15 +134,22 @@ function logFocus(kind, id, origin) {
 }
 
 // 사이드바 선택은 해당 pane만 표시한다. 같은 pane 재선택으로 zoom을 풀지 않는다.
+// pane 의 탭은 마지막 snapshot 이 알고 있으면 그 값을 쓴다. herdr 호출은 하나에 약 100ms 라
+// pane.get 을 생략하면 전환이 그만큼 빨라진다. snapshot 에 없는 pane 만 herdr 에 묻는다.
 export function handleFocus(ws, msg) {
   if (!ws._local || !msg.target) return;
   logFocus("pane", msg.target, msg.origin);
   const client = herdr;
   return enqueueFocus(ws, async () => {
-    const pane = await client.paneGet(msg.target);
-    if (!pane.tab_id) throw new Error("herdr pane has no tab");
-    await client.tabFocus(pane.tab_id);
+    let tabId = snapshot().state.find((s) => s.paneId === msg.target)?.tabId || null;
+    if (!tabId) {
+      const pane = await client.paneGet(msg.target);
+      tabId = pane.tab_id;
+    }
+    if (!tabId) throw new Error("herdr pane has no tab");
+    await client.tabFocus(tabId);
     await client.paneZoom(msg.target, "on");
+    return { paneId: msg.target, tabId };
   });
 }
 
@@ -120,14 +158,14 @@ export function handleTabFocus(ws, msg) {
   if (!ws._local || !msg.tabId) return;
   logFocus("tab", msg.tabId, msg.origin);
   const client = herdr;
-  return enqueueFocus(ws, () => client.tabFocus(msg.tabId));
+  return enqueueFocus(ws, async () => { await client.tabFocus(msg.tabId); return { tabId: msg.tabId }; });
 }
 
 export function handleWorkspaceFocus(ws, msg) {
   if (!ws._local || !msg.workspaceId) return;
   logFocus("workspace", msg.workspaceId, msg.origin);
   const client = herdr;
-  return enqueueFocus(ws, () => client.workspaceFocus(msg.workspaceId));
+  return enqueueFocus(ws, async () => { await client.workspaceFocus(msg.workspaceId); return { workspaceId: msg.workspaceId }; });
 }
 
 // 세션 닫기는 화면이 가리킨 terminal identity까지 대조하고 해당 pane 하나에만 적용한다.
@@ -177,7 +215,10 @@ export async function handlePty(ws, msg) {
     } else if (msg.type === "pty.input") {
       if (!ws._local) return;
       lastTypedConsole = ws;   // 사용자가 직전에 입력한 콘솔. 분리 창이 보낸 내용을 붙일 대상
-      if (typeof msg.data === "string") ptyMgr.input(ws, msg.data);
+      if (typeof msg.data === "string") {
+        traceTerminalInput(() => `console pane=${focusedPaneId()}`, msg.data);
+        ptyMgr.input(ws, msg.data);
+      }
     } else if (msg.type === "pty.resize") {
       if (!ws._local) return;
       ptyMgr.resize(ws, msg.cols, msg.rows);

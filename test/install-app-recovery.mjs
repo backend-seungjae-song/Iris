@@ -19,6 +19,7 @@ function executable(file, body) {
 //   server: 새 앱 서버 준비 확인(wait-installed-server.cjs)의 결과.
 function harness(t, {
   codesign = "pass", open = "pass", quit = "pass", launch = "stays", copy = "pass", server = "ready", channel = false,
+  precheck = "pass", deployStateExists = true,
 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-install-recovery-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -27,6 +28,7 @@ function harness(t, {
   const built = path.join(fixtureRoot, "dist", "mac-arm64", "Iris.app");
   const mocks = path.join(dir, "bin");
   const state = path.join(dir, "state");
+  const deployState = deployStateExists ? state : path.join(dir, "fresh-deploy-state");
   const log = path.join(dir, "events.log");
   fs.mkdirSync(path.join(app, "Contents"), { recursive: true });
   fs.mkdirSync(path.join(built, "Contents"), { recursive: true });
@@ -47,10 +49,14 @@ function harness(t, {
   const commands = source.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
   assert.doesNotMatch(commands, /\/Applications\//, "대역 실행이 실제 설치 앱 경로를 건드리면 안 된다");
   const script = path.join(dir, "install-app.sh");
+  const lockScript = path.join(fixtureRoot, "scripts", "mcp-worker", "deployment-lock.sh");
+  fs.mkdirSync(path.dirname(lockScript), { recursive: true });
+  fs.copyFileSync(path.join(root, "scripts", "mcp-worker", "deployment-lock.sh"), lockScript);
   fs.writeFileSync(script, source, { mode: 0o755 });
 
   const backups = `$(ls "$(dirname "$IRIS_TEST_APP")" | grep -c '^Iris.app.old-' || true)`;
   executable(path.join(mocks, "node"), `
+if [ "\${1:-}" = "scripts/check-shipped.mjs" ] && [ "${precheck}" = "fail" ]; then exit 44; fi
 if [ "\${1:-}" = "scripts/wait-installed-server.cjs" ]; then
   echo "ready-check backups=${backups}" >> "$MOCK_LOG"
   ${server === "ready" ? "exit 0" : "exit 1"}
@@ -99,13 +105,22 @@ exit $found`);
       IRIS_TEST_APP: app,
       MOCK_LOG: log,
       MOCK_STATE: state,
+      IRIS_DEPLOY_STATE_DIR: deployState,
     },
     encoding: "utf8",
   });
   const events = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
   const running = fs.existsSync(path.join(state, "running"));
-  return { app, dir, events, result, running };
+  const deploymentLock = fs.existsSync(path.join(deployState, "deployment.lock"));
+  return { app, dir, events, result, running, deploymentLock };
 }
+
+test("상태 폴더가 없는 첫 설치도 잠금을 얻고 설치를 마친다", (t) => {
+  const h = harness(t, { deployStateExists: false });
+  assert.equal(h.result.status, 0, h.result.stdout + h.result.stderr);
+  assert.equal(installedVersion(h.app), "new");
+  assert.equal(h.deploymentLock, false);
+});
 
 function installedVersion(app) {
   return fs.readFileSync(path.join(app, "Contents", "version"), "utf8").trim();
@@ -189,6 +204,14 @@ test("서명 검증 실패는 실행 중인 앱을 종료하거나 교체하지 
   assert.equal(h.events.includes("quit"), false);
   assert.equal(h.events.includes("ditto"), false);
   assert.equal(h.events.includes("open"), false);
+});
+
+test("빌드 전 검사 실패도 배포 잠금을 반환한다", (t) => {
+  const h = harness(t, { precheck: "fail" });
+  assert.equal(h.result.status, 44, h.result.stdout + h.result.stderr);
+  assert.equal(h.deploymentLock, false);
+  assert.equal(installedVersion(h.app), "old");
+  assert.equal(h.events.includes("quit"), false);
 });
 
 test("서명 인증서 없이 빌드한 앱은 ad-hoc 서명을 붙인 뒤 검증해 설치한다", (t) => {

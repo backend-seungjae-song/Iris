@@ -1,0 +1,42 @@
+
+ ▐▛███▛█   Claude Code v2.1.295
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   ~/…/20260927-mobile-remote/fake-sessions/proj
+
+
+❯ 테스트 세션입니다. 다음을 순서대로 하나씩 실행하세요. 한 단계가
+  끝나면 다음 단계로 넘어가세요. 1) Bash 로 mkdir -p out && echo
+  hi > out/a.txt 실행 2) notes.txt 의 line one 을 line 1 로 수정
+  3) new.md 파일을 새로 만들어 내용 hello 4) WebFetch 로
+  https://example.com 가져오기 5) AskUserQuestion 으로 단일 선택
+  질문 하나 6) AskUserQuestion 으로 다중 선택 질문 하나 7)
+  AskUserQuestion 으로 질문 두 개 동시에 8) 계획 모드로 들어가서
+  ExitPlanMode 로 계획 제출
+
+⏺ 요청은 8단계 도구 동작 테스트입니다. 각 단계를 순서대로
+  실행하고, 끝날 때마다 결과를 확인한 뒤 다음 단계로
+  넘어가겠습니다.
+
+  1단계: 작업 폴더에 out/a.txt를 만듭니다.
+
+  Creating out directory and writing hi to a.txt
+  ⎿  $ mkdir -p out && echo hi > out/a.txt && cat out/a.txt
+
+──────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to
+ auto mode" below
+ Create out directory and write hi to a.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ mkdir -p out && echo hi > out/a.txt && cat out/a.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to
+      /Users/you/Projects/Personal/iris/.working/example-mobi
+      le-remote/fake-sessions/proj/out from this project
+   3. Yes, and switch to auto mode · auto mode handles these
+      prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

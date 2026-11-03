@@ -123,6 +123,12 @@ export function createRequestStore(options = {}) {
     answer,
     cancel,
     expire,
+    discard(ref) {
+      const record = records.get(ref);
+      if (!record || record.status === "pending") return false;
+      records.delete(ref);
+      return true;
+    },
     get: pending,
     notifyRemoteDisabled,
     subscribe(subscriber) {

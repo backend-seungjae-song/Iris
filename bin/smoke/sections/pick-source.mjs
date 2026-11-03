@@ -351,7 +351,7 @@ check("Explorer 파일·폴더도 지목 대상이고 @ 멘션으로 나간다",
 check("고른 세션은 부를 수 있는 주소로 나간다", () =>
   /`주소: herdr pane \$\{a\.paneId\}`/.test(pickHost)
   && /`읽기: herdr pane read \$\{a\.paneId\} --source recent --lines 50`/.test(pickHost)
-  && /`보내기: herdr pane run \$\{a\.paneId\} "<명령>"`/.test(pickHost)
+  && /`보내기: iris-pane-send \$\{a\.paneId\} "<명령>"`/.test(pickHost)
   && /a\.sessionUuid \? `세션: \$\{a\.sessionUuid\}` : null/.test(pickHost)
   && /a\.cwd \? `폴더: \$\{a\.cwd\}` : null/.test(pickHost));
 

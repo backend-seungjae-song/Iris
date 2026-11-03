@@ -180,6 +180,19 @@ export function wireLinkMode(el) {
 export function noticeBlock(title, lines) {
   return ["⟦Iris⟧ " + title, ...lines.filter(Boolean), "⟦/Iris⟧"].join("\n");
 }
+// 휠 이동량 → 보낼 줄 수. 30px 마다 한 줄, 한 이벤트에 최대 6줄. 방향이 바뀌거나 직전 이벤트와
+// WHEEL_IDLE_MS 넘게 떨어지면 남은 양을 버림. 버리지 않으면 몇 분 전 스크롤의 나머지가 다음 작은
+// 움직임에 더해져 의도하지 않은 줄이 나감
+const WHEEL_IDLE_MS = 300;
+export function wheelStep(rest, deltaY, gapMs) {
+  if (!(gapMs <= WHEEL_IDLE_MS) || Math.sign(rest) === -Math.sign(deltaY)) rest = 0;
+  rest += deltaY;
+  const whole = Math.trunc(Math.abs(rest) / 30);
+  if (!whole) return { rest, lines: 0, dir: 0 };
+  const dir = rest < 0 ? -1 : 1;
+  return { rest: rest - dir * whole * 30, lines: Math.min(6, whole), dir };
+}
+
 export function terminalBarePathToken(raw) {
   return String(raw || "").replace(/(\.[A-Za-z0-9]{1,10})(?:으로|에서|까지|부터|에게|처럼|보다|이나|라도|을|를|은|는|이|가|와|과|로|에|의|도|만)$/u, "$1");
 }
@@ -198,6 +211,9 @@ export function terminalLinkSpans(cellsAt, y, opts = {}) {
   const EDGE_SLACK = opts.edgeSlack == null ? 3 : opts.edgeSlack;
   const softWrapped = opts.softWrapped || (() => false);
   const pathCh = isHostWindows() ? /[\p{L}\p{N}\p{M}_.\\/:@+%~-]/u : /[\p{L}\p{N}\p{M}_./@+%~-]/u;
+  // URL 의 구분 글자. 이 글자 앞뒤에서 접힌 URL 도 이어진 줄로 판정
+  const urlCh = /[:?=&#,;!*$]/;
+  const tokenCh = (ch) => pathCh.test(ch) || urlCh.test(ch);
   const trimEnd = (c) => { let e = c.length; while (e > 0 && /[\s│▕┃▏▐⎸⎹|]/.test(c[e - 1].ch)) e--; return e; };
   const cellsOf = (ry) => { const c = cellsAt(ry); return c == null ? null : c.slice(0, trimEnd(c)); };
   // 테두리·패딩 몇 칸은 허용한다. herdr 는 content 오른쪽에 테두리와 패딩을 그린다.
@@ -221,13 +237,14 @@ export function terminalLinkSpans(cellsAt, y, opts = {}) {
     return k > i && k + 1 < n.length && /[.)]/.test(n[k].ch) && n[k + 1].ch === " ";
   };
   const continues = (ry) => {
-    const c = cellsOf(ry); if (!c || !c.length || !pathCh.test(c[c.length - 1].ch)) return false;
+    const c = cellsOf(ry); if (!c || !c.length || !tokenCh(c[c.length - 1].ch)) return false;
     const n = cellsOf(ry + 1); if (!n || !n.length) return false;
     let i = 0; while (i < n.length && n[i].ch === " ") i++;
-    if (i >= n.length || !pathCh.test(n[i].ch)) return false;
+    if (i >= n.length || !tokenCh(n[i].ch)) return false;
     if (newItemAt(n, i)) return false;
-    // 안 찬 줄이라도 토큰 한가운데서 끊겼으면 이어진 줄이다.
-    return softWrapped(ry) || reachesEdge(ry) || JOINER.test(c[c.length - 1].ch);
+    // 안 찬 줄이라도 토큰 한가운데서 끊겼으면 이어진 줄이다. `_` 는 바로 앞에서 끊겨 다음 줄
+    // 첫 글자가 되기도 한다. `/`·`.` 로 시작하는 줄은 따로 쓴 경로일 수 있어 넣지 않는다.
+    return softWrapped(ry) || reachesEdge(ry) || JOINER.test(c[c.length - 1].ch) || n[i].ch === "_";
   };
   let startY = y; while (startY > 1 && continues(startY - 1)) startY--;
   let text = "", first = true; const map = [];
@@ -252,13 +269,22 @@ export function terminalLinkSpans(cellsAt, y, opts = {}) {
     links.push({ range: { start: { x: a.x, y: a.y }, end: { x: b.endX, y: b.y } }, text: label, kind });
   };
   // 1) 마크다운 링크 `[라벨](대상)`. 라벨부터 닫는 괄호까지 통째로 누를 수 있어야 한다.
-  const MD = isHostWindows() ? /\[[^\]\n]{1,200}\]\((file:\/\/[^)\s]+|https?:\/\/[^)\s]+|[A-Za-z]:[\\/][^)\s]+|\\\\[^)\s]+|~?\/[^)\s]+)\)/g : /\[[^\]\n]{1,200}\]\((file:\/\/[^)\s]+|https?:\/\/[^)\s]+|~?\/[^)\s]+)\)/g;
+  const MD = isHostWindows() ? /\[[^\]\n]{1,200}\]\((file:\/\/[^)\s]+|https?:\/\/[^)\s]+|[A-Za-z]:[\\/][^)\s]+|\\\\[^)\s]+|~?\/[^)\n]+)\)/g : /\[[^\]\n]{1,200}\]\((file:\/\/[^)\s]+|https?:\/\/[^)\s]+|~?\/[^)\n]+)\)/g;
   let mm;
   while ((mm = MD.exec(text))) add(mm.index, mm[0].length, mm[1], "md");
   // 2) 맨 URL
   const URLRE = /(?:https?|file):\/\/[^\s<>"\'`\])]+/g;
   while ((mm = URLRE.exec(text))) add(mm.index, mm[0].length, mm[0], "url");
-  // 3) 맨 경로. 오인 방지는 수식키가 아니라 대상 자체로 건다(루트가 명시됐거나 작업 폴더 안으로
+  // 3) 괄호·따옴표·백틱 안의 공백 든 경로. 맨 경로 규칙은 공백에서 끊어 없는 파일을 가리킴
+  //    - 닫는 기호 바로 앞이 `.확장자`일 때만
+  //    - 쉼표·세미콜론, 공백 뒤 새 경로가 있으면 나열이라 건너뜀
+  const DELIM = /[(`"'“‘「]((?:~|\.{0,2})\/[^\n()`"'“”‘’「」]*?\.[\p{L}\p{N}]{1,10})(?=[)`"'”’」])/gu;
+  while ((mm = DELIM.exec(text))) {
+    const inner = mm[1];
+    if (!/\s/.test(inner) || /[,;]|\s[~./]/.test(inner)) continue;
+    add(mm.index + 1, inner.length, inner, "path");
+  }
+  // 4) 맨 경로. 오인 방지는 수식키가 아니라 대상 자체로 건다(루트가 명시됐거나 작업 폴더 안으로
   //    풀리는 토큰만 openTerminalPath 의 경계 검사를 통과해 실제로 열린다).
   const PATHRE = /(?:~|\.{0,2})?(?:\/[\p{L}\p{N}\p{M}_.@+%-]+)+(?::\d+)?|(?:[\p{L}\p{N}\p{M}_.@+%-]+\/)+[\p{L}\p{N}\p{M}_.@+%-]+(?::\d+)?/gu;
   const pathRe = isHostWindows() ? /(?:[A-Za-z]:[\\/]|\\\\|~[\\/]|\.\.?[\\/])(?:[\p{L}\p{N}\p{M}_.@+%-]+[\\/])*[\p{L}\p{N}\p{M}_.@+%-]+(?::\d+)?|(?:[\p{L}\p{N}\p{M}_.@+%-]+[\\/])+[\p{L}\p{N}\p{M}_.@+%-]+(?::\d+)?/gu : PATHRE;
@@ -382,18 +408,16 @@ export function initXterm() {
   }
   // 휠 이동량 누적 후 30px마다 한 줄. 트랙패드는 한 번 쓸 때 작은 이동량의 이벤트를 수십 개 보내므로
   // 이벤트마다 한 줄 이상 보내면 지나치게 빠르고 macOS 스크롤 속도 설정도 반영 안 됨
-  let wheelRest = 0;
+  let wheelRest = 0, wheelAt = 0;
   terminalInner.addEventListener("wheel", (e) => {
     const ws = getWs();
     if (!getAppMouseOn() || !ws || ws.readyState !== 1) return; // 앱이 마우스 안 씀 → xterm 기본 처리
     e.preventDefault(); e.stopPropagation();
-    if (Math.sign(wheelRest) === -Math.sign(e.deltaY)) wheelRest = 0; // 방향 전환 시 남은 양 버림
-    wheelRest += e.deltaY;
-    const whole = Math.trunc(Math.abs(wheelRest) / 30);
-    if (!whole) return;
-    const dir = wheelRest < 0 ? -1 : 1;
-    wheelRest -= dir * whole * 30;
-    const n = Math.min(6, whole);
+    const now = performance.now();
+    const step = wheelStep(wheelRest, e.deltaY, now - wheelAt);
+    wheelRest = step.rest; wheelAt = now;
+    if (!step.lines) return;
+    const dir = step.dir, n = step.lines;
     const { col, row } = cellAt(e.clientX, e.clientY);
     // 화면 밖 드래그가 동작 중이면 그 기능이 이 휠 이벤트를 가져간다. 로드되지 않았으면 아무도 가져가지 않는다.
     if (callHook("chatcopy.wheel", { dir, lines: n, reportCol: col, reportRow: row, event: e })) return;
@@ -401,9 +425,39 @@ export function initXterm() {
     let seq = ""; for (let i = 0; i < n; i++) seq += "\x1b[<" + btn + ";" + col + ";" + row + "M";
     wsSend({ type: "pty.input", data: seq });
   }, { passive: false, capture: true });
-  // 클릭 전달: 움직이지 않은 클릭만 herdr로 보낸다. 드래그는 로컬 선택(복사)이므로 보내지 않는다.
-  // 이 구분이 herdr 기능 유지와 드래그 복사 보존의 핵심이다.
+  // 왼쪽 버튼 누르기·끌기·떼기는 그대로 herdr로 전달. 선택·복사는 herdr와 pane 앱(Claude Code 전체 화면 등)이
+  // 처리하므로 겉에 뜨는 표시·줄바꿈·들여쓰기를 앱 기준으로 정리. 앱이 복사하지 않은 범위의 보완은 chatcopy.forwardEnd. 수식키 끌기만 로컬 선택
+  // 가운데·오른쪽 버튼은 움직이지 않은 클릭만 전달
   let mdBtn = -1, mdX = 0, mdY = 0, mdHadSel = false, selOff = false;
+  let held = null, heldFrom = null; // 전달 중인 왼쪽 버튼의 마지막 셀·누른 셀
+  const sendMouse = (code, cell, up) => wsSend({ type: "pty.input", data: "\x1b[<" + code + ";" + cell.col + ";" + cell.row + (up ? "m" : "M") });
+  // 2칸 글자(한글 등)의 둘째 칸은 그 글자의 첫 칸으로 보고. 둘째 칸에서 시작한 선택을 다음 글자부터 잡는 앱이 있음(Claude Code)
+  const glyphCell = (clientX, clientY) => {
+    const cell = cellAt(clientX, clientY);
+    try {
+      const buf = xterm.buffer.active;
+      const glyph = buf.getLine(buf.viewportY + cell.row - 1)?.getCell(cell.col - 1);
+      if (cell.col > 1 && glyph && glyph.getWidth() === 0) cell.col -= 1;
+    } catch {}
+    return cell;
+  };
+  const releaseHeld = (e) => {
+    if (!held) return;
+    const cell = e && Number.isFinite(e.clientX) ? glyphCell(e.clientX, e.clientY) : held;
+    const from = heldFrom;
+    held = null; heldFrom = null;
+    sendMouse(0, cell, true);
+    callHook("chatcopy.forwardEnd", { from, to: cell });
+  };
+  document.addEventListener("mousemove", (e) => {
+    if (!held) return;
+    const cell = glyphCell(e.clientX, e.clientY);
+    if (cell.col === held.col && cell.row === held.row) return;
+    held = cell;
+    sendMouse(32, cell, false); // 32 = 버튼 누른 채 이동
+  }, true);
+  document.addEventListener("mouseup", (e) => { if (e.button === 0) releaseHeld(e); }, true);
+  window.addEventListener("blur", () => releaseHeld(null)); // 창 밖에서 뗀 버튼은 신호가 안 와서 마지막 셀에서 뗌
   // Ctrl/Cmd+Shift+클릭은 자체 제스처(Finder에서 보기)다. 그런데 xterm은 shift+mousedown을
   // "선택 확장"으로도 소비해서, 같은 입력이 두 번 해석돼 화면에 의도치 않은 선택이 남는다.
   // 그 조합 동안에만 선택 기능을 끈다. mousedown 자체는 xterm에 그대로 전달해야 한다.
@@ -412,6 +466,18 @@ export function initXterm() {
   // 내부 API가 없는 빌드로 폴백되면 증상만 남고 원인이 보이지 않으므로, 그때만 한 줄 남긴다.
   (function () { const ss = selService(); if (!ss || typeof ss.disable !== "function") blog("selection service API 없음 — Ctrl+Shift 클릭은 폴백(선택 지우기)으로 처리"); })();
   terminalInner.addEventListener("mousedown", (e) => {
+    const ws = getWs();
+    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && getAppMouseOn() && ws && ws.readyState === 1
+      && !terminalInner.querySelector(".xterm-cursor-pointer")) {
+      e.preventDefault(); e.stopPropagation(); // xterm 로컬 선택 시작 방지
+      try { xterm.clearSelection(); } catch (e2) {}
+      xterm.focus();
+      releaseHeld(null);
+      held = heldFrom = glyphCell(e.clientX, e.clientY);
+      callHook("chatcopy.forwardStart");
+      sendMouse(0, held, false);
+      return;
+    }
     mdBtn = e.button; mdX = e.clientX; mdY = e.clientY;
     try { mdHadSel = !!(xterm.hasSelection && xterm.hasSelection()); } catch (e2) { mdHadSel = false; }
     // 일반 좌클릭 드래그만 화면 밖 추적 대상이다(수식키 조합은 자체 제스처).
@@ -433,7 +499,7 @@ export function initXterm() {
     if (selOff) { selOff = false; const ss = selService(); if (ss) { try { ss.enable(); } catch (e2) {} } }
     else if (e.shiftKey && (e.metaKey || e.ctrlKey)) { try { xterm.clearSelection(); } catch (e2) {} } // 폴백
     if (!getAppMouseOn() || !ws || ws.readyState !== 1) return;   // 앱이 마우스 안 씀 → 건드리지 않음
-    if (btn !== e.button || btn < 0) return;                  // 이 창 밖에서 시작한 클릭
+    if (btn !== e.button || btn < 0) return;                  // 이 창 밖에서 시작한 클릭·전달한 왼쪽 버튼
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return; // 우리 커스텀 제스처(경로 열기·Finder·선택)
     if (Math.abs(e.clientX - mdX) > 3 || Math.abs(e.clientY - mdY) > 3) return; // 드래그 = 로컬 선택
     if (mdHadSel) return;                                     // 선택을 지우는 클릭은 herdr로 안 보냄

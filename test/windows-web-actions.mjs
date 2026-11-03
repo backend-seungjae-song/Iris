@@ -44,7 +44,7 @@ test("Windows folder rename retargets descendants, watch ownership and active ID
     getMonacoModels: () => new Map(), getMonacoViewState: () => new Map(), getMonacoEditor: () => null, getMonacoRuntime: () => null,
     getTabSpaces: () => ["space"], getTabs: () => [moved, sibling], isFileLikeKind: () => true,
     trackFileWatch: (sp, tab) => watched.push(tab.path), untrackFileWatch: (p) => untracked.push(p),
-    getActiveTabId: () => "file:old", setActiveTab: (sp, id) => active.push(id), tabIoRegistry: new Map(), callHook: noop,
+    paneRename: (sp, oldId, id) => { if (oldId === "file:old") active.push(id); }, tabIoRegistry: new Map(), callHook: noop,
     renderTabs: noop, showActiveTab: noop, persistFileTabs: noop,
   });
   move("C:\\work\\DIR", "D:\\target");

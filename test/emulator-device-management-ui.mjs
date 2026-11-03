@@ -26,6 +26,7 @@ async function fixture(run) {
         { udid: 'missing', name: 'iPhone 16', runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-18-5', state: 'Shutdown', isAvailable: false, runnable: false, runtimeInstalled: false, canDuplicate: false },
       ];
       window.places = { one: 'column', two: 'column' };
+      devices.forEach(d => { d.canDelete = true; });
       const host = window.host = {
         getSettings: async () => ({ ok: true, settings: { mobileEmulatorDefaultDeviceUdid: null } }),
         setSettings: async settings => { calls.push(['settings', settings]); return { ok: true, settings }; },
@@ -45,6 +46,12 @@ async function fixture(run) {
         onOpenDevice: async device => { calls.push(['open', device.udid]); device.state = 'Booted'; },
         onMoveDevice: async (device, place) => { calls.push(['move', device.udid, place]); places[device.udid] = place; },
         onStopDevice: async device => { calls.push(['stop', device.udid]); device.state = 'Shutdown'; },
+        onDeleteDevice: async device => {
+          calls.push(['delete', device.udid]);
+          if (window.deleteCanceled) return { ok: true, canceled: true };
+          if (window.deleteError) return { ok: false, error: deleteError };
+          devices.splice(devices.indexOf(device), 1); return { ok: true, deleted: true };
+        },
       });
       await panel.refresh();
       window.launch = launchModule.mountLaunchButton({ host, hasTab: () => true, onOpen: d => calls.push(['launch', d.udid]) });
@@ -105,6 +112,42 @@ test('생성 실패는 오류를 표시하고 자동으로 재시도하지 않�
   assert.equal(await page.$eval('.emu-dp-note', el => el.textContent), '디스크 공간이 부족합니다.');
   assert.equal(await page.evaluate(() => calls.filter(c => c[0] === 'create').length), 1);
   assert.equal(await page.evaluate(() => devices.length), 3);
+}));
+
+test('기기 행에서 삭제하고 취소·실패하면 기기 목록을 유지한다', async () => fixture(async page => {
+  await page.evaluate(() => { window.deleteCanceled = true; });
+  await action(page, 'one', '삭제');
+  assert.equal(await page.$$(row('one')).then(rows => rows.length), 1);
+  await page.evaluate(() => { window.deleteCanceled = false; window.deleteError = '기기가 아직 종료 중입니다.'; });
+  await action(page, 'one', '삭제');
+  assert.equal(await page.$eval('.emu-dp-note', el => el.textContent), '기기가 아직 종료 중입니다.');
+  assert.equal(await page.evaluate(() => devices.length), 3);
+  await page.evaluate(() => { window.deleteError = ''; });
+  await action(page, 'one', '삭제');
+  assert.deepEqual(await page.evaluate(() => devices.map(d => d.udid)), ['two', 'missing']);
+  assert.equal(await page.$$(row('one')).then(rows => rows.length), 0);
+  await action(page, 'missing', '삭제');
+  assert.deepEqual(await page.evaluate(() => devices.map(d => d.udid)), ['two']);
+}));
+
+test('실제 Android 기기에는 삭제 버튼을 제공하지 않는다', async () => fixture(async page => {
+  await page.evaluate(async () => { devices.push({ udid: 'real-phone', name: 'Phone', runtime: 'Android', state: 'Booted', isAvailable: true, canDelete: false }); await panel.refresh(); });
+  assert.equal(await page.$$eval(row('real-phone') + ' button', buttons => buttons.some(b => b.textContent === '삭제')), false);
+}));
+
+test('작은 화면·긴 화면·큰 화면과 확대 글자에서도 기기 작업 버튼이 패널 안에 표시된다', async () => fixture(async page => {
+  await page.addStyleTag({ content: read('web/css/00-tokens.css') + read('web/css/01-base.css') + read('web/css/33-emulator.css') });
+  for (const [width, height, fontSize] of [[360, 640, '100%'], [390, 1000, '125%'], [1440, 1000, '100%']]) {
+    await page.setViewport({ width, height });
+    await page.evaluate(size => { document.documentElement.style.fontSize = size; }, fontSize);
+    assert.equal(await page.$eval(row('one'), wrap => {
+      const bounds = wrap.getBoundingClientRect();
+      return [...wrap.querySelectorAll('.emu-dp-actions button')].every(button => {
+        const rect = button.getBoundingClientRect();
+        return rect.width > 0 && rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1;
+      });
+    }), true, `${width}×${height}, 글자 ${fontSize}`);
+  }
 }));
 
 test('설치된 iOS 버전을 지원하지 않는 기종은 추가를 막고 지원 버전을 안내한다', async () => fixture(async page => {

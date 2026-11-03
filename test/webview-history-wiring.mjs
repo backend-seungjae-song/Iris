@@ -5,12 +5,12 @@ import vm from 'node:vm';
 import * as feedback from '../web/js/browser/navigation-feedback.js';
 const source = fs.readFileSync(new URL('../web/js/browser/webview-factory.js', import.meta.url), 'utf8');
 const history = {index:1,entries:[{url:'https://example.test/a'},{url:'https://example.test/b'},{url:'https://example.test/c'}]};
-function fixture({restoreOk=true,reopened=true,fallbackLoaded=false}={}) {
+function fixture({restoreOk=true,reopened=true,fallbackLoaded=false,slept=false}={}) {
   const stubs={};
   for (const match of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*"[^"]+";/g)) {
     for (const name of match[1].split(',').map(x=>x.trim()).filter(Boolean)) stubs[name]=()=>{};
   }
-  const callbacks=new Map(), attrs={}, records=new Map(), changes=[], loads=[];
+  const callbacks=new Map(), attrs={}, records=new Map(), changes=[], loads=[], statuses=[];
   let stages=0, finishes=0;
   const element={dataset:{},classList:{contains:()=>false,toggle(){}},
     setAttribute:(k,v)=>{attrs[k]=v},addEventListener:(k,f)=>{if(!callbacks.has(k))callbacks.set(k,[]);callbacks.get(k).push(f)},
@@ -26,11 +26,12 @@ function fixture({restoreOk=true,reopened=true,fallbackLoaded=false}={}) {
     getWebview:id=>records.get(id),registerWebview:(id,rec)=>records.set(id,rec),
     takeReopenedBrowserHistory:()=>reopened?history:null,
     partitionFor:()=> 'persist:acprof:test',profileIdForStored:x=>x,profileOfTab:()=> 'test',
-    getBrowserState:()=>({tabsBySpace:{test:[{id:'tab'}]}}),bsMutate:m=>changes.push(m),activeBrowserId:()=>null});
+    getBrowserState:()=>({tabsBySpace:{test:[{id:'tab'}]}}),bsMutate:m=>changes.push(m),activeBrowserId:()=>null,
+    setTabStatus:(id,patch)=>statuses.push(patch)});
   vm.runInContext(source.replace(/import\s*\{[^}]+\}\s*from\s*"[^"]+";/g,'').replace(/\bexport /g,''),context);
   context.initWebviewFactory({acHost:host,wvStack:{appendChild(){for(const fn of callbacks.get('did-attach')||[])fn({})}},wsSend(){},blog(){},showToast(){},urlInput:{},bNote:{},isNewTab:()=>false});
-  const rec=context.createWebview('tab','test',history.entries[1].url);
-  return {context,rec,emit,attrs,changes,loads,stages:()=>stages,finishes:()=>finishes};
+  const rec=context.createWebview('tab','test',history.entries[1].url,slept?history:null);
+  return {context,rec,emit,attrs,changes,loads,statuses,stages:()=>stages,finishes:()=>finishes};
 }
 test('reopened tab stages a marker before attach and finishes restored history once',async()=>{
   const f=fixture(); assert.equal(f.attrs.src,'about:blank#iris-history:fixture_token');
@@ -68,4 +69,21 @@ test('browser tab label keeps the whole page title',async()=>{
   const title='아주 긴 페이지 제목이 탭 이름에서 잘리지 않고 끝까지 보여야 한다 — 끝';
   await f.emit('page-title-updated',{title});
   assert.equal(tab.label,title);
+});
+test('slept tab wakes through the same history restore as a reopened tab',async()=>{
+  const f=fixture({reopened:false,slept:true}); assert.equal(f.attrs.src,'about:blank#iris-history:fixture_token');
+  assert.equal(f.stages(),1);
+  await f.emit('dom-ready');
+  assert.equal(f.finishes(),1);assert.deepEqual(f.loads,[]);
+});
+test('draft reports from frames keep the tab marked until every frame is clear or the page changes',async()=>{
+  const f=fixture({reopened:false});
+  const dirty=()=>f.statuses.filter(p=>'formDirty' in p).at(-1)?.formDirty;
+  await f.emit('ipc-message',{channel:'ac-form-dirty',frameId:[3,1],args:[true]});
+  await f.emit('ipc-message',{channel:'ac-form-dirty',frameId:[3,7],args:[true]});
+  assert.equal(dirty(),true);
+  await f.emit('ipc-message',{channel:'ac-form-dirty',frameId:[3,1],args:[false]});
+  assert.equal(dirty(),true,'another frame still has text');
+  await f.emit('did-navigate',{url:'https://example.test/next',isMainFrame:true});
+  assert.equal(dirty(),false,'new document clears reports');
 });

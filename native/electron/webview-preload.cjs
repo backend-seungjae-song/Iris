@@ -88,14 +88,57 @@ function reportUserActivity(kind) {
   try { ipcRenderer.sendToHost("ac-user-activity", { kind }); } catch (_) {}
 }
 window.addEventListener("pointerdown", (e) => {
+  // 진짜 누르기만 앱 셸에 알림(메뉴 닫기·가운데 칸 선택). AI 의 페이지 안 클릭이 사용자 메뉴·선택을 바꾸던 문제
+  if (!e || !e.isTrusted) return;
   try { ipcRenderer.sendToHost("ac-guest-pointerdown"); } catch (_) {}
-  if (e && e.isTrusted) reportUserActivity("pointer");
+  reportUserActivity("pointer");
 }, true);
 window.addEventListener("keydown", (e) => { if (e && e.isTrusted) reportUserActivity("key"); }, true);
 window.addEventListener("input", (e) => { if (e && e.isTrusted) reportUserActivity("input"); }, true);
 window.addEventListener("scroll", (e) => { if (!e || e.isTrusted) reportUserActivity("scroll"); }, true);
 window.addEventListener("wheel", (e) => { if (e && e.isTrusted) reportUserActivity("scroll"); }, true);
 window.addEventListener("touchstart", (e) => { if (e && e.isTrusted) reportUserActivity("touch"); }, true);
+
+// 사용자가 쓴 글이 입력칸에 남았는지 호스트에 알림. 남은 탭은 재우기 제외(다시 불러오면 글이 사라짐)
+// 검색칸은 제외. 검색어가 남은 YouTube·Jira 같은 탭이 계속 깨어 있지 않게
+// 보낸 뒤 페이지가 칸을 비우는 경우(채팅 전송)는 30초마다 재확인
+const NON_TEXT_INPUT = new Set(["checkbox", "radio", "submit", "button", "reset", "file", "hidden", "range", "color", "image", "search"]);
+const editedFields = new Set();
+let draftSent = false, draftTimer = null;
+function draftField(el) {
+  if (!el || el.nodeType !== 1) return null;
+  const role = (el.getAttribute("role") || "").toLowerCase();
+  if (role === "searchbox" || role === "combobox") return null;
+  if (el.tagName === "TEXTAREA") return el;
+  if (el.tagName === "INPUT") return NON_TEXT_INPUT.has((el.type || "text").toLowerCase()) ? null : el;
+  return el.isContentEditable ? (el.closest("[contenteditable]:not([contenteditable=false])") || el) : null;
+}
+function fieldHasText(el) {
+  if (!el.isConnected) return false;
+  const text = el.tagName === "INPUT" || el.tagName === "TEXTAREA" ? el.value : el.textContent;
+  return String(text || "").trim() !== "";
+}
+function syncDraft() {
+  for (const el of editedFields) if (!fieldHasText(el)) editedFields.delete(el);
+  const dirty = editedFields.size > 0;
+  if (dirty && !draftTimer) draftTimer = setInterval(syncDraft, 30000);
+  if (!dirty && draftTimer) { clearInterval(draftTimer); draftTimer = null; }
+  if (dirty === draftSent) return;
+  draftSent = dirty;
+  try { ipcRenderer.sendToHost("ac-form-dirty", dirty); } catch (_) {}
+}
+window.addEventListener("input", (e) => {
+  if (!e || !e.isTrusted) return;
+  const el = draftField(e.composedPath ? e.composedPath()[0] : e.target);
+  if (el) editedFields.add(el);
+  syncDraft();
+}, true);
+// 보낸 양식의 칸은 제외(보낸 뒤 페이지가 바뀌지 않는 양식)
+window.addEventListener("submit", (e) => {
+  const form = e && e.target;
+  for (const el of editedFields) if (form && form.contains && form.contains(el)) editedFields.delete(el);
+  syncDraft();
+}, true);
 
 // ③ 자체 자동완성(아이디/비번). Electron webview엔 Chrome식 네이티브 드롭다운이 없다.
 // 보안 설계:
@@ -113,7 +156,7 @@ window.addEventListener("touchstart", (e) => { if (e && e.isTrusted) reportUserA
   ipcRenderer.on("ac-autofill-response", function (_e, payload) {
     if (!payload || payload.origin !== origin || payload.frameId !== FRAME_ID) return;
     var list = Array.isArray(payload.accounts) ? payload.accounts : []; // [{i, username}], 비번 없음
-    if (list.length) { accounts = list; if (curField) showDropdown(curField); }
+    if (list.length) { accounts = list; if (curField && curField === document.activeElement) showDropdown(curField); }
     // 빈 응답: 임포트가 아직 안 끝났을 수 있다(탭 열림 시 auto-import 비동기). accounts=null로 두어
     // 다음 focus 때 재요청을 허용한다. (조작 중 차단으로 빈 경우도 동일하며, 재시도 비용이 낮다.)
     else { accounts = null; requested = false; }
@@ -297,8 +340,8 @@ window.addEventListener("touchstart", (e) => { if (e && e.isTrusted) reportUserA
     var el = e.target;
     if (isPassword(el) || isUserField(el)) {
       curField = el;
-      if (accounts == null) requestAccounts();
-      else if (accounts.length) showDropdown(el);
+      // 포커스마다 다시 물음. 받아 둔 목록을 그대로 띄우면 처음 물은 뒤 AI 가 탭을 조작하기 시작해도 창이 뜸
+      requested = false; requestAccounts();
     }
   }, true);
   document.addEventListener("focusout", function () {

@@ -22,6 +22,37 @@ function Confirm-Step([string]$message) {
   if ([Console]::IsInputRedirected) { return $false }
   return (Read-Host "$message [y/N]") -match '^[yY]$'
 }
+function Acquire-DeploymentLock([string]$stateDir) {
+  $directory = Join-Path $stateDir 'deployment.lock'
+  $ownerFile = Join-Path $directory 'owner.json'
+  New-Item -ItemType Directory -Path (Split-Path $directory) -Force | Out-Null
+  try { New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null }
+  catch {
+    $owner = $null
+    try { $owner = Get-Content -LiteralPath $ownerFile -Raw | ConvertFrom-Json }
+    catch {}
+    $alive = $false
+    if ($owner -and $owner.pid) {
+      try { $alive = $null -ne (Get-Process -Id ([int]$owner.pid) -ErrorAction Stop) }
+      catch {}
+    }
+    $age = ([DateTime]::UtcNow - (Get-Item -LiteralPath $directory).LastWriteTimeUtc).TotalSeconds
+    if ($alive -or $age -lt 30) { throw "다른 배포가 진행 중입니다: $($owner.owner) pid=$($owner.pid)" }
+    Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null
+  }
+  $token = [Guid]::NewGuid().ToString('N')
+  $owner = @{ schemaVersion=1; token=$token; pid=$PID; owner='full-app-install'; acquiredAt=[DateTime]::UtcNow.ToString('o') }
+  [IO.File]::WriteAllText($ownerFile, ($owner | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+  return [pscustomobject]@{ Directory=$directory; OwnerFile=$ownerFile; Token=$token }
+}
+function Release-DeploymentLock($lock) {
+  if (!$lock) { return }
+  $owner = Get-Content -LiteralPath $lock.OwnerFile -Raw | ConvertFrom-Json
+  if ($owner.token -ne $lock.Token) { throw '배포 잠금 소유권이 바뀌어 해제하지 않았습니다.' }
+  Remove-Item -LiteralPath $lock.OwnerFile -Force
+  Remove-Item -LiteralPath $lock.Directory -Force
+}
 function Refresh-Path {
   $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + $env:PATH
 }
@@ -325,7 +356,9 @@ foreach ($name in @('IRIS_PORT','IRIS_STATE_DIR','PORT','REMOTE','HOST','ELECTRO
 $state = Invoke-Tool node @('-e', "process.stdout.write(require('./server/state-home.cjs').stateHome())") -capture
 if ($state.ExitCode -ne 0 -or !$state.Output.Trim()) { throw '설치 앱 상태 폴더를 확인하지 못했습니다.' }
 $stateLock = Join-Path $state.Output.Trim() 'server.lock'
-Install-WindowsApp $exe $setup.FullName $stateLock
+$deploymentLock = Acquire-DeploymentLock $state.Output.Trim()
+try { Install-WindowsApp $exe $setup.FullName $stateLock }
+finally { Release-DeploymentLock $deploymentLock }
 if (!$appOnly) { foreach ($runtime in @('claude','codex')) { if (!(Agent-Mcp $runtime)) { $ok = $false } } }
 $contextArgs = @((Join-Path $root 'scripts\install-agent-context.mjs'),'--app',$exe)
 if (!$appOnly -and (Confirm-Step 'Claude Code와 Codex에 세션 기록·지목 등록 훅을 추가할까요?')) { $contextArgs += '--hooks' }

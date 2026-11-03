@@ -75,6 +75,19 @@ export default async function run() {
     return true;
   });
 
+  // Xcode 27 에서 idb 입력 명령은 기기 안 dtuhidd 를 깨워 사람 터치를 막는다(bin/mcp/ios-hid.mjs). iOS 입력은 도우미로만
+  check("iOS 입력에 idb 입력 명령을 쓰지 않는다", () => {
+    const files = ["bin", "server"].flatMap((dir) => filesUnder(dir, (rel) => /\.(?:mjs|cjs|js)$/.test(rel) && !/node_modules|\.test\./.test(rel)));
+    if (files.length < 20) cannotMeasure(`bin·server 파일을 ${files.length} 개만 셌다 — 세는 방식이 깨졌다`);
+    // 실제 호출만: idb([...]) · run("idb", [...]) 의 첫 낱말이 "ui" 이고 다음이 입력 명령인 것, 명령 줄 문자열, idb Python HID
+    const call = /\b(?:idb|run|exec)\(\s*(?:[^,()]*idb[^,()]*,\s*)?\[\s*["']ui["']\s*,\s*(?:["'](?:tap|swipe|text|key|button)["']|words\[0\])/;
+    const code = (rel) => read(rel).split("\n").filter((line) => !/^\s*\/\//.test(line)).join("\n");
+    const pattern = { test: (src) => call.test(src) || /["'`]\s*(?:\S*\/)?idb\s+ui\s+(?:tap|swipe|text|key|button)\b/.test(src) || /\bHIDPress\b/.test(src) };
+    const hits = files.filter((rel) => pattern.test(code(rel)));
+    if (hits.length) throw new Error(`idb 입력 명령이 남아 있다: ${hits.join(", ")}`);
+    return true;
+  });
+
   // 스페이스 브라우저의 탭 분리와 같이, 분리한 에뮬레이터는 가운데 탭 띠에 남지 않고 창이 닫히면 되돌아온다.
   const bootBody = (name) => {
     const src = read("web/js/emulator/boot.js");

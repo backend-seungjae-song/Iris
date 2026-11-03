@@ -138,7 +138,8 @@ function setup(options = {}) {
   const host = createSwitcherHost({
     core, catalog, iconRunner, mediaRunner, fs, path, stateHome: () => HOME, globalShortcut: shortcuts,
     defaultRelay: DEFAULT_RELAY, killProbe: options.killProbe || (() => true),
-    raiseOwnWindow: options.raiseOwnWindow, ownPid: options.ownPid, irisKey: options.irisKey,
+    raiseOwnWindow: options.raiseOwnWindow, ownFocusedWindow: options.ownFocusedWindow, ownPid: options.ownPid, irisKey: options.irisKey,
+    activateSelf: options.activateSelf || (() => {}),
     isTrustedSender: (event, expected) => event?.trusted === true && expected === "http://iris.test",
     isTrustedMediaSender: options.isTrustedMediaSender || ((event) => event?.trusted === true),
     expectedAppUrl: "http://iris.test", broadcast: (payload) => broadcasts.push(payload),
@@ -253,7 +254,8 @@ test("T5 체크가 0개면 전역 단축키를 등록하지 않는다", () => {
 
 test("전역 우선 사용을 켜면 체크가 0개여도 다음 창 키만 등록하고 누르면 irisKey 를 부른다", async () => {
   let irisKeys = 0;
-  const { host, fs, shortcuts } = setup({ irisKey: () => { irisKeys += 1; } });
+  const calls = [];
+  const { host, fs, shortcuts } = setup({ ownPid: 4321, irisKey: () => { irisKeys += 1; calls.push("irisKey"); }, activateSelf: (pid) => calls.push(["activate", pid]) });
   host.start();
   const out = await host.handle(trusted, { op: "global-priority", on: true });
   assert.equal(out.status.globalPriority, true);
@@ -263,6 +265,8 @@ test("전역 우선 사용을 켜면 체크가 0개여도 다음 창 키만 등�
   assert.deepEqual(JSON.parse(fs.files.get(path.join(HOME, "window-switcher-options.json"))), { globalPriority: true });
   shortcuts.callbacks.get("Alt+Tab")();
   assert.equal(irisKeys, 1);
+  // 다른 앱(Slack)이 앞이면 창 focus 만으로 안 올라오는 경우가 있어 창을 올린 뒤 이 프로세스를 맨 앞 앱으로 지정
+  assert.deepEqual(calls, ["irisKey", ["activate", 4321]]);
 
   await host.handle(trusted, { op: "global-priority", on: false });
   assert.equal(shortcuts.isRegistered("Alt+Tab"), false);
@@ -423,6 +427,50 @@ test("move는 id와 key로 고른 순서를 저장하고 목록 revision을 올�
   assert.equal(restored.status.listRevision, before + 2);
 });
 
+test("group·leave·ungroup 은 묶음을 저장하고 step 에 group 을 넘기며, 같이 올린 결과를 기록한다", async () => {
+  const wins = [101, 202, 303].map((id, index) => window({ id, cgId: id, matchTitle: `창${id}`,
+    displayTitle: `창${id}`, bounds: [index * 300, 0, 300, 300] }));
+  const fs = memoryFs({ [STATE]: JSON.stringify(core.serialize({ version: 1, picked: wins, cursor: null })) });
+  let targets = null;
+  const catalog = {
+    async enumerate() { return { ok: true, windows: wins }; },
+    async step(input) {
+      targets = input.targets;
+      return { ok: true, raised: 101, also: [202], left: [{ id: 303, reason: "other-desktop" }],
+        resolved: [101, 202, 303], missing: [], front: null };
+    },
+    cancel() {},
+  };
+  const { host } = setup({ fs, catalog });
+  host.start();
+  await refresh(host);
+  const before = host.getStatus().listRevision;
+  const keyOf = (result, cgId) => result.picked.find((item) => item.cgId === cgId).pickKey;
+  const listed = await host.handle(trusted, { op: "list" });
+
+  const grouped = await host.handle(trusted, { op: "group", keys: [keyOf(listed, 101), keyOf(listed, 202)] });
+  assert.deepEqual(grouped.picked.map((item) => item.group || ""), ["g1", "g1", ""]);
+  assert.deepEqual(core.deserialize(fs.files.get(STATE)).picked.map((item) => item.group || ""), ["g1", "g1", ""]);
+  assert.equal(grouped.status.listRevision, before + 1);
+
+  const stepped = await host.handle(trusted, { op: "step", dir: 1 });
+  assert.deepEqual(targets.map((item) => item.group || ""), ["g1", "g1", ""]);
+  assert.equal(stepped.status.lastStep.also, 1);
+  assert.deepEqual(stepped.status.lastStep.left, ["other-desktop"]);
+
+  const moved = await host.handle(trusted, { op: "move", id: 303, dir: -1, unit: "stop" });
+  assert.deepEqual(moved.picked.map((item) => item.cgId), [303, 101, 202]);
+  const left = await host.handle(trusted, { op: "leave", keys: [keyOf(moved, 101)] });
+  assert.deepEqual(left.picked.map((item) => item.group || ""), ["", "", ""]);
+  const regrouped = await host.handle(trusted, { op: "group", keys: [keyOf(left, 202), keyOf(left, 303)] });
+  const ungrouped = await host.handle(trusted, { op: "ungroup", id: 303 });
+  assert.notDeepEqual(regrouped.picked.map((item) => item.group || ""), ["", "", ""]);
+  assert.deepEqual(ungrouped.picked.map((item) => item.group || ""), ["", "", ""]);
+  assert.deepEqual(await host.handle(trusted, { op: "group", keys: "abc" }), { error: "bad-keys" });
+  assert.deepEqual(await host.handle(trusted, { op: "move", id: 101, dir: 1, unit: "all" }), { error: "bad-unit" });
+  assert.deepEqual(await host.handle({ trusted: false }, { op: "group", keys: [] }), { error: "untrusted" });
+});
+
 test("정상 저장 뒤 직전 정상본을 .bak으로 남긴다", async () => {
   const previous = stored({ id: 201, cgId: 201, matchTitle: "이전" });
   const fs = memoryFs({ [STATE]: JSON.stringify(previous) });
@@ -495,6 +543,31 @@ test("R6 재시작 재결합 전에는 죽은 pid로 저장본을 지우지 않�
   assert.equal(rejoined.picked.length, 1);
   assert.equal(rejoined.picked[0].cgId, 202);
   assert.equal(host.getStatus().droppedOnRestart, 0);
+});
+
+test("재시작 때 창 목록을 못 읽어 남긴 선택은 이전 실행 pid 로 지우지 않고, 설정을 열지 않아도 다시 읽어 지금 창에 붙인다", async () => {
+  const fs = memoryFs({ [STATE]: JSON.stringify(stored()) });
+  const timers = fakeTimers();
+  let readable = false;
+  const returned = window({ id: 202, cgId: 202, pid: 88, pidStart: "Sun Aug 30 10:01:00 2026" });
+  const catalog = {
+    async enumerate() { return readable ? { ok: true, windows: [returned] } : { ok: false, reason: "timeout" }; },
+    async step() { throw new Error("부르지 않음"); }, cancel() {},
+  };
+  const { host } = setup({ fs, timers, catalog, killProbe: (pid) => pid === 88 });
+  host.start();
+  await timers.timeouts.find((item) => item.ms === 3000).fn();
+  await timers.timeouts.find((item) => item.ms === 8000).fn();
+  timers.intervals[0].fn();
+  assert.equal(core.deserialize(fs.files.get(STATE)).picked.length, 1, "이전 실행 pid 가 죽었다고 지우지 않음");
+
+  readable = true;
+  await timers.timeouts.find((item) => item.ms === 10000).fn();
+  const rebound = core.deserialize(fs.files.get(STATE));
+  assert.equal(rebound.picked.length, 1);
+  assert.equal(rebound.picked[0].cgId, 202);
+  timers.intervals[0].fn();
+  assert.equal(core.deserialize(fs.files.get(STATE)).picked.length, 1);
 });
 
 test("열거에서 같은 pid의 시작 시각이 달라지면 다른 프로세스로 보고 저장과 등록에서 뺀다", async () => {
@@ -1300,4 +1373,80 @@ test("⌥Tab 은 토글을 받는 창이 앞일 때만 토글하고, 아니면 �
   assert.deepEqual(irisKeyAction({ focused: emu, lastSwitch: null, main }, takes), { action: "raise", win: main });
   assert.deepEqual(irisKeyAction({ focused: null, lastSwitch: win("browser", true), main }, takes), { action: "raise", win: main });
   assert.deepEqual(irisKeyAction({ focused: null, lastSwitch: null, main: null }, takes), { action: "none", win: null });
+});
+
+test("고른 창이 모두 이 앱 창이면 osascript 없이 묶음을 올리고 맨 앞 창에 마지막으로 포커스를 준다", async () => {
+  const own = [1, 2, 3].map((id) => window({ id, cgId: id, pid: 77, matchApp: "Iris", matchTitle: `Iris — ${id}`,
+    displayTitle: `Iris — ${id}`, bounds: [id * 100, 0, 100, 100] }));
+  const picked = core.serialize({ version: 1, picked: own, cursor: null }).picked;
+  picked[1].group = "g1";
+  picked[2].group = "g1";
+  const fs = memoryFs({ [STATE]: JSON.stringify({ version: 1, picked, cursor: null }) });
+  let osascriptCalls = 0;
+  const catalog = {
+    async enumerate() { return { ok: true, windows: own }; },
+    async step() { osascriptCalls += 1; return { ok: true, raised: null, resolved: [], missing: [], front: null }; },
+    cancel() {},
+  };
+  const raised = [];
+  let focusedTitle = "Iris — 1";
+  const { host } = setup({ fs, catalog, ownPid: 77,
+    ownFocusedWindow: () => (focusedTitle ? { title: focusedTitle } : null),
+    raiseOwnWindow: (target) => { raised.push(target.matchTitle); return true; } });
+  host.start();
+  await refresh(host);
+
+  const first = await host.handle(trusted, { op: "step", dir: 1 });
+  assert.equal(osascriptCalls, 0);
+  assert.deepEqual(raised, ["Iris — 3", "Iris — 2"]);
+  assert.equal(first.status.lastStep.how, "own-window-direct");
+  assert.equal(first.status.lastStep.also, 1);
+
+  focusedTitle = "Iris — 3";
+  raised.length = 0;
+  await host.handle(trusted, { op: "step", dir: 1 });
+  assert.deepEqual(raised, ["Iris — 1"]);
+
+  focusedTitle = null;
+  raised.length = 0;
+  await host.handle(trusted, { op: "step", dir: 1 });
+  assert.deepEqual(raised, ["Iris — 1"], "다른 앱이 앞이면 첫 차례부터");
+  assert.equal(osascriptCalls, 0);
+});
+
+test("이 앱 창을 못 찾거나 다른 앱 창이 섞이면 osascript 경로로 간다", async () => {
+  const own = window({ id: 1, cgId: 1, pid: 77, matchApp: "Iris", matchTitle: "Iris — 1", displayTitle: "Iris — 1" });
+  const other = window({ id: 2, cgId: 2, pid: 88, matchTitle: "다른 앱", displayTitle: "다른 앱", bounds: [500, 0, 100, 100] });
+  for (const [windows, raise] of [[[own], () => false], [[own, other], () => true]]) {
+    const fs = memoryFs({ [STATE]: JSON.stringify(core.serialize({ version: 1, picked: windows, cursor: null })) });
+    let osascriptCalls = 0;
+    const catalog = {
+      async enumerate() { return { ok: true, windows }; },
+      async step({ ordered }) { osascriptCalls += 1; return { ok: true, raised: ordered[0], resolved: ordered, missing: [], front: null }; },
+      cancel() {},
+    };
+    const { host } = setup({ fs, catalog, ownPid: 77, ownFocusedWindow: () => null, raiseOwnWindow: raise });
+    host.start();
+    await refresh(host);
+    await host.handle(trusted, { op: "step", dir: 1 });
+    assert.equal(osascriptCalls, 1);
+  }
+});
+
+test("같은 제목의 이 앱 창이 둘이어도 포커스 창을 창 번호로 알아보고 고른 창을 넘긴다", async () => {
+  const own = [
+    window({ id: 3498, cgId: 3498, pid: 77, matchApp: "Iris", matchTitle: "Iris — 에뮬레이터", displayTitle: "Iris — 에뮬레이터", bounds: [1441, 32, 477, 993] }),
+    window({ id: 3490, cgId: 3490, pid: 77, matchApp: "Iris", matchTitle: "Iris — 콘솔", displayTitle: "Iris — 콘솔", bounds: [2, 32, 1916, 993] }),
+    window({ id: 3497, cgId: 3497, pid: 77, matchApp: "Iris", matchTitle: "Iris — 에뮬레이터", displayTitle: "Iris — 에뮬레이터", bounds: [10, 32, 400, 900] }),
+  ];
+  const fs = memoryFs({ [STATE]: JSON.stringify(core.serialize({ version: 1, picked: own, cursor: null })) });
+  const catalog = { async enumerate() { return { ok: true, windows: own }; }, async step() { throw new Error("osascript 를 부르면 안 된다"); }, cancel() {} };
+  const raised = [];
+  const { host } = setup({ fs, catalog, ownPid: 77,
+    ownFocusedWindow: () => ({ id: 3497, title: "Iris — 에뮬레이터" }),
+    raiseOwnWindow: (target) => { raised.push(target.cgId); return true; } });
+  host.start();
+  await refresh(host);
+  await host.handle(trusted, { op: "step", dir: 1 });
+  assert.deepEqual(raised, [3498], "포커스가 셋째 창이면 다음은 첫 창");
 });

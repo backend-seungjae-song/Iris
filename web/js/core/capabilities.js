@@ -59,6 +59,8 @@
 //   현재 목록 확인: node bin/importers.mjs web/js/core/capabilities.js
 
 export const CAPABILITIES = [
+  { id: "centersplit", label: "가운데 뷰어 분할", files: ["centersplit/boot.js"],
+    css: ["43-center-split.css"], load: () => import("../centersplit/boot.js") },
   {
     id: "diffreview", label: "Diff 의견", presets: ["dev"],
     files: ["diff-review/boot.js", "diff-review/model.js"],
@@ -100,6 +102,14 @@ export const CAPABILITIES = [
     css: ["06-accounts.css"],
     rail: "accounts",
     load: () => import("../browser/accounts-screen.js"),
+  },
+  {
+    // 북마크마다 열 계정을 정하는 관리 화면. 브라우저의 북마크 막대·메뉴는 앱 셸(browser/bookmarks.js) 그대로
+    id: "bookmarkmgr",
+    files: ["bookmarks/manager.js", "bookmarks/manager-view.js"],
+    css: ["44-bookmark-manager.css"],
+    rail: "bookmarkmgr",
+    load: () => import("../bookmarks/manager.js"),
   },
   {
     id: "archive",
@@ -378,7 +388,7 @@ export const CAPABILITIES = [
     // xterm 의 기본 선택만 남는다(⌘C 는 그대로 동작하고, 파일을 놓아도 창이 이동하지 않는다).
     id: "chatcopy",
     files: [
-      "chatcopy/boot.js", "chatcopy/copy-text.js", "chatcopy/edge-drag.js", "chatcopy/drop-path.js",
+      "chatcopy/boot.js", "chatcopy/copy-text.js", "chatcopy/edge-drag.js", "chatcopy/drop-path.js", "chatcopy/forward-copy.js",
     ],
     css: ["21-chat-copy.css"],
     label: "채팅 복붙",

@@ -259,18 +259,24 @@ function wireAccounts() {
     if (add) { const inp = $("#acct-new-name"); const v = (inp.value || "").trim(); if (v) { if (!addProfile(v)) showToast("이미 있는 프로필 이름입니다", { level: "info" }); else inp.value = ""; acctRefresh(); } return; }
     const imp = e.target.closest("[data-imp-cid]");
     if (imp) {
+      if (imp.disabled) return;
       const cid = imp.dataset.impCid, label = imp.dataset.impLabel; imp.innerHTML = '<span class="acct-spin"></span>가져오는 중…'; imp.disabled = true;
+      imp.classList.remove("acct-btn-danger");
       const withPw = !!(document.getElementById("acct-with-pw") || {}).checked;
-      const res = await importChromeToProfile(cid, label, withPw);
-      if (res && res.error) { imp.textContent = "실패"; imp.classList.add("acct-btn-danger"); showToast("가져오기 실패", { level: "err", detail: String(res.error) }); }
-      // 바로 넣지 못한 쿠키는 다음 실행 때 한 번 적용을 시도할 뿐이고, 그사이 로그인 상태가 바뀌면 버려진다.
-      else if (res && !res.live && res.staged) {
-        imp.textContent = "미완료";
-        showToast(`가져오기 미완료: ${label} 쿠키 ${res.staged}개를 바로 넣지 못했습니다. 앱을 다시 시작하면 한 번 더 적용을 시도합니다.`, { level: "err" });
-      } else {
-        // 비밀번호를 가져오지 않은 것은 실패가 아니라 선택이므로, 화면에 그대로 구분해 표시한다.
-        const pw = res && res.loginsSkipped ? "로그인 미포함" : `로그인 ${(res && res.logins) || 0}`;
-        showToast(`가져오기 완료: ${label} (쿠키 ${(res && res.imported) || 0}, ${pw})`, { level: "ok" }); acctRefresh();
+      try {
+        const res = await importChromeToProfile(cid, label, withPw);
+        if (res && res.error) { imp.textContent = "실패"; imp.classList.add("acct-btn-danger"); showToast("가져오기 실패", { level: "err", detail: String(res.error) }); }
+        else {
+          // 비밀번호를 가져오지 않은 것은 실패가 아니라 선택이므로, 화면에 그대로 구분해 표시한다.
+          const pw = res && res.loginsSkipped ? "로그인 미포함" : `로그인 ${(res && res.logins) || 0}`;
+          showToast(`가져오기 완료: ${label} (쿠키 ${(res && res.imported) || 0}개 추가, 이미 있던 ${(res && res.kept) || 0}개는 그대로, ${pw})`, { level: "ok" }); acctRefresh();
+        }
+      } catch (error) {
+        imp.classList.add("acct-btn-danger");
+        showToast("가져오기 실패", { level: "err", detail: String(error?.message || error) });
+      } finally {
+        imp.textContent = "가져오기";
+        imp.disabled = false;
       }
       return;
     }

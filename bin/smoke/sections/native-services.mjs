@@ -90,6 +90,175 @@ export default async function run() {
       return true;
     });
 
+    check("프로세스 메모리 기록은 렌더러 pid 와 webContents 를 함께 남기고 query 를 뺀다", () => {
+      const { createProcessMemoryLog } = require_("../native/electron/process-memory-log.cjs");
+      const files = {};
+      const fakeFs = {
+        mkdirSync() {},
+        statSync: (f) => { if (!(f in files)) throw new Error("ENOENT"); return { size: files[f].length }; },
+        renameSync: (a, b) => { files[b] = files[a]; delete files[a]; },
+        appendFileSync: (f, s) => { files[f] = (files[f] || "") + s; },
+      };
+      const wc = (id, pid, url, host = null) => ({ id, isDestroyed: () => false, getType: () => (host ? "webview" : "window"),
+        getOSProcessId: () => pid, getURL: () => url, hostWebContents: host });
+      const shell = wc(1, 101, "http://127.0.0.1:4271/?space=a");
+      const log = createProcessMemoryLog({
+        app: { getAppMetrics: () => [{ pid: 101, type: "Tab", memory: { workingSetSize: 2048 } }], once() {} },
+        allWebContents: () => [shell, wc(2, 202, "https://example.com/path?token=secret#x", shell)],
+        dir: "/d", fs: fakeFs, setIntervalFn: () => ({ unref() {} }), readFootprint: (_pids, done) => done(null),
+      });
+      log.start();
+      const row = JSON.parse(files["/d/process-memory.jsonl"].trim());
+      const page = row.contents.find((c) => c.wc === 2);
+      if (!page || page.pid !== 202 || page.host !== 1 || page.type !== "webview") throw new Error("webview 의 pid·host 를 안 남긴다");
+      if (page.url !== "https://example.com/path") throw new Error(`query·hash 가 남는다: ${page.url}`);
+      if (row.processes[0].workingSetKB !== 2048) throw new Error("프로세스 메모리를 안 남긴다");
+      files["/d/process-memory.jsonl"] = "x".repeat(5 * 1024 * 1024);
+      log.sample();
+      if (!files["/d/process-memory.jsonl.1"] || files["/d/process-memory.jsonl"].length > 100000) throw new Error("상한을 넘은 파일을 교체하지 않는다");
+      const broken = createProcessMemoryLog({ app: { getAppMetrics: () => { throw new Error("x"); }, once() {} },
+        allWebContents: () => [], dir: "/d", fs: fakeFs, setIntervalFn: () => ({ unref() {} }) });
+      broken.sample();
+
+      const shots = [];
+      const shotWc = (id, pid) => ({ id, isDestroyed: () => false, getOSProcessId: () => pid,
+        takeHeapSnapshot: (f) => { shots.push(f); return Promise.resolve(); } });
+      files["/d/heap-request.json"] = JSON.stringify({ pids: [303] });
+      Object.assign(fakeFs, { readFileSync: (f) => { if (!(f in files)) throw new Error("ENOENT"); return files[f]; },
+        unlinkSync: (f) => { delete files[f]; } });
+      const snap = createProcessMemoryLog({ app: { getAppMetrics: () => [], once() {} },
+        allWebContents: () => [shotWc(1, 101), shotWc(3, 303), shotWc(4, 303)], dir: "/d", fs: fakeFs });
+      snap.snapshotRequested();
+      if (shots.length !== 1 || !shots[0].includes("renderer-303-wc3-")) throw new Error(`요청한 pid 렌더러 하나만 저장해야 한다: ${shots}`);
+      if ("/d/heap-request.json" in files) throw new Error("요청 파일을 지우지 않아 다음 신호에 다시 저장한다");
+      if (snap.snapshotRequested().length) throw new Error("요청 없이 저장한다");
+      return true;
+    });
+
+    await checkAsync("프로세스 메모리 기록은 탭 밖 렌더러·창·footprint 를 남기고 큰 앱 창만 6시간에 한 번 할당·CPU 프로파일한다", async () => {
+      const { createProcessMemoryLog, WINDOW_PROFILE_KB } = require_("../native/electron/process-memory-log.cjs");
+      const dir = mkdtempSync(path.join(tmpdir(), "iris-process-memory-"));
+      try {
+        for (let i = 0; i < 9; i++) writeFileSync(path.join(dir, `renderer-1-wc1-${i}-auto.heapprofile`), "{}");
+        const commands = [];
+        let attached = false;
+        const debuggerOf = (busy = false) => ({
+          isAttached: () => busy || attached,
+          attach: () => { attached = true; },
+          detach: () => { attached = false; },
+          sendCommand: async (method) => { commands.push(method);
+            return method === "HeapProfiler.stopSampling" ? { profile: { head: {} } } : method === "Profiler.stop" ? { profile: { nodes: [] } } : {}; },
+        });
+        const main = { osProcessId: 101 };
+        main.framesInSubtree = [main, { osProcessId: 101, processId: 3, url: "https://same.example/" },
+          { osProcessId: 505, processId: 7, url: "https://ads.example/a?id=secret" }, { osProcessId: 505, processId: 7, url: "https://ads.example/b" }];
+        const ses = { storagePath: "/x/Partitions/persist:acprof:Play",
+          serviceWorkers: { getAllRunning: () => ({ 1: { scope: "chrome-extension://abc/path", renderProcessId: 9 } }) } };
+        const wc = (id, pid, type, extra = {}) => ({ id, isDestroyed: () => false, getType: () => type, getOSProcessId: () => pid,
+          getProcessId: () => pid + 1000, getURL: () => "http://127.0.0.1:4271/", hostWebContents: null, session: ses,
+          debugger: debuggerOf(), ...extra });
+        const shell = wc(1, 101, "window", { mainFrame: main });
+        const page = wc(2, 202, "webview");
+        let clock = 0;
+        const ws = { 101: WINDOW_PROFILE_KB + 1, 202: WINDOW_PROFILE_KB * 2 };
+        const log = createProcessMemoryLog({
+          app: { getAppMetrics: () => Object.entries(ws).map(([pid, kb]) => ({ pid: Number(pid), type: "Tab", creationTime: 5.4, memory: { workingSetSize: kb } })) },
+          allWebContents: () => [page, shell],
+          allWindows: () => [{ id: 9, webContents: shell, isDestroyed: () => false, getBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+            isVisible: () => true, isMinimized: () => false, isFocused: () => false }],
+          screen: { getDisplayMatching: () => ({ scaleFactor: 2 }) },
+          dir, now: () => new Date(clock), setTimeoutFn: (fn) => setImmediate(fn),
+          readFootprint: (pids, done) => done({ processes: [{ pid: 101, footprint: 300 * 1048576,
+            categories: { IOSurface: { dirty: 100 * 1048576, swapped: 0 }, Stack: { dirty: 1048576 } } }] }),
+        });
+        log.sample();
+        const row = JSON.parse(readFileSync(path.join(dir, "process-memory.jsonl"), "utf8").trim());
+        const frames = row.contents.find((c) => c.wc === 1).frames;
+        if (JSON.stringify(frames) !== JSON.stringify([{ pid: 505, processId: 7, origin: "https://ads.example", count: 2 }])) throw new Error(`다른 프로세스 frame 을 origin 만으로 안 남긴다: ${JSON.stringify(frames)}`);
+        if (JSON.stringify(row.serviceWorkers) !== JSON.stringify([{ partition: "persist:acprof:Play", scope: "chrome-extension://abc", processId: 9 }])) throw new Error(`service worker 를 안 남긴다: ${JSON.stringify(row.serviceWorkers)}`);
+        if (row.windows[0]?.scale !== 2 || row.windows[0].wc !== 1 || row.windows[0].width !== 800) throw new Error("창 배치·배율을 안 남긴다");
+        const fp = row.footprint?.[101];
+        if (fp?.footprint !== 300 || fp.ioSurface?.dirty !== 100 || "Stack" in fp) throw new Error(`footprint 를 안 남긴다: ${JSON.stringify(fp)}`);
+        if (row.processes[0].created !== 5) throw new Error("프로세스 생성 시각을 안 남긴다");
+
+        const out = log.watchWindows();
+        if (!out || !out.includes("renderer-101-wc1-")) throw new Error(`상한을 넘은 앱 창을 프로파일하지 않는다: ${out}`);
+        for (let i = 0; i < 100 && !existsSync(out); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        if (!existsSync(out) || attached) throw new Error("프로파일 파일을 안 쓰거나 debugger 를 안 뗀다");
+        if (!commands.includes("HeapProfiler.startSampling")) throw new Error("할당 프로파일을 시작하지 않는다");
+        const cpuOut = out.replace(/\.heapprofile$/, ".cpuprofile");
+        for (let i = 0; i < 100 && !existsSync(cpuOut); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        if (!commands.includes("Profiler.start") || !existsSync(cpuOut)) throw new Error("같은 구간의 CPU 프로파일을 안 남긴다");
+        const kept = readdirSync(dir).filter((f) => f.endsWith(".heapprofile"));
+        if (kept.length !== 8 || kept.includes("renderer-1-wc1-0-auto.heapprofile")) throw new Error(`최근 8개만 남겨야 한다: ${kept.length}`);
+        clock += 3600000;
+        if (log.watchWindows()) throw new Error("6시간 안에 다시 프로파일한다");
+        clock += 6 * 3600000;
+        ws[101] = 1;
+        if (log.watchWindows()) throw new Error("웹 페이지(webview)를 프로파일한다");
+        writeFileSync(path.join(dir, "heap-request.json"), JSON.stringify({ pids: [202], profile: true }));
+        if (log.snapshotRequested().length) throw new Error("요청으로 웹 페이지를 프로파일한다");
+        return true;
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    await checkAsync("footprint 가 1.5GB 넘은 webview 만 5분 기록에서 프로파일하고, 끊기면 10분 뒤 다시 한다", async () => {
+      const { createProcessMemoryLog, WEBVIEW_PROFILE_MB } = require_("../native/electron/process-memory-log.cjs");
+      const dir = mkdtempSync(path.join(tmpdir(), "iris-webview-profile-"));
+      try {
+        let attached = false, failStop = true, starts = 0;
+        const dbg = { isAttached: () => attached, attach: () => { attached = true; }, detach: () => { attached = false; },
+          sendCommand: async (method) => {
+            if (method === "HeapProfiler.startSampling") starts++;
+            if (method === "HeapProfiler.stopSampling") {
+              if (failStop) throw new Error("Debugger is not attached");
+              return { profile: { head: {} } };
+            }
+            return method === "Profiler.stop" ? { profile: { nodes: [] } } : {};
+          } };
+        const wc = (id, pid, type) => ({ id, isDestroyed: () => false, getType: () => type, getOSProcessId: () => pid,
+          getURL: () => "https://www.youtube.com/feed/playlists", hostWebContents: null, debugger: dbg });
+        const small = wc(3, 303, "webview");
+        const big = wc(2, 202, "webview");
+        const fp = { 202: WEBVIEW_PROFILE_MB + 100, 303: WEBVIEW_PROFILE_MB - 100 };
+        let clock = 0;
+        const log = createProcessMemoryLog({
+          app: { getAppMetrics: () => [{ pid: 202, type: "Tab", memory: { workingSetSize: 170 * 1024 } }] },
+          allWebContents: () => [small, big], dir, now: () => new Date(clock), setTimeoutFn: (fn) => setImmediate(fn),
+          readFootprint: (_pids, done) => done({ processes: Object.entries(fp).map(([pid, m]) => ({ pid: Number(pid), footprint: m * 1048576 })) }),
+        });
+        const events = () => readFileSync(path.join(dir, "process-memory.jsonl"), "utf8").trim().split("\n")
+          .map((l) => JSON.parse(l)).filter((r) => r.event === "profile");
+        const settle = async (n) => { for (let i = 0; i < 100 && events().length < n; i++) await new Promise((r) => setTimeout(r, 10)); };
+        log.sample();
+        await settle(1);
+        if (starts !== 1) throw new Error(`큰 webview 를 프로파일하지 않는다: ${starts}`);
+        const first = events()[0];
+        if (first?.wc !== 2 || !String(first.result).startsWith("failed")) throw new Error(`끊긴 회차를 failed 로 안 남긴다: ${JSON.stringify(first)}`);
+        if (attached) throw new Error("실패 후 debugger 를 안 뗀다");
+        clock += 5 * 60000;
+        log.sample();
+        await new Promise((r) => setTimeout(r, 30));
+        if (starts !== 1) throw new Error("10분 전에 다시 프로파일한다");
+        clock += 6 * 60000;
+        failStop = false;
+        log.sample();
+        await settle(2);
+        if (events()[1]?.result !== "saved" || !readdirSync(dir).some((f) => f.includes("renderer-202-wc2-") && f.endsWith("-auto-webview.heapprofile")))
+          throw new Error(`재시도에서 프로파일 파일을 안 남긴다: ${JSON.stringify(events())}`);
+        clock += 3600000;
+        log.sample();
+        await new Promise((r) => setTimeout(r, 30));
+        if (starts !== 2) throw new Error("성공 후 6시간 안에 다시 프로파일한다");
+        fp[202] = WEBVIEW_PROFILE_MB - 1;
+        clock += 6 * 3600000;
+        log.sample();
+        await new Promise((r) => setTimeout(r, 30));
+        if (starts !== 2) throw new Error("1.5GB 이하 webview 를 프로파일한다");
+        return true;
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
     check("인증서 신뢰는 로컬 자체서명 범위와 한 번의 사람 질문에 묶인다", () => {
       const { createCertificateTrust } = require_("../native/electron/certificate-trust.cjs");
       const handlers = {}, prompts = [];

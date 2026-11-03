@@ -35,8 +35,14 @@ console.log("\n[10i] QA 도구 다섯");
   check("보호된 배경 탭만 계속 돈다", () => /function setReason/.test(webviewThrottleSource)
     && /contents\.setBackgroundThrottling\(!\(reasons && reasons\.size\)\)/.test(webviewThrottleSource)
     && /setThrottleReason\(guest, "capture", true\)/.test(main));
-  check("판정과 증거는 같은 순간", () => /async expect\(send, wc, args\)/.test(inspect) && /name: "browser_expect"/.test(mcp)
-    && /cdpExecRaw\(webContentsMod\(wc\), wc\.id, "screenshot"/.test(inspect));
+  check("QA 판정과 증거는 같은 호출에서 생성", () => {
+    const qaExpect = read("native/electron/cdp-qa-expect.cjs");
+    const qaProtocol = read("server/qa-protocol.js");
+    return /async "qa-expect"\(send, wc, args/.test(qaExpect)
+      && /await screenshot\(send, wc,/.test(qaExpect)
+      && /expect: object\(/.test(qaProtocol)
+      && !/name: "browser_expect"/.test(mcp);
+  });
   check("픽셀 비교", () => /function diffPng/.test(cdpCaptureToolsSource) && /nativeImage\.createFromBitmap/.test(cdpCaptureToolsSource)
     && /name: "browser_diff"/.test(mcp));
   check("크기별 촬영 후 원복", () => /async shotsizes\(_send, wc, args\)/.test(capture)

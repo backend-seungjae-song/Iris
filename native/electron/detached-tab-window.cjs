@@ -18,8 +18,9 @@
 //   서브프레임·대화상자 차단·스로틀 중 하나라도 빠지면 그 창에서만 요소 선택이 동작하지 않거나,
 //   더 나쁘게는 파티션 가드가 없는 webview 가 생긴다. 검사가 두 자리를 대조한다.
 //   떨어진 탭은 옮긴 것이 아니라 감춘 것이다. 브라우저 상태의 탭 기록은 그대로 두고, 어느
-//   탭이 지금 어느 창에 있는지만 이 모듈이 안다. 그래서 창을 닫으면 그 창의 탭이 사라지지 않고
-//   원래 띠로 돌아온다. 창을 닫아 탭을 잃는 경로는 만들지 않는다. 창의 탭이 모두 빠지면 창을 닫는다.
+//   탭이 지금 어느 창에 있는지만 이 모듈이 안다. 창의 탭이 모두 빠지면 창을 닫는다.
+//   사람이 창을 닫으면 크롬처럼 그 창의 탭도 닫는다. 닫기는 렌더러가 보통 탭 닫기(tab.close)로 해서
+//   닫은 탭 다시 열기에 남는다. 앱 종료 때와 렌더러가 답하지 않을 때는 탭을 원래 띠로 돌린다.
 //   기록을 남기지 않는다. 앱을 다시 켜면 떨어진 탭은 없고 전부 자기 스페이스에 있다.
 //   끌기로 만든 창은 포커스를 가져가지 않는다(activate: false → showInactive). 가져가면 끌던
 //   창이 포커스를 잃고 그 순간 마우스 이벤트가 끊긴다. 끌기가 끝나지 못한 채 멈추고, 나중에
@@ -33,6 +34,7 @@
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/detached-tab-window.cjs
 
 const CHANNEL = "ac-detached-tabs";
+const CLOSE_REPLY_MS = 3000;   // 창을 닫을 때 렌더러가 탭을 닫고 답하기까지 기다리는 시간
 
 // 끌기는 이 기능이 소유하며, 기능 표가 세운 경계 뒤에서 가져온다. 밖에서 require 하면 탭 분리를
 // 꺼도 끌기 연결이 살아 있게 된다.
@@ -42,7 +44,7 @@ function createDetachedTabWindows({
   BrowserWindow, ipcMain, preloadPath, webviewPreloadPath, windowLayout,
   guardWebviewPartition, pinHiddenViewportById, webContents, shell,
   loadUrlWithRetry, getAppUrl, noThrottleOpt, isTrustedSender, isAppQuitting,
-  markAppAlive, log, screen,
+  markAppAlive, log, screen, setTimer = setTimeout, hidden = false,
 }) {
   const wins = new Map(); // 창 id -> { win, space, tabs: Set<tabId> }
   let seq = 0;
@@ -108,7 +110,7 @@ function createDetachedTabWindows({
     if (curWid) {
       const cur = wins.get(curWid);
       if (cur.tabs.size === 1 && !cur.win.isDestroyed()) {
-        try { if (activate) { cur.win.show(); cur.win.focus(); } else cur.win.showInactive(); } catch {}
+        try { if (!hidden) { if (activate) { cur.win.show(); cur.win.focus(); } else cur.win.showInactive(); } } catch {}
         return cur.win;
       }
       cur.tabs.delete(id);
@@ -128,7 +130,8 @@ function createDetachedTabWindows({
       },
     };
     const win = new BrowserWindow(opts);
-    try { if (activate) win.show(); else win.showInactive(); } catch {}
+    // 숨김 실행(--qa-hidden 개발 앱)은 창을 화면에 내지 않음. 그리기는 이어짐(paintWhenInitiallyHidden)
+    try { if (!hidden) { if (activate) win.show(); else win.showInactive(); } } catch {}
     windowLayout.ownWindowTitle(win, opts.title);
     applyWebviewPolicy(win);
     win.webContents.on("console-message", (a, b, c) => {
@@ -142,14 +145,30 @@ function createDetachedTabWindows({
     const query = new URLSearchParams({ mode: "browser", space: sp, win: wid, tab: id });
     loadUrlWithRetry(win, getAppUrl() + "/?" + query.toString());
 
-    // 창을 닫는 것은 탭을 버리는 것이 아니라 되돌리는 것이다. 앱이 통째로 나가는 중이면
-    // 되돌릴 화면도 없으므로 방송하지 않는다.
+    // 사람이 닫으면 렌더러가 그 창의 탭을 먼저 닫음. 빈 창(마지막 탭을 빼거나 닫음)과 앱 종료는 바로 닫음
+    win.on("close", (ev) => {
+      const rec = wins.get(wid);
+      if (!rec || rec.closing === "go" || !rec.tabs.size || isAppQuitting()) return;
+      ev.preventDefault();
+      if (rec.closing) return;
+      rec.closing = "asked";
+      try { win.webContents.send("ac-detached-window-closing", { tabs: [...rec.tabs] }); } catch {}
+      setTimer(() => closeNow(wid), CLOSE_REPLY_MS);   // 답이 없으면 탭은 원래 띠로
+    });
+    // 앱이 통째로 나가는 중이면 되돌릴 화면도 없으므로 방송하지 않는다.
     win.on("closed", () => {
       wins.delete(wid);
       if (!isAppQuitting()) broadcast();
     });
     broadcast();
     return win;
+  }
+
+  function closeNow(wid) {
+    const rec = wins.get(wid);
+    if (!rec || rec.win.isDestroyed()) return;
+    rec.closing = "go";
+    try { rec.win.close(); } catch {}
   }
 
   // 탭을 원래 띠로 돌려보낸다. 그 탭만 있던 창이면 창이 닫힌다.
@@ -185,8 +204,10 @@ function createDetachedTabWindows({
     ipcMain.handle("ac-detach-tab", (e, arg) => {
       try {
         if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
+        // activate:false 는 포커스를 가져가지 않는 창(QA 전용 창). 사용자 키보드 포커스를 그대로 둠
         const win = openDetachedTab({
           space: arg && arg.space, tabId: arg && arg.tabId, title: arg && arg.title,
+          activate: !(arg && arg.activate === false),
         });
         return win ? { ok: true } : { ok: false, error: "분리할 탭을 알 수 없습니다" };
       } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -202,6 +223,11 @@ function createDetachedTabWindows({
         if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
         return { ok: claimTab(arg && arg.win, arg && arg.tabId, arg && arg.space) };
       } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+    });
+    // 창을 닫기 전 탭 닫기를 마친 렌더러의 답. 보낸 창 자신만 닫음
+    ipcMain.on("ac-detached-window-close", (e) => {
+      if (!isTrustedSender(e)) return;
+      for (const [wid, rec] of wins) if (rec.closing === "asked" && rec.win.webContents === e.sender) closeNow(wid);
     });
     // 새로 뜬 창은 직접 요청해 현재 상태를 받는다. 방송만 있으면 늦게 뜬 창이 받지 못한다.
     ipcMain.handle("ac-detached-tabs", (e) => {

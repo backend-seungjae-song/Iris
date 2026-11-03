@@ -219,7 +219,7 @@ console.log("\n[10j] 보고 있지 않은 탭도 QA 대상");
     if (!/browser_ask_user/.test(cdp)) return false;
     // 그림이 있어야 답이 되는 명령만 막는다. goto·reload·dialog 까지 막으면 최소화된 창에 떠 있는
     // 확인창을 닫을 길이 사라진다.
-    if (!/const NEEDS_PIXELS = new Set\(\["screenshot"\]\);/.test(cdp)) return false;
+    if (!/const NEEDS_PIXELS = new Set\(\["screenshot", "qa-screenshot"\]\);/.test(cdp)) return false;
     if (!/if \(paintableProbe && \(KEYS_NEED_PAINT\(cmd\) \|\| NEEDS_PIXELS\.has\(cmd\)\)\)/.test(cdp)) return false;
     // diff·observe(screenshot:false)·login 은 그림 없이 되는 일이라 막지 않는다.
     if (/NEEDS_PIXELS = new Set\(\[[^\]]*"(diff|observe)"/.test(cdp)) {
@@ -296,7 +296,7 @@ console.log("\n[10j] 보고 있지 않은 탭도 QA 대상");
     const control = read("native/electron/cdp-control.cjs");
     if (!/attachPolicy\.touch\(wc\.id\);\s*const send = ensureAttached\(wc\);/.test(control)) throw new Error("명령이 조작 창을 미루지 않는다");
     if (!/allowAttach: \(wc\) => attachPolicy\.allowAttach\(wc\.id\)/.test(control)) throw new Error("세션 관문이 정책을 안 본다");
-    if (!/if \(e && e\.code === ERROR_CODES\.CDP_BLOCKED\) throw e;/.test(control)) throw new Error("관문 오류를 재부착으로 재시도한다");
+    if (!/if \(cmd\.startsWith\("qa-"\) \|\| \(e && e\.code === ERROR_CODES\.CDP_BLOCKED\)\) throw e;/.test(control)) throw new Error("관문 오류를 재부착으로 재시도한다");
     if (!/if \(cmd === "handoff"\) return handoff\(wc\);/.test(control)) throw new Error("사람에게 넘기는 handoff 가 없다");
     // 로그인 호스트에서 떼는 것은 AI 세션이다. Firefox 정체 전달용 attach(정체성 모듈 소유, document 계약 없음)까지
     // 떼면 로그인 화면이 Chrome 정체로 돌아간다. 정책 detach·탐색 진입·noCdp 분기 셋이 모두 같은 함수를 거친다.

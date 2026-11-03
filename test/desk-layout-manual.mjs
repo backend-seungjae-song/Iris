@@ -12,7 +12,7 @@ const require = createRequire(hostPath);
 const source = readFileSync(process.env.DESK_LAYOUT_TEST_SOURCE || hostPath, "utf8");
 
 for (const openedAtLogin of [false, true]) {
-  test(`수동 저장과 시작·모니터 재연결 자동 복원을 유지한다 (로그인: ${openedAtLogin})`, async (t) => {
+  test(`수동 저장과 로그인·모니터 재연결 자동 복원을 유지하고 앱만 다시 켜면 옮기지 않는다 (로그인: ${openedAtLogin})`, async (t) => {
     const stateDir = mkdtempSync(path.join(tmpdir(), "iris-desk-manual-"));
     t.after(() => rmSync(stateDir, { recursive: true, force: true }));
     const record = path.join(stateDir, "desk-layouts", "login-item.json");
@@ -54,7 +54,8 @@ for (const openedAtLogin of [false, true]) {
     });
     await new Promise(setImmediate);
     assert.deepEqual(errors, []);
-    assert.equal(timers.size, 1, "시작 복원만 예약한다");
+    // 앱만 다시 켠 경우는 끄기 직전 상태 그대로(저장 배치로 옮기지 않음). 로그인 때만 복원 예약
+    assert.equal(timers.size, openedAtLogin ? 1 : 0, openedAtLogin ? "로그인 복원만 예약한다" : "앱만 다시 켜면 복원을 예약하지 않는다");
     assert.ok([...timers.values()].every((timer) => !timer.repeat), "주기 저장은 예약하지 않는다");
     assert.equal(listed, 0);
     assert.deepEqual(loginChanges, []);
@@ -79,8 +80,13 @@ for (const openedAtLogin of [false, true]) {
     const savedFile = path.join(stateDir, "desk-layouts", "monitors-1.json");
     const saved = readFileSync(savedFile, "utf8");
     rect = { x: 100, y: 100, width: 200, height: 200 };
-    await runTimer(5000);
-    assert.equal(applied, 1, "다시 켜면 저장한 배치를 복원한다");
+    if (openedAtLogin) {
+      await runTimer(5000);
+      assert.equal(applied, 1, "로그인 때는 저장한 배치를 복원한다");
+    } else {
+      assert.equal(applied, 0, "앱만 다시 켜면 저장 배치로 옮기지 않는다");
+      applied = 1;   // 아래 단계의 누적 수를 로그인 경우와 맞춤
+    }
     assert.equal(readFileSync(savedFile, "utf8"), saved, "복원이 저장본을 덮어쓰지 않는다");
     shortcuts.get("Control+Alt+R")();
     await new Promise(setImmediate);

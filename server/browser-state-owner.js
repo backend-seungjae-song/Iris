@@ -1,3 +1,4 @@
+import { qaOwner } from "./qa-ownership.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -86,6 +87,7 @@ export function wire() {
   const state = browserState.get();
   const out = { ...state };
   for (const field of BS_SPACE_FIELDS) out[field] = project(state[field]);
+  out.tabsBySpace = Object.fromEntries(Object.entries(out.tabsBySpace || {}).map(([space, tabs]) => [space, tabs.map(({ qaRunId: _stored, ...tab }) => ({ ...tab, ...(qaOwner(tab.id) ? { qaRunId: qaOwner(tab.id) } : {}) }))]));
   if (out.activeSpace) {
     const liveIds = (snapshot().workspaces || []).map((workspace) => workspace.id);
     out.activeSpace = spaceKey.idOfKey(out.activeSpace, liveIds, lastActiveWorkspaceId) || out.activeSpace;

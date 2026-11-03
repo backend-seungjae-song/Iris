@@ -15,8 +15,8 @@
 //   redrawBrowser(화면 갱신). 이 기능은 탭 기록을 바꾸지 않는다.
 //
 // 유지 조건
-//   떨어진 탭은 옮긴 것이 아니라 감춘 것이다. 탭 기록은 그대로 두고 띠에서만 뺀다. 그래서
-//   분리 창을 닫으면 그 창의 탭이 사라지지 않고 원래 위치로 돌아온다.
+//   떨어진 탭은 옮긴 것이 아니라 감춘 것이다. 탭 기록은 그대로 두고 띠에서만 뺀다.
+//   사람이 분리 창을 닫으면 크롬처럼 그 창의 탭을 닫는다. 보통 탭 닫기라서 닫은 탭 다시 열기에 남는다.
 //   목록은 네이티브가 정본이다. 여기서 낙관적으로 먼저 감추지 않는다. 창이 실제로 떴을 때만
 //   감춰야 창이 뜨지 않은 경우에 탭이 어디에도 없는 상태가 생기지 않는다.
 //   분리 창의 고른 탭은 그 창만의 값이다. 스페이스의 공유 활성 탭을 쓰면 원래 창이 감춰진 탭으로 끌려간다.
@@ -27,6 +27,7 @@
 //   탭 순환과 네이티브의 ac-detached-tabs 방송이다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/detach-tab.js
 import { provide } from "../core/hooks.js";
+import { boundSpace, bsMutate, getBrowserState } from "./state.js";
 import { wireTabDrag, reportStripRect } from "./tab-drag.js";
 
 let host = null;          // acHost
@@ -63,6 +64,20 @@ function shownTab() {
   for (let i = at + 1; i < order.length; i++) if (own.has(order[i])) return (picked = order[i]);
   for (let i = at - 1; i >= 0; i--) if (own.has(order[i])) return (picked = order[i]);
   return (picked = live[0]);
+}
+
+// 사람이 이 분리 창을 닫음. 탭을 닫고 서버 상태에서 빠진 뒤 창을 닫음. 먼저 닫으면 원래 띠에 잠깐 다시 보임
+const CLOSE_WAIT_MS = 1500;
+function closeOwnTabs(ids) {
+  const sp = boundSpace();
+  for (const id of ids) bsMutate({ op: "tab.close", space: sp, id });
+  const started = Date.now();
+  const tick = () => {
+    const left = ((getBrowserState().tabsBySpace || {})[sp] || []).some((t) => ids.includes(t.id));
+    if (!left || Date.now() - started > CLOSE_WAIT_MS) { try { host.detachedWindowClose(); } catch {} return; }
+    setTimeout(tick, 50);
+  };
+  tick();
 }
 
 async function detach(tabId, title, space) {
@@ -136,8 +151,10 @@ export function initCapability(ctx) {
     return true;
   });
 
-  // 되돌리는 경로는 둘이며 모두 이 파일 밖에 있다. 다른 창의 띠로 끌어다 놓거나, 그 창을 닫는 것이다.
-  // 창을 닫으면 네이티브가 그 창의 탭을 목록에서 빼고 방송한다.
+  // 되돌리는 경로는 다른 창의 띠로 끌어다 놓는 것이고 이 파일 밖에 있다.
+  if (myWin && host && host.onDetachedWindowClosing && host.detachedWindowClose) {
+    host.onDetachedWindowClosing((m) => closeOwnTabs(((m && m.tabs) || []).map(String)));
+  }
 
   if (host && host.onDetachedTabs) host.onDetachedTabs(setDetached);
   // 늦게 뜬 창은 방송을 받지 못했으므로, 현재 상태를 한 번 조회해 맞춘다.

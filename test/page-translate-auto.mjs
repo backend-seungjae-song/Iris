@@ -14,7 +14,8 @@ const settingsKey = "iris.pageTranslate.settings.v1:persist:acprof:first";
 
 async function fixture(run) {
   const built = await build({ stdin: { contents: `export { initCapability } from './web/js/browser/page-translate.js';
-    export { callHook } from './web/js/core/hooks.js';`, resolveDir: process.cwd() }, bundle: true, write: false, format: "iife", globalName: "Translation" });
+    export { callHook } from './web/js/core/hooks.js';
+    export { replaceBrowserState } from './web/js/browser/state.js';`, resolveDir: process.cwd() }, bundle: true, write: false, format: "iife", globalName: "Translation" });
   const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
   const bar = html.match(/<div class="urlbar">[\s\S]*?(?=\n        <div class="bookmark-line">)/)?.[0];
   assert.ok(bar);
@@ -114,6 +115,19 @@ test("탭 전환·새 탭·storage 변경을 관찰하고 dispose 뒤 실행을 
   await page.evaluate(() => { capability.dispose(); for (const rec of records.values()) rec.el.dispatchEvent(new Event("dom-ready")); window.dispatchEvent(new StorageEvent("storage", { key: "iris.pageTranslate.settings.v1:persist:acprof:first" })); addTab(73); });
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 30)));
   assert.equal(await page.evaluate(() => calls.length), before); assert.equal(await page.$("#wv-translate"), null);
+}));
+
+test("항상 번역 설정이어도 QA 회차 탭은 번역하지 않고 다른 탭은 번역한다", async () => fixture(async (page) => {
+  await page.evaluate((key) => {
+    Translation.replaceBrowserState({ tabsBySpace: { w1: [{ id: 74, qaRunId: "qa-test" }, { id: 75 }] } });
+    localStorage.setItem(key, JSON.stringify({ target: "ko", always: ["en"], never: [], neverSites: [] }));
+    window.dispatchEvent(new StorageEvent("storage", { key }));
+    addTab(74); addTab(75);
+  }, settingsKey);
+  await page.waitForFunction(() => calls.some((call) => call.wc === 75 && call.op === "translate"));
+  await page.waitForFunction(() => calls.some((call) => call.wc === 74 && call.op === "detect"));
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
+  assert.equal(await page.evaluate(() => calls.filter((call) => call.wc === 74 && call.op === "translate").length), 0);
 }));
 
 test("SPA 이벤트를 합치고 하위 프레임·번역된 문서의 재감지를 생략한다", async () => fixture(async (page) => {

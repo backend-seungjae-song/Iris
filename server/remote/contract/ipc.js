@@ -5,6 +5,8 @@ export const MAX_REMOTE_FRAME_BYTES = 64 * 1024;
 export const MAX_BROWSER_FRAME_JPEG_BYTES = 384 * 1024;
 export const MAX_BROWSER_FRAME_MESSAGE_BYTES = 520 * 1024;
 export const MAX_BROWSER_DRAFT_MESSAGE_BYTES = 400 * 1024;
+// 탭이 수백 개여도 목록 한 번에 담기는 크기
+export const MAX_BROWSER_TABS_MESSAGE_BYTES = 256 * 1024;
 export const REMOTE_AVAILABILITY = Object.freeze(["enabled", "pin-required", "sharing-disabled"]);
 const MAX_REMOTE_IPC_BYTES = MAX_REMOTE_FRAME_BYTES + (4 * 1024);
 const MAX_LARGE_REMOTE_IPC_BYTES = MAX_BROWSER_FRAME_MESSAGE_BYTES + (4 * 1024);
@@ -60,6 +62,7 @@ export function fitsRemoteOutboundPayload(payload) {
     const decoded = JSON.parse(payload);
     if (decoded?.type === "browser.frame") return bytes <= MAX_BROWSER_FRAME_MESSAGE_BYTES;
     if (decoded?.type === "browser.draft.result") return bytes <= MAX_BROWSER_DRAFT_MESSAGE_BYTES;
+    if (decoded?.type === "browser.tabs.result") return bytes <= MAX_BROWSER_TABS_MESSAGE_BYTES;
   } catch {}
   return false;
 }

@@ -10,8 +10,8 @@
 //   preload 가 노출한 window.acHost.emulator 와 web/js/emulator/pane.js.
 //
 // 유지 조건
-//   창을 닫을 때 close() 가 아니라 dispose() 를 부른다. 창을 닫는 것은 탭으로 되돌리는 것이고,
-//   탭이 같은 세션에 다시 붙는다. close() 를 부르면 기기와 헬퍼가 꺼져서 탭이 처음부터 다시 켠다.
+//   창을 닫을 때 close() 가 아니라 dispose() 를 부른다. 탭으로 되돌릴지(기기 패널의 옮기기) 화면만
+//   없앨지(사람이 창을 닫음)는 본 창(boot.js)이 정하고, 되돌리면 탭이 같은 세션에 다시 붙는다.
 //
 // 영향 범위
 //   web/js/emulator/boot.js 의 분리·되돌리기.
@@ -86,8 +86,13 @@ if (!host || !params.get("space")) {
   // 복원으로 켜는 중(connect=1)에는 붙거나 실패할 때까지 보고 보류(켜는 중에 "꺼짐"이 저장되지 않게)
   let running = null;
   let booting = params.get("connect") === "1";
+  // 붙은 기기 보고. 창 제목이 기종 이름이 됨(같은 기종 여럿이면 번호)
+  let reported = null;
   setInterval(() => {
     const cur = pane.current();
+    const device = cur.attached ? { name: cur.name || "", udid: cur.udid || "" } : { name: "", udid: "" };
+    const key = device.name + "\n" + device.udid;
+    if (key !== reported) { reported = key; host.reportWindowDevice?.({ tab: params.get("tab"), ...device }); }
     if (booting) { if (cur.attached || cur.error) booting = false; else return; }
     if (cur.loading) return;
     const on = !!cur.attached;

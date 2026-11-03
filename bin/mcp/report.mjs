@@ -1,3 +1,4 @@
+import { renderSessionRecords } from "./report-session.mjs";
 // 확인 보고서. 찍은 장면과 판정 영수증을 사람이 읽고 눌러 보는 한 장으로 묶는다.
 //
 // 소유 범위
@@ -31,6 +32,7 @@ import { windowsPowerShellEnv } from "../../server/windows-powershell.cjs";
 import { artifactDir } from "../../server/artifacts-home.cjs";
 import qaExpiry from "../../server/qa-expiry-guard.cjs";
 import { renderPlain } from "./report-plain.mjs";
+import { dhashPng } from "./png-dhash.mjs";
 
 // 개발 인스턴스와 설치된 앱이 같은 폴더를 쓰면 회차 장부가 섞인다. 어디인지는 한 곳이 정한다.
 // 상태 폴더를 import 시점에 고정하면 그 뒤에 IRIS_STATE_DIR 을 지정해도 반영되지 않는다. 개발 환경이
@@ -90,14 +92,15 @@ function receiptById(id) { return receipts.find((r) => r.id === String(id || "")
 // 남에게 넘길 문서의 기준 이미지가 같은 파일이다.
 function runStore(runId) {
   const dir = path.join(artifactDir("qa"), runId);
-  fs.mkdirSync(path.join(dir, "shots"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "derived"), { recursive: true });
   return dir;
 }
 function keepShot(dir, src, name) {
   const use = qaExpiry.acquirePaths([dir, src], "report-copy");
   try {
   if (!src || !fs.existsSync(src)) return null;
-  const dest = path.join(dir, "shots", name + path.extname(src || ".png"));
+  if (path.resolve(src).startsWith(path.join(path.resolve(dir), "shots") + path.sep)) return src;
+  const dest = path.join(dir, "derived", shaOf(src) + path.extname(src || ".png"));
   try {
     fs.copyFileSync(src, dest);
     // 표시는 이미지 옆 파일에 있어 장면만 옮기면 표시가 사라진다. 같이 옮긴다.
@@ -107,6 +110,32 @@ function keepShot(dir, src, name) {
     return dest;
   } catch { return src; }
   } finally { use.release(); }
+}
+// 장면 dHash. 보고서 한 장을 만드는 동안만 기억(같은 경로의 파일이 다음 보고서 전에 바뀔 수 있음)
+function sceneHasher() {
+  const seen = new Map();
+  return (p) => {
+    if (!p) return null;
+    if (seen.has(p)) return seen.get(p);
+    const use = qaExpiry.acquirePaths([p], "report-embed");
+    let value = null;
+    try { value = dhashPng(fs.readFileSync(p)); } catch { value = null; } finally { use.release(); }
+    seen.set(p, value);
+    return value;
+  };
+}
+// 장면 원본 파일 sha256. 확인자가 사진을 가리키는 키. 읽지 못하면 다른 사진과 같다고 보지 않음(null)
+function fileHasher() {
+  const seen = new Map();
+  return (p) => {
+    if (!p) return null;
+    if (seen.has(p)) return seen.get(p);
+    const use = qaExpiry.acquirePaths([p], "report-embed");
+    let value = null;
+    try { value = crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex"); } catch { value = null; } finally { use.release(); }
+    seen.set(p, value);
+    return value;
+  };
 }
 // 장면의 실제 픽셀 크기. 세로로 긴 폰 화면과 가로로 넓은 웹 화면은 보고서에서 배치 방식이 달라야 한다.
 function pngSize(p2) {
@@ -122,14 +151,27 @@ function pngSize(p2) {
 // 넣으면 보고서 한 장이 93MB가 된다. 열리지 않는 보고서는 증거가 아니다(확인 결과).
 // 원본은 회차 폴더에 그대로 남고, 굽는 사본만 줄인다. 줄이지 못하면 원본을 그대로 쓴다.
 const EMBED_MAX_W = 1600;
+// JPEG 로 넣을 때 긴 변 상한. 세로로 긴 휴대폰 화면도 줄임
+const EMBED_JPEG_SIDE = 1280;
 const shrunk = new Map();
 function forEmbed(p) {
-  if (shrunk.has(p)) return shrunk.get(p);
+  // 줄인 사본은 회차 정리로 지워질 수 있음. 서버가 오래 돌면 지워진 경로를 돌려줘 장면이 빠진 사례
+  const cached = shrunk.get(p);
+  if (cached && (cached === p || fs.existsSync(cached))) return cached;
   let out = p;
   try {
     const d = pngSize(p);
-    if (d && d.w > EMBED_MAX_W) {
-      const tmp = /\.png$/i.test(p) ? p.replace(/\.png$/i, `.w${EMBED_MAX_W}.png`) : `${p}.w${EMBED_MAX_W}.png`;
+    // macOS 는 JPEG(품질 70)로 넣음. PNG 원본을 넣어 장면 400장 보고서가 265MB 가 된 사례. 같은 화면 378KB → 120KB
+    if (process.platform === "darwin") {
+      const derived = path.basename(path.dirname(p)) === "shots" ? path.join(path.dirname(path.dirname(p)), "derived") : path.dirname(p);
+      fs.mkdirSync(derived, { recursive: true });
+      const tmp = path.join(derived, `${shaOf(p)}.m${EMBED_JPEG_SIDE}.q70.jpg`);
+      if (!fs.existsSync(tmp)) execFileSync("sips", ["-s", "format", "jpeg", "-s", "formatOptions", "70", ...(d && Math.max(d.w, d.h) > EMBED_JPEG_SIDE ? ["-Z", String(EMBED_JPEG_SIDE)] : []), p, "--out", tmp], { stdio: "ignore" });
+      if (fs.statSync(tmp).size > 0) out = tmp;
+    } else if (d && d.w > EMBED_MAX_W) {
+      const derived = path.basename(path.dirname(p)) === "shots" ? path.join(path.dirname(path.dirname(p)), "derived") : path.dirname(p);
+      fs.mkdirSync(derived, { recursive: true });
+      const tmp = path.join(derived, `${shaOf(p)}.w${EMBED_MAX_W}.png`);
       if (!fs.existsSync(tmp)) {
         if (process.platform === "win32") {
           execFileSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
@@ -149,7 +191,8 @@ const dataUri = (p) => {
   try {
   try {
     if (!p || !fs.existsSync(p)) return null;
-    return `data:image/png;base64,${fs.readFileSync(forEmbed(p)).toString("base64")}`;
+    const embed = forEmbed(p);
+    return `data:image/${embed.endsWith(".jpg") ? "jpeg" : "png"};base64,${fs.readFileSync(embed).toString("base64")}`;
   } catch { return null; }
   } finally { use.release(); }
 };
@@ -426,9 +469,9 @@ function lanesOf(e, open) {
   return open && open.length === 1 ? [[open[0][0], open[0][1]]] : [];
 }
 
-function readLedger(runId) {
+function readLedger(runId, serverEvents) {
   let lines = [];
-  try { lines = fs.readFileSync(path.join(runStore(runId), "journal.jsonl"), "utf8").split("\n"); }
+  try { lines = serverEvents ? serverEvents.map(e => JSON.stringify(e)) : fs.readFileSync(path.join(runStore(runId), "journal.jsonl"), "utf8").split("\n"); }
   catch { return null; }
   const rows = new Map(), notes = [], receipts = new Map(), voided = new Set();
   const voids = [];
@@ -462,7 +505,7 @@ function readLedger(runId) {
       else if (e.act === "close") {
         const r = rows.get(e.row); if (!r) continue;
         const ln = r.lanes.get(e.path) || { path: e.path, frames: [], receipts: [] };
-        ln.color = e.color; ln.note = e.note;
+        ln.color = e.color; ln.note = e.note; ln.history = e.history; ln.judgment = e.sceneJudgment;
         ln.options = e.options; ln.lean = e.lean; ln.simple = e.simple;
         r.lanes.set(e.path, ln);
         open = open.filter((l) => !(l[0] === e.row && l[1] === e.path));
@@ -471,7 +514,7 @@ function readLedger(runId) {
     else if (e.kind === "list") { if (!list) list = e;
       if (!sets.some((x) => x.name === e.name)) sets.push(e); }
     else if (e.kind === "aside") {
-      for (const f of (e.frames || [])) aside.set(String(f), e.why || "");
+      for (const f of (e.frames || [])) aside.set(serverEvents ? `${e.row}\0${e.path_}\0${f}` : String(f), e.why || "");
     }
     else if (e.kind === "void" && e.receipt) {
       voided.add(String(e.receipt));
@@ -499,7 +542,7 @@ function readLedger(runId) {
         const r = rows.get(rid); if (!r) continue;
         const ln = r.lanes.get(pth) || { path: pth, frames: [], receipts: [] };
         ln.frames.push({ path: e.path, why: e.kind === "artifact" ? "찍음" : e.why,
-          caption: e.caption, url: e.url, t: e.t });
+          caption: e.caption, captureNote: e.captureNote, marks: e.marks, url: e.url, t: e.t, seq: e.origSeq ?? e.seq, claimKind: e.claimKind });
         r.lanes.set(pth, ln);
       }
     } else if (e.kind === "assertion") {
@@ -509,8 +552,11 @@ function readLedger(runId) {
         const r = rows.get(rid); if (!r) continue;
         const ln = r.lanes.get(pth) || { path: pth, frames: [], receipts: [] };
         ln.receipts.push(e);
-        if (e.shot) ln.frames.push({ path: e.shot, why: "판정", url: e.url, t: e.t,
-          caption: `${e.id} · ${e.expected}${e.pass ? "" : " → 어긋남"}` });
+        // 판정 장면이 이미 효과 장면으로 들어와 있으면 판정 장면으로 표시. 그대로 두면 사람용 보고서가 판정 장면을 하나도 고르지 못함
+        const seen = e.shot && ln.frames.find(frame => frame.path === e.shot);
+        if (seen) seen.why = "판정";
+        if (e.shot && !seen) ln.frames.push({ path: e.shot, why: "판정", url: e.url, t: e.t, seq: e.origSeq ?? e.seq,
+          captureNote: e.captureNote, caption: `${e.id} · ${e.expected}${e.pass ? "" : " → 어긋남"}${e.captureNote ? " · " + e.captureNote : ""}` });
         r.lanes.set(pth, ln);
       }
     }
@@ -538,9 +584,10 @@ function readLedger(runId) {
   if (aside.size) {
     for (const r of rows.values()) {
       for (const ln of r.lanes.values()) {
-        ln.aside = ln.frames.filter((f) => aside.has(String(f.path)))
-          .map((f) => ({ ...f, why: aside.get(String(f.path)) }));
-        ln.frames = ln.frames.filter((f) => !aside.has(String(f.path)));
+        const asideKey = f => serverEvents ? `${r.id}\0${ln.path}\0${f.path}` : String(f.path);
+        ln.aside = ln.frames.filter((f) => aside.has(asideKey(f)))
+          .map((f) => ({ ...f, why: aside.get(asideKey(f)) }));
+        ln.frames = ln.frames.filter((f) => !aside.has(asideKey(f)));
       }
     }
   }
@@ -727,7 +774,7 @@ function ledgerCard(dir, r, i) {
       const label = f.why === "찍음" ? "찍음" : f.why === "판정" ? "판정"
         : f.why === "before" ? "조작 전" : f.why === "after" ? "조작 후"
         : n === 0 ? "처음" : n === kept.length - 1 ? "끝" : String(n + 1);
-      return { src: dataUri(p3), file: p3, label, marks: readMarks(p3),
+      return { src: dataUri(p3), file: p3, label, marks: f.marks || readMarks(p3),
         said: f.caption || "", note: shortUrl(f.url) };
     });
     const stage = cells.length ? shotStage(cells, cells.length > 2) : { html: "", cls: "" };
@@ -758,6 +805,8 @@ function ledgerCard(dir, r, i) {
         lp.length}가지<br>${lp.slice(0, 4).map(esc).join("<br>")}${
         lp.length > 4 ? "<br>…" : ""}<br>장면마다 대상 화면 확인할 것</p>` : ""}
       ${ln.note ? `<div class="lane-note">${lineHtml(ln.note)}</div>` : ""}
+      ${Array.isArray(ln.history) && ln.history.length ? `<div class="lane-note">${lineHtml(`판정 이력\n${ln.history.map((x) =>
+        `${x.run}${x.replaced ? ` (${x.replaced})` : ""}: ${COLOR[x.color]?.label || x.color}${x.reportable === false ? " (그 회차 보고서 검사 미통과)" : ""}`).join("\n")}`)}</div>` : ""}
       ${picksBlock(ln)}
       ${stage.html ? `<div class="proof">${stage.html}</div>`
         : `<p class="noproof">${stale ? "장면 파일 덮임. 남아 있지 않음"
@@ -788,19 +837,28 @@ function buildReport(options) {
     const values = [options.out, ...receiptsOfRun([rid, options.resume?.from]).map((r) => r.shot)];
     if (options.resume?.from) values.push(path.join(artifactDir("qa"), String(options.resume.from)));
     for (const step of options.steps || []) values.push(step.before, step.after, step.shot, step.diff, ...(Array.isArray(step.via) ? step.via : [step.via]));
-    other = qaExpiry.acquirePaths(values, "mcp-report-source-output");
+    // 장부 장면이 있는 회차도 처음에 한 번 잡음. 장면마다 잡고 풀면 표시 파일 fsync 가 장면 수만큼 반복됨
+    for (const e of options.serverEvents || []) values.push(e.path, e.shot, e.sourceShot, ...(Array.isArray(e.frames) ? e.frames : []));
+    for (const d of options.sessionAnalysis?.defects || []) values.push(...(d.frames || []).map((f) => f.shot), ...(d.failures || []).map((f) => f.shot));
+    other = qaExpiry.acquirePaths(values.filter((v) => typeof v === "string" && v), "mcp-report-source-output");
     return buildReportHeld({ ...options, runId: rid });
   } finally { try { if (other) other.release(); } finally { primary.release(); } }
 }
-function buildReportHeld({ title, summary, steps, out, kind, runId, target, setup, run, resume, overview }) {
+function buildReportHeld({ title, summary, steps, out, kind, runId, target, setup, run, resume, overview, serverEvents, charter, sessionRecord, sessionAnalysis, build, captures, actionHtml, captureInfoHtml, sceneLimit, runSeqs }) {
   const handoff = kind === "handoff";
   const rid = runId || "run-" + Date.now();
   const dir = runStore(rid);
   const kept = [];
+  let sessionShot = 0;
+  const sessionScene = (shot, caption) => {
+    const keptShot = keepShot(dir, shot, `session-${++sessionShot}`);
+    const src = keptShot && dataUri(keptShot);
+    return src ? `<figure><img src="${src}" alt="${esc(caption)}" style="max-width:100%;max-height:620px"><figcaption>${esc(caption)}</figcaption></figure>` : `<p class="warn">${esc(caption)} · 장면 파일 없음</p>`;
+  };
   // 이어받은 단계가 앞에 온다. 읽는 사람이 "어디까지는 그때 것이고 어디부터 이번 것인지"를
   // 위에서부터 순서대로 알 수 있게.
   // 장부에 줄이 있으면 화면은 장부를 그린다. 무엇을 실을지 고르는 단계가 없어진다.
-  const led = handoff ? null : readLedger(rid);
+  const led = handoff ? null : readLedger(rid, serverEvents);
   const res = resumeSteps(resume);
   const allSteps = [...res.carried, ...(steps || [])];
   const built = allSteps.map((s, i) => {
@@ -1440,6 +1498,8 @@ img{max-width:100%;display:block}
 .shots{display:grid;gap:12px}
 .shots.pair{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 figure{margin:0;display:flex;flex-direction:column;align-items:flex-start}
+/* 조작 기록의 기기 사진은 원본 폭(1170px)이면 한 장이 화면을 다 덮음 */
+.qa-actions figure img{max-width:min(100%,360px);height:auto}
 /* 커서 모양은 다음 동작의 예고다. 사진을 누르면 확대가 아니라 다음 장면으로 넘어가므로 돋보기
    커서를 쓰면 예고와 실제 동작이 일치하지 않는다. 넘길 것이 있는 영역에만 커서를 바꾼다.
    여정 줄(strip)은 이미 다 펼쳐져 있어 넘길 것이 없다. */
@@ -1617,6 +1677,7 @@ html:has(.dense){scroll-snap-type:none}
 .dense section[id^="q"]{scroll-margin-top:calc(var(--navh, 140px) + 12px)}
 </style>
 <div class="wrap${handoff ? "" : " rev"}${many ? " dense" : ""}"><h1>${esc(title || (handoff ? "QA 안내" : "확인 보고서"))}<span class="kind">${kindLabel}</span></h1>
+${renderSessionRecords(charter, sessionRecord, esc, sessionAnalysis, sessionScene, { build })}
 ${navBlock}
 ${summary ? `<p class="lede">${esc(summary)}</p>` : ""}
 ${handoff
@@ -1769,11 +1830,27 @@ document.addEventListener("keydown", (e) => {
   // 장부 회차의 기본 지면은 개발자가 아닌 사람이 읽는다. 확인 기록 번호·선택자·주소는
   // 그 사람이 검증에 쓸 수 없어서 옆 파일(-dev)에 두고, 기본 지면에는 흐름과 장면만 싣는다.
   const devPath = led ? p.replace(/(\.html?)?$/i, "-dev.html") : null;
+  // 사람용 보고서에는 조작별 S1~S6 기록을 넣지 않음. 판단 끝난 배경 반응까지 원본 사진으로 들어가 높이가 87만 px 가 된 사례
+  const finalize = (source, { plain = false } = {}) => {
+    if (!serverEvents) return source;
+    const stabilityLabel = value => value?.remaining?.includes?.("not-requested") ? " · 안정화 확인 생략" : value?.stable === false ? ` · 안정 전 촬영 · 남은 항목: ${esc(JSON.stringify(value.remaining))}` : "";
+    // 본문(main) 안 끝에 붙임. <script> 앞에 붙이면 main 밖이라 여백 없이 화면 왼쪽 끝에 붙음
+    const place = (page, part) => page.includes("</main>") ? page.replace(/<\/main>(?![\s\S]*<\/main>)/, () => `${part}</main>`) : page.replace("<script>", () => `${part}<script>`);
+    if (actionHtml && !plain) source = place(source, actionHtml);
+    if (captureInfoHtml) source = place(source, captureInfoHtml);
+    else if (captures?.length) source = place(source, `<section class="req"><h2>촬영 정보</h2>${captures.map(capture => `<details><summary>#${capture.seq} · 사진 #${capture.shotSeq}${stabilityLabel(capture.stability)}</summary><pre>${esc(JSON.stringify(capture, null, 2))}</pre></details>`).join("")}</section>`);
+    return source;
+  };
+  // 사람용 보고서가 확인자 덮어쓰기 오류로 멈추면 두 파일 모두 이전 것을 그대로 둠. 개발자 보고서만 새로 쓰여 두 판이 달라지는 것을 막음
+  const sceneEdits = led ? { applied: [], hidden: [], notShown: [] } : null;
+  const textEdits = led ? [] : null;
   if (led) {
-    fs.writeFileSync(devPath, html);
-    fs.writeFileSync(p, renderPlain({ title, summary, overview, led, dir, devHref: path.basename(devPath) },
-      { esc, keepShot, dataUri, pngSize, readMarks, boxesOf, rowColor, frameStale, COLOR }));
-  } else fs.writeFileSync(p, html);
+    const dev = finalize(html);
+    const plainPage = finalize(renderPlain({ title, summary, overview, led, dir, charter, sessionRecord, sessionAnalysis, sessionScene, build, devHref: path.basename(devPath) },
+      { esc, keepShot, dataUri, pngSize, readMarks, boxesOf, rowColor, frameStale, COLOR, sceneLimit, sceneHash: sceneHasher(), fileSha: fileHasher(), sceneEdits, textEdits, runSeqs }), { plain: true });
+    fs.writeFileSync(devPath, dev);
+    fs.writeFileSync(p, plainPage);
+  } else fs.writeFileSync(p, finalize(html));
   // 다음 실행이 이 장면들을 '이전'으로 집어 쓸 수 있게 이름과 함께 남긴다.
   const mf = path.join(dir, "manifest.json");
   let prev = {}; try { prev = JSON.parse(fs.readFileSync(mf, "utf8")); } catch {}
@@ -1810,6 +1887,8 @@ document.addEventListener("keydown", (e) => {
     : null;
   return { ok: true, path: p, ...(devPath ? { devPath } : {}), runId: rid, store: dir, steps: n,
     ...(ledTally ? { ledger: ledTally } : {}),
+    ...(sceneEdits && (sceneEdits.applied.length || sceneEdits.hidden.length || sceneEdits.notShown.length) ? { sceneEdits } : {}),
+    ...(textEdits?.length ? { textEdits } : {}),
     ...(handoff ? {} : { checks: checks.length, failed: checkBad, failedSteps: bad,
       unverified: unver.length, unreported: missing.length }) };
 }

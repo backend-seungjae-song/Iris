@@ -71,7 +71,7 @@ check("한글 맨 경로를 토큰 전체로 잡음", () => {
 });
 check("확장자 뒤 한국어 조사는 맨 경로 링크에서 분리", () => {
   const helper = sliceBetween(xtermWiring, "function terminalBarePathToken", "function initXterm", "확장자 뒤 한국어 조사는 맨 경로 링크에서 분리");
-  const provider = sliceBetween(xtermWiring, "// 3) 맨 경로", "cb(links.length", "확장자 뒤 한국어 조사는 맨 경로 링크에서 분리");
+  const provider = sliceBetween(xtermWiring, "// 4) 맨 경로", "cb(links.length", "확장자 뒤 한국어 조사는 맨 경로 링크에서 분리");
   const resolver = sliceBetween(fileRouting, "function resolveTerminalPath", "function revealTerminalPath", "확장자 뒤 한국어 조사는 맨 경로 링크에서 분리");
   return /\(\\\.\[A-Za-z0-9\]\{1,10\}\)/.test(helper)
     && /을\|를/.test(helper)

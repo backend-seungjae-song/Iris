@@ -51,7 +51,51 @@ async function dispatchMouse(send, args) {
   return { ok: true, action, at: { x: Math.round(x), y: Math.round(y) } };
 }
 
-function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isTabShown, run, webContentsMod }) {
+// 지금 포커스된 칸에 글을 넣는 페이지 안 식
+// 같은 출처 iframe 은 안쪽 칸까지 따라감. 다른 출처 iframe 이면 crossFrame 반환, 호출부가 그 프레임에서 다시 실행
+function insertAtFocusExpression(text) {
+  return `(() => {
+    const t = ${JSON.stringify(String(text))};
+    let el = document.activeElement;
+    while (el && /^i?frame$/i.test(el.tagName)) {
+      let inner = null; try { inner = el.contentDocument && el.contentDocument.activeElement; } catch (e) {}
+      if (!inner) return { ok: false, crossFrame: true };
+      el = inner;
+    }
+    if (!el || el === el.ownerDocument.body) return { ok: false, why: "커서가 어디에도 없습니다" };
+    const doc = el.ownerDocument;
+    const field = el.matches && el.matches("input,textarea");
+    if (!field && !el.isContentEditable) return { ok: false, why: "글을 넣을 수 없는 요소입니다: " + el.tagName };
+    const before = field ? el.value : el.textContent;
+    let put = false; try { put = doc.execCommand("insertText", false, t); } catch (e) {}
+    if (!put || (t && (field ? el.value : el.textContent) === before)) {
+      if (field) {
+        const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s;
+        const proto = Object.getPrototypeOf(el), d = Object.getOwnPropertyDescriptor(proto, "value");
+        const next = el.value.slice(0, s) + t + el.value.slice(e);
+        if (d && d.set) d.set.call(el, next); else el.value = next;
+        try { el.selectionStart = el.selectionEnd = s + t.length; } catch (e) {}
+      } else {
+        const sel = doc.getSelection();
+        if (sel && sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(doc.createTextNode(t)); r.collapse(false); }
+        else el.textContent = (el.textContent || "") + t;
+      }
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: t, inputType: "insertText" }));
+      return { ok: true, via: "값 직접 설정" };
+    }
+    return { ok: true, via: "페이지 안 입력" };
+  })()`;
+}
+
+// ownsUserFocus(wc): 그 탭이 지금 사용자 키보드 포커스를 가졌는지 여부(Promise<boolean>)
+// 포커스가 없는 탭에는 CDP Input.* 글·키·누르기 금지, 페이지 안 경로로 처리
+// 이유 1: webview 에 보낸 insertText·dispatchKeyEvent 가 창의 포커스 위젯으로 감(크로미움 input_handler.cc)
+// 이유 2: 진짜 mouseDown 을 받은 탭으로 키보드 포커스 이동(render_widget_host_impl.cc FocusOwningWebContents)
+// 결과: 사용자가 치던 칸에 AI 글자가 섞이고 사용자 키가 AI 탭으로 감
+// 페이지 안 focus()·execCommand·요소 click() 은 포커스 이동 없음(실측)
+// pressAllowed(wc): 진짜 누르기를 보내도 사용자 포커스가 그대로인지(Promise<boolean>). 없으면 ownsUserFocus
+function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isTabShown, run, webContentsMod,
+  ownsUserFocus = () => false, pressAllowed = ownsUserFocus }) {
   async function clickTarget(send, wc, args, clickCount) {
     return await withLayout(send, async (applied) => {
       const ref = args.ref || args.sel;
@@ -72,7 +116,9 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       // 교차 출처 프레임 안의 요소는 좌표로 누를 수 없다. DOM.getBoxModel이 주는 값은 그 프레임의
       // 좌표계이고, Input 이벤트는 창 좌표계라 그대로 쓰면 다른 위치를 누른다. 그런 요소는 언제나
       // 요소를 직접 누른다.
-      if (applied || sid) {
+      // 진짜 누르기가 사용자 포커스를 옮기는 탭도 요소 직접 누르기(좌표 누르기는 포커스를 이 탭으로 옮김)
+      const elementOnly = applied || sid || !(await pressAllowed(wc));
+      if (elementOnly) {
         const r = await s("DOM.resolveNode", { backendNodeId });
         const objectId = r && r.object && r.object.objectId;
         if (objectId) {
@@ -111,9 +157,37 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       return await clickTarget(send, wc, args, 2);
     },
     // 현재 포커스에 텍스트 삽입(키 이벤트 없이)
-    async type(send, _wc, args) {
-      await send("Input.insertText", { text: args.text || "" });
-      return { ok: true };
+    async type(send, wc, args) {
+      const text = String(args.text || "");
+      if (await ownsUserFocus(wc)) {
+        await send("Input.insertText", { text });
+        return { ok: true };
+      }
+      const expression = insertAtFocusExpression(text);
+      const evalIn = async (sid) => {
+        const r = await send.on(sid)("Runtime.evaluate", { expression, returnByValue: true });
+        return (r && r.result && r.result.value) || null;
+      };
+      let v = await evalIn(null);
+      // 다른 출처 iframe 안 칸: 포커스 칸이 있는 프레임이 하나일 때만 입력
+      if (v && v.crossFrame) {
+        const probe = `(() => { const a = document.activeElement; return !!a && a !== document.body
+          && ((a.matches && a.matches("input,textarea")) || a.isContentEditable); })()`;
+        const hits = [];
+        for (const sid of (send.frames ? send.frames() : []).filter(Boolean)) {
+          try {
+            const r = await send.on(sid)("Runtime.evaluate", { expression: probe, returnByValue: true });
+            if (r && r.result && r.result.value === true) hits.push(sid);
+          } catch {}
+        }
+        if (hits.length !== 1) {
+          throw new Error("커서가 다른 출처 iframe 안에 있어 칸을 정할 수 없습니다 — fill 로 칸을 지정하세요");
+        }
+        v = await evalIn(hits[0]);
+        if (v) v.frame = "iframe";
+      }
+      if (!v || !v.ok) throw new Error((v && v.why) || "글을 넣지 못했습니다");
+      return { ok: true, via: v.via, ...(v.frame ? { frame: v.frame } : {}) };
     },
     // 되돌리기 어려운 자리에 쓰이므로 두 가지를 지킨다. 보이는 탭에서만 입력한다(아무도 보지 못하는
     // 화면을 대량으로 고치지 않는다). 그리고 중간에 실패하면 그 자리에서 멈추고 몇 칸이
@@ -673,13 +747,15 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       // 프레임 안 입력칸은 Input.insertText 로 채울 수 없다. 그 명령은 창 단위라 최상위 문서의
       // 포커스로 들어가서, 성공으로 돌아오는데 정작 iframe 칸은 비어 있고 엉뚱한 칸이 채워진다.
       // 그래서 그 요소를 직접 잡아 값을 넣고 프레임워크가 듣는 이벤트를 함께 낸다.
-      if (fillSid) {
+      // 사용자 포커스가 다른 곳에 있는 탭도 같은 직접 경로(Input.insertText 는 사용자 칸으로 감)
+      const direct = !fillSid && !(await ownsUserFocus(wc));
+      if (fillSid || direct) {
         const fs = send.on(fillSid);
         await fs("DOM.enable");
         try { await fs("DOM.scrollIntoViewIfNeeded", { backendNodeId: fillNodeId }); } catch {}
         const rn = await fs("DOM.resolveNode", { backendNodeId: fillNodeId });
         const oid = rn && rn.object && rn.object.objectId;
-        if (!oid) throw new Error("iframe 안 입력칸을 다룰 수 없습니다");
+        if (!oid) throw new Error(direct ? "입력칸을 다룰 수 없습니다" : "iframe 안 입력칸을 다룰 수 없습니다");
         const fr = await fs("Runtime.callFunctionOn", {
           objectId: oid, returnByValue: true, awaitPromise: false, userGesture: true,
           functionDeclaration: `function(t){ const el=this;
@@ -705,9 +781,11 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
           arguments: [{ value: String(args.text == null ? "" : args.text) }],
         });
         const fvv = (fr && fr.result && fr.result.value) || {};
-        if (!fvv.ok) throw new Error("iframe 안 입력이 반영되지 않았습니다" + (fvv.got !== undefined ? ` (현재 값: ${fvv.got})` : ""));
-        if (fvv.contenteditable) return { ok: true, ref: args.ref, via: "리치 편집기 직접 설정", frame: "iframe" };
-        return { ok: true, ref: args.ref, via: "값 직접 설정", frame: "iframe" };
+        if (!fvv.ok) throw new Error((direct ? "입력이 반영되지 않았습니다" : "iframe 안 입력이 반영되지 않았습니다")
+          + (fvv.got !== undefined ? ` (현재 값: ${fvv.got})` : ""));
+        const where = direct ? {} : { frame: "iframe" };
+        if (fvv.contenteditable) return { ok: true, ref: args.ref, via: "리치 편집기 직접 설정", ...where };
+        return { ok: true, ref: args.ref, via: "값 직접 설정", ...where };
       }
 
       await send("DOM.enable");

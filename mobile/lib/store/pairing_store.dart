@@ -60,6 +60,7 @@ class PairingStore {
     : _preferences = preferences ?? SharedPreferencesAsync();
 
   static const _key = 'iris.remote.pairing';
+  static const _resumeKey = 'iris.remote.resume';
   final SharedPreferencesAsync _preferences;
 
   Future<PairingSettings?> load() async {
@@ -75,9 +76,17 @@ class PairingStore {
   Future<void> save(PairingSettings settings) =>
       _preferences.setString(_key, jsonEncode(settings.toJson()));
 
+  // 마지막 재접속 토큰. 컴퓨터가 기기 키 서명과 유휴 만료를 함께 확인하므로 토큰만으로는 접속할 수 없음
+  Future<String?> loadResumeToken() => _preferences.getString(_resumeKey);
+
+  Future<void> saveResumeToken(String? token) => token == null
+      ? _preferences.remove(_resumeKey)
+      : _preferences.setString(_resumeKey, token);
+
   Future<void> removeRegistration(ConnectionKey connectionKey) async {
     await connectionKey.deleteKey();
     await _preferences.remove(_key);
+    await _preferences.remove(_resumeKey);
   }
 }
 

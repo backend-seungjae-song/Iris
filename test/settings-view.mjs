@@ -18,6 +18,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sliceBetween } from "../bin/slice-anchor.mjs";
 
 const previousFetch = globalThis.fetch;
 globalThis.fetch = async () => new Response(JSON.stringify({ exists: true, revision: 0, hidden: [], local: true }));
@@ -390,4 +391,74 @@ test("그룹 단추 클릭은 기능 구성을 적용하지 않는다", async ()
   const page = readFileSync(new URL("../web/js/devtool/keymap-page.js", import.meta.url), "utf8");
   assert.doesNotMatch(page, /applyPreset/);
   assert.match(page, /presetView = pre\.dataset\.setPreset;\s*renderKeymapPage\(\);\s*return;/);
+});
+
+function groupedMarkup(selected = []) {
+  const windows = [
+    window({ id: 1, pickKey: "k1", displayTitle: "혼자 창", picked: true }),
+    window({ id: 2, pickKey: "k2", displayTitle: "묶음 첫 창", picked: true, bounds: [600, 0, 500, 400] }),
+    window({ id: 3, pickKey: "k3", displayTitle: "묶음 둘째 창", picked: true, bounds: [1200, 0, 500, 400] }),
+    window({ id: 4, pickKey: "k4", displayTitle: "끝 창", picked: true, bounds: [1800, 0, 500, 400] }),
+  ];
+  return settingsMarkup({
+    section: "windows", items: [], screens: [], toggles: [],
+    switcher: {
+      windows,
+      picked: [{ pickKey: "k1" }, { pickKey: "k2", group: "g1" }, { pickKey: "k3", group: "g1" }, { pickKey: "k4" }],
+      selected,
+      status: { permission: true },
+      media: { permission: "granted", icons: {}, thumbs: {}, missing: [] },
+    },
+  });
+}
+
+test("묶음은 머리 줄과 이어진 줄로 그리고, 색 강조선·색 배지·줄마다 빼기 단추가 없다", () => {
+  const html = groupedMarkup();
+  const group = sliceBetween(html, '<div class="km-sw-group"', 'data-sw-sel="k4"', "묶음");
+  assert.equal((html.match(/<div class="km-sw-group"/g) || []).length, 1);
+  assert.match(group, />묶음 · 2개 창</);
+  assert.match(group, />묶음 첫 창</);
+  assert.match(group, />묶음 둘째 창</);
+  assert.match(group, /data-sw-move="-1" data-sw-unit="stop" data-ref-id="2"/);
+  assert.match(group, /data-sw-ungroup="" data-ref-id="2"/);
+  assert.match(rowMarkup(html, "묶음 첫 창"), /class="km-sw-reason"[^>]*>포커스</);
+  assert.doesNotMatch(html, /km-sw-badge focus|data-sw-leave=|data-sw-join=|km-sw-join/);
+});
+
+test("고른 창 줄마다 선택 칸이 있고, 나머지 창 줄에는 같은 폭의 빈 칸만 있다", () => {
+  const html = groupedMarkup();
+  for (const key of ["k1", "k2", "k3", "k4"]) assert.match(html, new RegExp(`data-sw-sel="${key}"`));
+  assert.equal((html.match(/class="km-sw-end"/g) || []).length, 5);
+});
+
+test("선택 막대는 고른 창이 있을 때만 나오고, 둘 이상이어야 묶기가 켜지며, 묶인 창이 섞이면 빼기도 나온다", () => {
+  assert.doesNotMatch(groupedMarkup(), /km-sw-selbar/);
+  const one = groupedMarkup(["k1"]);
+  assert.match(one, /1개 선택됨/);
+  assert.match(one, /data-sw-sel-group=""\s*disabled/);
+  assert.doesNotMatch(one, /data-sw-sel-leave/);
+  const two = groupedMarkup(["k1", "k3"]);
+  assert.match(two, /2개 선택됨/);
+  assert.doesNotMatch(two, /data-sw-sel-group=""\s*disabled/);
+  assert.match(two, /data-sw-sel-leave/);
+  assert.match(rowMarkup(two, "묶음 둘째 창"), /data-sw-sel="k3" checked/);
+});
+
+test("묶음 안 줄의 위로·아래로는 묶음 끝에서 막히고, 혼자인 줄은 목록 끝에서만 막힌다", () => {
+  const html = groupedMarkup();
+  assert.match(rowMarkup(html, "묶음 첫 창"), /data-sw-move="-1"[^>]*disabled/);
+  assert.match(rowMarkup(html, "묶음 둘째 창"), /data-sw-move="1"[^>]*disabled/);
+  assert.doesNotMatch(rowMarkup(html, "끝 창"), /data-sw-move="-1"[^>]*disabled/);
+  assert.match(rowMarkup(html, "끝 창"), /data-sw-move="1"[^>]*disabled/);
+  assert.match(rowMarkup(html, "혼자 창"), /data-sw-move="-1"[^>]*disabled/);
+  assert.doesNotMatch(rowMarkup(html, "혼자 창"), /data-sw-move="1"[^>]*disabled/);
+});
+
+test("묶음 창을 같이 못 띄웠으면 그 수와 이유를 적는다", () => {
+  const html = settingsMarkup({
+    section: "windows", items: [], screens: [], toggles: [],
+    switcher: { windows: [window({ id: 1, picked: true })], picked: [{ id: 1 }],
+      status: { permission: true, lastStep: { left: ["other-desktop", "other-desktop"] } } },
+  });
+  assert.match(html, /묶음 중 2개 창은 다른 데스크톱에 있어서 같이 띄우지 못했습니다/);
 });

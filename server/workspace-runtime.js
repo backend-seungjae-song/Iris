@@ -4,7 +4,8 @@ import path from "node:path";
 import * as archive from "./archive.js";
 import { attachAgentLineage, watchAgentLineage } from "./agent-lineage.js";
 import { attachQuestionState } from "./agent-question.js";
-import { attachCodexSessions } from "./codex-session.js";
+import { attachCodexSessions, prewarmCodexScan } from "./codex-session.js";
+import { focusChangedSince, focusMark } from "./focus-epoch.js";
 import { CONFIG_DIR as HERDR_CONFIG_DIR } from "./herdr-session.cjs";
 import { buildMonitorState } from "./join.js";
 import * as spaceKey from "./space-key.js";
@@ -22,8 +23,9 @@ import * as spaceKey from "./space-key.js";
 //   build는 join/codex-session/space-key/archive owner에 기대며 handler를 import하지 않는다.
 //
 // 유지 조건
-//   agent→codex session→workspace→tab 병합 순서, workspace folder identity 판정과 Herdr event 조건,
-//   150ms debounce·300ms resubscribe 타이밍을 보존하고 build 중 runtime snapshot을 publish하지 않는다.
+//   agent·workspace 목록을 함께 받고 codex session·workspace folder·tab 조회를 병렬로 돈 뒤 병합하는 순서,
+//   workspace folder identity 판정과 Herdr event 조건, 150ms debounce·300ms resubscribe 타이밍을 보존하고
+//   build 중 runtime snapshot을 publish하지 않는다. 포커스 요청과 겹친 build 는 focusStale 을 true 로 돌려준다.
 //
 // 영향 범위
 //   server/index.js의 build→migrate→publish composition과 Herdr start 배선,
@@ -37,6 +39,8 @@ let debounceTimer = null;
 let resubTimer = null;
 let lineageWatcher = null;
 let lineageDebounceTimer = null;
+// 직전 build 가 본 workspace id. 다음 build 가 agent·workspace 목록을 기다리지 않고 tab.list 를 같은 왕복에 보낸다.
+let knownWorkspaceIds = [];
 
 export function initWorkspaceRuntime(deps) {
   herdr = deps.herdr;
@@ -86,9 +90,10 @@ export function buildSpaceRecoveryEvidence(workspaces = []) {
 }
 
 // Spaces(워크스페이스) 목록 + 각 Space의 대표 폴더(cwd). 좌상 사이드바용.
-export async function buildWorkspaces(agents) {
+// knownList: 호출자가 agent.list 와 함께 이미 받은 workspace.list. 없으면 여기서 묻는다.
+export async function buildWorkspaces(agents, knownList = null) {
   let list = [];
-  try { list = await herdr.workspaceList(); } catch {}
+  try { list = knownList || await herdr.workspaceList(); } catch {}
   const folderByWs = new Map();
   for (const a of agents) {
     if (a.workspace_id && a.cwd && !folderByWs.has(a.workspace_id)) folderByWs.set(a.workspace_id, a.cwd);
@@ -153,31 +158,42 @@ export async function buildWorkspaces(agents) {
 
 // 관제 상태 재계산의 build 단계. 파일 I/O가 있으므로 runtime-state의 재진입 guard가 이 함수를 부른다.
 export async function buildWorkspaceSnapshot() {
-  const agents = await herdr.agentList();
+  // herdr 는 호출 하나에 약 100ms 걸리고 서로 독립인 호출은 동시에 끝난다. agent·workspace 목록과
+  // 직전 회차가 알던 workspace 의 tab 목록을 한 왕복에 묻고, 새로 생긴 workspace 의 tab 목록만 한 번 더 묻는다.
+  // 포커스 요청과 겹쳤는지는 시작 시점의 표로 판정한다.
+  const mark = focusMark();
+  const earlyTabs = new Map(knownWorkspaceIds.map((w) => [w, herdr.tabList(w).catch(() => null)]));
+  prewarmCodexScan();
+  const [agents, workspaceList] = await Promise.all([herdr.agentList(), herdr.workspaceList().catch(() => [])]);
   // 원자적 재계산: 완전히 병합한 뒤에만 runtime snapshot에 대입한다. 대입을 먼저 하면
   // tab.list I/O를 기다리는 동안 새 연결이 tabLabel 미병합 상태를 캡처하는 레이스가 생긴다.
   const nextState = buildMonitorState(agents);
-  // codex 세션 키는 herdr가 제공하지 않으므로 프로세스에서 찾아 채운다. 이 값을 채워야
-  // 화면에서 codex도 접을 수 있는 세션으로 표시된다(codex-session.js 주석 참조).
-  await attachCodexSessions(nextState, herdr);
+  // 탭 목록(#8 라벨 + 탭이동): 워크스페이스별 tab.list → 라벨 맵 + 전체 탭 목록(세션 없는 탭 포함).
+  // 에이전트 없는 워크스페이스도 포함해야 세션 미활성 탭까지 순환·포커스 가능.
+  const tabLabel = new Map();
+  const tabsByWorkspace = {};
+  const allWsIds = [...new Set([...workspaceList.map((w) => w.workspace_id), ...agents.map((a) => a.workspace_id)].filter(Boolean))];
+  const fetchTabs = async (w) => {
+    try {
+      const tabs = await (earlyTabs.get(w) ?? herdr.tabList(w));
+      if (!tabs) return;
+      tabsByWorkspace[w] = tabs.map((t) => ({ tabId: t.tab_id, number: t.number, label: t.label || "", focused: !!t.focused, agentStatus: t.agent_status || null, paneCount: t.pane_count || 0 }));
+      for (const t of tabs) tabLabel.set(t.tab_id, t.label);
+    } catch {}
+  };
+  const [, { workspaces, migrations }] = await Promise.all([
+    // codex 세션 키는 herdr가 제공하지 않으므로 프로세스에서 찾아 채운다. 이 값을 채워야
+    // 화면에서 codex도 접을 수 있는 세션으로 표시된다(codex-session.js 주석 참조).
+    attachCodexSessions(nextState, herdr, agents),
+    buildWorkspaces(agents, workspaceList),
+    Promise.all(allWsIds.map(fetchTabs)),
+  ]);
+  knownWorkspaceIds = allWsIds;
   // codex 기록 파일까지 채운 뒤, 답을 끝낸 에이전트가 질문을 남겼는지 붙인다(status 는 그대로 둔다).
   attachQuestionState(nextState);
   // 부모 세션 UUID까지 검증할 수 있도록 codex 키를 채운 다음, launcher가 남긴 명시적
   // receipt를 현재 pane/terminal snapshot과 대조해 유효한 관계만 붙인다.
   attachAgentLineage(nextState, agents);
-  const { workspaces, migrations } = await buildWorkspaces(agents);
-  // 탭 목록(#8 라벨 + 탭이동): 워크스페이스별 tab.list → 라벨 맵 + 전체 탭 목록(세션 없는 탭 포함).
-  // 에이전트 없는 워크스페이스도 포함해야 세션 미활성 탭까지 순환·포커스 가능.
-  const allWsIds = [...new Set([...workspaces.map((w) => w.id), ...agents.map((a) => a.workspace_id)].filter(Boolean))];
-  const tabLabel = new Map();
-  const tabsByWorkspace = {};
-  await Promise.all(allWsIds.map(async (w) => {
-    try {
-      const tabs = await herdr.tabList(w);
-      tabsByWorkspace[w] = tabs.map((t) => ({ tabId: t.tab_id, number: t.number, label: t.label || "", focused: !!t.focused, agentStatus: t.agent_status || null, paneCount: t.pane_count || 0 }));
-      for (const t of tabs) tabLabel.set(t.tab_id, t.label);
-    } catch {}
-  }));
   const infoByPane = new Map();
   for (const a of agents) if (a.pane_id) infoByPane.set(a.pane_id, { tabLabel: tabLabel.get(a.tab_id) || null, tabId: a.tab_id || null });
   for (const s of nextState) { const i = infoByPane.get(s.paneId); s.tabLabel = i?.tabLabel || null; s.tabId = i?.tabId || null; }
@@ -190,6 +206,8 @@ export async function buildWorkspaceSnapshot() {
     state: nextState,
     workspaces,
     tabs: tabsByWorkspace,
+    // 포커스 요청이 이 build 와 겹쳤으면 focused 값이 옛것일 수 있다. 창은 이 방송으로 선택을 바꾸지 않는다.
+    focusStale: focusChangedSince(mark),
     allowedRoots: [...new Set([
       ...agents.map((a) => a.cwd),
       ...workspaces.map((w) => w.folder),

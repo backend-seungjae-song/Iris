@@ -180,6 +180,10 @@ body.layout-on .emu-column { display: flex; flex-direction: column; position: re
 .emu-phone-bar .emu-vol-mute[aria-pressed="true"] { color: var(--muted); }
 .emu-vol-range { width: 76px; height: 16px; margin: 0 2px; accent-color: var(--accent); cursor: pointer; }
 .emu-vol-range:disabled { opacity: .45; cursor: default; }
+/* 화면 비율(아래 기기 조작 줄). device_preview 를 켠 앱이 있는 기기에서만 보인다 */
+.emu-vp { display: inline-flex; align-items: center; gap: 4px; flex: none; min-width: 0; }
+.emu-vp[hidden] { display: none; }
+.emu-vp-dd .cc-dd-menu { max-height: 360px; overflow-y: auto; }
 .emu-vol.muted .emu-vol-range { opacity: .45; }
 .emu-vol-val { min-width: 3.4em; font-size: var(--fs-s); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @container (max-width: 560px) {
@@ -274,7 +278,7 @@ body.layout-on .emu-column .emu-frame-wrap { padding: 20px 12px; }
 .emu-dp-device:last-child { border-bottom: 0; }
 .emu-dp-readiness { margin: 0 8px 5px 20px; font-size: var(--fs-xs); color: var(--muted); line-height: 1.4; }
 .emu-dp-readiness.needs-install { color: var(--pal-yellow-pop); }
-.emu-dp-actions { display: flex; gap: 4px; padding: 0 4px 0 8px; align-items: center; }
+.emu-dp-actions { display: flex; gap: 4px; padding: 0 4px 0 8px; align-items: center; flex-wrap: wrap; }
 .emu-dp-actions .emu-btn { padding: 0 6px; }
 .emu-dp-placement { flex: 1; min-width: 0; }
 .emu-dp-placement .cc-dd-trigger { width: 100%; height: 24px; padding: 0 4px; font-size: var(--fs-xs); gap: 3px; }

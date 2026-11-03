@@ -210,6 +210,7 @@ export function syncBookmarkStar() { const u = currentUrl(); $("#wv-bookmark").c
 
 // 칩 인라인 편집: ✎ → 입력칸으로 교체, Enter/✓ 저장, Esc/blur 취소.
 function editChip(chip, fields, save) {
+  chip.draggable = false;
   chip.innerHTML = fields.map((f) => `<input class="bmk-in ${f.cls}" value="${esc(f.value)}" placeholder="${f.ph}" />`).join("")
     + `<span class="bmk-ok" title="저장">✓</span>`;
   const ins = [...chip.querySelectorAll(".bmk-in")];
@@ -241,7 +242,13 @@ function newFolder(scope) {
   const id = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   if (sendBm({ op: "bookmark.folder.add", scope, folder: id, title: "새 폴더" })) pendingFolderEdit = { scope, id };
 }
-function openUrl(url) { if (!activeWv()) openBrowser(); urlInput.value = url; navigate(url); }
+// 계정을 정한 북마크(설정의 북마크 관리)는 그 계정으로 엶. scope 는 북마크가 있는 구역(공통·세션)
+function openUrl(url, scope) {
+  if (!activeWv()) openBrowser();
+  urlInput.value = url;
+  const b = scope ? leaves(sectionOf(scope)?.items || []).find((x) => x.url === url) : null;
+  navigate(url, b && typeof b.profile === "string" ? { profile: b.profile } : undefined);
+}
 function pageToAdd() { const u = currentUrl(); return u && u !== "about:blank" ? { url: u, title: (activeWv()?.title || u).slice(0, 60) } : null; }
 
 // ── 폴더·구역 메뉴 ──────────────────────────────────────────────────
@@ -317,7 +324,7 @@ function onMenuKey(e) {
 function onMenuClick(e) {
   const b = e.target.closest("button"); if (!b || b.disabled || !menu) return;
   const { scope, id, kind } = menu;
-  if (b.classList.contains("bmf-open")) { closeMenu(false); openUrl(b.dataset.url); return; }
+  if (b.classList.contains("bmf-open")) { closeMenu(false); openUrl(b.dataset.url, scope); return; }
   const act = b.dataset.act, url = b.dataset.url;
   if (act === "add-page") { const p = pageToAdd(); if (p) sendBm({ op: "bookmark.add", scope, ...p, ...(kind === "folder" ? { folder: id } : {}) }); closeMenu(false); }
   else if (act === "new-folder") { closeMenu(false); newFolder(scope); }
@@ -369,7 +376,7 @@ export function wireBookmarkBar() {
       if (same) closeMenu(false); else openMenu({ kind: "folder", scope: k.scope, id: k.id, anchorKey: chip.dataset.key }, e.detail === 0);
       return;
     }
-    openUrl(k.id);
+    openUrl(k.id, k.scope);
   });
   // 폴더 칩은 키보드로도 연다. 북마크 칩은 원래대로 마우스 전용이다.
   bar.addEventListener("keydown", (e) => {
@@ -393,7 +400,11 @@ export function wireBookmarkBar() {
     const r = f.getBoundingClientRect(), x = e.clientX - r.left;
     return x > r.width * 0.25 && x < r.width * 0.75 ? f : null;
   };
-  bar.addEventListener("dragstart", (e) => { dragKey = e.target.closest?.(".bmk")?.dataset.key || null; closeMenu(false); }, true);
+  bar.addEventListener("dragstart", (e) => {
+    // 입력한 글자를 선택해서 끌 때도 북마크 이동으로 처리하지 않는다.
+    if (bar.querySelector(".bmk-in")) { e.preventDefault(); e.stopImmediatePropagation(); dragKey = null; return; }
+    dragKey = e.target.closest?.(".bmk")?.dataset.key || null; closeMenu(false);
+  }, true);
   bar.addEventListener("dragend", () => { dragKey = null; clearInto(); }, true);
   bar.addEventListener("dragover", (e) => {
     const f = intoTarget(e); clearInto(); if (!f) return;

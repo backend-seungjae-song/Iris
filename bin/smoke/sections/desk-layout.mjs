@@ -110,7 +110,7 @@ function run() {
     return true;
   });
 
-  // ── geometry: 비율 왕복·edges 고정 ─────────────────────────────────
+  // ── geometry: 비율 왕복·변 반올림 ─────────────────────────────────
   check("rectToRatio/ratioToRect 왕복이 원래 좌표를 복원한다", () => {
     const area = { x: 0, y: 0, width: 1920, height: 1080 };
     const rect = { x: 480, y: 270, width: 960, height: 540 };
@@ -122,13 +122,14 @@ function run() {
     return true;
   });
 
-  check("computeEdges/pinEdges: 모서리에 붙은 창은 반올림 오차 없이 그대로 붙는다", () => {
-    const area = { x: 0, y: 0, width: 1920, height: 1080 };
-    const rect = { x: 1, y: 0, width: 959, height: 1080 }; // 왼쪽 1px 오차
-    const edges = geometry.computeEdges(rect, area);
-    if (!edges.l || !edges.t || !edges.b) throw new Error(`edges 판정 실패: ${JSON.stringify(edges)}`);
-    const pinned = geometry.pinEdges(rect, area, edges);
-    if (pinned.x !== 0) throw new Error(`pinEdges가 x를 0으로 고정하지 못함: ${pinned.x}`);
+  check("ratioToRect: 오른쪽·아래에 붙은 창은 다른 크기의 workArea 에서도 그 변이 모서리에 정확히 닿는다", () => {
+    const saved = { x: 0, y: 0, width: 1920, height: 1080 };
+    // 1728×972 로 가면 x·y 와 width·height 가 모두 .5 로 떨어진다. 따로 반올림하면 오른쪽·아래가 1px 넘친다.
+    const rect = { x: 5, y: 5, width: 1915, height: 1075 };
+    const target = { x: 100, y: 50, width: 1728, height: 972 };
+    const to = geometry.ratioToRect(geometry.rectToRatio(rect, saved), target);
+    if (to.x + to.width !== target.x + target.width) throw new Error(`오른쪽 변 ${to.x + to.width} ≠ ${target.x + target.width}`);
+    if (to.y + to.height !== target.y + target.height) throw new Error(`아래 변 ${to.y + to.height} ≠ ${target.y + target.height}`);
     return true;
   });
 
@@ -162,6 +163,22 @@ function run() {
     const { pairs } = geometry.pairAppWindows(saved, current);
     const byCg = new Map(pairs.map((p) => [p.saved.cgId, p.current.cgId]));
     if (byCg.get(1) !== 92 || byCg.get(2) !== 91) throw new Error(`3단계 순서 짝짓기 실패: ${JSON.stringify([...byCg])}`);
+    return true;
+  });
+
+  check("pairAppWindows 3단계: Iris 자기 창은 제목이 다르면 짝짓지 않는다", () => {
+    // 앱을 막 켜서 에뮬레이터 창이 아직 없을 때, 남은 에뮬레이터 자리를 다른 Iris 창이 차지했다
+    const own = (title, y) => ({ own: true, pid: 1, cgId: 1, title, slot: "main", rect: { x: 0, y, w: 0.5, h: 0.4 } });
+    const saved = [own("Iris — 콘솔", 0), own("Iris — 에뮬레이터", 0.5), own("Iris — 에뮬레이터", 0.6)];
+    const current = [
+      { own: true, pid: 2, cgId: 21, title: "Iris — QA", rect: { x: 0, y: 0, width: 800, height: 400 } },
+      { own: true, pid: 2, cgId: 22, title: "Iris — 콘솔", rect: { x: 0, y: 10, width: 800, height: 400 } },
+      { own: true, pid: 2, cgId: 23, title: "Iris — 에뮬레이터", rect: { x: 0, y: 20, width: 800, height: 400 } },
+    ];
+    const { pairs, unmatchedCurrent } = geometry.pairAppWindows(saved, current);
+    const wrong = pairs.filter((p) => p.saved.title !== p.current.title);
+    if (wrong.length) throw new Error(`제목이 다른 창끼리 짝지음: ${wrong.map((p) => p.saved.title + "<-" + p.current.title).join(", ")}`);
+    if (pairs.length !== 2 || unmatchedCurrent.length !== 1) throw new Error(`짝 ${pairs.length}개, 남은 지금 창 ${unmatchedCurrent.length}개`);
     return true;
   });
 
@@ -344,6 +361,36 @@ async function runAsync() {
     for (const [b, r] of Object.entries(want)) {
       if (JSON.stringify(to[b]) !== JSON.stringify(r)) throw new Error(`${b}: ${JSON.stringify(to[b])} ≠ ${JSON.stringify(r)}`);
     }
+    return true;
+  });
+
+  // 모서리에서 2px 떨어진 창(창 관리 도구가 남긴 여백). 예전에는 2px 안쪽 변을 모서리에 붙이다가 위·아래가 둘 다
+  // 걸리면 창이 2px 밀렸고, 2px 어긋난 창은 제자리로 보고 건너뛰었다(저장본 이력 10회에서 확인, 2026-10-18).
+  await checkAsync("host 복원 계산: 모서리에서 2px 떨어진 창은 같은 모니터에서 저장 px 그대로 돌아온다", async () => {
+    const gapRect = { x: 2, y: 40, width: 1724, height: 1075 };
+    const gap = { dir: tempDir("gap"), applied: [], windows: [
+      { bundle: "com.google.Chrome", appName: "Chrome", pid: 30, cgId: 300, title: "여백", rect: gapRect, desktop: 1, onCurrent: true },
+    ] };
+    const saved = await hostFor(gap, fakeScreen()).saveNow("shortcut");
+    if (!saved.saved) throw new Error(`저장 안 됨: ${JSON.stringify(saved)}`);
+    gap.windows = [{ ...gap.windows[0], rect: { x: 300, y: 200, width: 800, height: 600 } }];
+    const host = hostFor(gap, fakeScreen());
+    const store = createStore({ fs: require_("node:fs"), path: require_("node:path"), stateDir: gap.dir });
+    const { entries } = host.planEntries(store.readLayout(1).latest, await host.collect());
+    if (JSON.stringify(entries[0].to) !== JSON.stringify(gapRect)) throw new Error(`${JSON.stringify(entries[0].to)} ≠ ${JSON.stringify(gapRect)}`);
+    return true;
+  });
+
+  await checkAsync("host 자동 복원: 저장 위치에서 2px 어긋난 창도 옮긴다", async () => {
+    const gapRect = { x: 2, y: 40, width: 1724, height: 1075 };
+    const gap = { dir: tempDir("nudge"), applied: [], windows: [
+      { bundle: "com.google.Chrome", appName: "Chrome", pid: 30, cgId: 300, title: "여백", rect: gapRect, desktop: 1, onCurrent: true },
+    ] };
+    await hostFor(gap, fakeScreen()).saveNow("shortcut");
+    gap.windows = [{ ...gap.windows[0], rect: { x: 4, y: 42, width: 1724, height: 1075 } }];
+    const r = await hostFor(gap, fakeScreen()).restoreAuto("check");
+    if (r.placed !== 1 || gap.applied.length !== 1) throw new Error(`결과 ${JSON.stringify(r)}, 움직인 창 ${JSON.stringify(gap.applied)}`);
+    if (JSON.stringify(gap.applied[0].to) !== JSON.stringify(gapRect)) throw new Error(`목표 ${JSON.stringify(gap.applied[0].to)}`);
     return true;
   });
 

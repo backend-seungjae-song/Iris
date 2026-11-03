@@ -50,7 +50,7 @@ const ALLOWED_HOSTS = new Set([
   "opensource.org", "www.w3.org", "developer.mozilla.org", "www.chromium.org",
   "source.chromium.org", "bugs.chromium.org", "chromedevtools.github.io",
   "support.google.com", "security.googleblog.com", "developers.googleblog.com", "developer.chrome.com", "pptr.dev",
-  "developer.android.com", "apps.apple.com",
+  "developer.android.com", "apps.apple.com", "www.apple.com", "developer.apple.com",
   "schemas.android.com", "play.google.com", "flutter.dev", "dart.dev", "pub.dev",
   "easing.dev", "easings.co", "suggestqueries.google.com", "www.figma.com", "figma.com",
   "github.io", "xtermjs.org", "microsoft.github.io", "vercel.com", "www.gstatic.com",
@@ -63,7 +63,7 @@ const ALLOWED_HOSTS = new Set([
   //   translate.googleapis.com·translate-pa.googleapis.com: 페이지 번역이 불러오는 로더와 번역 요청
   "claude.ai", "translate.googleapis.com", "translate-pa.googleapis.com",
   // 화면·동작을 설명하려고 이름을 대는 실제 사이트
-  "www.google.com", "accounts.google.com", "accounts.youtube.com", "myaccount.google.com", "mail.google.com", "naver.com", "m.naver.com",
+  "www.youtube.com", "www.google.com", "accounts.google.com", "accounts.youtube.com", "myaccount.google.com", "mail.google.com", "naver.com", "m.naver.com",
   // 픽스처로 쓰는 일반 이름들. 특정 회사가 아니다
   "shop.com", "other.com", "a.com", "b.com", "c.com",
   // 원격·루프백 판정 검사가 거부돼야 하는 예로 쓰는 가짜 주소(test/loopback-origin-gate.mjs). 기기 주소가 아니다

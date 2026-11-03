@@ -14,9 +14,12 @@ const httpUrl = (value) => {
 const modifiers = (value) => hasExactKeys(value, ["ctrl", "alt", "shift", "cmd"])
   && [value.ctrl, value.alt, value.shift, value.cmd].every((item) => typeof item === "boolean");
 const keyName = (value) => safeText(value, 1, 24) && !/[\r\n]/.test(value);
-const keyButton = (value) => hasExactKeys(value, ["id", "label", "key", "modifiers"])
+// then: 첫 키 뒤에 차례로 누를 키, 최대 7개
+const keyStep = (value) => hasExactKeys(value, ["key", "modifiers"]) && keyName(value.key) && modifiers(value.modifiers);
+const keyButton = (value) => hasExactKeys(value, ["id", "label", "key", "modifiers"], ["then"])
   && safeText(value.id, 1, 32) && /^[A-Za-z0-9_-]+$/.test(value.id)
-  && safeText(value.label, 1, 24) && keyName(value.key) && modifiers(value.modifiers);
+  && safeText(value.label, 1, 24) && keyName(value.key) && modifiers(value.modifiers)
+  && (value.then === undefined || Array.isArray(value.then) && value.then.length >= 1 && value.then.length <= 7 && value.then.every(keyStep));
 const pointRequest = (value, type, extra = [], optional = []) => hasExactKeys(value,
   ["type", "rid", "tab", "x", "y", "width", "height", ...extra], optional)
   && value.type === type && RID(value.rid) && REF(value.tab)
@@ -26,7 +29,7 @@ const pointRequest = (value, type, extra = [], optional = []) => hasExactKeys(va
 
 export const ADVANCED_REQUEST_TYPES = Object.freeze([
   "terminal.watch", "terminal.input", "terminal.key", "terminal.select", "terminal.mouse", "terminal.scrollback", "terminal.keys.get", "terminal.keys.set",
-  "browser.tabs", "browser.frame.watch", "browser.pointer", "browser.mouse", "browser.type", "browser.key",
+  "browser.tabs", "browser.frame.watch", "browser.frame.fast", "browser.wheel", "browser.pointer", "browser.mouse", "browser.type", "browser.key",
   "browser.scroll", "browser.history", "browser.navigate", "browser.tab.new", "browser.element",
   "browser.element.hover", "browser.element.pick", "browser.element.send", "browser.focus", "browser.dialog",
   "browser.record.start", "browser.record.pause", "browser.record.finish",
@@ -57,6 +60,11 @@ const validators = new Map([
     && new Set(v.keys.map((item) => item.id)).size === v.keys.length && v.keys.every(keyButton)],
 
   ["browser.tabs", (v) => hasExactKeys(v, ["type", "rid"]) && RID(v.rid)],
+  ["browser.frame.fast", (v) => hasExactKeys(v, ["type", "rid", "tab", "width", "fps", "desktop"])
+    && RID(v.rid) && REF(v.tab) && integer(v.width, 240, 2560) && integer(v.fps, 1, 20)
+    && typeof v.desktop === "boolean"],
+  ["browser.wheel", (v) => pointRequest(v, "browser.wheel", ["dx", "dy"])
+    && integer(v.dx, -20000, 20000) && integer(v.dy, -20000, 20000) && (v.dx !== 0 || v.dy !== 0)],
   ["browser.frame.watch", (v) => hasExactKeys(v, ["type", "rid", "tab", "width", "fps", "desktop"])
     && RID(v.rid) && REF(v.tab) && integer(v.width, 240, 2560) && integer(v.fps, 1, 4)
     && typeof v.desktop === "boolean"],

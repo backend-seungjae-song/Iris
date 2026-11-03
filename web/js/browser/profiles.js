@@ -301,11 +301,13 @@ export function updateProfileBtn() {
   btn.innerHTML = `${PROFILE_ICON}<span>${esc(name)}</span>`;
 }
 // 탭 프로필 변경: 서버 반영 + partition은 attach 후 불변이라 webview 재생성(현재 URL 유지 재로드).
-function setTabProfile(tabId, profileId) {
-  const sp = curBmSpace(); if (!sp || !tabId) return;
+function setTabProfile(tabId, profileId) { switchTabAccount(tabId, profileId); }
+// 탭 계정 바꾸기. url 이 있으면 지금 주소 대신 그 주소를 엶(계정 규칙 주소로 이동할 때), space 가 없으면 보고 있는 스페이스
+export function switchTabAccount(tabId, profileId, url, space) {
+  const sp = space || curBmSpace(); if (!sp || !tabId) return;
   profileId = profileIdForStored(profileId);
   bsMutate({ op: "tab.profile", space: sp, id: tabId, profile: profileId });
-  const old = getWebview(tabId); const url = old ? old.url : "";
+  const old = getWebview(tabId); url = url || (old ? old.url : "");
   if (old) { forgetTabWc(old, tabId); try { old.el.remove(); } catch {} removeWebview(tabId); }
   const rec = createWebview(tabId, profileId);
   if (url && url !== "about:blank") navigateOn(rec, url);
@@ -355,7 +357,7 @@ export function openProfileMenu() {
         const res = await importChromeToProfile(cid, label);
         if (res && res.error) { bNote.textContent = "가져오기 실패: " + res.error; }
         else {
-          bNote.textContent = `가져오기 완료: ${profileName(res.profileId)} (${(res && res.imported) || 0}개 쿠키)`;
+          bNote.textContent = `가져오기 완료: ${profileName(res.profileId)} (쿠키 ${(res && res.imported) || 0}개 추가, 이미 있던 ${(res && res.kept) || 0}개는 그대로)`;
           closeProfileMenu(); setTabProfile(id, res.profileId); return;
         }
       } catch (err) { bNote.textContent = "가져오기 오류: " + (err && err.message || err); }

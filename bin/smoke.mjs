@@ -69,6 +69,9 @@ await runRecordReplay();
 const { default: runMcpServer } = await import("./smoke/sections/mcp-server.mjs");
 await runMcpServer();
 
+const { default: runMcpWorkerWiring } = await import("./smoke/sections/mcp-worker-wiring.mjs");
+await runMcpWorkerWiring();
+
 const { default: runSpaceIsolation } = await import("./smoke/sections/space-isolation.mjs");
 await runSpaceIsolation();
 
@@ -265,5 +268,8 @@ await runAgentState();
 
 const { default: runRedBlocks } = await import("./smoke/sections/80-red-blocks.mjs");
 await runRedBlocks();
+
+const { default: runQaChannel } = await import("./smoke/sections/qa-channel.mjs");
+await runQaChannel();
 
 process.exit(summary());

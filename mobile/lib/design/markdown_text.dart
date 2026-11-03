@@ -14,6 +14,93 @@ class IrisLinkScope extends InheritedWidget {
   bool updateShouldNotify(IrisLinkScope oldWidget) => open != oldWidget.open;
 }
 
+// 변경 줄 색. 1차 시안(dir-3)의 진한 글자 + 줄 배경
+class IrisDiffColors {
+  const IrisDiffColors({
+    required this.add,
+    required this.addBg,
+    required this.del,
+    required this.delBg,
+  });
+
+  final Color add;
+  final Color addBg;
+  final Color del;
+  final Color delBg;
+
+  static const dark = IrisDiffColors(
+    add: Color(0xff86D7A2),
+    addBg: Color.fromRGBO(84, 190, 120, .14),
+    del: Color(0xffF3A3A3),
+    delBg: Color.fromRGBO(230, 100, 100, .14),
+  );
+  static const light = IrisDiffColors(
+    add: Color(0xff156B37),
+    addBg: Color.fromRGBO(30, 140, 70, .11),
+    del: Color(0xffAE2020),
+    delBg: Color.fromRGBO(200, 40, 40, .09),
+  );
+
+  static IrisDiffColors forBrightness(Brightness brightness) =>
+      brightness == Brightness.dark ? dark : light;
+
+  static IrisDiffColors of(BuildContext context) =>
+      forBrightness(Theme.of(context).brightness);
+}
+
+// 표 칸 안의 +N / −N 표시용 임시 문자. 표 줄에만 붙인다
+const _diffMark = '';
+
+String _markDiffCounts(String data) {
+  if (!data.contains('|')) return data;
+  final token = RegExp(r'(?<=^|[\s|])([+−-])(\d+)(?=$|[\s|])');
+  return data
+      .split('\n')
+      .map(
+        (line) => line.trimLeft().startsWith('|')
+            ? line.replaceAllMapped(
+                token,
+                (m) => '$_diffMark${m.group(1)}${m.group(2)}',
+              )
+            : line,
+      )
+      .join('\n');
+}
+
+class _DiffCountSyntax extends md.InlineSyntax {
+  _DiffCountSyntax() : super('$_diffMark([+−-])(\\d+)');
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    final tag = match.group(1) == '+' ? 'diffadd' : 'diffdel';
+    parser.addNode(md.Element.text(tag, '${match.group(1)}${match.group(2)}'));
+    return true;
+  }
+}
+
+class _DiffCountBuilder extends MarkdownElementBuilder {
+  _DiffCountBuilder(this.added);
+
+  final bool added;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final colors = context.iris;
+    return Text(
+      element.textContent.replaceFirst('-', '−'),
+      style: (parentStyle ?? preferredStyle)?.copyWith(
+        color: added ? colors.okText : colors.dangerText,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+}
+
 class IrisMarkdown extends StatelessWidget {
   const IrisMarkdown(
     this.data, {
@@ -36,12 +123,15 @@ class IrisMarkdown extends StatelessWidget {
     final body = (baseStyle ?? IrisType.body).copyWith(
       color: textColor ?? colors.foreground,
     );
-    final blockSpacing = compact ? 5.0 : 10.0;
+    final size = body.fontSize ?? 17;
+    final blockSpacing = compact ? 5.0 : 8.0;
+    final line = BorderSide(color: colors.separator);
     return MarkdownBody(
-      data: data,
+      data: _markDiffCounts(data),
       selectable: selectable,
       fitContent: false,
       softLineBreak: true,
+      inlineSyntaxes: [_DiffCountSyntax()],
       styleSheet: MarkdownStyleSheet(
         p: body,
         pPadding: EdgeInsets.zero,
@@ -54,19 +144,19 @@ class IrisMarkdown extends StatelessWidget {
         strong: body.copyWith(fontWeight: FontWeight.w700),
         del: body.copyWith(decoration: TextDecoration.lineThrough),
         h1: body.copyWith(
-          fontSize: compact ? 20 : 25,
+          fontSize: compact ? 20 : size + 5,
           height: 1.25,
           fontWeight: FontWeight.w700,
         ),
         h2: body.copyWith(
-          fontSize: compact ? 18 : 22,
+          fontSize: compact ? 18 : size + 3,
           height: 1.3,
           fontWeight: FontWeight.w700,
         ),
         h3: body.copyWith(
-          fontSize: compact ? 17 : 19,
+          fontSize: compact ? 17 : size + 1,
           height: 1.35,
-          fontWeight: FontWeight.w700,
+          fontWeight: compact ? FontWeight.w700 : FontWeight.w600,
         ),
         h4: body.copyWith(fontWeight: FontWeight.w700),
         h5: body.copyWith(fontWeight: FontWeight.w600),
@@ -81,8 +171,8 @@ class IrisMarkdown extends StatelessWidget {
         h5Padding: EdgeInsets.only(bottom: blockSpacing / 2),
         h6Padding: EdgeInsets.only(bottom: blockSpacing / 2),
         blockSpacing: blockSpacing,
-        listIndent: compact ? 20 : 24,
-        listBullet: body.copyWith(color: colors.foreground2),
+        listIndent: 20,
+        listBullet: body.copyWith(color: colors.muted),
         listBulletPadding: const EdgeInsets.only(right: 6),
         blockquote: body.copyWith(color: colors.foreground2),
         blockquotePadding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
@@ -92,32 +182,42 @@ class IrisMarkdown extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
         ),
         code: body.copyWith(
-          color: colors.foreground2,
-          backgroundColor: colors.level3,
+          color: colors.foreground,
+          backgroundColor: colors.level2,
           fontFamily: 'monospace',
-          fontSize: body.fontSize == null ? 14 : body.fontSize! * 0.88,
+          fontSize: size * 0.88,
           height: 1.4,
         ),
-        tableHead: body.copyWith(fontWeight: FontWeight.w700),
-        tableBody: body.copyWith(
-          fontSize: body.fontSize == null ? 14 : body.fontSize! * 0.9,
+        tableHead: body.copyWith(
+          color: colors.muted,
+          fontSize: size * 0.8,
+          fontWeight: FontWeight.w600,
         ),
+        tableBody: body.copyWith(fontSize: size * 0.87),
         tableHeadAlign: TextAlign.left,
         tablePadding: EdgeInsets.only(bottom: blockSpacing),
-        tableBorder: TableBorder.all(color: colors.separator, width: 1),
+        tableBorder: TableBorder(
+          top: line,
+          bottom: line,
+          left: line,
+          right: line,
+          horizontalInside: line,
+          borderRadius: BorderRadius.circular(IrisRadius.field),
+        ),
         tableColumnWidth: const IntrinsicColumnWidth(),
         tableScrollbarThumbVisibility: true,
         tableCellsPadding: const EdgeInsets.symmetric(
           horizontal: 10,
-          vertical: 7,
+          vertical: 8,
         ),
         tableHeadCellsDecoration: BoxDecoration(color: colors.level2),
-        tableCellsDecoration: BoxDecoration(color: colors.level1),
-        horizontalRuleDecoration: BoxDecoration(
-          border: Border(top: BorderSide(color: colors.separator)),
-        ),
+        horizontalRuleDecoration: BoxDecoration(border: Border(top: line)),
       ),
-      builders: {'pre': _CodeBlockBuilder()},
+      builders: {
+        'pre': _CodeBlockBuilder(),
+        'diffadd': _DiffCountBuilder(true),
+        'diffdel': _DiffCountBuilder(false),
+      },
       imageBuilder: (uri, title, alt) => _BlockedImage(alt: alt, uri: uri),
       onTapLink: (text, href, title) {
         if (href != null) _showLink(context, href);
@@ -221,6 +321,12 @@ class _CodeBlockBuilder extends MarkdownElementBuilder {
   }
 }
 
+// 코드 칸 바탕. 다크는 터미널 바탕색, 라이트는 앱 바탕색
+Color _codeSurface(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? context.iris.terminal
+    : context.iris.background;
+
 class _CodeBlock extends StatelessWidget {
   const _CodeBlock({required this.code, required this.language});
 
@@ -229,62 +335,68 @@ class _CodeBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.iris;
     final shownLanguage = language.isEmpty ? 'code' : language;
     return Container(
       key: Key('markdown-code-$shownLanguage'),
       width: double.infinity,
       decoration: BoxDecoration(
-        color: context.iris.terminal,
-        borderRadius: BorderRadius.circular(14),
+        color: _codeSurface(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.line2),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            height: 38,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 12, right: 4),
-              child: Row(
-                children: [
-                  Text(
-                    shownLanguage,
-                    style: const TextStyle(
-                      color: Color(0xff8199aa),
-                      fontFamily: 'monospace',
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+          Container(
+            height: 36,
+            padding: const EdgeInsets.only(left: 12, right: 4),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: colors.separator)),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  shownLanguage,
+                  style: TextStyle(
+                    color: colors.muted,
+                    fontFamily: 'monospace',
+                    fontSize: 12,
                   ),
-                  const Spacer(),
-                  IconButton(
-                    key: const Key('markdown-code-copy'),
-                    tooltip: '코드 복사',
-                    onPressed: () =>
-                        Clipboard.setData(ClipboardData(text: code)),
-                    icon: const IrisIcon(
-                      'copy',
-                      size: 16,
-                      color: Color(0xff8fd0f2),
-                    ),
+                ),
+                const Spacer(),
+                IconButton(
+                  key: const Key('markdown-code-copy'),
+                  tooltip: '코드 복사',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 36,
+                    height: 36,
                   ),
-                ],
-              ),
+                  onPressed: () => Clipboard.setData(ClipboardData(text: code)),
+                  icon: IrisIcon('copy', size: 16, color: colors.muted),
+                ),
+              ],
             ),
           ),
           SingleChildScrollView(
             key: const Key('markdown-code-scroll'),
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: SelectableText.rich(
-              highlightCode(code, language),
+              highlightCode(
+                code,
+                language,
+                brightness: Theme.of(context).brightness,
+              ),
               key: const Key('markdown-code-text'),
               textScaler: MediaQuery.textScalerOf(context),
-              style: const TextStyle(
-                color: Color(0xffc9dcea),
+              style: TextStyle(
+                color: colors.foreground2,
                 fontFamily: 'monospace',
-                fontSize: 13,
-                height: 1.55,
+                fontSize: 12.5,
+                height: 1.6,
               ),
             ),
           ),
@@ -294,10 +406,38 @@ class _CodeBlock extends StatelessWidget {
   }
 }
 
+class _CodeStyles {
+  _CodeStyles(Brightness brightness)
+    : colors = brightness == Brightness.dark
+          ? IrisColors.dark
+          : IrisColors.light,
+      diff = IrisDiffColors.forBrightness(brightness);
+
+  final IrisColors colors;
+  final IrisDiffColors diff;
+
+  TextStyle get keyword =>
+      TextStyle(color: colors.termBlue, fontWeight: FontWeight.w600);
+  TextStyle get string => TextStyle(color: colors.termGreen);
+  TextStyle get comment =>
+      TextStyle(color: colors.muted, fontStyle: FontStyle.italic);
+  TextStyle get number => TextStyle(color: colors.termYellow);
+  TextStyle get diffAdd =>
+      TextStyle(color: diff.add, backgroundColor: diff.addBg);
+  TextStyle get diffDelete =>
+      TextStyle(color: diff.del, backgroundColor: diff.delBg);
+  TextStyle get diffHeader => TextStyle(color: colors.termBlue);
+}
+
 @visibleForTesting
-TextSpan highlightCode(String source, String language) {
+TextSpan highlightCode(
+  String source,
+  String language, {
+  Brightness brightness = Brightness.dark,
+}) {
+  final styles = _CodeStyles(brightness);
   final normalized = _languageAlias(language);
-  if (normalized == 'diff') return _highlightDiff(source);
+  if (normalized == 'diff') return _highlightDiff(source, styles);
   final keywords = _keywords[normalized] ?? _commonKeywords;
   final lineComment = switch (normalized) {
     'python' || 'ruby' || 'shell' || 'yaml' => '#',
@@ -312,7 +452,7 @@ TextSpan highlightCode(String source, String language) {
       final end = source.indexOf('*/', index);
       final stop = end < 0 ? source.length : end + 2;
       spans.add(
-        TextSpan(text: source.substring(index, stop), style: _codeComment),
+        TextSpan(text: source.substring(index, stop), style: styles.comment),
       );
       index = stop;
       blockComment = end < 0;
@@ -326,7 +466,7 @@ TextSpan highlightCode(String source, String language) {
       final end = source.indexOf('\n', index);
       final stop = end < 0 ? source.length : end;
       spans.add(
-        TextSpan(text: source.substring(index, stop), style: _codeComment),
+        TextSpan(text: source.substring(index, stop), style: styles.comment),
       );
       index = stop;
       continue;
@@ -335,7 +475,7 @@ TextSpan highlightCode(String source, String language) {
     if (char == '"' || char == "'" || char == '`') {
       final stop = _stringEnd(source, index, char);
       spans.add(
-        TextSpan(text: source.substring(index, stop), style: _codeString),
+        TextSpan(text: source.substring(index, stop), style: styles.string),
       );
       index = stop;
       continue;
@@ -344,7 +484,7 @@ TextSpan highlightCode(String source, String language) {
         .firstMatch(source.substring(index));
     if (number != null) {
       final value = number.group(0)!;
-      spans.add(TextSpan(text: value, style: _codeNumber));
+      spans.add(TextSpan(text: value, style: styles.number));
       index += value.length;
       continue;
     }
@@ -355,7 +495,7 @@ TextSpan highlightCode(String source, String language) {
       spans.add(
         TextSpan(
           text: value,
-          style: keywords.contains(value) ? _codeKeyword : null,
+          style: keywords.contains(value) ? styles.keyword : null,
         ),
       );
       index += value.length;
@@ -367,17 +507,17 @@ TextSpan highlightCode(String source, String language) {
   return TextSpan(children: spans);
 }
 
-TextSpan _highlightDiff(String source) {
+TextSpan _highlightDiff(String source, _CodeStyles styles) {
   final spans = <TextSpan>[];
   final lines = source.split('\n');
   for (var index = 0; index < lines.length; index++) {
     final line = lines[index];
     final style = line.startsWith('+') && !line.startsWith('+++')
-        ? _diffAdd
+        ? styles.diffAdd
         : line.startsWith('-') && !line.startsWith('---')
-        ? _diffDelete
+        ? styles.diffDelete
         : line.startsWith('@@')
-        ? _diffHeader
+        ? styles.diffHeader
         : null;
     spans.add(TextSpan(text: line, style: style));
     if (index != lines.length - 1) spans.add(const TextSpan(text: '\n'));
@@ -409,26 +549,6 @@ String _languageAlias(String language) => switch (language.toLowerCase()) {
   'patch' => 'diff',
   final value => value,
 };
-
-const _codeKeyword = TextStyle(
-  color: Color(0xff8fd0f2),
-  fontWeight: FontWeight.w600,
-);
-const _codeString = TextStyle(color: Color(0xff8bfbc2));
-const _codeComment = TextStyle(
-  color: Color(0xff8199aa),
-  fontStyle: FontStyle.italic,
-);
-const _codeNumber = TextStyle(color: Color(0xfff9f871));
-const _diffAdd = TextStyle(
-  color: Color(0xff8bfbc2),
-  backgroundColor: Color(0x1f8bfbc2),
-);
-const _diffDelete = TextStyle(
-  color: Color(0xffff7a72),
-  backgroundColor: Color(0x1fff7a72),
-);
-const _diffHeader = TextStyle(color: Color(0xff8fd0f2));
 
 const _commonKeywords = <String>{
   'async',

@@ -46,7 +46,7 @@ const { isFileUrl, isLoopbackUrl } = require("./local-link.cjs");
 const EXPLICIT_SAVE_TTL_MS = 15000;
 
 function createDownloadHook({ fs, path, downloadState, allWindows, now = Date.now,
-  aiDriving = () => false, noteBlockedDownload = () => {} }) {
+  aiDriving = () => false, noteBlockedDownload = () => {}, downloadsDir = () => "" }) {
   const reservedPaths = new Set();
   const explicitSaves = new Map();   // url → 요청 시각
   function noteExplicitSave(url) {
@@ -97,10 +97,11 @@ function createDownloadHook({ fs, path, downloadState, allWindows, now = Date.no
   function installDownloadHook(sess) {
     sess.on("will-download", (_ev, item, wc) => {
       const sourceUrl = (() => { try { return String(item.getURL() || ""); } catch { return ""; } })();
+      const explicitSave = takeExplicitSave(sourceUrl);
       // 로컬 파일 링크는 내려받을 대상이 아니다. 그 파일은 이미 디스크에 있고, 브라우저가
       // 렌더링하지 못해 내려받기로 분류된 것뿐이므로(표·문서·압축파일) 앱이 받아서 그린다.
       // 사용자가 「다른 이름으로 저장」을 요청한 경우는 요청대로 저장한다.
-      if (isFileUrl(sourceUrl) && !takeExplicitSave(sourceUrl)) {
+      if (isFileUrl(sourceUrl) && !explicitSave) {
         if (toHost(wc, "ac-open-local", { target: sourceUrl })) {
           try { item.cancel(); } catch {}
           return;
@@ -114,7 +115,7 @@ function createDownloadHook({ fs, path, downloadState, allWindows, now = Date.no
         // 창을 띄우고, 그 창이 닫힐 때까지 조작이 막힌다.
         // 임의 위치에 자동 저장하지도 않는다. 어디에 무엇을 남길지는 미리 지정한 저장 위치가 정하며,
         // 지정하지 않은 채 남기는 것은 사용자가 요청하지 않은 쓰기다. 자동화는 browser_download 로
-        // 위치를 정하고 다시 실행하면 된다. 사용자가 시작한 내려받기는 저장 창을 그대로 띄운다.
+        // 위치를 정하고 다시 실행하면 된다.
         if (!downloadStatus.dir && wc && !wc.isDestroyed() && aiDriving(wc.id)) {
           noteBlockedDownload(wc, item);
           // 사용자에게도 한 줄 알린다. 사용자가 방금 누른 것이 여기서 취소됐을 수 있고, 알림이
@@ -136,6 +137,18 @@ function createDownloadHook({ fs, path, downloadState, allWindows, now = Date.no
           item.once("done", (__e, state) => {
             downloadState.complete(dest, state);
           });
+        } else if (!explicitSave) {
+          // 사람이 시작한 내려받기: 저장 창 없이 다운로드 폴더에 저장(사용자 2026-10-29)
+          // - 「다른 이름으로 저장」만 저장 창을 띄움
+          let home = ""; try { home = String(downloadsDir() || ""); } catch {}
+          if (home) {
+            const dest = reserveDownloadPath(home, item.getFilename());
+            item.setSavePath(dest);
+            item.once("done", (__e, state) => {
+              reservedPaths.delete(dest);
+              if (state === "completed") toHost(wc, "ac-native-notice", { text: `다운로드 폴더에 저장했습니다: ${path.basename(dest)}` });
+            });
+          }
         }
       } catch {}
       try {

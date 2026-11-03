@@ -15,10 +15,13 @@ class KeepAliveService : Service() {
         const val ACTION_UPDATE = "iris.remote.keepalive.UPDATE"
         const val ACTION_STOP = "iris.remote.keepalive.STOP"
         const val EXTRA_REQUEST_COUNT = "requestCount"
-        const val EXTRA_DISCONNECTED = "disconnected"
+        const val EXTRA_ALERT = "alert"
+        const val EXTRA_OPEN_RESPONSES = "openResponses"
 
-        private const val CONNECTION_CHANNEL = "iris.remote.connection"
-        private const val REQUEST_CHANNEL = "iris.remote.requests"
+        // 포그라운드 서비스 알림은 숨길 수 없어 상태 표시줄 아이콘 없는 최소 중요도 채널로 둠
+        private const val CONNECTION_CHANNEL = "iris.remote.connection.min"
+        private const val REQUEST_CHANNEL = "iris.remote.requests.v2"
+        private const val REQUEST_QUIET_CHANNEL = "iris.remote.requests.quiet"
         private const val CONNECTION_NOTIFICATION = 4100
         private const val REQUEST_NOTIFICATION = 4101
     }
@@ -38,10 +41,9 @@ class KeepAliveService : Service() {
             ACTION_START -> startForegroundConnection()
             ACTION_UPDATE -> updateRequests(
                 intent.getIntExtra(EXTRA_REQUEST_COUNT, requestCount),
+                intent.getBooleanExtra(EXTRA_ALERT, false),
             )
-            ACTION_STOP -> stopConnection(
-                disconnected = intent.getBooleanExtra(EXTRA_DISCONNECTED, false),
-            )
+            ACTION_STOP -> stopConnection()
         }
         return START_NOT_STICKY
     }
@@ -49,23 +51,36 @@ class KeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createChannels() {
+        notifications.deleteNotificationChannel("iris.remote.connection")
         notifications.createNotificationChannel(
             NotificationChannel(
                 CONNECTION_CHANNEL,
                 "Iris 연결",
-                NotificationManager.IMPORTANCE_LOW,
+                NotificationManager.IMPORTANCE_MIN,
             ).apply {
                 description = "Iris 원격 연결 상태"
                 lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             },
         )
+        notifications.deleteNotificationChannel("iris.remote.requests")
         notifications.createNotificationChannel(
             NotificationChannel(
                 REQUEST_CHANNEL,
                 "Iris 응답 요청",
-                NotificationManager.IMPORTANCE_DEFAULT,
+                NotificationManager.IMPORTANCE_HIGH,
             ).apply {
                 description = "응답이 필요한 요청 수"
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            },
+        )
+        // 소리 없이 개수만 갱신하는 알림용 채널
+        notifications.createNotificationChannel(
+            NotificationChannel(
+                REQUEST_QUIET_CHANNEL,
+                "Iris 응답 요청 개수 갱신",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "새 요청 없이 개수만 바뀔 때"
                 lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             },
         )
@@ -81,9 +96,8 @@ class KeepAliveService : Service() {
         foreground = true
     }
 
-    private fun updateRequests(count: Int) {
+    private fun updateRequests(count: Int, alert: Boolean) {
         if (!foreground) return
-        val increased = count > requestCount
         requestCount = count
         if (count <= 0) {
             notifications.cancel(REQUEST_NOTIFICATION)
@@ -92,22 +106,15 @@ class KeepAliveService : Service() {
         notifications.notify(
             REQUEST_NOTIFICATION,
             notification(
-                REQUEST_CHANNEL,
+                if (alert) REQUEST_CHANNEL else REQUEST_QUIET_CHANNEL,
                 "응답 요청 ${count}건",
-                onlyAlertOnce = !increased,
+                onlyAlertOnce = !alert,
             ),
         )
     }
 
-    private fun stopConnection(disconnected: Boolean) {
-        if (disconnected) {
-            notifications.notify(
-                REQUEST_NOTIFICATION,
-                notification(REQUEST_CHANNEL, "연결이 끊겼습니다"),
-            )
-        } else {
-            notifications.cancel(REQUEST_NOTIFICATION)
-        }
+    private fun stopConnection() {
+        notifications.cancel(REQUEST_NOTIFICATION)
         stopForeground(STOP_FOREGROUND_REMOVE)
         foreground = false
         stopSelf()
@@ -119,12 +126,14 @@ class KeepAliveService : Service() {
         ongoing: Boolean = false,
         onlyAlertOnce: Boolean = false,
     ): Notification {
+        val opensResponses = channel == REQUEST_CHANNEL || channel == REQUEST_QUIET_CHANNEL
         val launch = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_OPEN_RESPONSES, opensResponses)
         }
         val pendingIntent = PendingIntent.getActivity(
             this,
-            0,
+            if (opensResponses) 1 else 0,
             launch,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

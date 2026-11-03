@@ -374,9 +374,9 @@ check("모든 도구 스키마가 properties 맵 형식", () => {
 check("조작 도구는 tab 인자를 받음", () => {
   const t = mcpBoot.list?.result?.tools || []; if (!t.length) return false;
   const noTab = t.filter((x) => !x.inputSchema?.properties?.tab).map((x) => x.name);
-  // 탭이 없는 도구만 예외다. 목록·새 탭·보고서·기록·고른 요소(브라우저를 거치지 않는다),
+  // 탭이 없는 도구만 예외다. 목록·새 탭·기록·고른 요소(브라우저를 거치지 않는다),
   // 그리고 앱 도구 전부(시뮬레이터엔 탭이라는 개념이 없다).
-  const exempt = ["browser_tabs", "browser_new_tab", "browser_report", "browser_trace", "browser_picks"];
+  const exempt = ["browser_tabs", "browser_new_tab", "browser_trace", "browser_picks"];
   const app = t.filter((x) => x.name.startsWith("app_")).map((x) => x.name);
   return exempt.every((n) => noTab.includes(n)) && app.every((n) => noTab.includes(n))
     && noTab.length === exempt.length + app.length;

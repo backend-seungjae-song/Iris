@@ -40,3 +40,11 @@ test('Windows switcher rejects reused HWND and reports desktop refusal without d
   const list=await g.catalog.enumerate(); const blocked=await g.catalog.step({ordered:[123],targets:list.windows,dir:1,ownPid:99});
   assert.equal(blocked.missing[0].reason,'desktop-switch-failed');
 });
+test('Windows switcher raises every window in a group and refocuses the first',async()=>{
+  const rows=[{...row,id:1,cgId:1,matchTitle:'A'},{...row,id:2,cgId:2,matchTitle:'B'},{...row,id:3,cgId:3,matchTitle:'C'}];
+  const f=catalogFixture(rows); const list=await f.catalog.enumerate();
+  const targets=list.windows.map((w)=>w.id===1||w.id===2?{...w,group:'g1'}:w);
+  const r=await f.catalog.step({targets,dir:1,ownPid:99});
+  assert.equal(r.raised,1); assert.deepEqual([...r.also],[2]);
+  assert.deepEqual(f.calls.filter((c)=>c.op==='focus').map((c)=>c.hwnd),[1,2,1]);
+});

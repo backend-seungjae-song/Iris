@@ -132,14 +132,22 @@ function createObservation({
   now,
   shotsDir,
   setTimeoutFn = setTimeout,
+  captureMoment = null,
 }) {
   const logBuffers = new Map();
+  const eventListeners = new Set();
+  function subscribeEvents(listener) { eventListeners.add(listener); return () => eventListeners.delete(listener); }
+  function cdpEvent(id, method, params, sessionId = "") {
+    for (const listener of eventListeners) {
+      try { listener(Number(id), method, params, sessionId); } catch {}
+    }
+  }
 
   function bufFor(id) {
     let b = logBuffers.get(Number(id));
     if (!b) {
       b = { console: [], exceptions: [], network: [], dialogs: [], reqUrls: new Map(),
-        moments: [], momentSeen: new Set() };
+        moments: [], momentSeen: new Set(), pending: new Set() };
       logBuffers.set(Number(id), b);
     }
     return b;
@@ -170,11 +178,24 @@ function createObservation({
   function closeDialog(id) { bufFor(id).dialogOpen = null; }
   function dialogOpen(id) { const b = logBuffers.get(Number(id)); return b && b.dialogOpen; }
 
-  function noteRequest(id, requestId, url) {
+  function noteRequest(id, requestId, url, sessionId = "") {
     if (!requestId) return;
+    bufFor(id).pending.add(JSON.stringify([sessionId, requestId]));
     const urls = bufFor(id).reqUrls;
     urls.set(requestId, url || "");
     if (urls.size > 500) urls.delete(urls.keys().next().value);
+  }
+
+  function finishRequest(id, requestId, sessionId = "") {
+    bufFor(id).pending.delete(JSON.stringify([sessionId, requestId]));
+  }
+
+  function pendingRequests(id) { return bufFor(id).pending.size; }
+
+  function forgetRequests(id, sessionId) {
+    const pending = bufFor(id).pending;
+    if (sessionId == null) pending.clear();
+    else for (const key of pending) if (JSON.parse(key)[0] === sessionId) pending.delete(key);
   }
 
   function requestUrl(id, requestId) {
@@ -217,8 +238,30 @@ function createObservation({
     if (buf.momentSeen.has(print)) return;
     buf.momentSeen.add(print);
     const rec = { id: m.id, text: m.text, print, ts: now(), why: m.why,
-      rect: m.rect || null, gone: false, shot: null };
+      rect: m.rect || null, gone: false, shot: null,
+      captureTarget:{type:"tab",id:wcId}, unavailable:["url","viewport"],
+      stability:{waitedMs:0,stable:false,remaining:["not-requested"]} };
     pushCapped(buf.moments, rec);
+    if (captureMoment) {
+      try {
+        const captured = await captureMoment(wcId, send, m);
+        if (captured) {
+          rec.shot = captured.path || null;
+          rec.caption = captured.caption;
+          rec.marks = captured.marks;
+          rec.captureTarget = captured.captureTarget || { type:"tab",id:captured.tab || wcId };
+          rec.url = captured.url;
+          rec.viewport = captured.viewport;
+          rec.unavailable = ["url","viewport"].filter(key => !captured[key]);
+          rec.stability = captured.stability || rec.stability;
+          if (!rec.shot) rec.shotError = "QA 순간 알림 촬영 결과가 없습니다";
+          return;
+        }
+      } catch {
+        rec.shotError = "QA 순간 알림 촬영 실패";
+        return;
+      }
+    }
     let held = false;
     try { if (!isTabShown(wcId)) held = await captureHold(wcId, true); } catch { held = false; }
     try {
@@ -278,6 +321,8 @@ function createObservation({
     return {
       list: fresh.map((m) => ({ text: m.text, shot: m.shot || null, gone: !!m.gone,
         lived: m.lived || null, print: m.print, why: m.why,
+        id: m.id, ts: m.ts, caption: m.caption, marks: m.marks, rect: m.rect,
+        captureTarget: m.captureTarget, url:m.url, viewport:m.viewport, unavailable:m.unavailable, stability: m.stability,
         note: m.shot ? null : (m.shotError || "뜬 것은 봤지만 찍지 못했다") })),
       commit: () => { for (const m of fresh) m.sent = true; },
     };
@@ -313,8 +358,8 @@ function createObservation({
   function forget(wcId) { logBuffers.delete(Number(wcId)); }
   function animates(cmd) { return ANIMATES.has(cmd); }
 
-  return { recordConsole, recordException, recordNetwork, openDialog, closeDialog, dialogOpen,
-    noteRequest, requestUrl, setFileChooser, setLastUpload, noteMoment, settleAnimations, prime,
+  return { subscribeEvents, cdpEvent, recordConsole, recordException, recordNetwork, openDialog, closeDialog, dialogOpen,
+    noteRequest, finishRequest, pendingRequests, forgetRequests, requestUrl, setFileChooser, setLastUpload, noteMoment, settleAnimations, prime,
     momentPayload, drainMoments, observe, clearDiagnostics, diagSince, forget, animates };
 }
 

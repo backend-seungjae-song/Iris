@@ -1,0 +1,44 @@
+
+⏺ 요청은 8단계 도구 동작 테스트입니다. 각 단계를 순서대로 실행하고,
+  끝날 때마다 결과를 확인한 뒤 다음 단계로 넘어가겠습니다.
+
+  1단계: 작업 폴더에 out/a.txt를 만듭니다.
+
+  Ran 1 shell command
+
+⏺ 1단계 완료: out/a.txt에 hi가 들어갔습니다.
+
+  2단계: notes.txt를 읽고 line one을 line 1로 바꿉니다.
+
+  Read 1 file
+
+⏺ Update(notes.txt)
+  ⎿  Added 1 line, removed 1 line
+      1 -line one
+      1 +line 1
+      2  line two
+
+⏺ 2단계 완료: notes.txt 첫 줄을 line 1로 바꿨습니다.
+
+  3단계: new.md를 만들고 내용을 hello로 씁니다.
+
+⏺ Write(new.md)
+  ⎿  Wrote 1 line to new.md
+      1 hello
+
+⏺ 4단계: WebFetch로 https://example.com을 가져옵니다. 도구 스키마를
+  먼저 불러옵니다.
+
+⏺ Fetch(https://example.com)
+
+───────────────────────────────────────────────────────────────────
+ Fetch
+ Claude wants to fetch content from example.com
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ url: https://example.com/
+ prompt: 이 페이지의 제목과 본문 핵심 문장을 요약해 주세요.
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to allow Claude to fetch this content?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for example.com
+   3. No, and tell Claude what to do differently (esc)

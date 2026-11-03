@@ -44,7 +44,7 @@ class StartScreen extends StatelessWidget {
               ),
               const SizedBox(height: 22),
               Text(
-                '컴퓨터과 연결',
+                '컴퓨터와 연결',
                 key: const Key('start-title'),
                 style: IrisType.title.copyWith(color: context.iris.foreground),
               ),

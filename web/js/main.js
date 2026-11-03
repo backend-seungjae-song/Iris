@@ -40,18 +40,20 @@ import {
   closeProfileMenu, getProfileChromeSource, getProfiles, getSpaceDefaults, initProfiles, openProfileMenu,
   profileById, profileIdForStored, profileOfTab,
 } from "./browser/profiles.js";
-import { boundSpace, bsMutate, getBrowserState, initBrowserState } from "./browser/state.js";
+import { boundSpace, bsMutate, getBrowserState, initBrowserState, isBrowserStateLoaded } from "./browser/state.js";
+import { linkRole } from "./browser/link-role.js";
+import { linkRuleForPageTab, matchLinkRule } from "./browser/link-rules.js";
 import {
   markAiRecentUnknown, markAiTargetsUnknown, setAiBusyTabs, setAiRecentUse, setAiTargets, setTabHandles,
 } from "./browser/ai-state.js";
 import { applyBrowserState, reconcileAiTabs, wakeTabHere } from "./browser/ai-tabs.js";
 import {
   autofillBlocked, createWebview, forgetTabWc, goUrl, initWebviewFactory, navigate, navigateOn,
-  reportActiveBrowserWc, reportTabWc, spaceOfTabId, updateActiveWebview, updateWebviewMeta,
+  reportActiveBrowserWc, reportTabWc, spaceOfTabId, syncLinkAccountRules, updateActiveWebview, updateWebviewMeta,
 } from "./browser/webview-factory.js";
 import { getWebview, getWebviewEntries, getWebviewIds } from "./browser/webview-store.js";
 import {
-  activeWv, clearTabDialog, initWebview, newTabId, renderTabDialog, scheduleWebviewThrottling,
+  activeWv, clearTabDialog, initWebview, reloadActiveTab, newTabId, renderTabDialog, scheduleWebviewThrottling,
   setTabDialog,
 } from "./browser/webview.js";
 import { initFilePalette, spaceRootFor, handleFilePaletteTree } from "./center/file-palette.js";
@@ -79,12 +81,12 @@ import {
 } from "./center/closed-tabs.js";
 import { getOverrides as getKeymapOverrides, setOverrides as setKeymapOverrides } from "./core/keymap.js";
 import { artifactsMessage } from "./devtool/artifacts-page.js";
-import { enterKeymapPage, initKeymapPage, renderKeymapPage } from "./devtool/keymap-page.js";
+import { enterKeymapPage, initKeymapPage, linkRulesChanged, renderKeymapPage } from "./devtool/keymap-page.js";
 import {
   initTextEditor, ensureMonacoLib, markFileDirty, monacoTheme,
 } from "./center/text-editor.js";
 import {
-  addTab, ensureTabSpace, getActiveTabId, getCenterSpace, getTabs, getTabSpaces, setActiveTab,
+  addTab, ensureTabSpace, isTabVisible, getCenterSpace, getTabs, getTabSpaces, setActiveTab,
   setCenterSpace,
 } from "./center/tab-store.js";
 import {
@@ -342,9 +344,10 @@ function showNotice({ id, title, body, warn, action, answer, hot, choices, wait,
 // 알림의 "그 탭으로" 동작. 순서가 중요하다. 그 탭이 있는 스페이스로 먼저 옮기고, 그 스페이스의
 // 브라우저 탭으로 들어간다. 콘솔 탭 목록에 그 탭이 없으면(다른 스페이스에서 AI가 만든 탭)
 // 활성 id만 바뀌어 아무것도 뜨지 않거나 파일 탭 영역에 다른 내용이 표시된다.
+// 반환: 옮겼으면 true, 그 탭이 이제 없으면 false(알림이 다른 탭으로 보내지 않고 사유를 표시)
 function gotoTabById(tabId) {
-  if (!tabId) return;
-  const sp = spaceOfTabId(tabId); if (!sp) return;
+  if (!tabId) return false;
+  const sp = spaceOfTabId(tabId); if (!sp) return false;
   // 브라우저가 분리돼 있으면 그 창이 탭을 소유한다. 창을 띄우고 그쪽에서 전환한다. 다만 콘솔(과 herdr)
   // 쪽 스페이스도 함께 옮겨야 한다. 여기서 바로 빠져나가면 탭만 바뀌고 스페이스는 그대로여서,
   // 이동한 탭과 작업 환경이 서로 다른 스페이스에 남는다.
@@ -353,7 +356,7 @@ function gotoTabById(tabId) {
     bsMutate({ op: "space.active", space: sp });
     bsMutate({ op: "tab.switch", space: sp, id: tabId });
     try { window.acHost && acHost.openBrowser && acHost.openBrowser(); } catch {}
-    return;
+    return true;
   }
   if (!BROWSER_MODE) {
     focusSpace(sp);   // 사이드바 선택·파일 트리·센터까지 그 스페이스로 (centerSpace도 여기서 바뀐다)
@@ -367,6 +370,7 @@ function gotoTabById(tabId) {
   setActiveTab(sp, tabId);
   bsMutate({ op: "tab.switch", space: sp, id: tabId });   // 브라우저 상태의 활성 탭도 같이 옮긴다
   renderTabs(); showActiveTab(); renderBmTabs();
+  return true;
 }
 
 // ── 파일 트리 우클릭 컨텍스트 메뉴(VSCode식) ──
@@ -585,8 +589,11 @@ function newBrowserTab(url, opts) {
   // 탭 4개가 전부 옛 기본 계정 하나로 박혀 있었다).
   // 기본 계정이 없으면 값을 박지 않는다(undefined). 그래야 나중에 기본을 정할 때 그 탭도 따라온다.
   const spDef = getSpaceDefaults()[sp];
+  // 계정을 정하지 않은 새 탭은 설정 「링크 열기」 규칙이 먼저(북마크·링크·+ 탭 주소), 없으면 스페이스 기본
+  const rule = url && !(opts && opts.profile !== undefined) ? matchLinkRule(url, getBrowserState().linkProfileRules) : null;
   const inherit = opts && opts.profile !== undefined
     ? profileIdForStored(opts.profile)
+    : rule ? profileIdForStored(rule.profile)
     : ((spDef && profileById(spDef)) ? spDef : undefined);
   if (!BROWSER_MODE && getBrowserState().docked) {
     setCenterSpace(sp);
@@ -618,7 +625,7 @@ try { window.acHost && acHost.onOpenTab && acHost.onOpenTab((m) => {
   // 연 탭(opener)의 프로필을 찾아 넘긴다. 찾지 못하면 활성 탭 기준으로 상속한다.
   // 새 탭은 *요청한 탭에 지금 표시되는* 프로필로 뜬다. 저장값이 비어 스페이스 기본값을 따르는
   // 중이었다면 그 실제 값을 상속한다. 화면에 보이는 프로필과 새 탭의 세션이 달라지면 안 된다.
-  let profile, openerSpace, openerGroup, openerTab = null;
+  let profile, openerSpace, openerGroup, openerTab = null, openerUrl = "";
   if (m.openerWc) {
     const hit = getWebviewEntries().find(([, rec]) => rec && rec.wc === m.openerWc)?.[0];
     if (hit) {
@@ -628,8 +635,12 @@ try { window.acHost && acHost.onOpenTab && acHost.onOpenTab((m) => {
       const owner = openerSpace && ((browserState.tabsBySpace && browserState.tabsBySpace[openerSpace]) || []).find((t) => t.id === hit);
       openerGroup = owner && owner.group ? owner.group : undefined;
       profile = profileOfTab(hit);
+      openerUrl = (owner && owner.url) || "";
     }
   }
+  // 설정 「링크 열기」 규칙. 다른 규칙 주소로 가는 새 탭만 규칙 계정, 같은 규칙 안이면 원래 탭 계정
+  const rule = linkRuleForPageTab(m.url, openerUrl, getBrowserState().linkProfileRules);
+  if (rule) profile = rule.profile;
   const createdId = newBrowserTab(m.url, {
     background: m.background, profile, space: openerSpace, group: openerGroup,
   });
@@ -650,6 +661,25 @@ try { window.acHost && acHost.onOpenLocal && acHost.onOpenLocal((m) => {
   // 메모 창에서 누른 웹 링크도 이 길로 온다. 브라우저는 콘솔 창에만 있다.
   if (/^https?:\/\//i.test(m.target)) openInSpaceBrowser(m.target); else openLocalLink(m.target);
 }); } catch (e2) {}
+// 다른 앱에서 누른 웹 링크. 공유 창(공유 브라우저)과 콘솔 창(세션 브라우저)이 수신하고, 어느 쪽으로 보낼지는
+// main 이 설정으로 정함. 서버 연결과 첫 브라우저 상태 전에는 탭 생성 요청이 버려지므로 그때까지 보관
+const inboundLinks = [];
+function flushInboundLinks() {
+  if (!getWs() || !isBrowserStateLoaded()) return;
+  for (const url of inboundLinks.splice(0)) openInSpaceBrowser(url);
+}
+const LINK_ROLE = linkRole({ browserMode: BROWSER_MODE, memoMode: MEMO_MODE, boundSpace: BOUND_SPACE, detachedWin: APP_PARAMS.get("win") });
+if (LINK_ROLE) {
+  try {
+    window.acHost && acHost.onInboundLink && acHost.onInboundLink((m) => {
+      if (!m || !/^https?:\/\//i.test(String(m.url || ""))) return;
+      inboundLinks.push(String(m.url));
+      flushInboundLinks();
+    });
+    const ready = LINK_ROLE === "shared" ? acHost && acHost.sharedBrowserReady : acHost && acHost.consoleLinkReady;
+    if (ready) ready();
+  } catch (e2) {}
+}
 // 메모·마크다운 미리보기의 웹 링크. 그대로 두면 target=_blank 가 창의 열기 처리기로 가서 외부 브라우저가
 // 연다. 스페이스 브라우저에서 열고, 메모 창에는 브라우저가 없어 콘솔 창으로 넘긴다. file 링크는 여기서
 // 열지 않는다. 메모는 원격도 쓸 수 있어 작업 폴더 밖 파일을 편집기에 열고 저장 허용까지 주게 된다.
@@ -689,7 +719,7 @@ if (!AUX_MODE) addEventListener("beforeunload", (e) => {
   if (getTabSpaces().some((sp) => getTabs(sp).some((t) => isTabDirty(t)))) { e.preventDefault(); e.returnValue = ""; }
 });
 initTextEditor({
-  $, esc, cssEsc, extOf, fileview, tabstrip,
+  $, esc, cssEsc, extOf, fileview,
   withFileViewTransition, bindAgentKeys, wsSend, isFileLikeKind, showToast,
   getRenderedFileOwner,
   getRenderedFileToken,
@@ -715,6 +745,7 @@ initWebview({
   $, esc, wsSend, BROWSER_MODE, bNote, renderBmTabs, renderTabs,
   getSpaces,
   createWebview, forgetTabWc, showToast,
+  exportBrowserHistory: (wcId) => window.acHost?.browserHistoryExport?.(wcId),
 });
 // ── 탭 화면 크기 ──
 initViewport({ $, showToast, acHost: window.acHost });
@@ -740,7 +771,7 @@ $("#wv-back").addEventListener("click", () => { const r = activeWv(); if (callHo
 $("#wv-fwd").addEventListener("click", () => { const r = activeWv(); if (callHook("mirror.command", r, "forward")) return;
   try { if (r && r.el.canGoForward()) r.el.goForward(); } catch (e) { blog("fwd err", e.message); } });
 $("#wv-reload").addEventListener("click", () => { const r = activeWv(); if (callHook("mirror.command", r, "reload")) return;
-  try { if (r) r.el.reload(); } catch (e) {} });
+  reloadActiveTab(); });
 $("#wv-devtools").addEventListener("click", () => toggleDevTools());
 $("#wv-size").addEventListener("click", (e) => { e.stopPropagation(); openSizeMenu(); });
 for (const [el, axis] of [[$("#wvh-r"), "r"], [$("#wvh-b"), "b"], [$("#wvh-c"), "c"]]) {
@@ -847,12 +878,16 @@ async function syncSwitcher(payload) {
 }
 initKeymapPage({
   $, wsSend, showToast,
+  // 설정 「링크 열기」의 링크별 계정 규칙. 규칙은 브라우저 상태(서버)가 소유
+  getLinkRules: () => ({ rules: getBrowserState().linkProfileRules || [], accounts: getProfiles() }),
+  setLinkRules: (rules) => bsMutate({ op: "linkRules.set", rules }),
   getRailScreens: railScreens,
   setRailScreen,
   getSwitcher: () => switcherModel,
   pickWindow: (id) => syncSwitcher({ op: "pick", id }),
   unpickWindow: (ref) => syncSwitcher({ op: "unpick", ...(ref || {}) }),
-  moveWindow: (ref, dir) => syncSwitcher({ op: "move", ...(ref || {}), dir }),
+  moveWindow: (ref, dir, unit) => syncSwitcher({ op: "move", ...(ref || {}), dir, ...(unit ? { unit } : {}) }),
+  groupWindow: (op, ref) => syncSwitcher({ op, ...(ref || {}) }),
   // 새로 열거: 사람이 화면에 들어오거나 「다시 읽기」를 눌렀을 때만 쓴다.
   refreshWindows: async () => {
     await syncSwitcher({ op: "list", refresh: true });
@@ -994,7 +1029,9 @@ function handleCapsMessage(m) {
 }
 
 function handleStateMessage(m) {
-      replaceHerdrState(m); if (m.tabs) for (const w of Object.keys(m.tabs)) { const f = (m.tabs[w] || []).find((x) => x.focused); if (f) lastTabBySpace[w] = f.tabId; } if (typeof m.local === "boolean") isLocal = m.local; renderHerdrTabs();
+      // focusStale: 서버가 이 상태를 만드는 동안 포커스 요청이 진행 중이었다. focused 값이 옛것일 수 있어
+      // 선택·마지막 탭 기억을 이 방송으로 바꾸지 않는다. 다음 방송이 곧 신선한 포커스를 가져온다.
+      replaceHerdrState(m); if (m.tabs && !m.focusStale) for (const w of Object.keys(m.tabs)) { const f = (m.tabs[w] || []).find((x) => x.focused); if (f) lastTabBySpace[w] = f.tabId; } if (typeof m.local === "boolean") isLocal = m.local; renderHerdrTabs();
       renderSpaces(); renderAgents();
       callHook("git.syncOnly"); // 스페이스·pane이 열리고 닫히면 소스 제어의 레포 목록도 따라간다(새 폴더만 물어본다)
       // 방금 만든 스페이스가 이 갱신에 들어왔으면 그때 들어간다(생성 응답이 목록보다 먼저 온다).
@@ -1005,7 +1042,7 @@ function handleStateMessage(m) {
       // 역방향 동기화: herdr에서 현재 포커스된 pane으로 우리 선택을 맞춘다(loop-safe, debounce).
       const agents = getLastAgents();
       const foc = agents.find((a) => a.focused);
-      if (foc && !BROWSER_MODE) scheduleHerdrSync(foc.paneId); // 분리창은 콘솔 포커스 동기화 안 함
+      if (foc && !BROWSER_MODE) { if (!m.focusStale) scheduleHerdrSync(foc.paneId); } // 분리창은 콘솔 포커스 동기화 안 함
       // 포커스 pane 이 에이전트가 아니면 위 동기화가 스페이스를 못 채움. 선택이 없거나 herdr 에서 닫힌 스페이스면
       // 탐색기·실행·메모가 빈 채로 또는 닫힌 스페이스에 남으므로 herdr 포커스 스페이스로 옮김
       else if (!BROWSER_MODE && !getSpaces().some((s) => s.id === selectedSpaceId)) { const w = getSpaces().find((x) => x.focused); if (w) switchToSpaceOf({ workspaceId: w.id }); }
@@ -1016,7 +1053,7 @@ function handleStateMessage(m) {
       $("#meta").title = "";
 }
 
-function handleBrowserStateMessage(m) { applyBrowserState(m.state); }
+function handleBrowserStateMessage(m) { applyBrowserState(m.state); flushInboundLinks(); linkRulesChanged(); syncLinkAccountRules(); }
 
 function handleFsMessage(m) {
       if (handlePendingRevealFs(m)) { focusCreatedAfterList(m.path); return; }
@@ -1050,7 +1087,8 @@ function handleBrowserDialogMessage(m) {
         if (m.open) setTabDialog(hit, { kind: m.kind || "alert", message: String(m.message || ""), wc: m.wc, def: String(m.def || ""), byAi: !!m.byAi });
         else clearTabDialog(hit);
         renderBmTabs(); renderTabDialog();
-        if (m.open) pushNotice({ id: `dialog-${m.wc}`, kind: "waiting",
+        // AI 가 조작 중인 탭의 질문은 AI 가 명령 결과로 받아 답함. 사용자 알림을 띄우면 하던 일이 막힘
+        if (m.open && !m.ai) pushNotice({ id: `dialog-${m.wc}`, kind: "waiting",
           title: "한 탭이 답을 기다립니다", body: String(m.message || m.kind || ""),
           go: { label: "그 탭으로", run: () => gotoTabById(hit) } });
         else removeNotice(`dialog-${m.wc}`);
@@ -1082,7 +1120,7 @@ function handleFileMessage(m, responseIoEntry) {
         fileReloadReason.delete(m.path);
         for (const sp of getTabSpaces()) {
           const ft = getTabs(sp).find((x) => x.id === id); if (!ft) continue;
-          if (m.error) { ft.gone = true; if (ft.id === getActiveTabId(getCenterSpace())) showActiveTab(); }
+          if (m.error) { ft.gone = true; if (isTabVisible(getCenterSpace(), ft.id)) showActiveTab(); }
           else {
             ft.gone = false; ft.hasDiskSnapshot = true;
             // 내용이 같으면 기준만 맞춘다. 그래야 자기 저장이 돌아온 응답이 충돌로 처리되지 않는다.
@@ -1111,10 +1149,10 @@ function handleFileMessage(m, responseIoEntry) {
           if (typeof m.revision === "string") t.revision = m.revision;
         }
       }
-      const at = curTabs().find((x) => x.id === id && x.id === getActiveTabId(getCenterSpace()));
+      const at = curTabs().find((x) => x.id === id && isTabVisible(getCenterSpace(), x.id));
       if (at) {
         if (at.draft == null) showActiveTab();
-        if (at.id === getActiveTabId(getCenterSpace())) markFileDirty(at);
+        if (isTabVisible(getCenterSpace(), at.id)) markFileDirty(at);
       }
 }
 
@@ -1129,7 +1167,7 @@ function handleFileSavedMessage(m, responseIoEntry) {
         if (typeof m.revision === "string") t.revision = m.revision;
         if (t.draft === saving.snapshot) t.draft = null;
         t._saving = null;
-        if (t === getTabs(getCenterSpace()).find((tab) => tab.id === getActiveTabId(getCenterSpace()))) markFileDirty(t);
+        if (isTabVisible(getCenterSpace(), t.id) && getTabs(getCenterSpace()).includes(t)) markFileDirty(t);
         else renderTabs();
         callHook("git.refreshFor", t.path);
       }
@@ -1301,9 +1339,11 @@ function handleAiNotifyMessage(m) {
   const go = m.device
     ? { label: "그 앱으로", run: () => { if (!callHook("emulator.focus", m.device)) wsSend({ type: "focus-app", device: m.device }); } }
     : m.tab ? { label: "그 탭으로", run: () => gotoTabById(m.tab) } : null;
+  // review: 확인할 화면을 띄운 탭. 다른 일을 하던 사람이 볼 때까지 남기고 앱이 뒤에 있으면 macOS 알림도
   pushNotice({ id: m.id, kind: m.level || "info", title: m.title || "알림", body: m.body,
-    detail: m.detail, source: [m.session, m.space, m.tab || m.device].filter(Boolean).join(" · "), go });
-  if (fresh && (m.level === "warn" || m.level === "err"))
+    detail: m.detail, source: [m.session, m.space, m.tab || m.device].filter(Boolean).join(" · "), go,
+    ...(m.review ? { sticky: true } : {}) });
+  if (fresh && (m.review || m.level === "warn" || m.level === "err"))
     window.acHost?.notify?.({ id: m.id, title: m.title, body: m.body || m.detail || "", level: m.level });
 }
 

@@ -36,9 +36,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     setState(() {
       if (opened) {
         _error = null;
-        _notice = 'Play 스토어에서 Tailscale을 설치하고 컴퓨터과 같은 계정으로 로그인하세요. 그다음 컴퓨터에서 기기 추가를 눌러 나온 QR을 찍으세요.';
+        _notice =
+            '${TailscaleStore.storeName}에서 Tailscale을 설치하고 컴퓨터와 같은 계정으로 로그인하세요. 그다음 컴퓨터에서 기기 추가를 눌러 나온 QR을 찍으세요.';
       } else {
-        _error = 'Play 스토어를 열지 못했습니다. Tailscale 앱을 직접 설치하세요.';
+        _error =
+            '${TailscaleStore.storeName}를 열지 못했습니다. Tailscale 앱을 직접 설치하세요.';
       }
     });
   }

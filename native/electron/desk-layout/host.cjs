@@ -17,7 +17,7 @@
 //   개발 실행(app.isPackaged === false)에서는 단축키·로그인 항목·자동 복원을
 //   하지 않는다. 두 Iris가 같은 창을 동시에 움직이면 상태 소유자가 둘인 것과 같은 사고가 된다.
 //   개발 확인은 IPC(ac-desklayout-save-now · ac-desklayout-restore-now)로 직접 부른다.
-//   저장은 수동으로만 한다. 자동 복원(모니터 수 변경·앱 시작)은 위치·크기만 적용하고 데스크톱을 넘기지 않는다.
+//   저장은 수동으로만 한다. 자동 복원(모니터 수 변경·로그인)은 위치·크기만 적용하고 데스크톱을 넘기지 않는다.
 //   단축키 복원(ctrl+alt+R)만 데스크톱까지 되돌린다.
 //   알림에 적는 수는 실제로 성공한 것만 센다.
 //   이 기능은 기본 꺼짐(optIn)이라 사용자가 설정에서 켠 뒤에만 로드된다. 끌 때는 ac-desklayout-disable 로
@@ -35,7 +35,7 @@ const { createStore } = require("./store.cjs");
 const { createMac } = require("./mac.cjs");
 const { createHud } = require("./hud.cjs");
 const {
-  monitorSlots, matchMonitorSlots, rectToRatio, ratioToRect, computeEdges, pinEdges, pairAppWindows,
+  monitorSlots, matchMonitorSlots, rectToRatio, ratioToRect, pairAppWindows,
 } = require("./geometry.cjs");
 
 const DISPLAY_CHANGE_DEBOUNCE_MS = 3000;
@@ -48,7 +48,9 @@ const LOGIN_START_DELAY_MS = 5000;
 const SHORTCUT_ACCELS = { save: "Control+Alt+S", restore: "Control+Alt+R" };
 const MOVE_BUDGET_SECONDS = 60;
 const CONSECUTIVE_SAVE_FAILURE_ALERT = 3;
-const IN_PLACE_TOLERANCE_PX = 2;
+// 적용한 뒤 창이 목표에서 이만큼 안에 있으면 성공으로 본다. 일부 앱은 요청한 크기를 격자에 맞춰 1~2px 바꾼다.
+// 제자리 판정에는 쓰지 않는다. 2px 어긋난 창을 건너뛰면 사용자가 그 차이를 본다(2026-10-18).
+const LANDED_TOLERANCE_PX = 2;
 
 // 옛 init.lua의 SKIP_RELAUNCH에 개발용 Electron을 더했다. 옛 apps.json에 들어 있었고, 다시 띄우면 빈 Electron 창이 뜬다.
 const SKIP_RELAUNCH_BUNDLES = new Set([
@@ -179,7 +181,7 @@ function createHost(ctx) {
       const area = displays.find((d) => d.id === w.displayId).workArea;
       return {
         bundle: w.bundle, appName: w.appName, pid: w.pid, cgId: w.cgId, title: w.title, slot: w.slot,
-        rect: rectToRatio(w.rect, area), edges: computeEdges(w.rect, area), desktop: w.desktop, own: w.own,
+        rect: rectToRatio(w.rect, area), desktop: w.desktop, own: w.own,
         ...(process.platform === "win32" ? { desktopId: w.desktopId || null } : {}),
       };
     });
@@ -258,10 +260,10 @@ function createHost(ctx) {
       for (const { saved, current } of pairs) {
         const display = c.displays.find((d) => d.id === slotMap.get(saved.slot)) || primary;
         const area = display.workArea;
-        const to = pinEdges(ratioToRect(saved.rect, area), area, saved.edges);
+        const to = ratioToRect(saved.rect, area);
         entries.push({
           key: `${current.pid}:${current.cgId}`, saved, current, to,
-          inPlace: near(current.rect, to, IN_PLACE_TOLERANCE_PX),
+          inPlace: near(current.rect, to, 0),
           desktopOk: process.platform === "win32" ? !saved.desktopId || saved.desktopId === current.desktopId : !saved.desktop || saved.desktop === current.desktop,
         });
       }
@@ -273,7 +275,7 @@ function createHost(ctx) {
     const win = ctx.BrowserWindow && ctx.BrowserWindow.fromId(entry.current.winId);
     if (!win || win.isDestroyed()) return { ok: false, reason: "window-not-found" };
     win.setBounds(entry.to);
-    return near(win.getBounds(), entry.to, IN_PLACE_TOLERANCE_PX) ? { ok: true } : { ok: false, reason: "frame-did-not-land" };
+    return near(win.getBounds(), entry.to, LANDED_TOLERANCE_PX) ? { ok: true } : { ok: false, reason: "frame-did-not-land" };
   }
 
   // 지금 데스크톱에서 닿는 창에 위치·크기를 적용한다. 다른 데스크톱의 창은 돌려준다.
@@ -621,11 +623,12 @@ function startPackaged(ctx, host) {
 
   try { claimLoginItem(ctx); } catch (e) { ctx.error && ctx.error("[desklayout] 로그인 항목 등록 실패", e); }
 
-  // 로그인 때는 저장된 앱도 다시 열고, 일반 재실행 때는 열린 창의 배치만 복원한다.
-  const loginTimer = setTimeout(() => {
-    const restore = host.openedAtLogin() ? host.loginRestore() : host.restoreAuto("startup");
-    restore.catch((e) => { ctx.error && ctx.error("[desklayout] 시작 복원 실패", e); });
-  }, LOGIN_START_DELAY_MS);
+  // 로그인 때만 저장한 배치로 앱을 다시 열고 되돌림
+  // 앱만 다시 켠 경우는 옮기지 않음: Iris 창은 끄기 직전 위치로 열리고(window-layout) 다른 앱 창은 그대로
+  // (사용자 2026-10-23: 껐다 켜지는 복구는 꺼지기 직전 상태)
+  const loginTimer = host.openedAtLogin() ? setTimeout(() => {
+    host.loginRestore().catch((e) => { ctx.error && ctx.error("[desklayout] 시작 복원 실패", e); });
+  }, LOGIN_START_DELAY_MS) : null;
 
   const stopRunning = () => {
     try { globalShortcut.unregister(SHORTCUT_ACCELS.save); globalShortcut.unregister(SHORTCUT_ACCELS.restore); } catch {}

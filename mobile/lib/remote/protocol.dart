@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 part 'advanced_protocol.dart';
 
+const browserFastFrameCapability = 'browser.frame.fast';
+const browserWheelCapability = 'browser.wheel';
+
 const remoteProtocolVersion = 'remote/1';
 
 final RegExp _hex128 = RegExp(r'^[0-9a-f]{32}$');
@@ -29,7 +32,24 @@ const Set<String> _errorCodes = {
   'terminal-frame-too-large',
   'terminal-layout-unavailable',
   'terminal-read-unavailable',
+  'terminal-read-timeout',
+  'terminal-screen-stale',
+  'gh_missing',
+  'auth_required',
+  'no_pr',
+  'no_remote',
+  'not_github',
+  'timeout',
+  'output_limit',
+  'command_failed',
+  'bad_response',
+  'unsupported_host',
+  'invalid_run',
 };
+
+Map<String, Object> deviceUnregisterRequest({required String rid}) {
+  return {'type': 'device.unregister', 'rid': _checkedRid(rid)};
+}
 
 class ProtocolException implements Exception {
   const ProtocolException(this.message);
@@ -350,9 +370,215 @@ class PermissionRequestBody extends RemoteRequestBody {
 }
 
 class QuestionRequestBody extends RemoteRequestBody {
-  const QuestionRequestBody(this.questions);
+  const QuestionRequestBody(this.questions, {this.screen});
+
+  final TerminalPromptScreen? screen;
 
   final List<RequestQuestion> questions;
+}
+
+enum PromptRole { allow, allowAlways, deny, text, choice, chat }
+
+enum PromptVariant {
+  command,
+  edit,
+  network,
+  permissions,
+  tool,
+  plan,
+  trust,
+  review,
+  approval,
+  choice,
+}
+
+class TerminalPromptOption {
+  const TerminalPromptOption(
+    this.row,
+    this.text,
+    this.selectable, {
+    this.role = PromptRole.choice,
+    this.description = '',
+    this.checked,
+  });
+  final bool? checked;
+  final int row;
+  final String text;
+  final bool selectable;
+  final PromptRole role;
+  final String description;
+}
+
+class TerminalPromptScreen {
+  const TerminalPromptScreen(
+    this.hash,
+    this.columns,
+    this.rows,
+    this.selectedRow,
+    this.options, {
+    this.title = '',
+    this.detail = '',
+    this.variant = PromptVariant.choice,
+    this.step = 0,
+    this.steps = 0,
+    this.tool = '',
+    this.target = '',
+  });
+  final int step, steps;
+  // tool·target 은 승인 훅이 알려 준 도구 이름과 대상, 화면 문구와 무관하게 제목을 정하는 데 사용
+  final String title, detail, tool, target;
+  final PromptVariant variant;
+  final String hash;
+  final int columns, rows, selectedRow;
+  final List<TerminalPromptOption> options;
+}
+
+QuestionRequestBody? _parsePromptBody(Object? value) {
+  if (!_hasExactKeys(value, {'questions', 'screen'})) return null;
+  final map = value! as Map<String, dynamic>;
+  final body = _parseQuestionBody({'questions': map['questions']});
+  final p = map['screen'];
+  if (p == null) {
+    if (map['questions'] is List && (map['questions'] as List).isEmpty) {
+      return const QuestionRequestBody([]);
+    }
+    return body;
+  }
+  if (body == null ||
+      !_hasKeys(p, {
+        'question',
+        'options',
+        'selectedRow',
+        'multiSelect',
+        'hash',
+        'columns',
+        'rows',
+      }) ||
+      (p as Map).keys.any(
+        (key) => !const {
+          'question',
+          'options',
+          'selectedRow',
+          'multiSelect',
+          'hash',
+          'columns',
+          'rows',
+          'title',
+          'detail',
+          'variant',
+          'step',
+          'steps',
+          'tool',
+          'target',
+        }.contains(key),
+      ) ||
+      (p['title'] != null &&
+          (p['title'] is! String ||
+              !_validPossiblyEmptyString(
+                p['title'] as String,
+                maximum: 400,
+              ))) ||
+      (p['detail'] != null &&
+          (p['detail'] is! String ||
+              !_validPossiblyEmptyString(
+                p['detail'] as String,
+                maximum: 4000,
+              ))) ||
+      (p['step'] != null &&
+          (p['step'] is! int || p['step'] < 1 || p['step'] > 20)) ||
+      (p['steps'] != null &&
+          (p['steps'] is! int || p['steps'] < 2 || p['steps'] > 20)) ||
+      (p['tool'] != null &&
+          (p['tool'] is! String ||
+              !_validString(p['tool'] as String, maximum: 128))) ||
+      (p['target'] != null &&
+          (p['target'] is! String ||
+              !_validString(p['target'] as String, maximum: 300))) ||
+      (p['variant'] != null &&
+          !PromptVariant.values.any((v) => v.name == p['variant']))) {
+    return null;
+  }
+  if (p['hash'] is! String ||
+      !_sha256.hasMatch(p['hash'] as String) ||
+      p['question'] is! String ||
+      !_validString(p['question'] as String, maximum: 1000) ||
+      p['multiSelect'] is! bool ||
+      p['columns'] is! int ||
+      p['columns'] < 1 ||
+      p['columns'] > 4096 ||
+      p['rows'] is! int ||
+      p['rows'] < 1 ||
+      p['rows'] > 4096 ||
+      p['selectedRow'] is! int ||
+      p['options'] is! List ||
+      p['options'].length < 2 ||
+      p['options'].length > 12) {
+    return null;
+  }
+  final options = <TerminalPromptOption>[];
+  for (final o in p['options'] as List) {
+    if (!_hasKeys(o, {'row', 'text', 'selectable'}) ||
+        (o as Map).keys.any(
+          (key) => !const {
+            'row',
+            'text',
+            'selectable',
+            'role',
+            'description',
+            'checked',
+          }.contains(key),
+        ) ||
+        (o['checked'] != null && o['checked'] is! bool) ||
+        (o['description'] != null &&
+            (o['description'] is! String ||
+                !_validPossiblyEmptyString(
+                  o['description'] as String,
+                  maximum: 300,
+                ))) ||
+        (o['role'] != null &&
+            !PromptRole.values.any((r) => r.name == o['role'])) ||
+        o['row'] is! int ||
+        o['row'] < 1 ||
+        o['row'] > p['rows'] ||
+        o['text'] is! String ||
+        !_validString(o['text'] as String, maximum: 300) ||
+        _hasControlCharacter(o['text'] as String) ||
+        o['selectable'] is! bool) {
+      return null;
+    }
+    options.add(
+      TerminalPromptOption(
+        o['row'] as int,
+        o['text'] as String,
+        o['selectable'] as bool,
+        role: o['role'] == null
+            ? PromptRole.choice
+            : PromptRole.values.firstWhere((r) => r.name == o['role']),
+        description: (o['description'] as String?) ?? '',
+        checked: o['checked'] as bool?,
+      ),
+    );
+  }
+  if (!options.any((o) => o.row == p['selectedRow'])) return null;
+  return QuestionRequestBody(
+    body.questions,
+    screen: TerminalPromptScreen(
+      p['hash'] as String,
+      p['columns'] as int,
+      p['rows'] as int,
+      p['selectedRow'] as int,
+      options,
+      title: (p['title'] as String?) ?? '',
+      detail: (p['detail'] as String?) ?? '',
+      step: (p['step'] as int?) ?? 0,
+      steps: (p['steps'] as int?) ?? 0,
+      tool: (p['tool'] as String?) ?? '',
+      target: (p['target'] as String?) ?? '',
+      variant: p['variant'] == null
+          ? PromptVariant.choice
+          : PromptVariant.values.firstWhere((v) => v.name == p['variant']),
+    ),
+  );
 }
 
 class RemoteRequest {
@@ -371,6 +597,12 @@ class RemoteRequest {
   final int createdAt;
   final int expiresAt;
   final RemoteRequestBody body;
+}
+
+class TerminalQuestionsMessage extends ServerMessage {
+  const TerminalQuestionsMessage(this.questions);
+
+  final List<RemoteRequest> questions;
 }
 
 class RequestsMessage extends ServerMessage {
@@ -714,6 +946,19 @@ ServerMessage parseServerMessage(String text) {
         final agents = _parseList(decoded['agents'], _parseAgent);
         if (agents != null) return AgentsMessage(agents);
       }
+    case 'terminal.questions':
+      if (_hasExactKeys(decoded, {'type', 'questions'}) &&
+          decoded['questions'] is List &&
+          (decoded['questions'] as List).length <= 32 &&
+          utf8.encode(jsonEncode(decoded['questions'])).length <= 32 * 1024) {
+        final questions = _parseList(decoded['questions'], _parseRequest);
+        if (questions != null &&
+            questions.every(
+              (q) => q.kind == 'claude-question' || q.kind == 'terminal-prompt',
+            )) {
+          return TerminalQuestionsMessage(questions);
+        }
+      }
     case 'requests':
       if (_hasExactKeys(decoded, {'type', 'requests'}) &&
           decoded['requests'] is List) {
@@ -910,6 +1155,7 @@ RemoteRequest? _parseRequest(Object? value) {
         'claude-permission',
         'claude-question',
         'browser-user',
+        'terminal-prompt',
       }.contains(map['kind']) ||
       !_validTimestamp(map['createdAt']) ||
       !_validTimestamp(map['expiresAt']) ||
@@ -920,6 +1166,7 @@ RemoteRequest? _parseRequest(Object? value) {
     'claude-permission' => _parsePermissionBody(map['body']),
     'claude-question' => _parseQuestionBody(map['body']),
     'browser-user' => _parseBrowserUserBody(map['body']),
+    'terminal-prompt' => _parsePromptBody(map['body']),
     _ => null,
   };
   if (body == null) return null;

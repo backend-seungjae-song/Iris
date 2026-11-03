@@ -87,7 +87,11 @@ async function makeFixture(t) {
   // 초기 Herdr connect가 재계산을 일으키므로 주기 안전망은 이 검사에 필요 없다. 남겨 두면 완료 뒤에도
   // 새 Herdr 요청 타이머를 만들어 테스트 프로세스를 붙잡는다.
   const realSetInterval = globalThis.setInterval;
+  const realSetIntervalForKeepAlive = realSetInterval;
   const realSetTimeout = globalThis.setTimeout;
+  // 실제 HTTP listen 이 하던 이벤트 루프 유지 역할. 감독기는 worker child·IPC 를 unref 하므로 없으면 기동 대기 중 루프가 비어 끝남
+  const keepAlive = realSetIntervalForKeepAlive(() => {}, 1_000);
+  t.after(() => clearInterval(keepAlive));
   globalThis.setInterval = () => ({ unref() {} });
   globalThis.setTimeout = (fn, ms, ...args) => {
     const timer = realSetTimeout(fn, ms, ...args);

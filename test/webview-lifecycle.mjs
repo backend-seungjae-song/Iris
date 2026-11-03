@@ -94,6 +94,42 @@ function fixture(overrides = {}) {
   };
 }
 
+function popupFixture() {
+  const primerCalls = [];
+  const popupCalls = [];
+  const documentNavigations = [];
+  const f = fixture({
+    registerSessionPrimer: (id, parent) => primerCalls.push([id, typeof parent]),
+    registerPopup: (id, contents) => popupCalls.push(["register", id, contents.id]),
+    unregisterPopup: (id) => popupCalls.push(["unregister", id]),
+    noteDocumentNavigation: (id) => documentNavigations.push(id),
+  });
+  const contentsHandlers = {};
+  const windowHandlers = {};
+  const contents = {
+    id: 52,
+    debugger: { isAttached: () => false, sendCommand: () => Promise.resolve(), on() {} },
+    isDestroyed: () => false,
+    setBackgroundThrottling() {},
+    setWindowOpenHandler() {},
+    getURL: () => "https://popup.example/page",
+    getTitle: () => "Popup",
+    on: (name, fn) => { (contentsHandlers[name] = contentsHandlers[name] || []).push(fn); },
+    once: (name, fn) => { (contentsHandlers[name] = contentsHandlers[name] || []).push(fn); },
+  };
+  const childWindow = {
+    webContents: contents,
+    isFocused: () => false,
+    show() {}, focus() {}, showInactive() {}, setAlwaysOnTop() {}, setTitle() {},
+    on: (name, fn) => { (windowHandlers[name] = windowHandlers[name] || []).push(fn); },
+    once: (name, fn) => { (windowHandlers[name] = windowHandlers[name] || []).push(fn); },
+  };
+  f.emit("did-create-window", childWindow);
+  return { ...f, contents, primerCalls, popupCalls, documentNavigations,
+    emitContents: (name, ...args) => { for (const fn of contentsHandlers[name] || []) fn(...args); },
+    emitWindow: (name, ...args) => { for (const fn of windowHandlers[name] || []) fn(...args); } };
+}
+
 test("탭 생성과 일반 탐색만으로는 debugger 를 붙이지 않고 primer 와 수신기만 걸어 둔다", () => {
   const f = fixture();
   assert.deepEqual(f.attachCalls, []);
@@ -167,4 +203,83 @@ test("beforeunload 가 이동을 막으면 사람에게 묻고, 나가기를 고
   answer = true;
   assert.equal(unload(), true, "나가기면 beforeunload 를 무시하고 이동한다");
   assert.deepEqual(asked, [51, 51]);
+});
+
+test("등록된 사이트 팝업도 CDP 세대를 발급하고 닫힐 때 해제한다", () => {
+  const f = popupFixture();
+
+  assert.deepEqual(f.popupCalls[0], ["register", "popup:u1", 52]);
+  assert.deepEqual(f.primerCalls.find(([id]) => id === 52), [52, "function"]);
+  f.emitContents("destroyed");
+  assert.deepEqual(f.primerCalls.at(-1), [52, "object"]);
+});
+
+test("사이트 팝업 창 종료가 webContents destroyed보다 먼저 와도 CDP 세대를 해제한다", () => {
+  const f = popupFixture();
+
+  f.emitWindow("closed");
+
+  assert.deepEqual(f.primerCalls.at(-1), [52, "object"]);
+});
+
+test("사이트 팝업은 debugger를 붙이기 전 탐색도 문서 세대에 반영한다", () => {
+  const f = popupFixture();
+
+  f.emitContents("did-start-navigation", {}, "https://popup.example/next", false, true);
+  f.emitContents("did-navigate", {}, "https://popup.example/next");
+
+  assert.deepEqual(f.documentNavigations, [52]);
+});
+
+test("사이트 팝업은 debugger를 붙이기 전 탐색 시작과 리다이렉트를 정책에 알린다", () => {
+  const f = popupFixture();
+
+  f.emitContents("did-start-navigation", {}, "https://popup.example/start", false, true);
+  f.emitContents("will-redirect", {}, "https://login.example/redirect", false, true);
+  f.emitContents("did-stop-loading");
+
+  assert.deepEqual(f.navigations, [
+    [52, "https://popup.example/start"],
+    [52, "https://login.example/redirect"],
+    [52, null],
+  ]);
+  assert.deepEqual(f.documentNavigations, [52]);
+});
+
+// 설정 「링크 열기」 계정 규칙: 다른 계정 규칙 주소로 가는 페이지 이동은 원래 계정으로 요청이 나가기 전에 막음(2026-11-03)
+function accountFixture(switchUrls) {
+  const sent = [];
+  const f = fixture({ linkAccountFor: (_wc, url) => switchUrls.includes(url) });
+  f.wc.hostWebContents.send = (channel, payload) => sent.push([channel, payload]);
+  const event = () => { const ev = { prevented: false, preventDefault() { ev.prevented = true; } }; return ev; };
+  return { ...f, sent, event };
+}
+
+test("계정 규칙 주소로 가는 페이지 안 링크는 요청 전에 막고 화면에 규칙 계정으로 다시 열라고 알림", () => {
+  const f = accountFixture(["https://www.figma.com/design/A"]);
+  const ev = f.event();
+  f.emit("will-navigate", ev, "https://www.figma.com/design/A");
+  assert.equal(ev.prevented, true);
+  assert.deepEqual(f.sent, [["ac-link-account", { wcId: 51, url: "https://www.figma.com/design/A" }]]);
+});
+
+test("계정 규칙 주소로 가는 리디렉트도 따라가기 전에 막고, 자식 프레임 리디렉트는 보지 않음", () => {
+  const f = accountFixture(["https://claude.ai/new"]);
+  const sub = f.event();
+  f.emit("will-redirect", sub, "https://claude.ai/new", false, false);
+  assert.equal(sub.prevented, false);
+  const ev = f.event();
+  f.emit("will-redirect", ev, "https://claude.ai/new", false, true);
+  assert.equal(ev.prevented, true);
+  assert.deepEqual(f.sent, [["ac-link-account", { wcId: 51, url: "https://claude.ai/new" }]]);
+});
+
+test("규칙에 안 걸리는 이동은 막지 않음", () => {
+  const f = accountFixture([]);
+  const nav = f.event(), red = f.event();
+  f.emit("will-navigate", nav, "https://example.com/a");
+  f.emit("will-redirect", red, "https://example.com/b", false, true);
+  assert.equal(nav.prevented, false);
+  assert.equal(red.prevented, false);
+  assert.deepEqual(f.sent, []);
 });

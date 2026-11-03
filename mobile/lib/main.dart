@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:iris_remote/design/tokens.dart';
+import 'package:iris_remote/diagnostics/app_log.dart';
 import 'package:iris_remote/remote/connection_key.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
 import 'package:iris_remote/screens/code_screen.dart';
 import 'package:iris_remote/screens/connection_screen.dart';
+import 'package:iris_remote/screens/notification_navigation.dart';
 import 'package:iris_remote/screens/qr_scanner_screen.dart';
 import 'package:iris_remote/screens/pin_screen.dart';
 import 'package:iris_remote/screens/start_screen.dart';
@@ -12,6 +14,7 @@ import 'package:iris_remote/store/pairing_store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  AppLog.install();
   runApp(const IrisRemoteApp());
 }
 
@@ -40,12 +43,28 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
   }
 
   Future<void> _load() async {
-    final settings = await _store.load();
+    var settings = await _store.load();
+    var notice = _pairingError;
+    // 이전 버전에서 만든 연결 키는 잠금 해제를 요구해 새 키로 바꿈: 컴퓨터에 등록한 키가 사라지므로 다시 페어링
+    if (settings != null && !await _connectionKeyExists()) {
+      await _store.removeRegistration(_connectionKey);
+      settings = null;
+      notice = '연결 키가 새로 바뀌어 다시 페어링해야 합니다. 컴퓨터에서 이 폰을 지우고 QR 을 다시 스캔하세요.';
+    }
     if (!mounted) return;
     setState(() {
       _settings = settings;
+      _pairingError = notice;
       _loading = false;
     });
+  }
+
+  Future<bool> _connectionKeyExists() async {
+    try {
+      return await _connectionKey.hasKey();
+    } on ConnectionKeyException {
+      return true;
+    }
   }
 
   Future<void> _scan() async {
@@ -88,6 +107,7 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
       pending.settings,
       pin: pin,
       onAuthenticated: () => _store.save(pending.settings),
+      onResumeToken: _store.saveResumeToken,
     );
     if (!mounted) {
       await connection.disconnect();
@@ -100,6 +120,16 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
   }
 
   Future<void> _unregister(ActiveRemoteSession? connection) async {
+    // Mac 기기 목록에서 먼저 지운다. 연결이 없거나 실패하면 폰만 지우고 Mac에서 직접 삭제하라고 알린다
+    var serverRemoved = false;
+    if (connection != null) {
+      try {
+        await connection.unregisterDevice();
+        serverRemoved = true;
+      } on Object catch (error) {
+        AppLog.write('unregister', 'server removal failed: $error');
+      }
+    }
     await connection?.disconnect();
     try {
       await _store.removeRegistration(_connectionKey);
@@ -110,7 +140,9 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
     setState(() {
       _settings = null;
       _initialConnection = null;
-      _pairingError = null;
+      _pairingError = serverRemoved
+          ? null
+          : '컴퓨터의 기기 목록에서는 지우지 못했습니다. Mac의 Iris 원격 화면에서 이 폰을 직접 삭제하세요.';
     });
   }
 
@@ -118,6 +150,15 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
+      navigatorObservers: [
+        NotificationNavigation.instance,
+        AppLogNavigatorObserver(),
+      ],
+      builder: (context, child) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _remoteSession.noteTouch(),
+        child: child,
+      ),
       title: 'Iris 원격',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.system,
@@ -141,6 +182,7 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
       key: ValueKey(settings.deviceId),
       settings: settings,
       remoteSession: _remoteSession,
+      store: _store,
       initialConnection: initialConnection,
       onUnregister: _unregister,
     );

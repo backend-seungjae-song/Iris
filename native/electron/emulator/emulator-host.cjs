@@ -25,6 +25,7 @@
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/emulator/emulator-host.cjs
 const fs = require("fs");
 const path = require("path");
+const { emulatorWindowTitles, EMPTY_EMULATOR_TITLE } = require("./window-titles.cjs");
 const { execFile } = require("child_process");
 
 const guard = require("./electron-guard.cjs");
@@ -32,11 +33,15 @@ const { cleanupPriorHelpers } = require("./stale-helper-cleanup.cjs");
 const { XCODE_DOWNLOAD_URL, inspectXcode, switchXcode, xcodeAppPath } = require("./xcode-setup.cjs");
 const { ANDROID_STUDIO_URL, inspectAndroidSetup } = require("./android-setup.cjs");
 const { createVolumeController } = require("./audio-volume.cjs");
+const { createDevicePreview } = require("./device-preview.cjs");
 const { createDeviceManager } = require("./device-management.cjs");
+const { guardSharedDevices } = require("./shared-device-guard.cjs");
+const { createHelperWatchdog } = require("./helper-watchdog.cjs");
+const { switchInputLanguage } = require("./input-language.cjs");
 
 const RENDERER_METHODS = new Set([
   "emulator.attach", "emulator.availability", "emulator.button", "emulator.gesture",
-  "emulator.listDevices", "emulator.rotate", "emulator.shutdown", "emulator.tap",
+  "emulator.listDevices", "emulator.rotate", "emulator.shutdown", "emulator.tap", "emulator.unregisterActive",
 ]);
 const BUTTON_NAMES = new Set(["back", "home", "recents", "volume_down", "volume_up", "lock"]);
 const SETTINGS_FILE = "emulator-settings.json";
@@ -52,8 +57,16 @@ function stopSimCallService(udid) {
   execFile("xcrun", ["simctl", "spawn", udid, "launchctl", "bootout", SIM_CALL_SERVICE], { timeout: 15000 }, () => {});
 }
 
+// 키 없음(기기 언어 기본 키보드)이면 실패로 끝나 null
+function readSimKeyboards(udid) {
+  return new Promise((resolve) => {
+    execFile("xcrun", ["simctl", "spawn", udid, "defaults", "read", "-g", "AppleKeyboards"], { timeout: 10000 },
+      (err, stdout) => resolve(err ? null : String(stdout)));
+  });
+}
+
 function initCapability(ctx) {
-  const { ipcMain, isTrustedSender, BrowserWindow, app, stateDir, shell, preloadPath, getAppUrl, loadUrlWithRetry } = ctx;
+  const { ipcMain, isTrustedSender, BrowserWindow, app, stateDir, shell, preloadPath, getAppUrl, loadUrlWithRetry, hidden = false } = ctx;
   const { dialog, screen } = require("electron");
   guard.configure(ctx);
   const orca = require("./orca-emulator.cjs");
@@ -74,8 +87,15 @@ function initCapability(ctx) {
       throw error;
     }
   }
+  function writeSettings(settings) {
+    fs.mkdirSync(stateDir, { recursive: true });
+    const tmp = settingsPath + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));
+    fs.renameSync(tmp, settingsPath);
+  }
 
   const bridge = new orca.EmulatorBridge();
+  const sharedDevices = guardSharedDevices(bridge);
   const deviceManager = createDeviceManager({ getSettings: readSettings });
   const allWindows = {
     webContents: {
@@ -111,9 +131,15 @@ function initCapability(ctx) {
         const preferred = await deviceManager.ensureDefault(await commands.emulatorAvailability({}));
         params.device = preferred.udid;
       }
+      if (arg.method === "emulator.button" && params?.name === "lang") {
+        const result = await switchInputLanguage({ bridge, target: { device: params.device ?? params.emulator, worktreeId: params.worktree },
+          readKeyboards: readSimKeyboards });
+        return { ok: true, result };
+      }
       if (arg.method === "emulator.button" && !BUTTON_NAMES.has(params?.name)) {
         return { ok: false, error: { code: "invalid_button", message: "지원하지 않는 기기 버튼" } };
       }
+      if (arg.method === "emulator.attach") await sharedDevices.beforeAttach(params.device || readSettings().mobileEmulatorDefaultDeviceUdid);
       const result = await method.handler(params, { runtime: commands });
       if (arg.method === "emulator.shutdown" && result?.ok === true && typeof result.deviceUdid === "string" && result.deviceUdid) {
         allWindows.webContents.send("ac-emulator-session-stopped", { worktree: params.worktree, device: result.deviceUdid });
@@ -145,6 +171,18 @@ function initCapability(ctx) {
     }
   });
 
+  // 켜진 iOS 기기의 화면 도우미가 끝나면 탭의 attach 와 같은 경로로 다시 붙여 새로 띄움
+  const attachMethod = methods.get("emulator.attach");
+  const helperWatchdog = createHelperWatchdog({
+    registry: bridge.sessionRegistry,
+    reattach: async (udid, worktree) => {
+      if (quitting) return;
+      await sharedDevices.beforeAttach(udid);
+      await attachMethod.handler(attachMethod.params.parse({ device: udid, worktree, focus: false }), { runtime: commands });
+    },
+  });
+  helperWatchdog.start();
+
   ipcMain.handle("ac-emulator-device-catalog", async (e) => {
     if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
     try { return { ok: true, catalog: await deviceManager.catalog() }; }
@@ -159,6 +197,40 @@ function initCapability(ctx) {
     if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
     try { return { ok: true, device: await deviceManager.ensureDefault(await commands.emulatorAvailability({})) }; }
     catch (error) { return { ok: false, error: String(error?.message || error), code: error?.code || "device_default_failed" }; }
+  });
+  ipcMain.handle("ac-emulator-device-delete", async (e, args) => {
+    if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
+    try {
+      const result = await deviceManager.remove(args, {
+        confirm: async (device) => {
+          const win = BrowserWindow.fromWebContents(e.sender);
+          if (!win || win.isDestroyed()) throw new Error("삭제를 확인할 창을 찾지 못했습니다.");
+          const choice = await dialog.showMessageBox(win, {
+            type: "warning", title: "가상 기기 삭제", message: `${device.name} 기기를 삭제할까요?`,
+            detail: "이 기기에 설치한 앱과 데이터가 모두 삭제됩니다. 삭제한 기기는 복구할 수 없습니다.",
+            buttons: ["취소", "삭제"], defaultId: 0, cancelId: 0, noLink: true,
+          });
+          return choice.response === 1;
+        },
+        stop: async (device) => {
+          const stopped = await commands.emulatorShutdown({ device: device.udid });
+          if (!stopped?.ok) throw new Error("기기를 끄지 못했습니다.");
+          allWindows.webContents.send("ac-emulator-session-stopped", { device: stopped.deviceUdid });
+        },
+      });
+      if (!result.deleted) return { ok: true, canceled: true };
+      const device = { udid: result.device.udid, persistentId: result.device.persistentId };
+      allWindows.webContents.send("ac-emulator-session-stopped", { device: device.udid });
+      let warning;
+      try {
+        const settings = readSettings();
+        if ([device.udid, device.persistentId].includes(settings.mobileEmulatorDefaultDeviceUdid)) {
+          settings.mobileEmulatorDefaultDeviceUdid = null;
+          writeSettings(settings);
+        }
+      } catch { warning = "기기를 삭제했지만 기본 기기 설정을 지우지 못했습니다. 기본 기기를 다시 선택하세요."; }
+      return { ok: true, deleted: true, device, ...(warning ? { warning } : {}) };
+    } catch (error) { return { ok: false, error: String(error?.message || error), code: error?.code || "device_deletion_failed" }; }
   });
 
   ipcMain.handle("ac-emulator-settings-get", (e) => {
@@ -176,10 +248,7 @@ function initCapability(ctx) {
       next[k] = v || null;
     }
     try {
-      fs.mkdirSync(stateDir, { recursive: true });
-      const tmp = settingsPath + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
-      fs.renameSync(tmp, settingsPath);
+      writeSettings(next);
       return { ok: true, settings: next };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   });
@@ -195,6 +264,16 @@ function initCapability(ctx) {
     return volume.set({ device: arg && arg.device, key: arg && arg.key, volume: arg && arg.volume, muted: arg && arg.muted });
   });
   app.on("will-quit", () => volume.stopAll());
+
+  // 기기 안 Flutter 앱의 화면 비율(device_preview). 앱 찾기·호출은 device-preview.cjs, 렌더러는 기기 id 와 프리셋 id 만 전달
+  const preview = createDevicePreview();
+  ipcMain.handle("ac-emulator-viewport", (e, arg) => {
+    if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
+    const device = arg && typeof arg.device === "string" ? arg.device : "";
+    if (arg && arg.op === "apply") return preview.apply(device, typeof arg.preset === "string" && arg.preset ? arg.preset : null);
+    return preview.presets(device);
+  });
+  app.on("will-quit", () => preview.dispose());
 
   ipcMain.handle("ac-emulator-pick-sdk", async (e) => {
     if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
@@ -254,6 +333,16 @@ function initCapability(ctx) {
   // (detached-tab-window.cjs)처럼 이 기능이 preload 를 붙여 창을 직접 만든다. 창을 닫는 것은 탭으로
   // 원래 자리로 되돌리는 것이므로 닫힐 때 모든 창에 알린다.
   const detachedWindows = new Map(); // tabId → BrowserWindow
+  // 창 제목: 붙은 기기의 기종 이름(같은 기종 여럿이면 번호). 창 전환·창 배치 복구가 제목으로 창을 구분
+  const windowDevices = new Map(); // tabId → { name, udid }
+  function retitleWindows() {
+    const titles = emulatorWindowTitles([...detachedWindows.keys()].map((key) => ({ key, ...(windowDevices.get(key) || {}) })));
+    for (const [key, win] of detachedWindows) {
+      const title = titles.get(key) || EMPTY_EMULATOR_TITLE;
+      win.__irisEmulatorTitle = title;
+      try { if (!win.isDestroyed() && win.getTitle() !== title) win.setTitle(title); } catch {}
+    }
+  }
   let mainContents = null;
   let pickState = false;
   let recordState = false;
@@ -269,13 +358,14 @@ function initCapability(ctx) {
   }
   ipcMain.handle("ac-emulator-window-open", (e, arg) => {
     if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
-    const { space, tab, device, pickAvailable, recordAvailable, pickOn, recordOn, bounds, connect } = arg || {};
+    const { space, tab, device, pickAvailable, recordAvailable, pickOn, recordOn, bounds, connect, focus } = arg || {};
     if (!ID_RE.test(String(space)) || !ID_RE.test(String(tab)) || (device != null && !ID_RE.test(String(device)))) {
       return { ok: false, error: "창 인자가 올바르지 않습니다" };
     }
     const existing = detachedWindows.get(tab);
     if (existing && !existing.isDestroyed()) {
-      existing.show(); existing.focus();
+      // 에이전트의 켜기 요청(focus:false)은 사용자 화면을 바꾸지 않음
+      if (!hidden && focus !== false) { existing.show(); existing.focus(); }
       if (connect === true) existing.webContents.send("ac-emulator-connect", { device: device || null });
       return { ok: true };
     }
@@ -284,12 +374,15 @@ function initCapability(ctx) {
     recordState = !!recordOn;
     const place = restoreBounds(bounds);
     const win = new BrowserWindow({
-      width: 460, height: 920, title: "에뮬레이터", backgroundColor: "#0b0f14",
+      width: 460, height: 920, title: "에뮬레이터", backgroundColor: "#0b0f14", ...(hidden ? { show: false } : {}),
       webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false, spellcheck: false },
     });
     // 생성 옵션의 크기는 주 모니터 작업 영역 높이로 잘림(다른 모니터의 세로 전체 창이 999 로 뜸). 만든 뒤 setBounds 는 그대로 적용
     if (place) win.setBounds(place);
     detachedWindows.set(tab, win);
+    // 페이지 <title> 이 기종 제목을 덮지 않게
+    win.on("page-title-updated", (event) => { if (win.__irisEmulatorTitle) event.preventDefault(); });
+    retitleWindows();
     win.webContents.on("did-finish-load", () => {
       win.webContents.send("ac-emulator-pick-state", pickState);
       win.webContents.send("ac-emulator-record-state", recordState);
@@ -308,6 +401,8 @@ function initCapability(ctx) {
     win.on("closed", () => {
       clearTimeout(boundsTimer);
       detachedWindows.delete(tab);
+      windowDevices.delete(tab);
+      retitleWindows();
       allWindows.webContents.send("ac-emulator-window-closed", { tab, quitting });
     });
     const query = new URLSearchParams({ space, tab });
@@ -323,6 +418,18 @@ function initCapability(ctx) {
     const win = detachedWindows.get(arg && arg.tab);
     if (win && !win.isDestroyed()) win.close();
     return { ok: true };
+  });
+  // 분리 창이 보고한 붙은 기기. 그 창 자신의 보고만 받음
+  ipcMain.on("ac-emulator-window-device", (e, arg) => {
+    if (!isTrustedSender(e)) return;
+    const win = detachedWindows.get(arg && arg.tab);
+    if (!win || win.isDestroyed() || win.webContents !== e.sender) return;
+    const name = typeof arg.name === "string" ? arg.name.slice(0, 80) : "";
+    const udid = arg.udid != null && ID_RE.test(String(arg.udid)) ? String(arg.udid) : "";
+    const before = windowDevices.get(arg.tab);
+    if (before && before.name === name && before.udid === udid) return;
+    windowDevices.set(arg.tab, { name, udid });
+    retitleWindows();
   });
   ipcMain.on("ac-emulator-control-request", (e, arg) => {
     if (!isTrustedSender(e) || !["pick", "record", "target", "device", "running"].includes(arg?.action)) return;
@@ -356,6 +463,7 @@ function initCapability(ctx) {
   app.on("before-quit", (event) => {
     // 기기를 끄기 전에 알림. 끄는 동안 본 창이 "꺼짐"을 자리 기록에 저장하면 다음 실행 때 기기를 다시 켜지 못함
     if (!quitting) { quitting = true; allWindows.webContents.send("ac-emulator-quitting", {}); }
+    helperWatchdog.stop();
     if (cleaned) return;
     event.preventDefault();
     if (cleaning) return;

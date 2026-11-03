@@ -132,6 +132,8 @@ function lifecycle({ registry, feature = featureState(), gatewayOptions = {}, au
     installer: { isInstalled: async () => false, install: async () => ({ ok: true, installed: true }),
       remove: async () => ({ ok: true, installed: false }) },
     ...gatewayOwner,
+    rpcHost: undefined,
+    createRpcHost: (hostOptions) => { gatewayOwner.state.hostOptions = hostOptions; return gatewayOwner.rpcHost; },
   });
   return { remote, feature, gateway: gatewayOwner, auxiliary, ctx };
 }
@@ -279,6 +281,22 @@ test("기기 폐기는 저장을 기다리지 않고 그 기기의 세션을 닫
   assert.deepEqual(built.gateway.state.closed, [["7".repeat(32), "device-removed"]]);
   release();
   assert.equal((await removing).ok, true);
+});
+
+test("폰이 보낸 기기 삭제는 그 기기를 지우고 요청한 연결만 남긴 채 나머지 세션을 닫는다", async (t) => {
+  const registry = createRegistry({
+    stateDir: await tempState(t),
+    initialState: { version: 1, enabled: true, devices: [DEVICE] },
+  });
+  const requester = "8".repeat(32);
+  const other = "7".repeat(32);
+  const built = lifecycle({ registry, authOwner: auth(() => [requester, other]) });
+  await built.remote.ready;
+  const result = await built.gateway.state.hostOptions.onDeviceUnregister(DEVICE.deviceId, requester);
+  assert.equal(result.ok, true);
+  assert.deepEqual(registry.effectiveState().devices, []);
+  assert.deepEqual(built.gateway.state.closed, [[other, "device-unregistered"]]);
+  assert.deepEqual(built.remote.getState().devices, []);
 });
 
 test("종료는 세션과 게이트웨이를 닫고 저장된 enabled를 유지한 뒤 정상 종료를 표시한다", async (t) => {

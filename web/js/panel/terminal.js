@@ -122,24 +122,14 @@ function collapsedHeader(buf, start) {
   return false;
 }
 
-// 탭 줄 아래에 글자 없이 괘선만 있는 줄이 붙으면 그 줄도 탭 줄에 속한다.
-// 빈 줄은 화면 내용이므로 남기고 멈춘다.
-function tabBarRows(buf, start, skip) {
-  let rows = 1;
-  for (let y = 1; y < 3 && y < xterm.rows; y++) {
-    const text = buf.getLine(start + y)?.translateToString(true, skip) || "";
-    if (/[─━═╌╍▁▔▬_]/.test(text) && !/[^\s─━═╌╍▁▔▬_]/.test(text)) { rows++; continue; }
-    break;
-  }
-  return rows;
-}
-
 // 지금 화면에서 pane 영역이 시작하는 칸과 줄. herdr 화면으로 읽히지 않으면 null 이다.
+// 사이드바 모드의 탭 줄은 한 줄. 그 아래 줄은 pane 내용이라 줄 수 판정에 쓰지 않음 — 내용으로 판정하면
+// 가림 줄 수가 바뀌어 pane 높이가 바뀌고, 다시 그린 내용이 판정을 되돌려 화면이 계속 위아래로 흔들림.
 export function detectOrigin() {
   try {
     const buf = xterm.buffer.active, start = buf.baseY;
     const d = findDivider(buf, start);
-    if (d >= 0) return { cols: d + 1, rows: tabBarRows(buf, start, d + 1) };
+    if (d >= 0) return { cols: d + 1, rows: 1 };
     if (collapsedHeader(buf, start)) return { cols: 0, rows: 2 };
   } catch {}
   return null;
@@ -171,10 +161,10 @@ export function sidebarCols() {
   return (xterm && detectOrigin()?.cols) ?? origin.cols;
 }
 
-// 칸 수와 위치를 셀 크기로 계산한다. herdr pane 의 첫 칸은 채팅 칸 왼쪽 끝에 두고 오른쪽 끝까지
-// 채운다(마지막 칸은 일부 잘릴 수 있다). 세로는 온전한 줄만 보이고, 줄 높이로 나누어떨어지지 않는
-// 나머지는 위아래 여백으로 반씩 나눈다. 반쯤 잘린 줄은 herdr 화면이 덜 가려진 것처럼 보이고,
-// 마지막 줄이 아래 끝에 붙으면 잘린 것처럼 보인다.
+// 칸 수와 위치를 셀 크기로 계산한다. herdr pane 의 첫 칸은 채팅 칸 왼쪽 끝에 두고, 가로는 안쪽
+// 여백 안에 온전히 들어가는 칸만 쓴다(남는 폭은 오른쪽 여백이 된다). 세로는 온전한 줄만 보이고,
+// 줄 높이로 나누어떨어지지 않는 나머지는 위아래 여백으로 반씩 나눈다. 반쯤 잘린 줄은 herdr 화면이
+// 덜 가려진 것처럼 보이고, 마지막 줄이 아래 끝에 붙으면 잘린 것처럼 보인다.
 // 안쪽 요소는 흐름 밖(position:absolute)에 두므로 그 크기가 .terminal 크기를 바꾸지 않는다.
 export function applyCropAndFit() {
   if (!xterm || !fitAddon) return;
@@ -201,7 +191,8 @@ export function applyCropAndFit() {
   const rect = terminal.getBoundingClientRect();
   const box = { width: rect.width - padL - padR, height: rect.height - padT - padB };
   // 조정판 값: left 는 pane 을 왼쪽으로, top 은 화면 전체를 위로 더 미는 px 이고 right 는 오른쪽에 더 들일 폭이다.
-  const cols = o.cols + Math.max(1, Math.ceil((box.width + tn.left + tn.right) / cw - 1e-3));
+  // 올림으로 채우면 마지막 칸이 여백 경계에서 잘려 줄 끝 글자가 반쯤 가려진다.
+  const cols = o.cols + Math.max(1, Math.floor((box.width + tn.left + tn.right) / cw + 1e-3));
   const usableH = box.height - tn.top;
   const paneRows = Math.max(1, Math.floor((usableH - MIN_VERTICAL_GAP_PX) / ch + 1e-3));
   const rows = o.rows + paneRows;

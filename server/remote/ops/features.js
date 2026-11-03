@@ -32,13 +32,15 @@ export function installFeatureOperations(table, features) {
   const browser = features.browser;
   table.set("browser.tabs", async (_entry, message) => projectFeature({ type: "browser.tabs.result", rid: message.rid,
     ...browser.catalog() }));
-  table.set("browser.frame.watch", async (entry, message) => {
+  for (const name of ["browser.frame.watch", "browser.frame.fast"]) {
+  table.set(name, async (entry, message) => {
     const result = await browser.watchFrame(entry, message);
     return result === true || result?.ok
       ? projectFeature({ type: "browser.frame.watch.result", rid: message.rid, tab: message.tab, watching: true })
       : failed(result, message.rid);
   });
-  for (const [name, method] of [["browser.pointer", "pointer"], ["browser.mouse", "mouse"], ["browser.type", "type"], ["browser.key", "key"],
+  }
+  for (const [name, method] of [["browser.wheel", "wheel"], ["browser.pointer", "pointer"], ["browser.mouse", "mouse"], ["browser.type", "type"], ["browser.key", "key"],
     ["browser.scroll", "scroll"], ["browser.history", "history"], ["browser.navigate", "navigate"]]) {
     table.set(name, async (entry, message) => { const result = await browser[method](entry, message);
       return result.ok ? action(message.rid) : failed(result, message.rid); });

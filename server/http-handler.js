@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runBrowserCmdResilient } from "./browser-commands.js";
+import { sanitizeBrowserArgs } from "./qa-ownership.js";
 import {
   closeDialogAsk,
   dialogPlanText,
@@ -115,7 +115,7 @@ const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css
   ".ttf": "font/ttf", ".woff": "font/woff", ".json": "application/json", ".svg": "image/svg+xml", ".map": "application/json",
   ".wasm": "application/wasm" };
 
-export function createHttpHandler({ irisHome, capabilityHost }) {
+export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, healthInfo = () => ({}) }) {
   return (req, res) => {
   // 정적 파일과 같은 경로로 판정해야 인코딩·상위 경로로 기능 게이트를 우회하지 못한다.
   let pathname;
@@ -185,14 +185,67 @@ export function createHttpHandler({ irisHome, capabilityHost }) {
   }
   if (capabilityHost?.http(req, res, pathname)) return;
   // AI→브라우저 제어: iris-browser CLI가 POST /browser-cmd로 명령을 보낸다. 로컬(루프백) 전용(AC5).
-  if (req.method === "POST" && pathname === "/browser-cmd") {
+  if (req.method === "POST" && ["/browser-cmd", "/qa-cmd"].includes(pathname)) {
     if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
     let body = ""; req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on("end", async () => {
       let j; try { j = JSON.parse(body || "{}"); } catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
-      const r = await runBrowserCmdResilient(String(j.cmd || ""), j.args || {}, j.session ? String(j.session) : null,
-        j.run ? String(j.run) : null);
+      let r;
+      try {
+        if (!workerSupervisor) throw new Error("MCP 작업 프로세스 감독기가 연결되지 않았습니다.");
+        const identity = { session: j.session ? String(j.session) : null,
+          ...(j.run ? { run: String(j.run) } : {}), ...(j.key ? { key: String(j.key) } : {}) };
+        r = await workerSupervisor.request(pathname === "/qa-cmd" ? "qa" : "browser",
+          String(j.cmd || ""), pathname === "/qa-cmd" ? (j.args || {}) : sanitizeBrowserArgs(j.args), identity);
+      } catch (error) { r = { ok: false, error: String(error.message), code: error.code }; }
       res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(r));
+    });
+    return;
+  }
+  if (req.method === "GET" && pathname === "/mcp-worker/status") {
+    if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only"}'); return; }
+    Promise.resolve(workerSupervisor?.liveStatus ? workerSupervisor.liveStatus() : workerSupervisor?.status())
+      .then(value => value || { state: "absent", accepting: false }, error => ({ state: "unknown", accepting: false, error: String(error.message || error) }))
+      .then(value => {
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify(value));
+      });
+    return;
+  }
+  if (req.method === "POST" && pathname === "/mcp-worker/activate") {
+    if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only"}'); return; }
+    let body = ""; req.on("data", chunk => { body += chunk; if (body.length > 64 * 1024) req.destroy(); });
+    req.on("end", async () => {
+      let input;
+      try { input = JSON.parse(body || "{}"); }
+      catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
+      try {
+        const result = await workerSupervisor.activate({
+          deployId: input.deployId == null || input.deployId === "" ? undefined : String(input.deployId),
+          expectPrevId: input.expectPrevId == null ? undefined : String(input.expectPrevId),
+          stopObservations: input.stopObservations === true,
+          recover: input.recover === true,
+        });
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        const code = error.code === "DEPLOYMENT_BUSY" ? 409 : error.code === "BUSY" ? 423 : 500;
+        res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ ok: false, code: error.code || "INTERNAL", error: String(error.message || error), details: error.details || {} }));
+      }
+    });
+    return;
+  }
+  if (req.method === "POST" && pathname === "/mcp-worker/reload-source") {
+    if (!isLoopbackRequest(req) || process.env.IRIS_BUNDLE_ID !== "development") {
+      res.writeHead(403).end('{"ok":false,"error":"development only"}'); return;
+    }
+    workerSupervisor.reloadSource().then(result => {
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify(result));
+    }, error => {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, code: error.code, error: String(error.message || error) }));
     });
     return;
   }
@@ -216,8 +269,11 @@ export function createHttpHandler({ irisHome, capabilityHost }) {
   // 연결할지를 이 값으로 판단한다. 없으면 앱이 자기 서버를 실행하고, 있으면 기존 서버를 그대로 쓴다.
   // 상태 폴더까지 실어야 개발 인스턴스와 설치본을 헷갈리지 않는다(포트만으론 구별이 안 된다).
   if (req.method === "GET" && pathname === "/healthz") {
+    const worker = workerSupervisor?.status() || {};
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({ ok: true, pid: process.pid, port: PORT, stateDir: irisHome, netPolicy: NET_POLICY }));
+    res.end(JSON.stringify({ ok: true, pid: process.pid, port: PORT, stateDir: irisHome, netPolicy: NET_POLICY,
+      ...healthInfo(), worker: { deployId: worker.deployId || null, pid: worker.pid || null,
+        workerGeneration: worker.workerGeneration || null, state: worker.state || "absent", accepting: worker.accepting === true } }));
     return;
   }
   let rel = pathname === "/" ? "/index.html" : pathname;

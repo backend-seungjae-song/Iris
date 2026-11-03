@@ -29,7 +29,7 @@ import {
 } from "./model.js";
 import { svRecalc } from "./formula.js";
 import { svCF } from "./conditional.js";
-import { getActiveTabId, getCenterSpace, getCurrentTabs } from "../center/tab-store.js";
+import { isTabVisible, getCenterSpace, getCurrentTabs } from "../center/tab-store.js";
 
 let $, esc, fileview, filePathBarHtml, withFileViewTransition, SHEET_TEXT_RE;
 let svPending, svGrowTo, svPaint, svRangeBox, svFillHandle, svRenderImages, svCurStyle;
@@ -50,8 +50,8 @@ export function bindSheetRenderActions(deps) {
 
 export const svTab = () => {
   const centerSpace = getCenterSpace();
-  const t = getCurrentTabs().find((x) => x.id === getActiveTabId(centerSpace));
-  return t && t.kind === "file" && t.sheetMode && t.sheet ? t : null;
+  const t = getCurrentTabs().find((x) => isTabVisible(centerSpace, x.id) && x.kind === "file" && x.sheetMode && x.sheet);
+  return t || null;
 };
 
 // ── 그리기 ──────────────────────────────────────────────────────────────────

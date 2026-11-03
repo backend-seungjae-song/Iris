@@ -21,24 +21,43 @@ class KeyModifiers {
   };
 }
 
+// 키 하나를 누르는 한 단계
+class TerminalKeyStep {
+  const TerminalKeyStep({required this.key, required this.modifiers});
+
+  final String key;
+  final KeyModifiers modifiers;
+
+  Map<String, Object> toJson() => {'key': key, 'modifiers': modifiers.toJson()};
+}
+
 class TerminalKeyButton {
   const TerminalKeyButton({
     required this.id,
     required this.label,
     required this.key,
     required this.modifiers,
+    this.then = const [],
   });
 
   final String id;
   final String label;
   final String key;
   final KeyModifiers modifiers;
+  // 첫 키 뒤에 차례로 누를 키, 서버는 최대 7개를 받는다
+  final List<TerminalKeyStep> then;
+
+  List<TerminalKeyStep> get steps => [
+    TerminalKeyStep(key: key, modifiers: modifiers),
+    ...then,
+  ];
 
   Map<String, Object> toJson() => {
     'id': id,
     'label': label,
     'key': key,
     'modifiers': modifiers.toJson(),
+    if (then.isNotEmpty) 'then': then.map((step) => step.toJson()).toList(),
   };
 }
 
@@ -245,6 +264,12 @@ class BrowserFrameWatchResult extends ServerMessage {
 
   final String rid;
   final String tab;
+}
+
+class BrowserFrameStatus extends ServerMessage {
+  const BrowserFrameStatus({required this.tab, required this.error});
+  final String tab;
+  final String? error;
 }
 
 class BrowserFrame extends ServerMessage {
@@ -598,6 +623,12 @@ Map<String, Object> terminalKeysSetRequest({
     }
     _checkAdvancedText(button.label, 24, '터미널 키 이름');
     _checkKey(button.key);
+    if (button.then.length > 7) {
+      throw const ProtocolException('키는 한 버튼에 8개까지 이어 누를 수 있습니다.');
+    }
+    for (final step in button.then) {
+      _checkKey(step.key);
+    }
   }
   return {
     'type': 'terminal.keys.set',
@@ -638,13 +669,14 @@ Map<String, Object> browserFrameWatchRequest({
   required int width,
   required int fps,
   required bool desktop,
+  bool fast = false,
 }) {
   _checkRef(tab, '브라우저 탭');
-  if (width < 240 || width > 2560 || fps < 1 || fps > 4) {
+  if (width < 240 || width > 2560 || fps < 1 || fps > (fast ? 20 : 4)) {
     throw const ProtocolException('브라우저 화면 크기나 갱신 횟수가 올바르지 않습니다.');
   }
   return {
-    'type': 'browser.frame.watch',
+    'type': fast ? 'browser.frame.fast' : 'browser.frame.watch',
     'rid': _checkedRid(rid),
     'tab': tab,
     'width': width,
@@ -709,6 +741,34 @@ Map<String, Object> browserPointerRequest({
       height: height,
     ),
     'action': action,
+  };
+}
+
+Map<String, Object> browserWheelRequest({
+  required String rid,
+  required String tab,
+  required double x,
+  required double y,
+  required int width,
+  required int height,
+  required int dx,
+  required int dy,
+}) {
+  if ((dx == 0 && dy == 0) || dx.abs() > 20000 || dy.abs() > 20000) {
+    throw const ProtocolException('브라우저 휠 값이 올바르지 않습니다.');
+  }
+  return {
+    ..._pointRequest(
+      type: 'browser.wheel',
+      rid: rid,
+      tab: tab,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+    ),
+    'dx': dx,
+    'dy': dy,
   };
 }
 
@@ -1303,6 +1363,21 @@ ServerMessage? _parseAdvancedServerMessage(Map<String, dynamic> value) {
           tab: value['tab'] as String,
         );
       }
+    case 'browser.frame.status':
+      if (_hasExactKeys(value, {'type', 'tab', 'error'}) &&
+          _validRef(value['tab']) &&
+          (value['error'] == null ||
+              const {
+                'browser-frame-unavailable',
+                'browser-tab-unavailable',
+                'browser-controller-unavailable',
+                'browser-command-unavailable',
+              }.contains(value['error']))) {
+        return BrowserFrameStatus(
+          tab: value['tab'] as String,
+          error: value['error'] as String?,
+        );
+      }
     case 'browser.frame':
       return _parseBrowserFrame(value);
     case 'browser.element.result':
@@ -1442,6 +1517,8 @@ TerminalFrame? _parseTerminalFrame(
             'terminal-frame-too-large',
             'terminal-layout-unavailable',
             'terminal-read-unavailable',
+            'terminal-read-timeout',
+            'terminal-screen-stale',
           }.contains(value['error'])) ||
       !_validRef(value['agent']) ||
       value['revision'] is! int ||
@@ -1516,9 +1593,33 @@ KeyModifiers? _parseModifiers(Object? value) {
 }
 
 TerminalKeyButton? _parseTerminalKey(Object? value) {
-  if (!_hasExactKeys(value, {'id', 'label', 'key', 'modifiers'})) return null;
-  final map = value! as Map<String, dynamic>;
+  if (value is! Map<String, dynamic> ||
+      !_hasKeys(value, {'id', 'label', 'key', 'modifiers'}) ||
+      !value.keys.every(
+        const {'id', 'label', 'key', 'modifiers', 'then'}.contains,
+      )) {
+    return null;
+  }
+  final map = value;
   final modifiers = _parseModifiers(map['modifiers']);
+  final then = <TerminalKeyStep>[];
+  final rawThen = map['then'];
+  if (rawThen != null) {
+    if (rawThen is! List || rawThen.isEmpty || rawThen.length > 7) return null;
+    for (final item in rawThen) {
+      if (!_hasExactKeys(item, {'key', 'modifiers'})) return null;
+      final step = item! as Map<String, dynamic>;
+      final stepModifiers = _parseModifiers(step['modifiers']);
+      if (step['key'] is! String ||
+          !_validString(step['key'] as String, maximum: 24) ||
+          stepModifiers == null) {
+        return null;
+      }
+      then.add(
+        TerminalKeyStep(key: step['key'] as String, modifiers: stepModifiers),
+      );
+    }
+  }
   if (map['id'] is! String ||
       !RegExp(r'^[A-Za-z0-9_-]{1,32}$').hasMatch(map['id'] as String) ||
       map['label'] is! String ||
@@ -1533,6 +1634,7 @@ TerminalKeyButton? _parseTerminalKey(Object? value) {
     label: map['label'] as String,
     key: map['key'] as String,
     modifiers: modifiers,
+    then: then,
   );
 }
 

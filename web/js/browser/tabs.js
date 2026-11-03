@@ -11,7 +11,7 @@ import { shortcutLabel } from "../core/keymap.js";
 //
 // 의존 대상
 //   상태는 browser/state, webview 는 browser/webview 와 webview-store,
-//   AI 가 쥔 탭은 browser/ai-state, Chrome 넘기기는 handoff.tabItem 훅으로 받는다,
+//   AI 가 쥔 탭은 browser/ai-state, Chrome 열기는 mirror.tabItem 훅으로 받는다,
 //   순서 바꾸기는 core/reorder 에서 import 한다.
 //   $·esc·cssEsc·showToast·showCtx·renderTabs·startTabRename·newBrowserTab 은
 //   main 이 소유해서 init 에서 받는다.
@@ -39,6 +39,7 @@ import { wireReorder } from "../core/reorder.js";
 import { fileKindById, isFileKindId } from "../core/file-kinds.js";
 import { callHook } from "../core/hooks.js";
 import { mayWriteSharedActive } from "./active-tab.js";
+import { keepAwakeItem, keepAwakeMark } from "./keep-awake.js";
 import { askConfirm } from "../explorer/context-menu.js";
 
 let $, esc, cssEsc, showToast, showCtx, renderTabs, startTabRename, newBrowserTab;
@@ -99,7 +100,7 @@ function tabChip(t, act) {
   const local = isFileKindId(t.kind) && getTabs(boundSpace()).find((x) => x.id === t.id);
   const dirty = local && isTabDirty(local);
   const cls = [t.id === act ? "active" : "", t.group ? "in-group" : "", selTabs.has(t.id) ? "selected" : "", st.loading ? "loading" : "", busy.length ? "ai-held" : "", dirty ? "dirty" : ""].filter(Boolean).join(" ");
-  return `<div class="ctab${cls ? " " + cls : ""}" draggable="true" data-tab="${esc(t.id)}" title="더블클릭: 이름 변경 · 우클릭: 메뉴 · 드래그: 순서 변경 · Ctrl/${shortcutLabel("⇧").replace(/\+$/, "")}+클릭: 다중 선택">${dirty ? '<span class="cdirty"></span>' : ""}${tabLead(t)}${asking}${ai}<span class="cname">${esc(t.name || t.title || "브라우저")}</span><button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+  return `<div class="ctab${cls ? " " + cls : ""}" draggable="true" data-tab="${esc(t.id)}" title="더블클릭: 이름 변경 · 우클릭: 메뉴 · 드래그: 순서 변경 · Ctrl/${shortcutLabel("⇧").replace(/\+$/, "")}+클릭: 다중 선택">${dirty ? '<span class="cdirty"></span>' : ""}${tabLead(t)}${asking}${ai}<span class="cname">${esc(t.name || t.title || "브라우저")}</span>${keepAwakeMark(t.keepAwake)}<button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
 }
 // 이 창이 띠에 그리고 화면에 올릴 탭. 분리 창은 자기 탭만, 그 밖의 창은 다른 창으로 떨어져 나간 탭을 뺀
 // 나머지. 탭 분리가 로드되지 않았으면 스페이스의 탭 전부.
@@ -115,7 +116,7 @@ export function shownBmTabs() {
 // (webview는 유지되므로 로그인·스크롤 상태는 그대로이고, 렌더에서만 감춘다).
 // 탭 이름을 줄이지 않아 탭 줄이 넘칠 수 있음. 선택이 바뀐 때만 그 탭까지 스크롤(사용자가 옆으로 넘겨 둔 위치 유지)
 const revealedActive = new WeakMap();
-export function revealActiveTab(strip) {
+export function revealActiveTab(strip, hold = false) {
   const el = strip.querySelector(".ctab.active");
   // 앞쪽 탭이 늘거나 이름이 바뀌어 활성 탭 위치가 밀린 경우도 다시 보여 줌. 사람이 휠로 넘긴 스크롤은 위치를 안 바꿔 유지
   const key = el ? `${el.dataset.tab}:${el.offsetLeft}:${el.offsetWidth}` : null;
@@ -123,6 +124,7 @@ export function revealActiveTab(strip) {
   // 화면에 그려지기 전(부팅 중 숨김)에는 스크롤이 안 되므로 기록하지 않고 다음 그리기에서 다시 시도
   if (!strip.clientWidth) return;
   revealedActive.set(strip, key);
+  if (hold) return; // 위치만 기록하고 스크롤은 그대로
   if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 export function renderBmTabs() {
@@ -158,7 +160,16 @@ export function renderBmTabs() {
   html += `<div class="ctab-add" data-add="1" title="새 탭(구글)">+</div>`;
   if (!ownTabs && savedGroups().length) html += `<div class="ctab-add" data-saved="1" title="저장된 그룹 열기">📁</div>`;
   tabstrip.innerHTML = html;
-  revealActiveTab(tabstrip);
+  // 펼치거나 접은 그룹 칩은 누른 자리에 그대로, 탭은 칩 뒤로 펼쳐짐. 활성 탭으로 스크롤하지 않음
+  const anchored = groupAnchor && groups.find((g) => g.id === groupAnchor.id);
+  let unfold = null;
+  if (anchored && anchored.collapsed === groupAnchor.collapsed) {
+    const chip = tabstrip.querySelector(`.tgroup[data-group="${cssEsc(anchored.id)}"]`);
+    if (chip) tabstrip.scrollLeft += chip.getBoundingClientRect().left - groupAnchor.left;
+    if (chip) unfold = { chip, id: anchored.id, ghosts: groupAnchor.ghosts };
+    groupAnchor = null;
+    revealActiveTab(tabstrip, true);
+  } else revealActiveTab(tabstrip);
   syncAiGlow();
   const pend = pendingGroupRename;
   if (pend && groups.some((g) => g.id === pend.gid) && pend.ids.every((id) => bmTabs().some((t) => t.id === id && t.group === pend.gid))) {
@@ -177,12 +188,96 @@ export function renderBmTabs() {
     move: moveTab,
   });
   if (!wired) wireReorder(tabstrip, ".ctab", (el) => el.dataset.tab, moveTab);
+  if (!ownTabs) wireGroupDrag(tabstrip);
+  if (unfold) animateGroupToggle(unfold);
+}
+// 그룹 펼치기·접기 애니메이션. 탭 폭이 0↔원래 폭으로 바뀌어 뒤 탭들이 함께 밀리고 당겨짐
+// 접을 때는 렌더로 이미 사라진 탭의 복제본을 칩 뒤에 잠깐 표시. 렌더·선택 판정에 안 걸리게 data-tab·active 제거
+const GROUP_ANIM_MS = 160;
+function sizeOf(el) {
+  const cs = getComputedStyle(el);
+  return { width: el.getBoundingClientRect().width, pl: cs.paddingLeft, pr: cs.paddingRight };
+}
+function animateGroupToggle({ chip, id, ghosts }) {
+  if (typeof chip.animate !== "function") return;
+  const opts = { duration: GROUP_ANIM_MS, easing: "cubic-bezier(.2,0,0,1)" };
+  const shut = { width: "0px", minWidth: "0px", paddingLeft: "0px", paddingRight: "0px", opacity: 0 };
+  const full = (g) => ({ width: g.width + "px", minWidth: "0px", paddingLeft: g.pl, paddingRight: g.pr, opacity: 1 });
+  if (ghosts && ghosts.length) {
+    let at = chip;
+    for (const g of ghosts) {
+      const n = g.node;
+      n.removeAttribute("data-tab"); n.classList.remove("active");
+      n.setAttribute("aria-hidden", "true");
+      Object.assign(n.style, { pointerEvents: "none", overflow: "hidden" });
+      at.after(n); at = n;
+      n.animate([full(g), shut], { ...opts, fill: "forwards" }).finished.then(() => n.remove(), () => n.remove());
+    }
+    return;
+  }
+  for (const el of tabstrip.querySelectorAll(".ctab[data-tab]")) {
+    const t = bmTabs().find((x) => x.id === el.dataset.tab);
+    if (!t || t.group !== id) continue;
+    el.style.overflow = "hidden";
+    el.animate([shut, full(sizeOf(el))], opts).finished.then(() => { el.style.overflow = ""; }, () => {});
+  }
+}
+// 그룹 칩 끌기 = 그룹 순서 변경. 놓은 칩의 왼쪽 절반이면 그 그룹 앞, 오른쪽 절반이면 다음 그룹 앞
+// 탭 분리가 띠의 HTML 끌기를 막고 칩 옆 요소가 탭이라 공용 wireReorder 대신 포인터로 처리
+const GROUP_DRAG_START = 5;
+function wireGroupDrag(strip) {
+  if (strip.__groupDrag) return;
+  strip.__groupDrag = true;
+  let drag = null;
+  const chipOf = (id) => strip.querySelector(`.tgroup[data-group="${cssEsc(id)}"]`);
+  const clear = () => strip.querySelectorAll(".tgroup").forEach((n) => { n.style.boxShadow = ""; n.style.opacity = ""; });
+  strip.addEventListener("pointerdown", (e) => {
+    const chip = e.button === 0 && !getPickMode() && e.target.closest(".tgroup");
+    drag = chip ? { id: chip.dataset.group, x: e.clientX, y: e.clientY, started: false, before: undefined } : null;
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    if (!drag.started) {
+      if (Math.abs(e.clientX - drag.x) < GROUP_DRAG_START && Math.abs(e.clientY - drag.y) < GROUP_DRAG_START) return;
+      drag.started = true;
+    }
+    clear();
+    const own = chipOf(drag.id); if (own) own.style.opacity = "0.5";
+    const over = document.elementFromPoint(e.clientX, e.clientY);
+    const target = over && over.closest && over.closest(".tgroup");
+    drag.before = undefined;
+    if (!target || !strip.contains(target) || target.dataset.group === drag.id) return;
+    const r = target.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+    target.style.boxShadow = after ? "inset -2px 0 0 var(--focus)" : "inset 2px 0 0 var(--focus)";
+    const order = bmGroups().map((g) => g.id), i = order.indexOf(target.dataset.group);
+    drag.before = after ? (order[i + 1] ?? null) : target.dataset.group;
+  }, true);
+  const finish = () => {
+    const d = drag; drag = null; clear();
+    if (!d || !d.started) return;
+    // 끈 뒤의 click 은 접기·펴기가 아니므로 한 번 무시
+    window.addEventListener("click", (ce) => { ce.stopPropagation(); ce.preventDefault(); }, { capture: true, once: true });
+    const sp = curBmSpace();
+    if (sp && d.before !== undefined && d.before !== d.id) bsMutate({ op: "group.move", space: sp, id: d.id, before: d.before });
+  };
+  window.addEventListener("pointerup", finish, true);
+  window.addEventListener("pointercancel", () => { drag = null; clear(); }, true);
 }
 // 그룹을 만들고 탭들을 넣은 뒤, 그 그룹 칩의 이름을 바로 인라인 편집 상태로 연다.
 // (Electron엔 window.prompt가 없으므로 이 코드베이스의 인라인 편집 방식을 따른다.)
 // 그룹은 서버가 상태를 돌려준 뒤에야 생기므로 편집은 renderBmTabs 에서 연다. 그룹 만들기·탭 넣기마다 상태가 따로 와서
 // 그룹만 생긴 렌더에서 열면 다음 렌더가 입력칸을 덮어씀 → 탭까지 다 들어간 렌더에서 연다
 let pendingGroupRename = null;
+let groupAnchor = null; // 펼치거나 접는 그룹 칩의 화면 위치
+function toggleGroup(sp, g) {
+  const chip = tabstrip.querySelector(`.tgroup[data-group="${cssEsc(g.id)}"]`);
+  // 접을 때 사라질 탭의 모양·폭을 미리 복제
+  const ghosts = g.collapsed ? null : [...tabstrip.querySelectorAll(".ctab[data-tab]")]
+    .filter((el) => { const t = bmTabs().find((x) => x.id === el.dataset.tab); return t && t.group === g.id; })
+    .map((el) => ({ node: el.cloneNode(true), ...sizeOf(el) }));
+  groupAnchor = chip ? { id: g.id, collapsed: !g.collapsed, left: chip.getBoundingClientRect().left, ghosts } : null;
+  bsMutate({ op: "group.collapse", space: sp, id: g.id, collapsed: !g.collapsed });
+}
 function makeGroup(sp, ids, defaultName) {
   const gid = newId("g");
   bsMutate({ op: "group.create", space: sp, id: gid, name: (defaultName || "새 그룹").slice(0, 40) });
@@ -220,11 +315,7 @@ function openTabCtx(x, y, tabId) {
   if (tb.group) items.push({ label: "그룹에서 빼기", act: () => bsMutate({ op: "tab.group", space: sp, id: tabId, group: null }) });
   items.push({ sep: true });
   items.push({ label: "이름 변경", act: () => startInlineTabRename(tabId) });
-  // 이 창에서 끝낼 수 없는 것(패스키·지문, 임베드를 막는 사이트, 확장이 필요한 흐름)을 진짜 Chrome에
-  // 넘긴다. 그 창은 이 탭의 프로필을 물려받고, 끝나면 로그인만 돌아온다.
-  // 이 줄을 만드는 것은 넘기기 기능이다. 로드되지 않았거나 넘길 수 없는 탭이면 아무것도 오지 않는다.
-  const handoffItem = callHook("handoff.tabItem", getWebview(tabId));
-  if (handoffItem) items.push(handoffItem);
+  items.push(keepAwakeItem(sp, tb));
   const mirrorItem = callHook("mirror.tabItem", getWebview(tabId));
   if (mirrorItem) items.push(mirrorItem);
   // 탭을 자기 창으로 빼내는 줄. 이 줄을 만드는 것은 탭 분리 기능이고, 로드되지 않았으면 오지 않는다.
@@ -264,11 +355,11 @@ function openGroupCtx(x, y, gid) {
   const items = [
     // 그룹에서 작업하다 탭을 하나 더 여는 흐름이다. 새 탭을 만들고 끌어다 넣는 두 단계를 없앤다.
     { label: "이 그룹에 새 탭", act: () => {
-      if (g.collapsed) bsMutate({ op: "group.collapse", space: sp, id: gid, collapsed: false }); // 접힌 채로 만들면 안 보인다
+      if (g.collapsed) toggleGroup(sp, g); // 접힌 채로 만들면 안 보인다
       newBrowserTab(null, { group: gid, space: sp });
     } },
     { sep: true },
-    { label: g.collapsed ? "펼치기" : "접기", act: () => bsMutate({ op: "group.collapse", space: sp, id: gid, collapsed: !g.collapsed }) },
+    { label: g.collapsed ? "펼치기" : "접기", act: () => toggleGroup(sp, g) },
     { label: "그룹 이름 변경", act: () => startInlineGroupRename(gid) },
     { sep: true },
     { label: `그룹 저장 (${mine.length}탭)`, disabled: !mine.length, act: () => {
@@ -324,7 +415,7 @@ export function wireBrowserModeTabstrip() {
     if (e.target.closest("[data-add]")) { e.stopPropagation(); newBrowserTab(); return; } // + 새 탭
     // 되돌리기는 이 창을 닫는 것과 같다. 탭은 원래 띠로 돌아온다.
     const grp = e.target.closest(".tgroup"); // 그룹 칩 클릭 = 접기/펴기
-    if (grp) { e.stopPropagation(); const g = bmGroups().find((v) => v.id === grp.dataset.group); if (g) bsMutate({ op: "group.collapse", space: sp, id: g.id, collapsed: !g.collapsed }); return; }
+    if (grp) { e.stopPropagation(); const g = bmGroups().find((v) => v.id === grp.dataset.group); if (g) toggleGroup(sp, g); return; }
     const close = e.target.closest(".cclose");
     if (close) {
       e.stopPropagation();

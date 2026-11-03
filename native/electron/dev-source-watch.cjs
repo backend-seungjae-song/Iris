@@ -37,7 +37,7 @@ const SOURCE_EXT = /\.(?:js|mjs|cjs|json)$/;
 const IGNORED = /(?:^|\/)(?:node_modules|\.git)\/|(?:^|\/)\.|\.tmp$|\.log$|(?:^|\/)server\.lock/;
 
 function createDevSourceWatch({
-  fs, path, root, log, reload,
+  fs, path, root, log, reload, reloadWorker, classify = () => "server",
   now = Date.now,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
@@ -50,6 +50,7 @@ function createDevSourceWatch({
 }) {
   const dir = path.join(root, "server");
   let watcher = null, timer = null, health = null;
+  const pending = new Set();
   let lastChangeAt = 0, lastReloadAt = 0, complained = false, broken = null;
   // 시각 대신 일련번호로 비교한다. 같은 밀리초에 들어온 저장은 시각만으로는 이미 반영된 것과
   // 구별되지 않아 그 변경이 누락된다.
@@ -75,10 +76,18 @@ function createDevSourceWatch({
   function fire(rel) {
     lastChangeAt = now();
     changeSeq++;
+    pending.add(String(rel));
     if (timer) clearTimeoutFn(timer);
-    timer = setTimeoutFn(() => {
+    timer = setTimeoutFn(async () => {
       timer = null;
-      reload(rel);
+      const changed = [...pending];
+      pending.clear();
+      try {
+        const kinds = await Promise.all(changed.map(classify));
+        const label = changed.join(", ");
+        if (kinds.every(kind => kind === "worker") && reloadWorker) await reloadWorker(label);
+        else await reload(label);
+      } catch (error) { log(`변경 분류에 실패했습니다: ${error.message || error}`); }
     }, debounceMs);
     if (timer && timer.unref) timer.unref();
   }

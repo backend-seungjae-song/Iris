@@ -21,7 +21,7 @@ import { createRemoteRpcHost } from "../server/remote/rpc-host.js";
 
 const SERVER_INSTANCE = "1".repeat(32);
 const CERT_HASH = "2".repeat(64);
-const REQUESTS = ["caps.get", "ping", "watch", "transcript.page", "transcript.watch",
+const REQUESTS = ["caps.get", "ping", "watch", "session.watch", "transcript.page", "transcript.watch",
   "agent.stop", "agent.message", "request.answer"];
 
 function configuration() {
@@ -110,6 +110,8 @@ function hostHarness(overrides = {}) {
     onFrame: overrides.onFrame,
     auth: overrides.auth,
     operations: overrides.operations,
+    terminalQuestions: overrides.terminalQuestions,
+    onPhoneSessionsChanged: overrides.onPhoneSessionsChanged,
     macName: overrides.macName || (async () => "MacBook Pro"),
   });
   return { host, children, timers };
@@ -149,6 +151,13 @@ test("IPC 계약은 정확한 필드만 받고 크기 상한을 적용한다", (
   assert.equal(isHostMessage(configuration()), true);
   assert.equal(isHostMessage({ ...configuration(), verdict: "trusted" }), false);
   assert.equal(fitsRemoteIpc({ payload: "x".repeat(80 * 1024) }), false);
+});
+
+test("탭이 많은 브라우저 탭 목록은 64KB를 넘어도 256KB까지 보낸다", () => {
+  const list = (bytes) => JSON.stringify({ type: "browser.tabs.result", rid: "1", tabs: "A".repeat(bytes) });
+  assert.equal(fitsRemoteOutboundPayload(list(100 * 1024)), true);
+  assert.equal(fitsRemoteOutboundPayload(list(256 * 1024)), false);
+  assert.equal(fitsRemoteOutboundPayload(JSON.stringify({ type: "agents", content: "A".repeat(100 * 1024) })), false);
 });
 
 test("큰 송신은 브라우저 화면과 붙여넣기 초안에만 종류별 상한을 적용한다", () => {
@@ -615,4 +624,38 @@ test("실제 게이트웨이 자식은 hello를 먼저 보내고 IPC disconnect�
   child.disconnect();
   const code = await exited;
   assert.equal(code, 0);
+});
+
+test('packet63 PIN 대기 연결 제외·PIN 통과 뒤 질문 구독·마지막 폰 종료 통지', async () => {
+  const auth = {
+    open: (connection) => ({ ok: true, challenge: { serverInstance: SERVER_INSTANCE,
+      connId: connection.connId, nonce: '7'.repeat(64), certHash: CERT_HASH } }),
+    authenticate: () => ({ ok: true, pinRequired: true }),
+    submitPin: async () => ({ ok: true, resumeToken: 'a'.repeat(43), pinIdleMinutes: 30 }),
+    beginRequest: () => ({ ok: true }), endRequest() {}, close() {}, activeBlocks: () => [],
+  };
+  const question = { ref: 'a'.repeat(32), agent: 'b'.repeat(32), kind: 'claude-question',
+    createdAt: 1, expiresAt: 86400001, body: { questions: [{ question: '확인?', header: '확인',
+      multiSelect: false, options: [{ label: '예', description: '' }] }] } };
+  const counts = [];
+  const harness = hostHarness({ auth,
+    terminalQuestions: { list: () => [question], subscribe: () => () => {} },
+    onPhoneSessionsChanged: () => counts.push(harness.host.authenticatedCount()) });
+  const child = await listen(harness);
+  const connId = await openConnection(harness, child);
+  child.emit('message', { type: 'conn.frame', connId, payload: JSON.stringify({ type: 'auth.response' }) });
+  await Promise.resolve();
+  assert.equal(harness.host.authenticatedCount(), 0);
+  assert.equal(projected(child, connId).at(-1).type, 'pin.required');
+  assert.equal(projected(child, connId).some((value) => value.type === 'terminal.questions'), false);
+  child.emit('message', { type: 'conn.frame', connId, payload: JSON.stringify({ type: 'pin.submit', v: 'remote/1', pin: '123456' }) });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(harness.host.authenticatedCount(), 1);
+  child.emit('message', { type: 'conn.frame', connId, payload: JSON.stringify({ type: 'session.watch', rid: 'sync' }) });
+  await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(projected(child, connId).at(-1), { type: 'terminal.questions', questions: [question] });
+  child.emit('message', { type: 'conn.close', connId, reason: 'peer-closed' });
+  assert.equal(harness.host.authenticatedCount(), 0);
+  assert.deepEqual(counts, [1, 0]);
+  harness.host.stop();
 });

@@ -44,11 +44,12 @@ function createAiCausality({ now = Date.now, graceMs = DEFAULT_GRACE_MS } = {}) 
     return id;
   }
 
-  function leave(ticket) {
+  function leave(ticket, { grace = true } = {}) {
     if (ticket == null) return;
     const left = (inFlight.get(ticket) || 0) - 1;
     if (left > 0) inFlight.set(ticket, left); else inFlight.delete(ticket);
-    until.set(ticket, now() + graceMs);
+    if (grace) until.set(ticket, now() + graceMs);
+    else if (left <= 0) until.delete(ticket);
   }
 
   function driving(wcId) {

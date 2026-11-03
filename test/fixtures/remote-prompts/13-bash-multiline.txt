@@ -1,0 +1,44 @@
+
+
+⏺ 10단계 완료: 검색 결과가 나왔습니다. 공식 문서가 아닌 2차 자료가
+  섞여 있어서, 요약은 참고용으로만 적겠습니다. Claude Code는
+  Anthropic의 터미널 코딩 도구이고, 파일 수정·명령 실행·테스트
+  실행을 하며, MCP와 훅, 서브에이전트, CLAUDE.md를 지원한다는
+  내용입니다.
+
+  Sources:
+  - claude code (Opper)
+    (https://docs.example/integrations/coding-agents/claude-code)
+  - Claude Code by Anthropic (ClaudeLog)
+    (https://guide.example/faqs/claude-code-by-anthropic/)
+  - Claude Code (MIT AI Agent Index)
+    (https://index.example/2025/claude-code)
+  - Claude Code (handsonai.info)
+    (https://tutorial.example/platforms/claude/cli/)
+
+  11단계: 3줄짜리 for 루프를 Bash로 실행합니다.
+
+⏺ Running a three-line for loop that echoes 1 to 3
+  ⎿  $ for i in 1 2 3; do
+     echo $i
+     done
+
+───────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to
+ auto mode" below
+ Run a three-line for loop that echoes 1 to 3
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ for i in 1 2 3; do
+ │   echo $i
+ │ done
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ A variable in this command can't be checked before it runs
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and switch to auto mode · auto mode handles these
+      prompts for you
+   3. No
+
+ Esc to cancel · Tab to amend

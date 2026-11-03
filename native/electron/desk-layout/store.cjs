@@ -162,7 +162,6 @@ function createStore({ fs, path, stateDir }) {
         cgId: null,
         slot: slotByName.get(w.screen) || "main",
         rect,
-        edges: { l: false, t: false, r: false, b: false },
         desktop: w.spaceIndex || 1,
         onCurrent: true,
       };

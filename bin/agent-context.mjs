@@ -53,11 +53,57 @@ function atomicWrite(file, data) {
   fs.renameSync(temp, file);
 }
 
-async function startHerdr(argv, env) {
-  const { stdout } = await run(executable("herdr", env), argv, { env, timeout: 15_000, maxBuffer: 256 << 10 });
-  const response = JSON.parse(stdout);
-  if (response.error) throw new Error(`herdr creation rejected: ${response.error.code || "unknown"}`);
-  return response.result;
+export async function herdrCall(argv, env, timeout = 15_000, runner = (args, opts) => run(executable("herdr", env), args, opts)) {
+  let stdout;
+  try {
+    ({ stdout } = await runner(argv, { env, timeout, maxBuffer: 256 << 10 }));
+  } catch (error) {
+    // 실패 응답은 stderr 의 오류 JSON. execFile 메시지에는 명령 줄 전체(브리프 원문)가 들어 있어 쓰지 않음
+    let code;
+    try { code = JSON.parse(error.stderr || "")?.error?.code; } catch {}
+    throw new Error(`herdr ${argv.slice(0, 2).join(" ")} failed: ${code || (error.killed ? "timeout" : "exit " + (error.code ?? "unknown"))}`);
+  }
+  let response;
+  try { response = JSON.parse(stdout); } catch { return null; }
+  if (response?.error) throw new Error(`herdr creation rejected: ${response.error.code || "unknown"}`);
+  return response?.result ?? null;
+}
+
+// herdr 0.9 agent start 는 기존 셸 팬에서만 동작 → 탭을 만들고 그 첫 팬에서 시작
+// agent start 성공 여부는 종료 코드로 판단(출력 형식 미보장)
+// agent 이름은 소문자로 시작하는 [a-z0-9_-] 32자 이하만 허용 → 탭 제목은 표시 이름, agent 이름은 작업 id
+export function herdrAgentName(id) {
+  const slug = String(id).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  return (/^[a-z]/.test(slug) ? slug : "a-" + slug).slice(0, 32);
+}
+export async function startHerdr(spec, env, { call = (argv, timeout) => herdrCall(argv, env, timeout), sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  const created = await call(["tab", "create", "--workspace", spec.workspaceId, "--cwd", spec.cwd, "--label", spec.name, "--no-focus"]);
+  const pane = created?.root_pane;
+  if (!created?.tab?.tab_id || !pane?.pane_id) throw new Error("herdr did not return the new tab's pane");
+  try {
+    // 새 탭의 셸이 프롬프트를 띄우기 전이면 agent_pane_busy → 잠시 뒤 다시 시도
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await call(["agent", "start", spec.agentName, "--kind", spec.kind, "--pane", pane.pane_id, "--timeout", "60000", "--", ...spec.agentArgs], 75_000);
+        break;
+      } catch (error) {
+        if (attempt >= 19 || !String(error.message).includes("agent_pane_busy")) throw error;
+        await sleep(500);
+      }
+    }
+  } catch (error) {
+    try { await call(["tab", "close", created.tab.tab_id]); } catch {}
+    throw error;
+  }
+  // 여러 줄 브리프는 셸 인자로 못 넘김(herdr invalid_agent_argument) → 준비된 에이전트에 첫 입력으로 제출
+  // 제출 실패 시 탭은 남김: 에이전트는 떠 있으므로 child 를 receipt 에 기록한 뒤 실패로 알림
+  const agent = { ...pane, workspace_id: pane.workspace_id || spec.workspaceId };
+  try {
+    await call(["agent", "prompt", pane.pane_id, spec.brief, "--wait", "--until", "working", "--timeout", "30000"], 45_000);
+  } catch (error) {
+    return { agent, briefError: `agent started in ${pane.pane_id} but brief submission was not confirmed: ${error.message}` };
+  }
+  return { agent };
 }
 
 export async function launchContext(options, deps = {}) {
@@ -97,7 +143,6 @@ export async function launchContext(options, deps = {}) {
   }
   const parentSessionId = parent.agent === "codex" ? env.CODEX_THREAD_ID : claudeSessionId || parent.agent_session?.value;
   if (!parentSessionId) throw new Error("Current parent session id is unavailable");
-  const runtimeBin = (deps.executable || executable)(options.runtime, env);
   const name = String(options.name || options.id).trim().slice(0, 120);
   const key = sha(parent.terminal_id + "\n" + options.id);
   const directory = path.join(stateDir, "agent-context", sha(socketPath));
@@ -110,10 +155,10 @@ export async function launchContext(options, deps = {}) {
     return { ...previous, receipt: file, reused: true };
   }
   const childSessionId = options.runtime === "claude" ? crypto.randomUUID() : undefined;
-  const command = options.runtime === "codex"
-    ? [runtimeBin, "--no-daemon", "--model", options.model, "--config", `model_reasoning_effort=${JSON.stringify(options.effort)}`, brief]
-    : [runtimeBin, "--model", options.model, "--effort", options.effort, "--session-id", childSessionId, brief];
-  const args = ["agent", "start", name, "--workspace", parent.workspace_id, "--cwd", cwd, "--no-focus", "--", ...command];
+  const agentArgs = options.runtime === "codex"
+    ? ["--no-daemon", "--model", options.model, "--config", `model_reasoning_effort=${JSON.stringify(options.effort)}`]
+    : ["--model", options.model, "--effort", options.effort, "--session-id", childSessionId];
+  const args = { name, agentName: herdrAgentName(options.id), workspaceId: parent.workspace_id, cwd, kind: options.runtime, agentArgs, brief };
   const record = { version: 1, id: options.id, signature, status: "launching", createdAt: new Date().toISOString(), socketPath,
     parent: { paneId: parent.pane_id, terminalId: parent.terminal_id, sessionId: parentSessionId, runtime: parent.agent },
     reason: options.reason, label: name, briefFile, briefSha256: sha(brief), runtime: options.runtime, model: options.model, effort: options.effort };
@@ -130,6 +175,7 @@ export async function launchContext(options, deps = {}) {
     // Persist creation before lineage registration so a registration failure is recoverable.
     record.status = "created";
     atomicWrite(file, record);
+    if (spawned.briefError) throw new Error(spawned.briefError);
     if (options.runtime === "codex") {
       const resolveSession = deps.resolveSession || resolveCodexSession;
       const sleep = deps.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));

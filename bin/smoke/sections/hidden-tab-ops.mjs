@@ -22,6 +22,7 @@ import {
   textEditor, web, webviewFactory, webviewThrottleSource, wsCore,
 } from "../sources.mjs";
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
+import { createWorkerBrowserService } from "../../../server/mcp-worker/browser-service.js";
 
 export default async function run() {
 console.log("\n[10k] 안 보이는 탭도 조작 대상");
@@ -33,7 +34,8 @@ console.log("\n[10k] 안 보이는 탭도 조작 대상");
   check("0x0이면 화면 크기를 대신 넣는다", () => /autoViewport/.test(hiddenViewport)
     && /if \(size\.width > 0 && size\.height > 0\)/.test(hiddenViewport) && /VP_FALLBACK/.test(hiddenViewport));
   check("그 크기는 보이는 탭에서 물려받는다", () => /function setDefaultViewport/.test(hiddenViewport)
-    && /acHost\.tabShown\(wc, Math\.round/.test(webviewFactory) && /setDefaultViewport\(m\.w, m\.h\)/.test(mainH));
+    && /acHost\.tabShown\(wc, Math\.round/.test(webviewFactory) && /setDefaultViewport\(m\.w, m\.h, wc\)/.test(mainH)
+    && /hasExplicitDevice\(Number\(wcId\)\)\) return;/.test(hiddenViewport));
   // 소스 모양이 아니라 실제로 실행해 확인한다. 데스크톱으로 돌아갈 때 metrics·touch·
   // mouse-to-touch·UA 중 하나라도 남으면 그 탭은 계속 모바일로 동작하고, 모양 검사는 그것을 못 본다.
   await checkAsync("기기 흉내는 되돌릴 때 전부 되돌린다", async () => {
@@ -132,9 +134,35 @@ console.log("\n[10k] 안 보이는 탭도 조작 대상");
     return true;
   });
   // 앱을 껐다 켜는 사이에 걸친 명령은 실패가 아니라 대기다. 탭은 정체성으로 복원된다.
-  check("앱이 없는 동안은 더 오래 기다린다", () => /APP_GONE_DELAYS/.test(browserCommands)
-    && /const gone = !!\(last && last\.appGone\);/.test(browserCommands)
-    && /const ladder = longWait \? APP_GONE_DELAYS : RETRY_DELAYS;/.test(browserCommands));
+  await checkAsync("앱이 없는 동안은 더 오래 기다린다", async () => {
+    const waited = [];
+    const nativeSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = (fn, ms, ...rest) => {
+      waited.push(ms);
+      return nativeSetTimeout(fn, 0, ...rest);
+    };
+    try {
+      const service = createWorkerBrowserService({
+        hostApi: {
+          withCommand: (_command, run) => run(),
+          call: async (operation) => {
+            if (operation === "journal.accept" || operation === "journal.trace") return {};
+            if (operation === "browser.commandTargetState") {
+              return { response: { ok: false, error: "앱 없음", sent: false, appGone: true } };
+            }
+            throw new Error(`예상하지 않은 host 연산: ${operation}`);
+          },
+        },
+        activity: { run: (_kind, _id, run) => run() },
+      });
+      const result = await service.dispatch({ command: "text", args: {},
+        identity: { session: "smoke-app-gone" }, commandId: "smoke-app-gone-1" });
+      return result.ok === false && /13회 시도/.test(result.error)
+        && waited.join(",") === "500,1000,1500,2000,3000,4000,5000,6000,8000,10000,10000,9000";
+    } finally {
+      globalThis.setTimeout = nativeSetTimeout;
+    }
+  });
   // 증거는 보고서에 담는다. 낱장 스크린샷이 홈 디렉터리에 쌓이지 않게 한다.
   check("스크린샷은 스스로 정리된다", () => /function pruneShots/.test(cdpCaptureToolsSource) && /SHOT_KEEP/.test(cdpCaptureToolsSource)
     && /SHOT_MAX_AGE_MS/.test(cdpCaptureToolsSource) && /pruneShots\(dir\);/.test(cdpCmdCaptureSource));

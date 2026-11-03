@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("acHost", {
   dockBrowser: () => ipcRenderer.send("ac-dock-browser"),
   // webview 포커스 중 눌린 브라우저 단축키(⌘⇧E/⌘⇧D)를 메인이 가로채 콜백에 이름으로 전달한다.
   onShortcut: (cb) => ipcRenderer.on("ac-shortcut", (_e, name) => cb(name)),
+  // 기기 메모리가 심각할 때 메인이 보냄. 쉬는 탭을 바로 재움
+  onMemoryPressure: (cb) => ipcRenderer.on("ac-memory-pressure", () => cb()),
   // 선택 기능이 webview 우클릭 메뉴에 보탤 범용 action. 등록은 host renderer만 할 수 있고,
   // click은 action 이름과 실제 guest id만 돌아온다. 번역 등 기능의 뜻은 이 bridge가 모른다.
   registerContextAction: (action) => ipcRenderer.send("ac-context-action-register", action),
@@ -138,13 +140,15 @@ contextBridge.exposeInMainWorld("acHost", {
   credsSummary: (partition) => ipcRenderer.invoke("ac-creds-summary", partition),
   clearCreds: (partition) => ipcRenderer.invoke("ac-clear-creds", partition),
   purgePartition: (partition) => ipcRenderer.invoke("ac-purge-partition", partition),
-  // 탭 하나를 자기 창으로 분리한다(Chrome의 탭 분리). 되돌리기는 그 창을 닫는 것과 같다.
-  // 창을 닫아 탭을 잃는 경로를 만들지 않으려고 닫기를 되돌리기로 정의했다.
+  // 탭 하나를 자기 창으로 분리한다(Chrome의 탭 분리). 되돌리기는 reattachTab 이고, 창을 닫으면 그 창의 탭도 닫힌다.
   detachTab: (arg) => ipcRenderer.invoke("ac-detach-tab", arg || {}),
   reattachTab: (tabId) => ipcRenderer.invoke("ac-reattach-tab", { tabId }),
   // 분리 창에 탭을 넣는다(그 창에서 만든 새 탭). 같은 스페이스의 탭만 받는다.
   claimDetachedTab: (arg) => ipcRenderer.invoke("ac-claim-detached-tab", arg || {}),
   detachedTabs: () => ipcRenderer.invoke("ac-detached-tabs"),
+  // 사람이 분리 창을 닫음 → fn({ tabs }) 에서 그 탭들을 닫은 뒤 detachedWindowClose() 로 창을 닫음
+  onDetachedWindowClosing: (fn) => subscribe("ac-detached-window-closing", fn),
+  detachedWindowClose: () => ipcRenderer.send("ac-detached-window-close"),
   onDetachedTabs: (fn) => {
     const h = (_e, payload) => { try { fn(payload && payload.tabs || []); } catch {} };
     ipcRenderer.on("ac-detached-tabs", h);
@@ -172,6 +176,17 @@ contextBridge.exposeInMainWorld("acHost", {
   aiLoginSet: (origin, username, allowed) => ipcRenderer.invoke("ac-ai-login-set", { origin, username, allowed }),
   // 요소 선택 모드: 포커스 없는 창도 커서를 따라가야 하므로 OS 커서 좌표를 메인에서 받는다.
   openSharedBrowser: (opts) => ipcRenderer.send("ac-open-shared-browser", opts || null),
+  // 다른 앱에서 누른 웹 링크. 공유 창이 수신 준비를 알린 뒤에만 main 이 전송
+  sharedBrowserReady: () => ipcRenderer.send("ac-shared-browser-ready"),
+  consoleLinkReady: () => ipcRenderer.send("ac-console-link-ready"),
+  onInboundLink: (cb) => subscribe("ac-inbound-link", cb),
+  // Iris 안에서 링크를 열 창. linkTarget() 조회, linkTarget("shared"|"session") 저장 → 저장된 값
+  linkTarget: (value) => ipcRenderer.invoke("ac-link-target", value ?? null),
+  // macOS 기본 브라우저. status → { ok, current, choices[{ id, name, self }], irisRegistered }, choose(id) → { ok, requested }
+  defaultBrowser: {
+    status: () => ipcRenderer.invoke("ac-default-browser-status"),
+    choose: (id) => ipcRenderer.invoke("ac-default-browser-choose", id),
+  },
   setPickMode: (on) => ipcRenderer.send("ac-pick-mode", !!on),
   // 선택 오버레이·기록기를 그 탭의 iframe 안까지 주입한다. executeJavaScript 는 최상위 프레임만 대상으로 한다.
   framesInject: (wc, key, src, on) => ipcRenderer.send("ac-frames-inject", { wc, key, src, on: !!on }),
@@ -185,6 +200,8 @@ contextBridge.exposeInMainWorld("acHost", {
   onNativeNotice: (cb) => ipcRenderer.on("ac-native-notice", (_e, m) => cb(m)),
   notify: (message) => ipcRenderer.send("ac-notify", message),
   onNoticeActivated: (cb) => ipcRenderer.on("ac-notice-activate", (_e, m) => cb(m)),
+  setLinkAccountRules: (list) => ipcRenderer.send("ac-link-account-rules", list), // 설정 「링크 열기」 계정 규칙 사본
+  onLinkAccount: (cb) => ipcRenderer.on("ac-link-account", (_e, m) => cb(m)), // 막은 이동을 규칙 계정으로 다시 열기
   onOpenTab: (cb) => ipcRenderer.on("ac-open-tab", (_e, m) => cb(m)), // 게스트의 "새 탭으로 열기"를 별도 창이 아니라 앱의 탭으로 처리
   // 페이지 안에서 누른 로컬 링크. 브라우저가 렌더링하지 못하는 것(표·문서)과 앱이 렌더링하는 것(마크다운).
   onOpenLocal: (cb) => ipcRenderer.on("ac-open-local", (_e, m) => cb(m)),
@@ -202,6 +219,7 @@ contextBridge.exposeInMainWorld("acHost", {
     rpc: (method, params) => ipcRenderer.invoke("ac-emulator-rpc", { method, params }),
     deviceCatalog: () => ipcRenderer.invoke("ac-emulator-device-catalog"),
     createDevice: (args) => ipcRenderer.invoke("ac-emulator-device-create", args),
+    deleteDevice: (args) => ipcRenderer.invoke("ac-emulator-device-delete", args),
     ensureDefaultDevice: () => ipcRenderer.invoke("ac-emulator-device-default"),
     onSessionStopped: (cb) => subscribe("ac-emulator-session-stopped", cb),
     onConnectRequested: (cb) => subscribe("ac-emulator-connect", cb),
@@ -213,6 +231,8 @@ contextBridge.exposeInMainWorld("acHost", {
     // 기기별 음량. use 는 저장값을 돌려주고 그 기기에 적용, set 은 저장 후 적용. 결과 { ok, volume(0~1), muted, error? }
     useVolume: (args) => ipcRenderer.invoke("ac-emulator-volume-use", args),
     setVolume: (args) => ipcRenderer.invoke("ac-emulator-volume-set", args),
+    // 기기 안 Flutter 앱(device_preview)의 화면 비율. { device, op:"list" } → { ok, current, presets }, { device, op:"apply", preset } → { ok, current }
+    viewport: (args) => ipcRenderer.invoke("ac-emulator-viewport", args),
     startFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStart", args),
     stopFrameStream: (args) => ipcRenderer.invoke("emulator:frameStreamStop", args),
     startVideoStream: (args) => ipcRenderer.invoke("emulator:videoStreamStart", args),
@@ -229,6 +249,7 @@ contextBridge.exposeInMainWorld("acHost", {
     onWindowBounds: (cb) => subscribe("ac-emulator-window-bounds", cb),
     onQuitting: (cb) => subscribe("ac-emulator-quitting", cb),
     requestControl: (args) => ipcRenderer.send("ac-emulator-control-request", args),
+    reportWindowDevice: (args) => ipcRenderer.send("ac-emulator-window-device", args),
     onControlRequest: (cb) => subscribe("ac-emulator-control-request", cb),
     setPickState: (on) => ipcRenderer.send("ac-emulator-pick-state", !!on),
     onPickState: (cb) => subscribe("ac-emulator-pick-state", cb),

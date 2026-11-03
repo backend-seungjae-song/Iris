@@ -27,11 +27,11 @@ PIN 인증 성공 응답은 아래 형식이다.
 {"type":"auth.ok","v":"remote/1","resumeToken":"base64url 43자","pinIdleMinutes":30}
 ```
 
-`resumeToken`은 서버 메모리에서 만든 32바이트 임의 값이며 폰도 프로세스 메모리에만 둔다. 폰 프로세스가 끝나면 토큰이 없어지므로 다음 연결에서 PIN을 입력한다. 서버는 토큰의 SHA-256 값, 기기, 마지막 사용 시각만 메모리에 둔다. 토큰은 현재 서버 실행에만 유효하다.
+`resumeToken`은 서버가 만든 32바이트 임의 값이다. 서버는 토큰의 SHA-256 값, 기기, 마지막 사용 시각만 `stateHome()/remote/resume-tokens.json`(0600, 디렉터리 0700)에 저장하고 토큰 원문은 저장하지 않는다. 변경은 2초 뒤에 한 번 쓰고 서버가 종료될 때 바로 쓴다. 서버가 다시 시작하면 마지막 사용부터 설정된 기한이 지나지 않은 항목만 읽는다. 폰은 마지막 토큰을 앱 저장소(SharedPreferences, `allowBackup=false`)에 두고, 앱을 다시 열면 PIN 없이 이 토큰으로 재접속을 먼저 시도한다. 재접속에는 기기 키 서명도 필요하므로 토큰만으로는 접속할 수 없다. 재접속이 실패하거나 사용자가 연결을 끊거나 등록을 해제하면 폰이 저장한 토큰을 지운다.
 
 연결이 끊긴 폰은 새 `auth.challenge`에 등록 기기 키로 다시 서명하고 `auth.response`의 선택 필드 `resumeToken`을 함께 보낸다. 서버는 기기 서명, 서버 인스턴스, Tailscale 노드, 인증서 pin을 먼저 확인한다. 토큰의 기기가 서명 기기와 같고 마지막 사용부터 설정된 기한이 지나지 않았으면 PIN 없이 `auth.ok`와 새 토큰을 보낸다. 사용한 토큰은 즉시 폐기한다. 다른 기기의 토큰, 이미 쓴 토큰, 만료 토큰은 `pin.required`로 처리한다.
 
-PIN 기한은 마지막 사용부터 10·20·30·60분이며 기본값은 30분이다. Mac의 Iris 원격 화면이 `remote.pin-idle.set`으로 바꾸며 `stateHome()/remote/session-policy.json`에 0600 권한으로 저장한다. 변경값은 연결된 세션과 보관 중인 재개 토큰에 바로 적용한다. 새 기한이 이미 지났으면 서버가 WebSocket을 코드 4001, 이유 `idle-timeout`으로 닫고 폰은 PIN 화면으로 돌아간다. 절대 1시간 제한은 없다.
+PIN 기한은 마지막 사용부터 10·20·30·60분이며 기본값은 10분이다. 화면만 보고 있는 시간이나 백그라운드 ping은 사용으로 세지 않는다. Mac의 Iris 원격 화면이 `remote.pin-idle.set`으로 바꾸며 `stateHome()/remote/session-policy.json`에 0600 권한으로 저장한다. 변경값은 연결된 세션과 보관 중인 재개 토큰에 바로 적용한다. 새 기한이 이미 지났으면 서버가 WebSocket을 코드 4001, 이유 `idle-timeout`으로 닫고 폰은 PIN 화면으로 돌아간다. 절대 1시간 제한은 없다.
 
 폰이 전면에 있을 때 보내는 `{"type":"ping","rid":"...","active":true}`와 인증 후 유효한 기능 요청은 마지막 사용 시각을 갱신한다. 백그라운드 연결 확인용 `active:false` ping은 갱신하지 않는다. Android 전경 서비스는 연결 알림과 프로세스 우선순위를 유지하며 앱 복귀 시 폰이 즉시 소켓을 확인한다. 소켓이 끊겼으면 같은 화면 상태를 남긴 채 재개 토큰으로 연결하고 `watch`, 대화 기록, 터미널, 브라우저 화면을 다시 구독한다.
 
@@ -130,9 +130,9 @@ Git 요청은 읽기 전용이다. stage, commit, push 요청은 없다. `git.di
 | `terminal.keys.get` | `{type,rid}` |
 | `terminal.keys.set` | `{type,rid,keys}`. 최대 24개, `id` 중복 금지. 각 항목은 `{id,label,key,modifiers}`이며 `id` 1–32자 영숫자·`_`·`-`, `label` 1–24자, `key` 1–24자다. |
 
-`terminal.watch.result`는 `{type,rid,agent,revision,text,truncated,hash,columns?,rows?,mouseMode,error?}`다. `terminal.frame`도 `rid`를 제외한 같은 필드를 가진다. 이전 서버의 추가 필드 없는 프레임도 파싱하지만 크기를 확인할 수 없다는 안내를 표시한다. `hash`는 서버의 현재 화면·열·행 수·마우스 모드 SHA-256이며 내부 ID를 포함하지 않는다. herdr revision이 없거나 같은 값이어도 해시가 다르면 300 ms 간격으로 프레임을 전송한다. 입력 직후에도 화면을 읽는다. 재연결로 복원한 구독의 첫 응답도 폰 화면 스트림에 반영한다.
+`terminal.watch.result`는 `{type,rid,agent,revision,text,truncated,hash,columns?,rows?,mouseMode,error?}`다. `terminal.frame`도 `rid`를 제외한 같은 필드를 가진다. 이전 서버의 추가 필드 없는 프레임도 파싱하지만 크기를 확인할 수 없다는 안내를 표시한다. `hash`는 서버의 현재 화면·열·행 수·마우스 모드 SHA-256이며 내부 ID를 포함하지 않는다. herdr revision이 없거나 같은 값이어도 해시가 다르면 300 ms 간격으로 프레임을 전송한다. 입력 직후에도 화면을 읽는다. 입력 후 읽기와 poll이 겹쳐도 다음 poll을 예약한다. visible·recent·크기 조회마다 2초 제한 시간을 적용하며 제한 시간 뒤에도 주기 조회를 이어 간다. 재연결로 복원한 구독의 첫 응답도 폰 화면 스트림에 반영한다.
 
-`text`는 `pane.read`의 `visible`·`ansi` 화면이다. OSC·DCS는 제거하고 SGR·커서 이동·지우기 코드는 유지한다. Mac 경로와 내부 식별자는 기존 공개 정책에 따라 대체하며 원래 셀 폭을 공백으로 맞춘다. 대체 문구보다 짧은 원문은 같은 칸 수의 `•`로 가린다. 이 부분의 원문 글자는 미러링하지 않는다. 화면은 UTF-8 48 KiB와 262,144셀 이하이며 상한 초과나 herdr `truncated:true`는 부분 화면 대신 `text:""`, `truncated:false`, `error:"terminal-frame-too-large"`로 표시한다. JSON 송신 한도 초과도 같은 오류 프레임으로 처리한다. 읽기·크기 조회 실패는 `[remote] <사유 코드>` 한 줄로 기록하며 내용은 기록하지 않는다.
+`text`는 `pane.read`의 `visible`·`ansi` 화면이다. OSC·DCS는 제거하고 SGR·커서 이동·지우기 코드는 유지한다. Mac 경로와 내부 식별자는 기존 공개 정책에 따라 대체하며 원래 셀 폭을 공백으로 맞춘다. 대체 문구보다 짧은 원문은 같은 칸 수의 `•`로 가린다. 이 부분의 원문 글자는 미러링하지 않는다. 화면은 UTF-8 48 KiB와 262,144셀 이하이며 상한 초과나 herdr `truncated:true`는 부분 화면 대신 `text:""`, `truncated:false`, `error:"terminal-frame-too-large"`로 표시한다. JSON 송신 한도 초과도 같은 오류 프레임으로 처리한다. 읽기·크기 조회 실패는 `[remote] terminal-read reason=<사유 코드>` 한 줄로 기록하며 내용은 기록하지 않는다. 제한 시간은 `terminal-read-timeout`이며 폰에 `터미널 읽기 시간이 초과되었습니다. 자동으로 다시 시도합니다.`를 표시한다. visible 원문이 같지만 recent 원문이 세 번 이상 바뀌고 첫 변경부터 2초 이상 지났으면 `terminal-screen-stale`을 보낸다. 폰은 기존 visible 화면과 `출력은 바뀌지만 화면이 갱신되지 않습니다. Mac에서 이 pane을 확인하세요.`를 표시한다. visible이 바뀌면 사유를 해제한다. 조용한 pane은 중단으로 판정하지 않는다. recent 기록은 화면 좌표를 보장하지 않으므로 visible 대신 표시하지 않는다.
 
 `columns`·`rows`는 소유 herdr 클라이언트의 `call("pane.layout", {pane_id})`가 반환한 해당 pane의 `rect.width`·`rect.height`이며 1–4,096이다. 조회 실패 시 문자열 길이로 추정하지 않고 `terminal-layout-unavailable`을 표시한다. Mac pane 크기는 바꾸지 않는다. 폰은 고정 열×행 격자를 셀별 좌표로 그리며 SGR 16색·256색·truecolor, 굵게·기울임·밑줄·반전·흐림, 커서 이동·지우기·alternate screen을 해석한다. 한글·CJK·이모지는 두 칸, 박스 문자·목록 표시는 한 칸을 사용한다. 결합 글자와 ZWJ 이모지는 한 글자 묶음으로 처리한다. 커서는 화면 ANSI에 표시 상태와 위치가 있을 때 그린다. 현재 herdr read 스키마에는 별도 커서 좌표가 없다.
 
@@ -162,7 +162,7 @@ Agent ref는 pane과 현재 세션 UUID를 함께 가리킨다. 일반 터미널
 
 대화 파일 링크는 서버 메모리에 원문 경로를 남기고 `iris-media:<32자리 ref>`로 투영한다. ref는 에이전트에 묶이고 최대 4,096개이며 서버가 재시작하거나 보관 한도를 넘으면 만료된다. PDF·HTML·PNG·JPEG·GIF·WebP·SVG의 절대 경로, file URL, 상대 경로를 인식한다. 상대 경로의 기준은 현재 에이전트 cwd다. 열기를 누를 때 실제 경로를 다시 확인하며 홈 디렉터리 밖, 상태 폴더 안, 존재하지 않는 파일, 허용 확장자가 아닌 파일, 2,048자를 넘는 경로와 URL은 거부한다. 심볼릭 링크도 실제 경로로 판정한다. HTTP(S) 외의 URL은 파일 ref 경로를 제외하고 모두 거부한다. 허용 파일은 데스크톱 문서 열기와 같은 file URL로 Mac의 Iris 탭 상태에 등록하며 파일 내용이나 Mac 경로를 폰에 보내지 않는다.
 
-에이전트 화면의 브라우저 버튼은 해당 세션 탭 중 활성 탭을 먼저 고르고 없으면 같은 스페이스의 활성 탭 또는 첫 탭을 고른다. 다른 스페이스의 탭으로 넘어가지 않는다.
+대화 화면과 터미널 화면의 브라우저 버튼은 같은 에이전트의 세션 탭, 같은 스페이스 활성 탭, 같은 스페이스 첫 탭 순서로 선택한다. 해당 스페이스에 탭이 없으면 `이 스페이스에 브라우저 탭이 없습니다`를 표시하며 다른 스페이스나 공유 탭으로 이동하지 않는다. 브라우저에서 터미널을 거쳐 돌아갈 때도 같은 순서를 사용한다.
 
 ### 4.1 목록과 화면
 
@@ -201,7 +201,7 @@ Agent ref는 pane과 현재 세션 UUID를 함께 가리킨다. 일반 터미널
 
 좌표 클릭 뒤 폰은 `browser.dialog`과 `browser.focus`를 확인한다. 입력 가능한 요소에 초점이 있으면 폰 키보드를 열고 조합 중인 글자는 보내지 않으며 확정된 글자를 `browser.type`으로 최대 4,000자씩 보낸다. 지우기·Enter·Tab·방향키·Esc는 `browser.key`로 보낸다. 붙여넣기는 폰 클립보드 글자를 `browser.type`으로 보내며 복사는 `browser.focus.result.selectedText`를 폰 클립보드에 넣는다. 입력할 수 없는 곳을 누르거나 키보드를 내리면 입력 도구를 닫는다. 서버 요청은 다른 조작과 함께 연결당 1초 9개 이하로 보낸다. 이동·끌기·hover·휠은 전송 중인 값과 최신 대기값 하나만 남기며, 클릭·키·확정 글자는 요청 순서와 개수를 보존한다. 연결이 바뀌면 이전 연결의 대기 요청은 새 연결로 보내지 않는다.
 
-인증 후 서버 요청 제한은 평균 초당 10개, 짧은 몰림 20개다. 20개를 다 쓴 뒤의 요청은 `limit-exceeded`로 거절하되 연결은 유지한다. 동시에 처리하는 요청은 8개까지이며 초과분은 `busy`다. 게이트웨이와 호스트의 전송 프레임 제한은 평균 초당 10개, 짧은 몰림 30개다. 30개를 소진한 지속 남용은 `rate-limit`으로 연결을 닫아 IPC와 Mac 작업을 보호한다. 인증 전 제한은 초당 5개다. 서버가 연결을 닫으면 `server.log`에 기기·토큰·요청 내용 없이 이유 코드 한 줄만 남긴다.
+인증 후 서버 요청 제한은 평균 초당 40개, 짧은 몰림 60개다. 60개를 다 쓴 뒤의 요청은 `limit-exceeded`로 거절하되 연결은 유지한다. 동시에 처리하는 요청은 16개까지이며 초과분은 `busy`다. 게이트웨이와 호스트의 전송 프레임 제한은 평균 초당 50개, 짧은 몰림 90개다. 90개를 소진한 지속 남용은 `rate-limit`으로 연결을 닫아 IPC와 Mac 작업을 보호한다. 인증 전 제한은 초당 5개다. 서버가 연결을 닫으면 `server.log`에 기기·토큰·요청 내용 없이 이유 코드 한 줄만 남긴다.
 
 `browser.dialog`은 `alert`, `confirm`, `prompt`, `beforeunload`를 폰 시트로 표시한다. 클릭 직후와 마지막 클릭 900ms 뒤에 확인해 지연 대화상자를 받는다. 늦은 확인 때 탭 목록도 다시 받아 페이지가 연 새 탭과 팝업을 폰 탭 목록에 표시한다. 새 끌기나 키 입력이 시작되면 늦은 확인을 취소해 현재 조작을 먼저 보낸다. `prompt` 수락만 `text`를 보낸다. `select`는 페이지에서 초점을 받은 뒤 방향키와 Enter로 조작한다.
 
@@ -233,6 +233,26 @@ Agent ref는 pane과 현재 세션 UUID를 함께 가리킨다. 일반 터미널
 
 ## 5. 사람 차례 요청
 
+### 5.1 Claude 질문과 터미널 답변
+
+Claude 질문 hook은 같은 사용자 소켓에 hello와 질문을 보내고 응답을 기다리지 않고 빈 출력으로 끝난다. 연결 제한은 250ms, 프로세스 제한은 300ms, 설치 timeout은 1초다. 같은 command의 기존 600초 설치 항목은 설치를 다시 요청하면 1초로 갱신한다. `question.answer`와 updatedInput 답 경로는 사용하지 않는다. 질문을 받은 서버는 원격 공유·등록 기기·pane·CLI 세션·입력 형식을 검사하고 메모리에 보관한다. 터미널 질문은 Claude의 평소 실행 경로로 표시된다.
+
+터미널로 넘긴 질문은 서버 메모리에만 보관한다. 한 pane에 최신 질문 하나, 서버 전체 최대 32개, projection JSON 합계 32 KiB, 최대 24시간이다. 입력 questions는 최대 4문항·16 KiB이며 선택지 `preview`는 검사 뒤 제외한다. 보관과 조회 때 pane, Agent.ref, CLI 세션을 다시 확인한다. 해당 세션의 `source.question` 또는 `status:blocked`가 유지되는 동안 재표시하며 Mac 답변 뒤 상태 해제, 세션 종료·교체, 새 질문, 보관 기한 만료 때 제거한다. hook 종료와 터미널 상태 갱신 사이에는 최대 20초를 허용한다.
+
+caps의 `session.watch`는 `{type:"session.watch",rid}`다. 등록 기기와 PIN 인증 뒤에만 처리한다. 최초 연결·재연결·재호출 때 `agents`, `requests`, 아래 응답을 전송하고 이후 변경도 구독한다. 빈 배열은 폰의 보관 질문 표시를 지운다.
+
+```json
+{"type":"terminal.questions","questions":[{"ref":"32자리 hex","agent":"Agent.ref","kind":"claude-question","createdAt":1,"expiresAt":86400001,"body":{"questions":[{"question":"질문","header":"제목","multiSelect":false,"options":[{"label":"선택지","description":"설명"}]}]}}]}
+```
+
+응답과 항목의 키는 위 목록만 허용하며 기존 request projection 검사도 적용한다. 보관 질문 ref는 `request.answer`로 답할 수 없다. 폰 홈의 답 대기 목록 위와 해당 세션 대화 화면에 질문과 선택지를 표시하며 `터미널에서 답하기`로 기존 터미널 화면을 연다. 선택지는 키 입력을 보내지 않는다. `terminal.watch`와 `terminal.key`가 caps에 있을 때 표시한다. 홈의 `동기화` 버튼은 `session.watch`를 다시 요청한다.
+
+기존 `watch`도 재호출할 수 있으며 기존 `agents`, `requests` 응답만 받는다. 새 폰은 `session.watch`가 caps에 없는 서버에서 `watch`를 사용한다. 이전 앱 파서는 모르는 메시지에 오류를 내지만 인증 후 읽기 루프는 그 오류를 무시한다. 새 보관 질문 응답은 `session.watch`를 요청한 연결에만 보낸다.
+
+서버가 받은 질문을 폰에 보내지 못하면 질문 내용·경로 없이 `[remote] question reason=<코드>` 한 줄을 남긴다. 코드는 `no-phone`, `phone-disconnected`, `remote-disabled`, `no-device`, `validation-rejected`, `expired`다.
+
+### 5.2 브라우저 사람 차례
+
 폰에서는 선택지를 지정하지 않은 `browser_ask_user` 요청에 답할 수 있다. 기존 `watch`의 `requests` 목록에서 아래 항목을 확인한다. 승인 요청과 지정 선택지가 있는 질문은 Mac에서 답한다.
 
 ```json
@@ -257,6 +277,8 @@ Agent ref는 pane과 현재 세션 UUID를 함께 가리킨다. 일반 터미널
 - `git.diff`: `{type,rid,agent,file,view,base?}`. `view`는 `working`, `staged`, `branch`. `base`는 `branch`일 때 쓰며 1–200자다.
 - 결과: `{type:"git.diff.result",rid,file,patch,truncated}`. `patch`는 UTF-8 48,000바이트 이하다. diff 헤더의 파일 경로는 작업 폴더 기준 상대 경로다. 서버가 자르면 `truncated:true`다.
 - `git.diff.draft`: `{type,rid,agent,file,side,line,text}`. `side`는 `old` 또는 `new`, `line` 1–10,000,000, `text` 1–4,000자다.
+GitHub capability는 `gh` 실행 파일 설치 여부로 결정한다. 로그인 여부는 요청 결과로 확인한다. 오류 응답은 기존 `{type:"error",rid,error:{code}}`이며 `gh_missing`, `auth_required`, `no_pr`, `no_remote`, `not_github`, `timeout`, `output_limit`, `command_failed`, `bad_response`, `unsupported_host`, `invalid_run`을 허용한다. 폰은 코드마다 설치 없음·미로그인·PR 없음·원격 없음·GitHub 아닌 저장소·응답 지연 등을 구분해 표시한다. `unsupported-request`는 요청 타입이 없는 서버의 응답에만 사용한다. caps에 없는 기능의 버튼은 숨긴다.
+
 - `github.pr`: `{type,rid,agent}` → `{type:"github.pr.result",rid,pr}`. `pr`에는 `number,title,url,state,isDraft,head,base,author,body,comments,reviews,reviewComments,files,checks,reviewCommentsLimited,reviewCommentsError`만 들어간다. `checks[].runId`가 있으면 로그 요청에 쓴다.
 - `github.check.log`: `{type,rid,agent,run}`. `run`은 숫자 1–18자리이며 현재 PR의 검사여야 한다.
 - 결과: `{type:"github.check.log.result",rid,run,log,truncated}`. `log`는 UTF-8 40,000바이트 이하다. 서버가 자르면 `truncated:true`다.
@@ -278,6 +300,8 @@ Agent ref는 pane과 현재 세션 UUID를 함께 가리킨다. 일반 터미널
 | `terminal-frame-too-large` | 터미널 화면 48 KiB 또는 JSON 상한 초과, 부분 화면 표시 금지 |
 | `terminal-layout-unavailable` | pane 열·행 수 조회 실패 |
 | `terminal-read-unavailable` | pane 화면 읽기 실패 |
+| `terminal-read-timeout` | 화면·최근 기록·크기 조회의 2초 제한 시간 초과 |
+| `terminal-screen-stale` | visible은 고정되고 recent 변경이 반복됨 |
 | `terminal-stale-screen` | 터치가 가리키는 화면 또는 열·행 수 변경 |
 | `terminal-selection-unavailable` | 선택 목록 또는 현재 선택 항목 판정 실패 |
 | `terminal-mouse-unavailable` | 마우스 보고 모드 확인 불가 또는 해제 상태 |
@@ -288,3 +312,68 @@ Agent ref는 pane과 현재 세션 UUID를 함께 가리킨다. 일반 터미널
 
 폰은 `caps.requests`에 없는 기능을 숨기거나 비활성화한다. 모든 오류 코드를 사유별 문구와 사용자가 Mac에서 할 일로 표시한다. `unavailable`과 브라우저 오류는 같은 요청을 즉시 반복하지 않고 Mac 상태가 바뀐 뒤 `caps.get`과 목록 요청을 다시 보낸다.
 직접 응답이 64 KiB 송신 한도를 넘고 해당 응답에 잘림 필드가 없으면 서버는 원래 응답 대신 `limit-exceeded`를 보낸다.
+
+### 폰 응답 요청 알림
+
+폰은 `requests`의 claude-permission·claude-question·browser-user와 `terminal.questions`를 요청 ref로 합친다. 같은 ref는 한 번만 센다. 해당 에이전트의 요청이 없으면 kind가 terminal이 아닌 에이전트 중 `question:true` 또는 `status:"blocked"`를 에이전트 ref·status·question 조합으로 센다. 기존 서버 메시지와 인증·유휴 종료 계약은 유지한다.
+
+이 집합에 새 식별자가 들어오면 Android 알림을 울린다. 앱이 전면이고 현재 대화·터미널 화면에서 해당 에이전트를 보고 있으면 그 항목은 울리지 않는다. 개수 감소는 조용히 갱신하고 0건이면 제거한다. 문구는 내용 없이 `응답 요청 N건`이며 누르면 홈의 응답 대기 항목이 있는 처음으로 이동한다. 연결 종료 알림은 `연결이 끊겼습니다`를 유지한다.
+
+Android 요청 채널은 `iris.remote.requests.v2`와 IMPORTANCE_HIGH를 사용한다. 이전 `iris.remote.requests` 채널은 삭제한다. Flutter의 `iris.remote/keepalive` update는 `requestCount`와 `alert`를 전달하고, Android는 `openResponses` 클릭을 전달한다. 초기 실행의 클릭은 `takeOpenResponses`로 한 번 소비한다. 이 상태는 메모리에만 유지하며 알림에는 질문·명령·답 내용을 넣지 않는다.
+
+### 터미널 화면 질문 (packet 66)
+
+`caps.requests`의 `terminal.prompts`는 화면 질문 지원 표시다. 해당 값을 아는
+폰만 `session.watch`에 `prompts: true`를 보낸다. 생략하거나 false이면 기존
+`claude-question` 보관 항목만 전송하므로 이전 앱에 새 종류가 전달되지 않는다.
+
+`terminal.questions.questions`는 `terminal-prompt`도 포함한다. 본문은 기존
+`questions`와 `screen`이다. `screen`에는 `question`(1000자), `options`(2~12개,
+각 `row`, 원문 `text` 300자, `selectable`), `selectedRow`, `multiSelect`, `hash`,
+`columns`, `rows`가 있다. pane·세션 식별자는 공개하지 않는다.
+
+인증 후 해당 구독이 있을 때만 blocked/question 에이전트 화면을 조회한다.
+매 회차 최대 4개를 순환 조회하고 회차 종료 후 1초 대기한다. 각 herdr 호출은
+기존 2초 제한을 사용한다. 화면 해시가 바뀔 때만 해석한다. 연속된 목록과
+유일한 현재 선택 표시가 없거나 화면 제어·크기 오류가 있으면 직접 선택을 제공하지 않는다.
+`promptFallback:true` 연결에는 터미널로 가는 카드를 제공한다. 기존 요청이 있는
+에이전트는 제외하며 보관 질문은 화면과 결합한다. 화면 변경·상태 해제 시 삭제하며
+삭제한 화면의 식별자 최대 128개를 메모리에 보관해 재표시를 막는다.
+
+카드의 선택은 기존 `terminal.watch` 후 원래 카드의 해시·치수·행으로
+`terminal.select`를 한 번 보낸다. 서버가 ref·현재 화면·치수를 다시 검사한다.
+같은 감지 화면의 중복 제출은 거절한다. 복수 선택과 Other/직접 입력 항목은
+`selectable: false`로 표시하고 기존 터미널 화면에서 답한다. 새 자유 입력 계약은 없다.
+화면이 바뀌면 폰에 `화면이 바뀌었습니다, 새로 고침`을 표시한다.
+
+65의 사람 차례 집합에 request ref로 포함하며 알림은 개수만 표시한다.
+감지·해석 실패·오래된 선택 로그는 `[remote] prompt reason=<코드>`이며
+화면 내용은 기록하지 않는다. 번호/›/❯ 시험 자료는 합성 자료이며 실제
+Codex 질문·Claude 허용·계획 승인·폴더 신뢰 화면의 실기기 확인이 필요하다.
+
+
+### packet 69: 질문 동시 표시와 해석 실패
+
+`session.watch.prompts:true` 연결에는 보관 질문을 화면과 결합한 `terminal-prompt`로 전송한다. 구조화 질문 본문·설명·multiSelect는 유지한다. 단일 문항·단일 선택이며 화면 선택지와 label이 일치할 때만 선택 버튼을 제공한다. 선택은 기존 `terminal.select`의 pane·세션·화면 해시·크기·속도 검사를 거쳐 방향키와 Enter만 보낸다. 복수 선택·여러 문항·Other는 터미널 화면에서 답한다.
+
+해석 실패는 `terminal-prompt`의 `{questions:[],screen:null}`로 전송한다. 보관 질문이 있으면 questions를 유지하고 screen만 null이다. 폰은 본문 없는 경우에도 `답 대기 · 터미널에서 답하기` 카드를 제공한다. caps에 `terminal.prompt-fallback`을 추가하고 `session.watch.promptFallback:true`로 screen:null을 구독한다. 이전 앱의 `prompts` 미지정 연결에는 terminal-prompt를 전송하지 않으며 promptFallback 미지정 연결에는 screen:null을 전송하지 않는다. 기기 등록과 PIN 검사는 동일하다.
+
+질문 입력의 제어문자는 제거하고 기존 길이 상한을 유지한다. 상태 해제·해석된 질문 화면의 소멸·세션 종료·기한 만료로 카드를 제거한다. 로그에는 내용 없이 `[remote] question reason=computer-answered|session-ended|expired|replaced`와 `[remote] prompt reason=computer-answered|session-ended|unrecognized` 등의 사유를 기록한다.
+
+### 브라우저 고속 화면과 휠
+
+- `browser.frame.fast`: `browser.frame.watch`와 같은 필드·응답. `fps`는 1–20. caps에 이 요청이 있을 때만 사용하며 없으면 기존 `browser.frame.watch`와 1–4 fps를 사용한다. 변경 화면과 입력 직후에는 지정 fps로 조회하고 정지 화면은 2 fps로 조회한다. 동일 JPEG는 생략하며 입력 직후에는 동일 화면도 다시 보낸다. 캡처가 진행 중이면 추가 조회를 합쳐 다음 조회 한 번으로 처리한다.
+- `browser.wheel`: `{type,rid,tab,x,y,width,height,dx,dy}`. 좌표 조건은 `browser.mouse`와 같고 두 델타는 각각 -20000–20000 정수이며 둘 다 0일 수 없다. CSS 뷰포트 좌표로 변환해 해당 위치에 가로·세로 CDP 휠을 전달한다. caps에 없으면 기존 세로 휠·직접 스크롤을 사용한다.
+- `browser.frame.status`: `{type,tab,error}`. 고속 구독에만 전송한다. `error`는 `null` 또는 `browser-frame-unavailable`, `browser-tab-unavailable`, `browser-controller-unavailable`, `browser-command-unavailable`. 실패 후에도 조회를 재예약하며 프레임 복구 뒤 `null`로 해제한다. 폰은 사유를 표시하고 새 프레임이 오면 표시를 지운다.
+- JPEG 원문 384 KiB와 프레임 JSON 520 KiB 상한, PIN·세션·송신 초당 9개·서버 입력 버킷을 유지한다. 휠은 폰에서 150ms 이상 간격으로 합치며 실행 중 하나와 합산 대기값만 유지한다. 클릭·키·글자 입력의 순서를 보존한다.
+- 폰은 스크롤 중 현재 그림을 즉시 이동하고 새 프레임으로 교체할 때 이동량을 해제한다. 손을 떼면 속도를 초당 지수 감속하며 취소·화면 종료·탭 변경·오류 때 관성을 중지한다. 두 손가락의 간격 변화가 `max(6dp, 중심 이동 × 1.5)` 이상일 때 핀치로 확정하고 중심 이동이 6dp 이상이면 페이지 스크롤로 확정한다. 확대 상태의 직접 한 손가락 이동은 뷰 경계까지 이동하고 남은 이동을 페이지 휠로 보낸다.
+- 프레임은 배율 1에서 위 정렬하고 주소줄·탭 줄 아래 영역 안에 종횡비를 유지해 맞춘다. 새로고침은 `browser.history` 지원 시 주소줄에 표시한다. 요청 동안 로딩을 표시하고 프레임 수신으로 종료하며 실패 사유를 표시한다.
+- macOS 경로는 기존 CDP 세션에서 메모리 JPEG를 캡처하며 스크린샷 파일과 sips를 사용하지 않는다. Windows는 기존 PowerShell 변환을 유지한다. 캡처·변환·전송 준비 시간은 30회 평균으로 `[remote] browser-frame ms=<캡처>/<변환>/<전송>`에 기록한다. 전송 시간은 서버의 프레임 전달 함수 호출까지이며 폰 수신·디코딩 시간은 포함하지 않는다.
+
+## 연결 키 (v2)
+
+폰의 연결 키는 EC P-256 서명 키이며 안드로이드 키스토어(StrongBox 우선)와 iOS Secure Enclave 안에 있어 꺼낼 수 없다. v2 키는 서명할 때 폰 잠금 해제를 요구하지 않는다(이전 키는 최근 300초 안의 잠금 해제가 필요했다). 키 설정은 만든 뒤 바꿀 수 없어 이전 키는 지우고 새 키를 만들며, 컴퓨터에 등록한 공개키가 달라지므로 한 번 다시 페어링한다. 앱은 시작할 때 `hasKey`로 현재 버전 키가 있는지 확인하고 없으면 저장된 등록을 지우고 페어링 화면을 보여 준다. 폰 잠금(화면 잠금)이 설정되어 있지 않으면 키를 만들지 않는다.
+
+## 폰에서 등록 해제
+
+폰의 `이 폰 등록 해제`는 먼저 `{type:"device.unregister",rid}`를 보낸다. 서버는 이 연결을 인증한 기기 하나만 레지스트리에서 지우고(`remove-device`), 그 기기의 다른 세션과 재접속 토큰을 폐기하며, 요청한 연결에는 `remote.action.result`(`done` 또는 이미 없으면 `unchanged`)를 보낸 뒤 1초 안에 닫는다. 폰은 응답 뒤 연결 키와 저장값을 지운다. 연결이 없거나 서버가 실패하면 폰 쪽은 그대로 지우고 `Mac의 Iris 원격 화면에서 이 폰을 직접 삭제하세요` 안내를 시작 화면에 표시한다. 연결 끊기만으로는 등록이 남는다. v2 키 전환으로 폰이 이전 키를 잃은 기기는 서버에 이전 항목이 남으므로 Mac 원격 화면에서 직접 삭제한다.

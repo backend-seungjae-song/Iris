@@ -1,34 +1,55 @@
 import 'package:flutter/material.dart';
-import 'package:iris_remote/design/agent_tile.dart';
+import 'package:iris_remote/design/action_bar.dart';
 import 'package:iris_remote/design/buttons.dart';
-import 'package:iris_remote/design/icon.dart';
 import 'package:iris_remote/design/markdown_text.dart';
-import 'package:iris_remote/design/sheet.dart';
+import 'package:iris_remote/design/motion.dart';
+import 'package:iris_remote/design/toast.dart';
 import 'package:iris_remote/design/tokens.dart';
 import 'package:iris_remote/format/result_text.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
+import 'package:iris_remote/screens/response_host.dart';
+import 'package:iris_remote/screens/response_kit.dart';
 import 'package:iris_remote/state/remote_state.dart';
 
-Future<void> showQuestionRequestSheet({
+// 반환값은 거절로 끝난 마지막 요청의 에이전트(없으면 null)
+Future<String?> showQuestionRequestSheet({
   required BuildContext context,
   required RemoteRequest request,
   required RemoteState state,
   required String agentName,
   required String agentKind,
   required String space,
-}) async {
-  final body = request.body as QuestionRequestBody;
-  await showIrisSheet<void>(
+}) {
+  return showResponseHost(
     context: context,
-    builder: (_) => QuestionRequestSheet(
-      request: request,
-      agentName: agentName,
-      agentKind: agentKind,
-      space: space,
-      onAnswer: (responses) => state.answerQuestions(request, body, responses),
-    ),
+    state: state,
+    request: request,
+    agentName: agentName,
+    agentKind: agentKind,
+    space: space,
   );
+}
+
+// 질문 답 초안. 요청 사이를 오가도 선택·입력·진행 위치를 보존하려고 호스트가 소유
+class QuestionDraft {
+  QuestionDraft(int count)
+    : selected = List.generate(count, (_) => <String>{}),
+      directSelected = List.filled(count, false),
+      controllers = List.generate(count, (_) => TextEditingController());
+
+  final List<Set<String>> selected;
+  final List<bool> directSelected;
+  final List<TextEditingController> controllers;
+  int index = 0;
+  // 질문이 둘 이상일 때 마지막 질문 뒤의 제출 확인 단계
+  bool review = false;
+
+  void dispose() {
+    for (final controller in controllers) {
+      controller.dispose();
+    }
+  }
 }
 
 class QuestionRequestSheet extends StatefulWidget {
@@ -38,6 +59,9 @@ class QuestionRequestSheet extends StatefulWidget {
     required this.agentKind,
     required this.space,
     required this.onAnswer,
+    this.nav,
+    this.closedAs,
+    this.draft,
     super.key,
   });
 
@@ -47,6 +71,11 @@ class QuestionRequestSheet extends StatefulWidget {
   final String space;
   final Future<RequestAnswerResult> Function(List<QuestionResponse> responses)
   onAnswer;
+  final ResponseNav? nav;
+  // 목록에서 사라진 요청. gone 은 이유 불명, gone-expired 는 만료 시각이 지난 경우
+  final String? closedAs;
+  // 비우면 이 화면이 직접 만들고 닫을 때 버림
+  final QuestionDraft? draft;
 
   @override
   State<QuestionRequestSheet> createState() => _QuestionRequestSheetState();
@@ -54,72 +83,96 @@ class QuestionRequestSheet extends StatefulWidget {
 
 class _QuestionRequestSheetState extends State<QuestionRequestSheet> {
   late final QuestionRequestBody _body;
-  late final List<Set<String>> _selected;
-  late final List<TextEditingController> _textControllers;
-  late final List<bool> _directSelected;
-  int _index = 0;
+  late final QuestionDraft _draft;
+  QuestionDraft? _ownDraft;
   bool _busy = false;
-  String? _result;
+  String? _gone;
 
   @override
   void initState() {
     super.initState();
     _body = widget.request.body as QuestionRequestBody;
-    _selected = List.generate(_body.questions.length, (_) => <String>{});
-    _directSelected = List.filled(_body.questions.length, false);
-    _textControllers = List.generate(
-      _body.questions.length,
-      (_) => TextEditingController(),
-    );
+    _draft =
+        widget.draft ?? (_ownDraft = QuestionDraft(_body.questions.length));
   }
 
   @override
   void dispose() {
-    for (final controller in _textControllers) {
-      controller.dispose();
-    }
+    _ownDraft?.dispose();
     super.dispose();
   }
 
+  int get _total => _body.questions.length;
+
   void _toggle(String label) {
-    final question = _body.questions[_index];
+    if (_busy) return;
+    final question = _body.questions[_draft.index];
+    final chosen = _draft.selected[_draft.index];
     setState(() {
       if (question.multiSelect) {
-        if (!_selected[_index].add(label)) _selected[_index].remove(label);
+        if (!chosen.add(label)) chosen.remove(label);
       } else {
-        _directSelected[_index] = false;
-        _selected[_index]
+        _draft.directSelected[_draft.index] = false;
+        chosen
           ..clear()
           ..add(label);
-        _textControllers[_index].clear();
+        _draft.controllers[_draft.index].clear();
       }
     });
   }
 
-  bool get _currentComplete {
-    final question = _body.questions[_index];
-    return _selected[_index].isNotEmpty ||
+  void _selectDirect() {
+    if (_busy) return;
+    setState(() {
+      _draft.selected[_draft.index].clear();
+      _draft.directSelected[_draft.index] = true;
+    });
+  }
+
+  bool _complete(int index) {
+    final question = _body.questions[index];
+    return _draft.selected[index].isNotEmpty ||
         (!question.multiSelect &&
-            _directSelected[_index] &&
-            _textControllers[_index].text.isNotEmpty);
+            _draft.directSelected[index] &&
+            _draft.controllers[index].text.isNotEmpty);
+  }
+
+  String _answerText(int index) {
+    final text = _draft.controllers[index].text;
+    if (text.isNotEmpty) return text;
+    return [
+      for (final option in _body.questions[index].options)
+        if (_draft.selected[index].contains(option.label)) option.label,
+    ].join(' · ');
   }
 
   Future<void> _next() async {
-    if (!_currentComplete || _busy) return;
-    if (_index < _body.questions.length - 1) {
-      setState(() => _index++);
+    if (!_complete(_draft.index) || _busy) return;
+    if (_total > 1) {
+      setState(() {
+        if (_draft.index < _total - 1) {
+          _draft.index++;
+        } else {
+          _draft.review = true;
+        }
+      });
       return;
     }
+    await _submit();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
     final responses = <QuestionResponse>[];
-    for (var index = 0; index < _body.questions.length; index++) {
-      final text = _textControllers[index].text;
+    for (var index = 0; index < _total; index++) {
+      final text = _draft.controllers[index].text;
       if (text.isNotEmpty) {
         responses.add(QuestionText(text));
       } else {
         responses.add(
           QuestionLabels([
             for (final option in _body.questions[index].options)
-              if (_selected[index].contains(option.label)) option.label,
+              if (_draft.selected[index].contains(option.label)) option.label,
           ]),
         );
       }
@@ -128,16 +181,27 @@ class _QuestionRequestSheetState extends State<QuestionRequestSheet> {
     try {
       final result = await widget.onAnswer(responses);
       if (!mounted) return;
-      setState(() => _result = requestAnswerResultText(result.result));
-      if (result.result == 'delivered' ||
-          result.result == 'already-answered' ||
-          result.result == 'expired') {
-        Navigator.of(context).pop();
+      switch (result.result) {
+        case 'delivered':
+          showIrisToast(context, '에이전트에게 보냈습니다');
+          Navigator.of(context).pop();
+        case 'already-answered' || 'expired':
+          setState(() => _gone = result.result);
+        default:
+          showIrisToast(
+            context,
+            requestAnswerResultText(result.result),
+            tone: IrisToastTone.error,
+          );
       }
     } on ProtocolException catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      if (mounted) {
+        showIrisToast(context, error.message, tone: IrisToastTone.error);
+      }
     } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      if (mounted) {
+        showIrisToast(context, error.message, tone: IrisToastTone.error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -145,350 +209,301 @@ class _QuestionRequestSheetState extends State<QuestionRequestSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final question = _body.questions[_index];
-    return SizedBox(
-      height: 497,
-      child: Column(
-        children: [
-          const IrisSheetGrabber(barKey: Key('question-grabber')),
-          const SizedBox(height: 14),
-          SizedBox(
-            key: const Key('question-header'),
-            height: 35,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                children: [
-                  IrisAgentTile(
-                    key: const Key('question-tile'),
-                    kind: widget.agentKind,
-                    status: 'question',
-                    small: true,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.agentName,
-                          style: TextStyle(
-                            color: context.iris.foreground2,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            height: 17 / 14,
-                          ),
-                        ),
-                        Text(
-                          '${widget.space} · 9분 전',
-                          style: TextStyle(
-                            color: context.iris.muted,
-                            fontSize: 13,
-                            height: 16 / 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    key: const Key('question-progress'),
-                    width: 27.3,
-                    child: ClipRect(
-                      child: Text(
-                        '${_index + 1} / ${_body.questions.length}',
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: context.iris.muted,
-                          fontSize: 13,
-                          height: 16 / 13,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+    final gone = _gone ?? (_busy ? null : widget.closedAs);
+    if (gone != null) return _answered(context, gone);
+    final children = _draft.review
+        ? _reviewBody(context)
+        : _questionBody(context);
+    return ResponseFrame(
+      header: ResponseHeader.titledNext,
+      title: widget.agentName,
+      space: widget.space,
+      agentKind: widget.agentKind,
+      nav: widget.nav,
+      bar: _draft.review ? _reviewBar(context) : _questionBar(context),
+      children: children,
+    );
+  }
+
+  String get _kindLabel {
+    if (_total == 1) {
+      return _body.questions.first.multiSelect ? '질문 · 여러 개 선택' : '질문 · 하나 고르기';
+    }
+    return _draft.review
+        ? '질문 $_total개 · 제출 전 확인'
+        : '질문 $_total개 · ${_draft.index + 1}번째';
+  }
+
+  Widget _kindRow() => ResponseKindRow(
+    label: _kindLabel,
+    tone: ResponseTone.question,
+    glyph: '?',
+    time: responseAgo(widget.request.createdAt),
+  );
+
+  List<Widget> _questionBody(BuildContext context) {
+    final colors = context.iris;
+    final question = _body.questions[_draft.index];
+    final hasDirect = question.options.any((o) => o.label == '직접 입력');
+    final addDirect = !question.multiSelect && !hasDirect;
+    final count = question.options.length + (addDirect ? 1 : 0);
+    final allSelected =
+        question.multiSelect && _draft.selected[_draft.index].length == count;
+    return [
+      _kindRow(),
+      if (_total > 1) ResponseProgress(count: _total, current: _draft.index),
+      if (_total > 1 && _draft.index > 0)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: ResponseAnswerCard(
+            key: const Key('question-previous-answer'),
+            question:
+                '$_draft.index. ${_body.questions[_draft.index - 1].question}',
+            answer: _answerText(_draft.index - 1),
+          ),
+        ),
+      Padding(
+        key: const Key('question-title'),
+        padding: EdgeInsets.only(
+          top: _total > 1 && _draft.index > 0 ? 20 : 14,
+          bottom: 8,
+        ),
+        child: IrisMarkdown(
+          question.question,
+          compact: true,
+          baseStyle: TextStyle(
+            color: colors.foreground,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            height: 1.38,
+            letterSpacing: -0.33,
+          ),
+        ),
+      ),
+      if (question.multiSelect)
+        ResponseSectionLabel(
+          '선택지 ${question.options.length}개',
+          inline: true,
+          trailing: GestureDetector(
+            key: const Key('question-select-all'),
+            behavior: HitTestBehavior.opaque,
+            onTap: _busy
+                ? null
+                : () => setState(() {
+                    if (allSelected) {
+                      _draft.selected[_draft.index].clear();
+                    } else {
+                      _draft.selected[_draft.index].addAll(
+                        question.options.map((o) => o.label),
+                      );
+                    }
+                  }),
+            child: Text(
+              allSelected ? '선택 해제' : '모두 선택',
+              style: TextStyle(
+                color: colors.link,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
-          Padding(
-            key: const Key('question-title'),
-            padding: const EdgeInsets.fromLTRB(4, 14, 4, 0),
-            child: IrisMarkdown(
-              question.question,
-              compact: true,
-              baseStyle: TextStyle(
-                color: context.iris.foreground,
-                fontSize: 21,
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-                letterSpacing: -0.42,
-              ),
-            ),
+        )
+      else
+        const ResponseSectionLabel('답'),
+      for (var i = 0; i < count; i++) ...[
+        if (i > 0) const SizedBox(height: 8),
+        _option(context, question, i),
+      ],
+      if (_total > 1 && _draft.index < _total - 1) ...[
+        const ResponseSectionLabel('남은 질문'),
+        for (var i = _draft.index + 1; i < _total; i++)
+          ResponseAnswerCard(
+            number: i + 1,
+            todo: true,
+            question: _body.questions[i].question,
+            answer: _complete(i) ? _answerText(i) : '아직 답하지 않음',
           ),
-          SizedBox(
-            key: const Key('question-note'),
-            height: 27.75,
-            width: double.infinity,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
-              child: Text(
-                question.multiSelect ? '여러 개 고를 수 있습니다' : '하나를 골라 주세요',
-                style: TextStyle(
-                  color: context.iris.muted,
-                  fontSize: 14.5,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: ListView.separated(
-              key: const Key('question-options'),
-              physics: const ClampingScrollPhysics(),
-              padding: EdgeInsets.zero,
-              itemCount:
-                  question.options.length +
-                  (!question.multiSelect &&
-                          !question.options.any(
-                            (option) => option.label == '직접 입력',
-                          )
-                      ? 1
-                      : 0),
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (context, optionIndex) {
-                if (optionIndex == question.options.length) {
-                  return _QuestionOption(
-                    label: '직접 입력',
-                    description: '',
-                    selected: _directSelected[_index],
-                    square: false,
-                    controller: _textControllers[_index],
-                    onTap: () => setState(() {
-                      _selected[_index].clear();
-                      _directSelected[_index] = true;
-                    }),
-                    onChanged: (_) => setState(() {}),
-                  );
-                }
-                final option = question.options[optionIndex];
-                final direct = !question.multiSelect && option.label == '직접 입력';
-                return _QuestionOption(
-                  key: optionIndex == 0
-                      ? const Key('question-option-first')
-                      : null,
-                  label: option.label,
-                  description: option.description,
-                  selected: direct
-                      ? _directSelected[_index]
-                      : _selected[_index].contains(option.label),
-                  square: question.multiSelect,
-                  controller: direct ? _textControllers[_index] : null,
-                  onChanged: direct ? (_) => setState(() {}) : null,
-                  onTap: direct
-                      ? () => setState(() {
-                          _selected[_index].clear();
-                          _directSelected[_index] = true;
-                        })
-                      : () => _toggle(option.label),
-                );
-              },
-            ),
-          ),
-          SizedBox(
-            key: const Key('question-footer'),
-            height: 64,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 14),
-              child: Row(
-                children: [
-                  if (_index > 0) ...[
-                    SizedBox(
-                      width: 96,
-                      child: IrisButton(
-                        label: '이전',
-                        expand: false,
-                        onPressed: () => setState(() => _index--),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                  ],
-                  IrisButton(
-                    key: const Key('question-next'),
-                    label: _busy
-                        ? '보내는 중…'
-                        : (_index == _body.questions.length - 1 ? '보내기' : '다음'),
-                    tone: IrisButtonTone.primary,
-                    onPressed: _currentComplete ? _next : null,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(
-            key: const Key('question-dots'),
-            height: 20,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 14),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (var dot = 0; dot < _body.questions.length; dot++) ...[
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: dot == _index ? 18 : 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: dot == _index
-                            ? context.iris.foreground
-                            : context.iris.level3,
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                    if (dot != _body.questions.length - 1)
-                      const SizedBox(width: 6),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          if (_result != null)
-            Text(_result!, style: TextStyle(color: context.iris.muted)),
-        ],
+      ],
+    ];
+  }
+
+  Widget _option(BuildContext context, RequestQuestion question, int i) {
+    final extraDirect = i == question.options.length;
+    final option = extraDirect ? null : question.options[i];
+    final direct =
+        !question.multiSelect && (extraDirect || option!.label == '직접 입력');
+    final selected = direct
+        ? _draft.directSelected[_draft.index]
+        : _draft.selected[_draft.index].contains(option!.label);
+    return ResponseOption(
+      key: i == 0 ? const Key('question-option-first') : null,
+      title: option?.label ?? '직접 입력',
+      description: option?.description ?? '',
+      multi: question.multiSelect,
+      selected: selected,
+      onTap: _busy
+          ? null
+          : (direct ? _selectDirect : () => _toggle(option!.label)),
+      extra: direct && selected ? _directField(context) : null,
+    );
+  }
+
+  Widget _directField(BuildContext context) {
+    final colors = context.iris;
+    return TextField(
+      key: const Key('question-direct-input'),
+      controller: _draft.controllers[_draft.index],
+      autofocus: true,
+      enabled: !_busy,
+      maxLength: 2000,
+      minLines: 1,
+      maxLines: 4,
+      onChanged: (_) => setState(() {}),
+      style: TextStyle(color: colors.foreground, fontSize: 15, height: 1.45),
+      decoration: InputDecoration(
+        hintText: '에이전트에게 보낼 답',
+        hintStyle: TextStyle(color: colors.muted),
+        counterText: '',
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+        filled: true,
+        fillColor: colors.level2,
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.line2),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colors.strong, width: 1.5),
+        ),
       ),
     );
   }
-}
 
-class _QuestionOption extends StatelessWidget {
-  const _QuestionOption({
-    required this.label,
-    required this.description,
-    required this.selected,
-    required this.square,
-    required this.onTap,
-    this.controller,
-    this.onChanged,
-    super.key,
-  });
-
-  final String label;
-  final String description;
-  final bool selected;
-  final bool square;
-  final VoidCallback onTap;
-  final TextEditingController? controller;
-  final ValueChanged<String>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasDescription = description.isNotEmpty;
-    final expandedInput = controller != null && selected;
-    final minimumHeight = expandedInput
-        ? 102.0
-        : (hasDescription ? 68.0 : 49.0);
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        constraints: BoxConstraints(minHeight: minimumHeight),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: selected
-              ? context.iris.brand.withValues(alpha: 0.10)
-              : context.iris.level2,
-          borderRadius: BorderRadius.circular(16),
+  Widget _questionBar(BuildContext context) {
+    final question = _body.questions[_draft.index];
+    final complete = _complete(_draft.index);
+    final last = _draft.index == _total - 1;
+    final String label;
+    if (_busy) {
+      label = '보내는 중…';
+    } else if (!complete) {
+      label = question.multiSelect ? '하나 이상 고르세요' : '답을 고르세요';
+    } else if (_total > 1) {
+      label = last ? '확인하고 제출' : '다음';
+    } else if (question.multiSelect) {
+      label = '선택한 ${_draft.selected[_draft.index].length}개 보내기';
+    } else if (_draft.controllers[_draft.index].text.isNotEmpty) {
+      label = '입력한 답 보내기';
+    } else {
+      label = '‘${_draft.selected[_draft.index].first}’ 보내기';
+    }
+    return IrisActionBar(
+      buttons: [
+        if (_draft.index > 0)
+          IrisButton(
+            key: const Key('question-previous'),
+            label: '이전',
+            tone: IrisButtonTone.secondary,
+            onPressed: _busy ? null : () => setState(() => _draft.index--),
+          )
+        else
+          IrisButton(
+            key: const Key('question-later'),
+            label: '나중에',
+            tone: IrisButtonTone.ghost,
+            onPressed: _busy ? null : () => Navigator.of(context).maybePop(),
+          ),
+        IrisButton(
+          key: const Key('question-next'),
+          label: label,
+          tone: IrisButtonTone.primary,
+          onPressed: complete && !_busy ? _next : null,
         ),
-        foregroundDecoration: selected
-            ? BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: context.iris.brand, width: 1.5),
-              )
-            : null,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 22,
-              height: 22,
-              margin: const EdgeInsets.only(top: 1),
-              decoration: BoxDecoration(
-                color: selected ? context.iris.brand : Colors.transparent,
-                borderRadius: BorderRadius.circular(square ? 7 : 11),
-                border: selected
-                    ? null
-                    : Border.all(color: context.iris.level3, width: 2),
-              ),
-              alignment: Alignment.center,
-              child: selected
-                  ? IrisIcon('check', size: 13, color: context.iris.onBrand)
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: context.iris.foreground,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      height: 1.2,
-                      letterSpacing: -0.16,
-                    ),
-                  ),
-                  if (hasDescription)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: IrisMarkdown(
-                        description,
-                        compact: true,
-                        selectable: false,
-                        baseStyle: TextStyle(
-                          color: context.iris.muted,
-                          fontSize: 14,
-                          height: 1.45,
-                        ),
-                        textColor: context.iris.muted,
-                      ),
-                    ),
-                  if (expandedInput)
-                    SizedBox(
-                      height: 40,
-                      child: TextField(
-                        key: const Key('question-direct-input'),
-                        controller: controller,
-                        autofocus: true,
-                        maxLength: 2000,
-                        onChanged: onChanged,
-                        style: TextStyle(
-                          color: context.iris.foreground,
-                          fontSize: 15,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: '에이전트에게 보낼 답',
-                          counterText: '',
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                          ),
-                          filled: true,
-                          fillColor: context.iris.level1,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+      ],
+    );
+  }
+
+  // 제출 확인 단계 진입: 본문 전체 페이드
+  List<Widget> _reviewBody(BuildContext context) {
+    return [
+      IrisFadeIn(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: _reviewItems(context),
         ),
       ),
+    ];
+  }
+
+  List<Widget> _reviewItems(BuildContext context) {
+    return [
+      _kindRow(),
+      ResponseProgress(count: _total, current: _total, allDone: true),
+      const ResponseTitle('이대로 보낼까요?'),
+      Text('고친 답은 제출하기 전까지 컴퓨터에 전달되지 않습니다.', style: responseLeadStyle(context)),
+      ResponseSectionLabel('답 $_total개'),
+      for (var i = 0; i < _total; i++)
+        ResponseAnswerCard(
+          key: Key('question-review-$i'),
+          question: '${i + 1}. ${_body.questions[i].question}',
+          answer: _answerText(i),
+          onEdit: _busy
+              ? null
+              : () => setState(() {
+                  _draft.index = i;
+                  _draft.review = false;
+                }),
+        ),
+    ];
+  }
+
+  Widget _reviewBar(BuildContext context) => IrisActionBar(
+    buttons: [
+      IrisButton(
+        key: const Key('question-review-cancel'),
+        label: '취소',
+        tone: IrisButtonTone.ghost,
+        onPressed: _busy ? null : () => setState(() => _draft.review = false),
+      ),
+      IrisButton(
+        key: const Key('question-submit'),
+        label: _busy ? '보내는 중…' : '제출',
+        tone: IrisButtonTone.primary,
+        onPressed: _busy ? null : _submit,
+      ),
+    ],
+  );
+
+  Widget _answered(BuildContext context, String gone) {
+    final remaining = gone.startsWith('gone')
+        ? (widget.nav?.count ?? 0)
+        : ((widget.nav?.count ?? 1) - 1).clamp(0, 99);
+    return ResponseFrame(
+      header: ResponseHeader.titledNext,
+      title: widget.agentName,
+      space: widget.space,
+      agentKind: widget.agentKind,
+      bar: responseAnsweredBar(
+        onHome: () => Navigator.of(context).pop(),
+        remaining: remaining,
+        onNext: widget.nav?.onNext,
+      ),
+      children: [
+        ResponseAnswered(
+          title: responseGoneText(gone).$1,
+          detail: responseGoneText(gone).$2,
+          badge: responseGoneBadge(gone),
+          kindLabel: _total > 1 ? '질문 $_total개' : '질문',
+          kindIcon: 'check-circle',
+          kindTone: ResponseTone.question,
+          kindGlyph: '?',
+          ghost: responseGhostCode(context, _body.questions.first.question),
+        ),
+      ],
     );
   }
 }

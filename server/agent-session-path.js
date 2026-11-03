@@ -17,6 +17,7 @@ function real(value) {
 }
 
 function roots(options = {}) {
+  if (options.roots) return options.roots; // 호출자가 한 번 구해 수천 파일에 재사용
   return {
     claude: real(options.claudeRoot || claudeHome("projects")),
     codex: real(options.codexRoot || codexHome("sessions")),
@@ -24,33 +25,66 @@ function roots(options = {}) {
   };
 }
 
-export function validateAgentSessionPath(agent, value, options = {}) {
-  if (!["claude", "codex"].includes(agent) || typeof value !== "string" || !value.endsWith(".jsonl")) return null;
-  const file = real(value);
+// 색인처럼 수천 파일을 매 재계산마다 검사하는 호출자가 세 루트의 realpath 를 한 번만 구하게 한다.
+export function sessionPathRoots(options = {}) { return roots(options); }
+
+// file 은 이미 realpath 가 확정된 일반 파일. 루트 안인지만 본다.
+export function validateResolvedAgentSessionPath(agent, file, options = {}) {
+  if (!["claude", "codex"].includes(agent) || typeof file !== "string") return null;
   const allowed = roots(options);
-  if (!file || !inside(allowed[agent], file) || inside(allowed.state, file)) return null;
+  return inside(allowed[agent], file) && !inside(allowed.state, file) ? file : null;
+}
+
+export function validateAgentSessionPath(agent, value, options = {}) {
+  if (typeof value !== "string" || !value.endsWith(".jsonl")) return null;
+  const file = validateResolvedAgentSessionPath(agent, real(value), options);
+  if (!file) return null;
   try { return fs.statSync(file).isFile() ? file : null; } catch { return null; }
 }
+
+// 관제 재계산(4초 주기·herdr 이벤트마다)이 모든 기록 파일에 대해 부르는 함수
+// 크기·수정 시각이 같으면 이전 결과 재사용, 읽을 때는 버퍼 재사용과 session_id 줄만 디코딩
+// 매번 256KB 를 새로 할당·디코딩하던 때 서버가 분당 수백 MB 를 할당해 힙이 GB 단위로 커짐
+const tailBuffer = Buffer.allocUnsafe(SESSION_TAIL_BYTES);
+const tailCache = new Map();
+// 상한은 기록 파일 수(2026-10 기준 약 3천 개)보다 크게. 넘치면 전체 재읽기가 매 재계산마다 반복
+const TAIL_CACHE_LIMIT = 20000;
+const NEWLINE = 0x0a;
 
 export function sessionIdsFromTranscriptTail(file) {
   let fd;
   try {
+    // 바뀌지 않은 파일은 stat 한 번으로 끝낸다. 열고 fstat 하고 닫는 세 호출을 수천 파일에 반복하면
+    // 재계산 한 회차가 수백 ms 동안 이벤트 루프를 막는다.
+    const st = fs.statSync(file);
+    const cached = tailCache.get(file);
+    if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) return new Set(cached.ids);
     fd = fs.openSync(file, "r");
-    const size = fs.fstatSync(fd).size;
+    const { size, mtimeMs } = fs.fstatSync(fd);
     const start = Math.max(0, size - SESSION_TAIL_BYTES);
-    const buffer = Buffer.alloc(size - start);
-    const read = fs.readSync(fd, buffer, 0, buffer.length, start);
-    const lines = buffer.subarray(0, read).toString("utf8").split("\n");
-    if (start > 0) lines.shift();
+    const view = tailBuffer.subarray(0, fs.readSync(fd, tailBuffer, 0, size - start, start));
     const ids = new Set();
-    for (const line of lines) {
-      if (!line.includes("session_id")) continue;
+    // 중간부터 읽었으면 잘린 첫 줄 제외
+    let pos = 0;
+    if (start > 0) {
+      const first = view.indexOf(NEWLINE);
+      pos = first < 0 ? view.length : first + 1;
+    }
+    while (pos < view.length) {
+      const hit = view.indexOf("session_id", pos);
+      if (hit < 0) break;
+      const lineStart = Math.max(pos, view.lastIndexOf(NEWLINE, hit) + 1);
+      const newline = view.indexOf(NEWLINE, hit);
+      const lineEnd = newline < 0 ? view.length : newline;
       try {
-        const value = JSON.parse(line)?.session_id;
+        const value = JSON.parse(view.toString("utf8", lineStart, lineEnd))?.session_id;
         if (typeof value === "string" && value) ids.add(value);
       } catch {}
+      pos = lineEnd + 1;
     }
-    return ids;
+    if (tailCache.size >= TAIL_CACHE_LIMIT) tailCache.delete(tailCache.keys().next().value);
+    tailCache.set(file, { size, mtimeMs, ids });
+    return new Set(ids);
   } catch {
     return new Set();
   } finally {

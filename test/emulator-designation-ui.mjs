@@ -18,7 +18,7 @@ const host = {
   rpc:async(method,args)=>{
     calls.push({method,args});
     if(method==='emulator.availability') return {ok:true,result:{platform:'darwin',simctl:{ok:true},serveSim:{ok:true},android:{},devices}};
-    if(method==='emulator.listDevices') return {ok:true,result:devices.map(d=>({...d,id:d.udid,detail:d.runtime}))};
+    if(method==='emulator.listDevices') return {ok:true,result:devices.map(d=>({...d,id:d.udid,detail:d.runtime,state:d.state.toLowerCase()}))};
     if(method==='emulator.attach') {
       if(args.device==='ios-b' && deferB) await new Promise(resolve=>window.releaseB=resolve);
       return {ok:true,result:{attached:true,info:{deviceUdid:args.device,displayName:'iPhone',state:'Booted'}}};
@@ -75,9 +75,12 @@ async function withPage(run) {
 async function openRow(page, index, udid) {
   await page.evaluate((index) => document.querySelectorAll(".emu-dp-row")[index].click(), index);
   await page.waitForFunction((udid) => calls.some((call) => call.method === "emulator.attach" && call.args.device === udid), {}, udid);
-  await page.waitForFunction((udid) => {
-    feature.ws["emulator-ask"]({ kind: "list", id: "poll" });
-    return messages.at(-1).tabs.some((tab) => tab.udid === udid);
+  // 목록 응답은 기기 상태를 조회한 뒤 오므로 id로 기다림
+  await page.waitForFunction(async (udid) => {
+    const id = "poll-" + Math.random();
+    feature.ws["emulator-ask"]({ kind: "list", id });
+    for (let i = 0; i < 50 && !messages.some((message) => message.id === id); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    return !!messages.find((message) => message.id === id)?.tabs.some((tab) => tab.udid === udid);
   }, {}, udid);
 }
 
@@ -92,11 +95,30 @@ test("동일한 이름의 iOS 기기를 UDID로 요청하면 기존 지정 기�
   await page.waitForFunction(() => messages.some((message) => message.id === "open-b"));
   assert.equal(await page.evaluate(() => messages.find((message) => message.id === "open-b").udid), "ios-b");
   assert.equal(await page.evaluate(() => calls.filter((call) => call.method === "emulator.attach").length), before);
+  const mark = await page.evaluate(() => calls.length);
   await page.evaluate(() => feature.ws["emulator-ask"]({ kind: "list", id: "after" }));
+  await page.waitForFunction(() => messages.some((message) => message.id === "after"));
   const tabs = await page.evaluate(() => messages.find((message) => message.id === "after").tabs);
+  // 목록 요청은 반응 관찰마다 오므로 수 초 걸리는 availability 대신 기기 목록만 조회
+  assert.deepEqual(await page.evaluate((mark) => calls.slice(mark).map((call) => call.method), mark), ["emulator.listDevices"]);
   assert.equal(tabs.find((tab) => tab.udid === "ios-a").owner, "agent");
   assert.equal(tabs.length, 2);
   assert.deepEqual(await page.evaluate(() => calls.filter((call) => call.method === "emulator.shutdown")), []);
+}));
+
+test("세션이 등록에서 뺀 기기의 소유 탭은 주인을 비우고, 남긴 기기의 탭은 그대로 둔다", async () => withPage(async (page) => {
+  await openRow(page, 0, "ios-a");
+  await openRow(page, 1, "ios-b");
+  await page.evaluate(() => {
+    feature.ws["emulator-ask"]({ kind: "reown", id: "reown", devices: ["ios-a", "ios-b"], owner: "agent" });
+    feature.ws["emulator-ask"]({ kind: "release", id: "release", owner: "agent", keep: ["ios-b"] });
+    feature.ws["emulator-ask"]({ kind: "list", id: "after" });
+  });
+  await page.waitForFunction(() => messages.some((message) => message.id === "after"));
+  assert.equal(await page.evaluate(() => messages.find((message) => message.id === "release").released), 1);
+  const tabs = await page.evaluate(() => messages.find((message) => message.id === "after").tabs);
+  assert.equal(tabs.find((tab) => tab.udid === "ios-a").owner, null);
+  assert.equal(tabs.find((tab) => tab.udid === "ios-b").owner, "agent");
 }));
 
 test("지정한 iOS 기기를 다른 UDID로 바꾸는 요청은 새 기기의 attach 완료 전에 성공하지 않는다", async () => withPage(async (page) => {

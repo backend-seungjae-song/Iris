@@ -1,4 +1,6 @@
 .page-translate-button[hidden], .page-translate-panel[hidden], .page-translate-panel [hidden] { display:none; }
+/* 검색창 쪽은 4px로 좁히고 계정 버튼 쪽은 기존 주소줄 간격인 8px을 유지한다. */
+.urlbar .page-translate-button { margin-inline-start:-4px; margin-inline-end:6px; }
 .page-translate-glyph { font:600 11px/1 var(--sans); letter-spacing:-1px; }
 .page-translate-button.translated, .page-translate-button[aria-expanded="true"] { color:var(--accent); background:var(--select); }
 .page-translate-panel { position:fixed; inset:auto; z-index:9999; box-sizing:border-box; width:340px; max-width:calc(100vw - 16px);

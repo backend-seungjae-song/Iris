@@ -34,6 +34,7 @@
 //   iris-browser pdf                   지금 페이지를 인쇄 레이아웃 그대로 PDF로 저장
 //   iris-browser select @e9 "옵션"      <select> 드롭다운에서 옵션(값/텍스트) 선택
 //   iris-browser newtab [url]          이 세션 전용 탭을 만들고 자동 고정(병렬 작업용. 기본 구글)
+//   iris-browser closetab @핸들 [...]  이 세션 그룹의 탭 닫기(최대 4개)
 //   iris-browser tabs                  열린 브라우저 탭 목록(wc·URL·제목) + 내 세션의 고정 상태
 //   iris-browser target [@핸들]        인자 없으면 내 고정 조회, 있으면 그 탭에 고정
 //   iris-browser untarget              고정 해제(이후 이 세션 그룹 안에서 마지막에 쓴 탭을 따름)
@@ -90,7 +91,7 @@ const HELP = `사용법: iris-browser <명령> [인자]  (공통: --tab @핸들 
   파일      upload <경로…> · download <폴더|off> [once]
   창        dialog <ok|cancel> [값] · dialogs <off|ok|cancel|ok,cancel…>
             nativewin · nativeclick <버튼이름> · nativekey <escape|enter>
-  탭        newtab [url] · target [@핸들] · untarget
+  탭        newtab [url] · closetab @핸들 · target [@핸들] · untarget
   진단      cdpstate              이 탭의 CDP 부착 상태(attached·aiSession·identity·blocked). 부착 정책은 건드리지 않는다
   계획      plan check|digest|run <plan.json> [--run <회차>] [--only S1,S2] [--local]
             동결된 계획을 모델 없이 실행한다. 대상이 하나로 안 좁혀지면 고치지 않고 멈춘다.
@@ -160,6 +161,7 @@ switch (cmd) {
     const v = (rest[1] || "").toLowerCase(); if (v) args.value = !(v === "off" || v === "false" || v === "0"); break; }
   case "select": { const a = rest[0] || ""; if (a.startsWith("@")) args.ref = a; else args.sel = a; args.value = rest.slice(1).join(" "); break; }
   case "target": if (rest[0]) args.tab = String(rest[0]).replace(/^@/, ""); break;
+  case "closetab": if (rest.length) args.tab = rest.map((r) => String(r).replace(/^@/, "")).join(","); break;
   // 스킴이 이미 있으면 그대로 둔다. http(s)만 통과시키면 file:·about: 주소 앞에 https://가
   // 덧붙어 "https://file///…"가 된다(확인 결과). 스킴이 없을 때만 https를 붙인다.
   // 사람을 부른다(결제·본인확인처럼 AI가 대신할 수 없는 경우).
@@ -239,6 +241,10 @@ const req = http.request(
         console.log(d.answered ? "사람 응답: " + d.answer : "응답 없음");
         if (d.tab) console.log("탭 @" + d.tab);
         if (d.note) console.log(d.note);
+      }
+      else if (cmd === "closetab" && d.closed) {
+        console.log("탭 @" + d.closed + " 닫음");
+        console.log("남은 탭: " + ((d.remaining || []).map((h) => "@" + h).join(" ") || "(없음)"));
       }
       else if (cmd === "newtab") {
         console.log(d.reused

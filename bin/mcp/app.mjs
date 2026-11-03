@@ -10,7 +10,7 @@
 // 의존 대상
 //   idb(idb-path.mjs 가 찾는다), adb(server/adb-path.js 가 찾는다), state-home.cjs 가 정한 상태 폴더와
 //   artifacts-home.cjs 가 정한 그 안의 부산물 위치,
-//   그리고 조립부가 넘겨주는 currentSession·journal·addReceipt·call(서버 호출, 탭 목록과 탭 열기에만 쓴다).
+//   그리고 조립부가 넘겨주는 currentSession·call(서버 호출, 탭 목록과 탭 열기에만 쓴다).
 //
 // 유지 조건
 //   대상은 Iris 에뮬레이터 탭에 열린 기기뿐이다. Iris 앱이 꺼져 있으면 앱 도구는 거절한다. 기기를 따로
@@ -18,11 +18,8 @@
 //   요소 참조는 그 스냅샷 순간에만 유효하다. 앱에는 탭이 없고 도구 인자는 기기다.
 //   좌표는 플랫폼마다 단위가 다르다(iOS 는 포인트, Android 는 픽셀). 스냅샷·탭·스와이프가 같은 기기의
 //   단위를 쓰므로 섞이지 않는다.
-//   통과는 영수증에서만 나온다. app_expect 도 브라우저와 같은 장부를 쓴다.
-//
 // 영향 범위
-//   공급자는 bin/iris-mcp.mjs 의 조립부이고, 양방향 소비자는 bin/mcp/report.mjs 다.
-//   앱 장면도 같은 회차 폴더·같은 표시 사이드카로 간다.
+//   공급자는 bin/iris-mcp.mjs 의 조립부다. 앱 장면의 표시 사이드카는 report.mjs의 그리기 함수를 쓴다.
 //   현재 목록은 다음으로 확인한다: node bin/importers.mjs bin/mcp/app.mjs
 
 import fs from "node:fs";
@@ -31,7 +28,11 @@ import childProcess from "node:child_process";
 import { stateHome } from "../../server/state-home.cjs";
 import { artifactDir } from "../../server/artifacts-home.cjs";
 import { adbPath } from "../../server/adb-path.js";
+import { androidScreenshotPng } from "../../server/android-screencap.js";
 import { idbPath, IDB_MISSING } from "./idb-path.mjs";
+import { refreshIdbCompanion } from "./idb-companion.mjs";
+import { needsPaste, pasteIosText } from "./idb-paste.mjs";
+import { createIosHid } from "./ios-hid.mjs";
 import { MAX_APP_TARGETS, appDeviceTargetId, resolveAppDeviceTarget } from "../../server/app-targets.js";
 import { writeMarks } from "./report.mjs";
 
@@ -44,7 +45,10 @@ export const MAX_DEVICES = MAX_APP_TARGETS;
 // 브라우저와 같은 방식을 앱에도 쓴다. idb가 접근성 트리를 주므로
 // 요소를 이름으로 찾아 값을 읽을 수 있고, 그러면 판정이 인상이 아니라 사실이 된다.
 // 조작은 서버(4271)를 거치지 않고 idb 를 직접 부른다. 대상 기기를 정할 때만 Iris 에 묻는다.
-function idb(args, opts = {}) {
+async function idb(args, opts = {}) {
+  // 이전 부팅에 묶인 companion 교체(idb-companion.mjs)
+  const at = args.indexOf("--udid");
+  if (at >= 0 && args[at + 1]) await refreshIdbCompanion(args[at + 1]).catch(() => false);
   return new Promise((resolve) => {
     const bin = idbPath();
     if (!bin) { resolve({ ok: false, out: "", err: IDB_MISSING }); return; }
@@ -79,7 +83,10 @@ let lastDeviceError = null;
 async function irisTabs() {
   const r = await serverCall("app-devices", {});
   if (!r || !r.ok) return { ok: false, error: (r && r.error) || "Iris 에뮬레이터 탭 목록을 받지 못했습니다.", tabs: [] };
-  const tabs = ((r.data && r.data.tabs) || []).map((t) => ({ name: t.name || "", udid: t.udid,
+  // QA 회차가 잡은 기기는 빼되, 사용자가 지목해 이 세션에 등록한 기기는 남긴다
+  const all = (r.data && r.data.tabs) || [];
+  const registered = all.some(t => t.qaRun) ? (await registeredDeviceState(await sessionOf())).devices : [];
+  const tabs = all.filter(t => !t.qaRun || registered.includes(t.udid) || (t.persistentId && registered.includes(t.persistentId))).map((t) => ({ name: t.name || "", udid: t.udid,
     persistentId: t.persistentId || null,
     platform: isIosUdid(t.udid) ? "ios" : "android", space: t.space, mine: !!t.mine, own: !!t.owner && !!t.mine }));
   return { ok: true, tabs };
@@ -239,13 +246,20 @@ const appTree = (udid) => (isIosUdid(udid) ? iosTree(udid) : androidTree(udid));
 
 // 조작. 같은 이름의 동작을 플랫폼마다 한 번씩 적는다. 결과는 idb 와 같은 {ok, err} 모양이다.
 const ANDROID_BUTTON = { HOME: 3, BACK: 4, LOCK: 26, SIDE_BUTTON: 26 };
-const IOS_BUTTON = new Set(["HOME", "LOCK", "SIDE_BUTTON", "SIRI", "APPLE_PAY"]);
+const IOS_BUTTON = new Set(["HOME", "LOCK", "SIDE_BUTTON"]);
+// iOS 입력은 사람 터치와 같은 serve-sim 도우미로(ios-hid.mjs). idb 입력 명령은 사람 터치를 막는다
+const iosHid = createIosHid({ readTree: (u) => iosTree(u) });
+const hidResult = (p) => p.then(() => ({ ok: true, out: "", err: "" }), (error) => ({ ok: false, out: "", err: error.message }));
+// adb 좌표는 정수만 받음
 function tapAt(u, x, y) {
-  return isIosUdid(u) ? idb(["ui", "tap", "--udid", u, String(x), String(y)])
+  return isIosUdid(u) ? hidResult(iosHid.tap(u, x, y))
     : adb(["-s", u, "shell", "input", "tap", String(Math.round(x)), String(Math.round(y))]);
 }
 function typeText(u, text) {
-  if (isIosUdid(u)) return idb(["ui", "text", "--udid", u, text]);
+  // 도우미 키 입력은 ASCII 만 보냄. 한글 등은 붙여넣기
+  if (isIosUdid(u) && needsPaste(text)) return refreshIdbCompanion(u).catch(() => false).then(() => pasteIosText(u, text))
+    .then(() => ({ ok: true, out: "", err: "" }), (error) => ({ ok: false, out: "", err: error.message }));
+  if (isIosUdid(u)) return hidResult(iosHid.type(u, text));
   // input text 는 ASCII 만 받는다. 한글을 보내면 기기에서 NullPointerException 으로 끝나 이유를 알 수 없으므로 먼저 거절한다.
   if (/[^\x20-\x7e]/.test(text)) return Promise.resolve({ ok: false, err: "Android 입력은 영문·숫자·기호만 넣을 수 있습니다(adb input text 제약)." });
   // adb shell 은 인자를 기기의 sh 에 한 줄로 넘긴다. 공백은 input 의 %s, 셸 문자는 역슬래시로 막는다.
@@ -255,22 +269,18 @@ function typeText(u, text) {
 function pressButton(u, button) {
   if (isIosUdid(u)) {
     if (!IOS_BUTTON.has(button)) return Promise.resolve({ ok: false, err: `iOS에는 ${button} 버튼이 없습니다.` });
-    return idb(["ui", "button", "--udid", u, button]);
+    return hidResult(iosHid.button(u, button));
   }
   const code = ANDROID_BUTTON[button];
   if (code == null) return Promise.resolve({ ok: false, err: `Android에는 ${button} 버튼이 없습니다(HOME·BACK·LOCK).` });
   return adb(["-s", u, "shell", "input", "keyevent", String(code)]);
 }
 function pressKeycode(u, keycode) {
-  return isIosUdid(u) ? idb(["ui", "key", "--udid", u, String(keycode)])
+  return isIosUdid(u) ? hidResult(iosHid.key(u, keycode))
     : adb(["-s", u, "shell", "input", "keyevent", String(keycode)]);
 }
 function swipe(u, { x1, y1, x2, y2, duration }) {
-  if (isIosUdid(u)) {
-    const args = ["ui", "swipe", "--udid", u, String(x1), String(y1), String(x2), String(y2)];
-    if (duration) args.push("--duration", String(duration));
-    return idb(args);
-  }
+  if (isIosUdid(u)) return hidResult(iosHid.swipe(u, { x1, y1, x2, y2, duration }));
   const ms = Math.round((Number(duration) || 0.3) * 1000);
   return adb(["-s", u, "shell", "input", "swipe", ...[x1, y1, x2, y2].map((v) => String(Math.round(v))), String(ms)]);
 }
@@ -278,7 +288,10 @@ async function screenshotTo(u, p) {
   if (isIosUdid(u)) return idb(["screenshot", "--udid", u, p]);
   const r = await adb(["-s", u, "exec-out", "screencap", "-p"], { binary: true });
   if (!r.ok || !r.out || !r.out.length) return { ok: false, err: r.err || "빈 화면" };
-  fs.writeFileSync(p, r.out);
+  let bytes;
+  try { bytes = androidScreenshotPng(r.out); }
+  catch (error) { return { ok: false, err: error.message }; }
+  fs.writeFileSync(p, bytes);
   return { ok: true, err: "" };
 }
 function appSnapshotText(tree, udid) {
@@ -330,7 +343,7 @@ function appIdent(udid, app) {
   const id = isIosUdid(udid) ? String(udid).slice(0, 8) : String(udid || "");
   return "app://" + id + (name ? "/" + name : "");
 }
-export function createAppSurface({ currentSession, journal, addReceipt, call }) {
+export function createAppSurface({ currentSession, call }) {
   sessionOf = currentSession;
   // 표면마다 자기 호출만. 호출 없이 만든 표면이 앞 표면의 실서버 호출을 이어받아 실제 앱·기기에 닿는 것 방지
   serverCall = typeof call === "function" ? call : noServerCall;
@@ -472,8 +485,8 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
       const r = await typeText(u, String(a.text));
       return r.ok ? { ok: true, data: { typed: String(a.text).length + "자" } } : { ok: false, error: r.err.slice(0, 200) };
     } },
-  { name: "app_key", desc: "하드웨어 버튼 또는 키코드를 누른다. iOS는 HOME·LOCK·SIDE_BUTTON·SIRI·APPLE_PAY, Android는 HOME·BACK·LOCK(SIDE_BUTTON은 LOCK과 같다). keycode는 iOS면 HID 키코드, Android면 KeyEvent 코드다.",
-    schema: { button: { type: "string", enum: ["HOME", "BACK", "LOCK", "SIDE_BUTTON", "SIRI", "APPLE_PAY"] }, keycode: { type: "number" } }, app: true,
+  { name: "app_key", desc: "하드웨어 버튼 또는 키코드를 누른다. iOS는 HOME·LOCK·SIDE_BUTTON, Android는 HOME·BACK·LOCK(SIDE_BUTTON은 LOCK과 같다). keycode는 iOS면 HID 키코드, Android면 KeyEvent 코드다.",
+    schema: { button: { type: "string", enum: ["HOME", "BACK", "LOCK", "SIDE_BUTTON"] }, keycode: { type: "number" } }, app: true,
     run: async (a) => {
       const u = await simTarget(a.device); if (!u) return { ok: false, error: await simTargetError(a.device) };
       const r = a.keycode != null ? await pressKeycode(u, a.keycode) : await pressButton(u, String(a.button || "HOME"));
@@ -487,13 +500,14 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
       const r = await swipe(u, a);
       return r.ok ? { ok: true, data: { swiped: `(${a.x1},${a.y1}) → (${a.x2},${a.y2})` } } : { ok: false, error: r.err.slice(0, 200) };
     } },
-  { name: "app_screenshot", desc: "기기 화면을 PNG로 남긴다. mark로 볼 곳을 지정하면 보고서에서 그 자리에 상자와 설명이 겹쳐 그려진다(원본은 안 상한다). caption은 이 장면이 무엇을 증명하는지 한 줄.",
+  { name: "app_screenshot", desc: "기기 화면을 PNG로 남긴다. mark로 볼 곳을 지정하면 표시 사이드카도 저장한다. 이 이미지는 QA 근거에 포함되지 않는다.",
     schema: { mark: { type: "array", description: "볼 곳들. {label?, ref?|label 매칭용 name, type?, nth?}",
         items: { type: "object", properties: { ref: { type: "string" }, name: { type: "string" }, type: { type: "string" }, nth: { type: "number" }, label: { type: "string" } } } },
       caption: { type: "string" } }, app: true,
     run: async (a) => {
       const u = await simTarget(a.device); if (!u) return { ok: false, error: await simTargetError(a.device) };
-      const t = await appTree(u);
+      await stopWatch(u);
+      const t = a.mark?.length ? await appTree(u) : [];
       const app = t.find((e) => e.type === "Application");
       const marks = [];
       for (const m of (a.mark || [])) {
@@ -501,50 +515,7 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
         if (f.hits[0]) marks.push(appMark(f.hits[0].frame, m.label || appName(f.hits[0])));
       }
       const p = await appShot(u, { marks, frame: app && app.frame, caption: a.caption });
-      // 앱은 idb·adb를 직접 부르므로 서버를 지나지 않는다. 장면도 회차 장부에 직접 제출해야
-      // 회차 폴더에 보존된다. 보존되지 않으면 상태 폴더의 60장 정리에 밀려 보고할 때 이미 없다.
-      // 어느 기기·어느 앱 화면에서 찍혔는지 함께 적는다. 브라우저 장면은 url을 적지만 앱 장면은
-      // 이 값이 없었다(확인 결과: artifact 301건 전부 없음). 그 줄이 무엇을 확인하는
-      // 화면인가를 정하는 값이라, 없으면 보고서가 장면을 줄 주제 밖으로 분류한다.
-      const j = await journal({ kind: "artifact", source: "app", shot: p, caption: a.caption,
-        url: appIdent(u, app) });
-      return { ok: true, data: { path: (j && j.shot) || p, marks: marks.length,
-        장부: j ? undefined : "안 실림 — 회차가 없거나 서버가 거절했다" } };
-    } },
-  { name: "app_expect", desc: "화면에 그 요소가 있고 값이 기대와 같은지 확인하고, 그 판정의 근거를 표시한 스크린샷까지 같은 순간에 남긴다. 보고서의 통과는 이 도구가 돌려주는 receipt에서만 나온다.",
-    schema: { label: { type: "string", description: "찾을 이름" }, ref: { type: "string" },
-      type: { type: "string" }, nth: { type: "number" },
-      text: { type: "string", description: "기대하는 값·문구(생략하면 존재만 확인)" },
-      mode: { type: "string", enum: ["contains", "equals", "exists", "absent"] } }, app: true,
-    run: async (a) => {
-      const u = await simTarget(a.device); if (!u) return { ok: false, error: await simTargetError(a.device) };
-      const t = await appTree(u);
-      const app = t.find((e) => e.type === "Application");
-      const mode = String(a.mode || (a.text == null ? "exists" : "contains"));
-      const f = appFind(t, a, u);
-      const hit = f.hits[0];
-      const got = hit ? (appName(hit) + (hit.AXValue && hit.AXValue !== appName(hit) ? " / " + hit.AXValue : "")) : null;
-      const pass = mode === "absent" ? !hit
-        : !hit ? false
-        : a.text == null ? true
-        : mode === "equals" ? got === String(a.text) : String(got).includes(String(a.text));
-      const desc = mode === "absent" ? `"${a.label}" 없음` : mode === "exists" ? `"${a.label}" 있음`
-        : `"${a.label}" ${mode === "equals" ? "=" : "⊃"} "${a.text}"`;
-      const shot = await appShot(u, {
-        marks: hit ? [appMark(hit.frame, desc, pass ? "#8BFBC2" : "#FF7A72")] : [],
-        frame: app && app.frame, caption: `${pass ? "됨" : "안 됨"} · ${desc}${hit ? "" : " (요소 없음)"}`,
-      }).catch(() => null);
-      // 앱은 idb·adb를 직접 부르므로 서버를 지나지 않는다. 그래서 판정을 회차 장부에 직접 제출한다.
-      // 이 자리가 없으면 앱 단계는 파생에서 빠지고 다시 모델 서술로 되돌아간다.
-      const j = await journal({ kind: "assertion", source: "app",
-        selector: String(a.ref || a.label || ""), mode, want: a.text ?? null,
-        url: appIdent(u, app),
-        matched: f.hits.length,
-        expected: desc, got, pass, found: !!hit, shot });
-      const rc = addReceipt({ surface: "app", selector: a.ref || a.label, mode, want: a.text ?? null,
-        expected: desc, got, pass, found: !!hit, shot: (j && j.shot) || shot }, j && j.id);
-      return { ok: true, data: { pass, expected: desc, got, found: !!hit, hits: f.hits.length,
-        shot: (j && j.shot) || shot, receipt: rc.id } };
+      return { ok: true, data: { path: p, marks: marks.length } };
     } },
   { name: "app_observe", desc: "지금 앱이 어떤 상태인지 한 번에 — 화면 한 장, 무엇이 떠 있는지, 경고·시트가 있는지. 뭔가 안 될 때 먼저 부른다.",
     schema: {}, app: true,
@@ -555,63 +526,29 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
       const s = appSnapshotText(t, u);
       const alerts = t.filter((e) => /Alert|Sheet|Dialog/i.test(String(e.type))).map((e) => appName(e)).filter(Boolean);
       const shot = await appShot(u, { frame: app && app.frame, caption: "지금 상태" }).catch(() => null);
-      // app_screenshot과 같은 이유로 회차 장부에 제출한다. 실패했을 때 찍은 이 한 장이
-      // 보고서에서 가장 먼저 필요한데, 보존하지 않으면 그 장이 먼저 사라진다.
-      // 실패 원인을 보려고 만든 도구이므로 원인도 함께 남긴다. 떠 있던 경고·시트와
-      // 화면에 있던 요소 수를 빼면 장면 하나만 남는다(확인 결과: 상세 0).
-      const j = shot ? await journal({ kind: "artifact", source: "app", shot, caption: "지금 상태",
-        url: appIdent(u, app),
-        detail: { app: s.app, screen: s.frame, elements: s.count, alerts } }) : null;
       return { ok: true, data: { app: s.app, screen: s.frame, elements: s.count, alerts,
-        shot: (j && j.shot) || shot, snapshot: s.text.slice(0, 2000) } };
+        shot, snapshot: s.text.slice(0, 2000) } };
+    } },
+  // 화면 비율은 앱 안 device_preview 가 바꾼다. idb·adb 가 아니라 그 기기가 열린 Iris 에뮬레이터 탭을 거쳐야
+  // 사람이 탭에서 보는 드롭다운과 같은 값이 된다.
+  { name: "app_viewport", desc: "기기에서 실행 중인 Flutter 앱(device_preview 를 켠 디버그 실행)을 다른 기기의 화면 크기·안전 영역·OS 로 보이게 한다. 시뮬레이터는 그대로라 다른 app_* 도구로 계속 조작한다. preset 없이 부르면 고를 수 있는 기기 목록과 현재 값을 준다.",
+    schema: { preset: { type: "string", description: "적용할 기기 id(목록의 id). \"real\" 이면 실제 기기 화면으로 되돌린다." } }, app: true,
+    run: async (a) => {
+      const u = await simTarget(a.device); if (!u) return { ok: false, error: await simTargetError(a.device) };
+      const preset = a.preset == null ? null : String(a.preset).trim();
+      const r = await serverCall("app-viewport", preset ? { device: u, op: "apply", preset: preset === "real" ? "" : preset } : { device: u, op: "list" });
+      if (!r || !r.ok) return { ok: false, error: (r && r.error) || "화면 비율을 바꾸지 못했습니다." };
+      return { ok: true, data: { current: r.data.current || "real", ...(r.data.presets ? { presets: r.data.presets } : {}) } };
     } },
   // 사람이 시뮬레이터·에뮬레이터 화면에서 직접 가리킨 것. 브라우저의 browser_picks에 대응한다.
   // 이쪽은 서버가 Flutter 검사기에서 받아 두므로 idb·adb를 지나지 않는다. 그래서 app: true가 아니다.
   { name: "app_picks", desc: "사용자가 앱 화면에서 직접 고른 요소들(최근 10개). 터미널에 붙은 글은 사람이 읽는 형식이고, 이 도구는 위젯 이름·소스 파일과 줄·상위 위젯 경로 같은 원본 필드를 준다. 고른 것이 무엇이었는지 다시 확인하거나 여러 개를 한꺼번에 다룰 때 쓴다.",
     schema: {}, run: (a, C) => C("app-picks") },
   ];
-  // 앱 조작을 장부에 남긴다. 브라우저는 조작마다 accepted·completed 짝과 전후 프레임이 서버에서
-  // 자동으로 남지만(server/browser-commands.js), 앱은 idb·adb를 직접 부르므로 그 경로를 지나지 않는다.
-  // 그대로 두면 tap·text·key·swipe 넷이 장부에 한 건도 남지 않는다(확인 결과: 기록 0건). 앱으로만
-  // 조작한 줄은 "무엇을 눌렀는가"가 어디에도 남지 않는다.
-  //
-  // 도구마다 journal 호출을 넣지 않는다. 도구가 늘 때마다 같은 곳이 다시 빈다. 조작이라는 것을
-  // 한 번 선언하고 감싼다.
-  const APP_ACT = new Set(["app_tap", "app_text", "app_key", "app_swipe"]);
-  for (const t of TOOLS) {
-    if (!APP_ACT.has(t.name)) continue;
-    const inner = t.run;
-    t.run = async (a, C) => {
-      const dev = await simTarget(a && a.device).catch(() => null);
-      const target = a && (a.ref || a.label || a.button
-        || (a.keycode != null ? "키 " + a.keycode : "")
-        || (a.x != null ? `(${a.x}, ${a.y})` : "")
-        || (a.x1 != null ? `(${a.x1},${a.y1}) → (${a.x2},${a.y2})` : "")
-        || (a.text != null ? String(a.text).length + "자 입력" : "")) || "";
-      // 값은 담지 않는다. 비밀이 섞일 수 있으므로 길이만 남긴다(브라우저 트레이스와 같은 규칙).
-      const j = await journal({ kind: "accepted", source: "app", cmd: t.name.slice(4),
-        target: String(target).slice(0, 120), url: dev ? "app://" + dev : undefined });
-      // 다음 조작을 시작하기 전에 앞 조작의 감시를 끝낸다. 감시를 계속하면 이번 조작이 띄운 화면을
-      // 앞 조작의 알림으로 잘못 기록한다.
-      if (dev) await stopWatch(dev);
-      const before = dev ? await appTree(dev).catch(() => null) : null;
-      const r = await inner(a, C);
-      await journal({ kind: "completed", source: "app", cmd: t.name.slice(4),
-        call_id: j && j.call_id, target: String(target).slice(0, 120),
-        url: dev ? "app://" + dev : undefined,
-        ok: !!(r && r.ok),
-        error: r && !r.ok ? String(r.error || "").slice(0, 200) : undefined,
-        detail: r && r.ok ? r.data : undefined });
-      if (dev && before && r && r.ok) startWatch(dev, before);
-      return r;
-    };
-  }
-  // 토스트처럼 잠깐 나타났다 사라지는 알림을 찾는다. 누른 뒤 1초쯤 지나 나타나고 3초 안에 사라져서,
-  // 다음 도구를 부를 때는 화면에 없다. 그래서 알림을 확인한 기록(receipt)이 하나도 없는 회차가 나왔고,
-  // 결과는 글로만 적혔다(2026-09-28).
+  // 토스트처럼 잠깐 나타났다 사라지는 알림을 다음 호출에 함께 돌려준다.
   //
   // 조작이 끝나면 9초 동안 접근성 트리를 반복해서 읽는다. 조작 전에 없던 요소가 나타나면 그때 화면을
-  // 찍고, 9초 안에 그 요소가 없어지면 알림으로 판단해 QA 기록 파일에 남긴다. 없어질 때까지 기다리는 이유는
+  // 찍고, 9초 안에 그 요소가 없어지면 알림으로 판단한다. 없어질 때까지 기다리는 이유는
   // 새 화면처럼 계속 남아 있는 요소를 알림으로 잘못 판단하지 않기 위해서다. 요소 네 개 이상이 같이
   // 나타났다 없어지면 화면이 바뀐 것으로 보고 기록하지 않는다.
   const WATCH_MS = 9000, MOMENT_MAX_PARTS = 3;
@@ -662,10 +599,7 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
       const moment = g.gone && g.keys.length <= MOMENT_MAX_PARTS;
       if (!moment) { if (g.shot) { try { fs.unlinkSync(g.shot); fs.rmSync(g.shot + ".marks.json", { force: true }); fs.rmSync(g.shot + ".caption.txt", { force: true }); } catch {} } continue; }
       const lived = g.last - g.first;
-      const j = g.shot ? await journal({ kind: "artifact", source: "moment", shot: g.shot,
-        caption: "잠깐 뜬 알림: " + g.text, url: g.url,
-        detail: { 문구: g.text, 떠있던초: Number((lived / 1000).toFixed(1)) } }) : null;
-      delivered.push({ text: g.text, lived, shot: (j && j.shot) || g.shot, journaled: !!j,
+      delivered.push({ text: g.text, lived, shot: g.shot,
         note: g.shot ? undefined : "찍지 못했다" });
     }
   }
@@ -678,6 +612,19 @@ export function createAppSurface({ currentSession, journal, addReceipt, call }) 
     const w = watches.get(u); if (!w) return;
     w.stop = true; watches.delete(u);
     await w.done;
+  }
+  const APP_ACT = new Set(["app_tap", "app_text", "app_key", "app_swipe"]);
+  for (const t of TOOLS) {
+    if (!APP_ACT.has(t.name)) continue;
+    const inner = t.run;
+    t.run = async (a, C) => {
+      const dev = await simTarget(a?.device).catch(() => null);
+      if (dev) await stopWatch(dev);
+      const before = dev ? await appTree(dev).catch(() => null) : null;
+      const result = await inner(a, C);
+      if (dev && before && result?.ok) startWatch(dev, before);
+      return result;
+    };
   }
   // 감시는 조작 결과를 돌려준 뒤에도 계속된다. 그 사이에 찾은 알림은 다음 앱 도구의 결과에 함께 넣어
   // 알린다.

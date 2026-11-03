@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTerminalFeature, terminalMouseMode, terminalSelection, encodeTerminalMouse } from '../server/remote/features/terminal.js';
+import { createTerminalFeature, terminalMouseMode, terminalSelection, encodeTerminalMouse, promptList } from '../server/remote/features/terminal.js';
 import { isRemoteRequest } from '../server/remote/contract/requests.js';
 import { projectFeature } from '../server/remote/projection.js';
 const REF = 'a'.repeat(32);
@@ -70,7 +70,8 @@ test('목록 표시와 한 선택 표시가 없거나 여러 목록이면 거절
   assert.equal(terminalSelection('❯ one\n❯ two',2),null);
   assert.equal(terminalSelection('● one\n○ two',2),1);
   assert.equal(terminalSelection('❯ /skill\n○ /other',2),1);
-  assert.equal(terminalSelection('❯ first\n○ second\ntext\n○ third',2),null);
+  assert.equal(terminalSelection('❯ first\n○ second\ntext\n○ third',4),null);
+  assert.equal(terminalSelection('❯ first\n○ second\n   설명\n○ third',4),2);
   assert.equal(terminalSelection('\x1b[2H❯ first\n○ second',2),null);
   assert.equal(terminalSelection('\x1b[31m❯ first\x1b[0m\n○ second',2),1);
 });
@@ -104,7 +105,7 @@ test('마우스 아닌 pane, 화면변경, 범위외 좌표에는 바이트를 �
 test('48KiB 상한은 부분 화면 대신 사유 표시, frame projection 허용',async()=>{
   const f=fixture();f.setText('x'.repeat(49*1024));const frame=await f.terminal.watch(entry,REF);
   assert.equal(frame.error,'terminal-frame-too-large');assert.equal(frame.text,'');assert.equal(frame.truncated,false);
-  assert.equal(f.logs.at(-1),'terminal-frame-too-large');
+  assert.equal(f.logs.at(-1),'terminal-read reason=terminal-frame-too-large');
   projectFeature({type:'terminal.frame',agent:REF,...frame});f.terminal.close();
 });
 test('터치 요청은 해시·기하·셀 범위·모르는 키를 엄격 검사',()=>{
@@ -121,7 +122,7 @@ test('화면 읽기 실패는 폰에도 사유 프레임으로 전달',async()=>
   f.herdr.paneRead=async()=>{throw new Error('private contents');};
   await f.timers.at(-1).callback();await new Promise(resolve=>setImmediate(resolve));
   assert.equal(f.frames.at(-1).error,'terminal-read-unavailable');
-  assert.equal(f.frames.at(-1).text,'');assert.equal(f.logs.at(-1),'terminal-read-unavailable');f.terminal.close();
+  assert.equal(f.frames.at(-1).text,'');assert.equal(f.logs.at(-1),'terminal-read reason=terminal-read-unavailable');f.terminal.close();
 });
 test('최근 기록은 실제 열 수를 쓰고 48KiB·셀 상한·닫힌 pane 거절',async()=>{
   const f=fixture();f.setRaw('older\nlatest');
@@ -152,4 +153,35 @@ test('ANSI로 나뉜 경로·식별자는 화면과 기록에서 가리고 색·
       plainSource.split('\n').map((line) => line.search(/ [XYZ]$/)), '뒤 글자의 셀 위치');
   }
   f.terminal.close();
+});
+
+test('최근 기록은 깊은 줄 수부터 읽고 상한을 넘으면 줄 수를 줄여 다시 읽음', async () => {
+  const f = fixture(); const asked = [];
+  f.herdr.paneRead = async (_pane, _source, _format, _strip, lines) => {
+    asked.push(lines);
+    return { text: lines === 400 ? 'x'.repeat(49 * 1024) : 'older\nlatest', truncated: false };
+  };
+  assert.deepEqual(await f.terminal.scrollback(REF), { ok: true, text: 'older\nlatest', columns: 87, lineCount: 2 });
+  assert.deepEqual(asked, [400, 200]); f.terminal.close();
+});
+
+test('질문 화면 위쪽의 › 입력 기록 줄이 있어도 아래 선택 목록을 인식', () => {
+  const screen = '› 지난 메시지 하나가 길어서\n줄이 바뀐 뒤 이어짐\n› 지난 메시지 둘\n이어짐\n──────────────────\n질문입니다?\n\n❯ 1. 가\n     설명\n  2. 나\n';
+  const list = promptList(screen);
+  assert.deepEqual(list.items.map(item => item.row), [8, 10]);
+  assert.equal(list.selectedIndex, 0);
+  assert.equal(promptList('› 하나\n› 둘\n'), null);
+});
+
+test("체크 목록 아래 번호 없는 Submit 줄은 선택지, 키 안내 줄은 설명에서 뺌", () => {
+  const text = [
+    "←  ☒ 증상  ✔ Submit  →", "", "무엇인가요?", "",
+    "  1. [✔] 첫째", "         설명 하나", "❯ 2. [ ] 둘째", "  3. [ ] Type something", "     Submit",
+    "───────────────────────────────────────────────────────────────────",
+    "  4. Chat about this", "", "Enter to select · ↑/↓ to navigate · Esc to cancel"].join("\n");
+  const list = promptList(text);
+  assert.deepEqual(list.items.map(item => item.text), ["1. [✔] 첫째", "❯ 2. [ ] 둘째", "3. [ ] Type something", "Submit", "4. Chat about this"]);
+  assert.equal(list.selectedIndex, 1);
+  assert.equal(list.items[2].description, "");
+  assert.equal(list.items[4].description, "");
 });

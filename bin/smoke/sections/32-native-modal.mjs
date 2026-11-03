@@ -154,7 +154,9 @@ check("지금 어느 편의 기능에 있는지 rail에 보인다", () =>
 // AI 자동완성 로그인: 허용한 (사이트, 아이디)만 쓰고, 비밀번호는 AI가 볼 수 없다.
 check("허용 목록에 오른 계정만 AI가 채운다", () => {
   return /function aiLoginAllowed\(origin, username\)/.test(aiLoginPolicySource)
-    && /const allowed = saved\.filter\(\(l\) => aiLoginAllowed\(origin, l\.username\)\)/.test(aiLoginPolicySource)
+    // 로컬 주소만 계정별 허용 없이 씀(사용자 2026-10-28). 원격은 허용 목록 그대로
+    && /function aiMayUse\(origin, username\) \{ return isLocalOrigin\(origin\) \|\| aiLoginAllowed\(origin, username\); \}/.test(aiLoginPolicySource)
+    && /const allowed = saved\.filter\(\(l\) => aiMayUse\(origin, l\.username\)\)/.test(aiLoginPolicySource)
     && /if \(!allowed\.length\)/.test(aiLoginPolicySource)
     && /wc\.send\("ac-ai-login"/.test(aiLoginPolicySource)
     && /ipcRenderer\.on\("ac-ai-login"/.test(read("native/electron/webview-preload.cjs"));
@@ -172,7 +174,8 @@ await checkAsync("ai-login-policy는 정확한 허용 계정만 채우고 비번
   const fsMod = require_("node:fs");
   const pathMod = require_("node:path");
   const dir = mkdtempSync(path.join(tmpdir(), "iris-ai-login-policy-"));
-  const origin = "https://login.example.test";
+  // .test 는 로컬로 판정되어 허용 목록을 건너뛰므로 원격 주소로 확인
+  const origin = "https://login.example.com";
   const accounts = [
     { origin, username: "alice", password: "inventory-must-not-leak-a" },
     { origin, username: "bob", password: "inventory-must-not-leak-b" },
@@ -319,7 +322,7 @@ check("안 저장된 탭은 앞에 동그라미", () =>
   /function markTabDirty/.test(textEditor)
   && /class="cdirty"/.test(centerTabs)
   && /\.ctab \.cdirty \{[^}]*border-radius:50%/.test(css("11-center-tabs"))
-  && /if \(at\.id === getActiveTabId\(getCenterSpace\(\)\)\) markFileDirty\(at\)/.test(mainJs));
+  && /if \(isTabVisible\(getCenterSpace\(\), at\.id\)\) markFileDirty\(at\)/.test(mainJs));
 // 채팅이 남는 폭을 모두 차지하면, 왼쪽 도구를 바꿀 때마다 그 폭 차이가 채팅에 반영된다.
 // 고정 폭은 채팅이 갖고, 남는 폭은 센터가 받는다. 배치 엔진의 계산을 실제로 돌려 본다.
 const layoutTree = await import(new URL("../../../web/js/core/layout-tree.js", import.meta.url).href);
@@ -403,10 +406,12 @@ check("자기 그룹 이름은 실제 그룹 이름으로 보고", () => {
 // 그래서 오래 유지되는 값(고정·지목·활성·목록·응답)은 전부 정체성으로 표현하고, wc는 명령을 보내기
 // 직전에만 조회해 사용한다. 재발급되는 번호 대신 고유 식별자를 쓴다.
 check("오래 남는 것은 wc로 말하지 않는다", () => {
+  const host = read("server/mcp-host/current-server.js");
   return !/targetByPane/.test(browserRuntime)                        // 세션→wc 고정 자체가 없다
     && !/const userGrants = new Map/.test(browserRuntime)            // 지목의 wc 사본도 없다
     && !/activeWcBySpace/.test(browserRuntime)                       // 활성 표시도 정체성
-    && /const wc = tg\.tabId \? wcOfTabId\(tg\.tabId\) : null;/.test(browserCommands) // 손잡이 변환은 명령 owner 한 곳
+    && /const wcId = (?:access\.)?wcOfTabId\(tabId\);/.test(host)                 // wc 조회는 host가 실행 직전에 수행
+    && /targetGet: \(\{ identity \}\) => runSessionCmd/.test(host)   // target 응답에는 탭 핸들 사용
     && /pinned: session && primaryPin\(session\) \? handleFor/.test(browserCommands); // 응답도 핸들
 });
 // 디스크에 wc가 새면 재시작 뒤 그 번호가 남의 탭을 가리킨다.
@@ -670,14 +675,15 @@ check("앱은 그 증명을 실제로 보낸다", () => {
 // 페이지가 던진 예외 메시지에 "연결 안 됨"이 들어 있으면 문자열 판별은 "안 나갔다"로 오판해
 // 이미 일어난 부수효과를 여러 번 반복한다. 전송 여부는 구조화된 값으로 판단한다.
 check("전송 사실은 문자열이 아니라 플래그로", () => {
-  const si = read("server/browser-commands.js");
-  return /sent: false, appGone: true/.test(si)
-    && /const notSent = last && last\.sent === false;/.test(si)
+  const si = read("server/mcp-worker/browser-service.js");
+  return /error\?\.sent === false/.test(si)
+    && /error\?\.appGone/.test(si)
+    && /const notSent = last\?\.sent === false;/.test(si)
     && !/NOT_SENT_RE/.test(si) && !/APP_GONE_RE/.test(si);
 });
 check("기다리는 이유가 바뀌면 회차도 다시 센다", () => {
-  const si = readAll("server");
-  return /if \(gone !== longWait\) \{ longWait = gone; step = 0; \}/.test(si) && /ladder\[step\+\+\]/.test(si);
+  const si = read("server/mcp-worker/browser-service.js");
+  return /if \(gone !== longWait\) \{\s*longWait = gone;\s*step = 0;\s*\}/.test(si) && /ladder\[step\+\+\]/.test(si);
 });
 // 브라우저 탭을 보고 있지 않으면 그 사실도 알려야 한다. 그러지 않으면 키 입력이 사라진다.
 check("보던 브라우저 탭에서 나가면 그것도 알린다", () => {
@@ -719,20 +725,9 @@ check("사람이 나설 차례는 그 자리에서 알려준다", () => {
   const inspect = cdpCmdInspectSource, mcp = read("bin/iris-mcp.mjs");
   return /async function humanHint\(send\)/.test(cdpHintsSource)
     && /out\.humanHint = hh;/.test(inspect) && /out\.humanHint = hh2;/.test(inspect)   // snapshot·observe 둘 다
-    && /browser_ask_user로 불러라/.test(cdpHintsSource)
+    && /이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라/.test(cdpHintsSource)
     && /d\.humanHint \? d\.humanHint \+ "\\n\\n" : ""/.test(mcp)
-    && /browser_ask_user를 불러라/.test(mcp);   // MCP 서버 지시문에도
-});
-// 호출 전에 AI가 채울 수 있는 칸이 남았는지 화면에서 확인한다. 배송지·받는 사람을 비워 두고
-// 호출하면 사람이 AI 몫까지 하게 된다. 비밀 칸은 사람 몫이므로 집계에서 제외한다.
-check("부르기 전에 할 일이 남았는지 본다", () => {
-  const si = readAll("server"), mcp = read("bin/iris-mcp.mjs");
-  return /const UNFILLED_PROBE = /.test(si)
-    && /password\|cc-\|card\|cvc\|cvv\|expiry\|one-time\|otp\|captcha/.test(si)   // 비밀 칸 제외
-    && /아직 네가 채울 수 있는 칸이 남았습니다/.test(si)
-    && /if \(left\.length && !args\?\.ready\)/.test(si)
-    && /AI가 못 채운 칸/.test(si)      // ready로 넘어가도 사용자에게는 보인다
-    && /ready: \{ type: "boolean"/.test(mcp);
+    && /이 세션 대화에서 사용자에게 직접 묻는다/.test(mcp);   // MCP 서버 지시문에도
 });
 // 요소를 고르는 것 자체가 이 탭의 대상을 봐 달라는 사용자 행위이므로, 그 시점에 권한 등록까지 끝낸다.
 // 핸들만 보내면 받는 쪽에 권한이 없어 그 지점에서 막힌다.
@@ -765,17 +760,31 @@ check("알림은 여닫는 표식이 짝으로 나간다", () => {
   return open === 1 && close === 1 && uses >= 2
     && !elsewhere.includes("⟦Iris⟧") && !elsewhere.includes("⟦/Iris⟧");
 });
-// 부름은 "갔음"에서 끝나면 안 된다. 거기서 돌려주면 AI가 사람이 일을 마치기 전에 턴을 끝낸다.
-check("부름은 사람이 끝낼 때까지 붙잡는다", () => {
-  const si = read("server/browser-commands.js"), ui = read("web/js/core/notice-center.js");
-  const mcp = read("bin/iris-mcp.mjs");
-  return /if \(answer === "갔음"\) \{ waitOn\(\); return; \}/.test(si)
-    && /data\.done = record\.choices \? answer === record\.choices\[0\] : answer === "다 했음"/.test(si)
-    && /record\.deadline = Date\.now\(\) \+ waitMs/.test(si)
-    && /rawWait < 30 \|\| rawWait > 240/.test(si)
-    && /\["다 했어요", "못 하겠어요"\]/.test(ui)
-    && !/data-close|"나중에"/.test(ui)
-    && /턴을 끝내지 말고/.test(mcp);
+// 사람에게 묻는 요청은 그 세션 콘솔에서(사용자 2026-10-28). 화면·폰 알림을 띄우면 사용자가 하던 일이 막힘
+await checkAsync("사람에게 묻는 요청은 알림 없이 대화에서 묻게 돌려준다", async () => {
+  const [{ createWorkerBrowserService }, { consoleAsk }] = await Promise.all([
+    import("../../../server/mcp-worker/browser-service.js"),
+    import("../../../server/browser-commands.js"),
+  ]);
+  const calls = [];
+  const service = createWorkerBrowserService({
+    hostApi: {
+      withCommand: (_command, invoke) => invoke(),
+      call: async (operation, input) => {
+        calls.push(operation);
+        if (operation === "journal.accept" || operation === "journal.trace") return {};
+        if (operation === "user.ask") return consoleAsk(input._kind === "approve" ? "approve" : "ask", input.message, input.choices);
+        throw new Error(operation);
+      },
+    },
+    activity: { run: (_kind, _id, invoke) => invoke() },
+  });
+  const sess = "smoke-console-ask-" + process.pid;
+  const ask = await service.dispatch({ command: "ask", args: { message: "결제해 주세요" }, identity: { session: sess }, commandId: "ask" });
+  const approve = await service.dispatch({ command: "approve", args: { title: "삭제", summary: "3건 삭제" }, identity: { session: sess }, commandId: "approve" });
+  return ask.ok && ask.data.console === true && /이 세션 대화에서 사용자에게 직접 물으세요/.test(ask.data.note)
+    && approve.ok && approve.data.approved === false
+    && !calls.includes("user.notify");
 });
 check("기다리는 알림은 다른 알림에 밀려나지 않는다", () => {
   const ui = read("web/js/core/notice-center.js");
@@ -789,42 +798,6 @@ check("알림 영역을 처음 만들 때 펼치기 버튼은 숨겨져 있다",
   const host = sliceBetween(ui, "function ensureHost()", "\n}", "알림 영역 생성");
   return /more = addButton\([^\n]*\);\s*more\.hidden = true;/.test(host);
 });
-// 호출이 끊긴 사이에 사람이 누른 답도 잃지 않는다. 그러지 않으면 알림을 두 번 띄우게 된다.
-check("끊긴 사이의 답과 부름을 이어받는다", () => {
-  const si = read("server/browser-commands.js");
-  return /const askByKey = new Map\(\)/.test(si) && /const askAnswers = new Map\(\)/.test(si)
-    && /askAnswers\.set\(aid, a\)/.test(si)
-    && /const resumed = providedId \? askOwner\.get\(providedId\) : null/.test(si)
-    && /let record = resumed \|\| askOwner\.get\(askByKey\.get\(key\)\)/.test(si)
-    && /record\.round \+= 1/.test(si);
-});
-// 이어받기는 호출 본문을 건너뛰고 곧바로 응답 조립으로 간다. 그 조립이 본문에서 선언되는 값을
-// 읽으면 서버가 종료된다(server.log의 ReferenceError: Cannot access 'askDevice' before
-// initialization). 소스 모양이 아니라 그 경로를 실제로 실행해서 확인한다. 종료되는 코드라면
-// 여기서 거부로 돌아온다.
-await checkAsync("끊긴 부름을 이어받아도 서버가 살아 있다", async () => {
-  const mod = await import("../../../server/browser-commands.js");
-  const sent = [];
-  mod.initBrowserCommands({ broadcast: (m) => sent.push(m) });
-  const sess = "smoke-ask-" + process.pid;
-  const original = globalThis.setTimeout;
-  let expire;
-  globalThis.setTimeout = (fn, ms, ...args) => ms > 29000 && ms <= 30000 ? (expire = fn, { fake: true }) : original(fn, ms, ...args);
-  try {
-    const first = mod.runBrowserCmd("ask", { message: "사람 손이 필요합니다", device: "smoke-sim", wait: 30 }, sess);
-    await Promise.resolve();
-    const ask = sent.find((m) => m && m.type === "ai-ask");
-    if (!ask || !expire) return false;
-    mod.answerUserAsk(ask.id, "갔음");
-    expire();
-    const timeout = await first;
-    if (timeout.data.answered || timeout.data.id !== ask.id) return false;
-    mod.answerUserAsk(ask.id, "다 했음");
-    const again = await mod.runBrowserCmd("ask", { message: "사람 손이 필요합니다", device: "smoke-sim", ask_id: ask.id, wait: 30 }, sess);
-    return !!(again.ok && again.data.id === ask.id && again.data.done && again.data.round === 2);
-  } finally { globalThis.setTimeout = original; }
-});
-
 // 여러 개를 골랐을 때 어느 문구가 어느 요소인지 대응시키는 라벨.
 check("여러 개 고르면 이름표와 한 벌 표시가 붙는다", () => {
   const si = readAll("server");

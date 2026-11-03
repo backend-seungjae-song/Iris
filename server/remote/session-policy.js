@@ -6,7 +6,7 @@ import { stateHome } from "../state-home.cjs";
 
 const VERSION = 1;
 export const PIN_IDLE_MINUTES = Object.freeze([10, 20, 30, 60]);
-export const DEFAULT_PIN_IDLE_MINUTES = 30;
+export const DEFAULT_PIN_IDLE_MINUTES = 10;
 
 function validMinutes(value) {
   return PIN_IDLE_MINUTES.includes(value);

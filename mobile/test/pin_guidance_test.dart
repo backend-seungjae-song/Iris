@@ -57,7 +57,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('컴퓨터에 연결'));
+    await tester.tap(find.text('다시 연결'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('connect-pin-sheet')), findsOneWidget);
     await tester.enterText(

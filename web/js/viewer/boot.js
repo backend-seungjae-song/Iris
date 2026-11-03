@@ -40,7 +40,7 @@ import {
   getRenderedFileOwner, renderTabs, sendTabIo, showActiveTab, withFileViewTransition,
 } from "../center/tabs.js";
 import { askInfo, askText } from "../explorer/context-menu.js";
-import { getActiveTabId, getCenterSpace, getTabs, getTabSpaces } from "../center/tab-store.js";
+import { isTabVisible, getCenterSpace, getTabs, getTabSpaces } from "../center/tab-store.js";
 import {
   svApplyResponseData, svDiscardSnapshot, svResetAfterDiscard, svRetargetTabPath,
   svSameDiscardSnapshot, svTearDownTab,
@@ -190,7 +190,7 @@ function handleDocxMessage(m, responseIoEntry, { showToast, renderDocxPanelBody 
   } else if (m.reason === "watch" && (isTabDirty(target) || target._saveInFlight)) {
     target.docxDiskData = m.data;
     target.docxDiskRevision = m.revision;
-    if (target.id === getActiveTabId(getCenterSpace())) showActiveTab();
+    if (isTabVisible(getCenterSpace(), target.id)) showActiveTab();
     return;
   } else {
     if (target.docxEditor && target !== getRenderedFileOwner()) {
@@ -205,7 +205,7 @@ function handleDocxMessage(m, responseIoEntry, { showToast, renderDocxPanelBody 
     target.hasDiskSnapshot = true;
   }
   const owner = responseIoEntry.owner;
-  if (owner.space === getCenterSpace() && target.id === getActiveTabId(getCenterSpace())
+  if (owner.space === getCenterSpace() && isTabVisible(getCenterSpace(), target.id)
       && target === getRenderedFileOwner()) {
     withFileViewTransition(target, { expectedOwner: target, expectedToken: target.docxRenderToken,
       forceDocxCleanup: m.reason !== "watch" }, (nextRenderToken) => {
@@ -234,7 +234,7 @@ function handleSheetMessage(m, responseIoEntry, { showToast, browserMode, filevi
       }
     }
   }
-  if (touched && curTabs().some((x) => x.id === id && x.id === getActiveTabId(getCenterSpace()))) {
+  if (touched && curTabs().some((x) => x.id === id && isTabVisible(getCenterSpace(), x.id))) {
     // showActiveTab()은 분리창(browserMode)에서 그냥 return하는 no-op다(주석: "분리창은
     // browserview를 항상 표시"). 분리 상태(sbState.docked=false)의 사용자가 실제로 보는
     // 창이 바로 이 창이라, 응답이 도착해 t.sheet가 채워져도 화면은 그 순간 이미 그려 둔
@@ -288,7 +288,7 @@ function handleSheetSavedMessage(m, responseIoEntry, { $, showToast }) {
       const entry = t._svMergeEdit && t._svMergeEdit.get(key);
       if (entry && entry.generation === generation) t._svMergeEdit.delete(key);
     }
-    if (t === getTabs(getCenterSpace()).find((tab) => tab.id === getActiveTabId(getCenterSpace()))) {
+    if (isTabVisible(getCenterSpace(), t.id) && getTabs(getCenterSpace()).includes(t)) {
       document.querySelectorAll("#sv-grid td.sv-c").forEach((cell) => {
         cell.classList.toggle("sv-dirty", !!(t._svDirty && t._svDirty.has(svDirtyKey(t, +cell.dataset.r, +cell.dataset.c))));
       });

@@ -32,7 +32,7 @@ import {
 import { getDiscardedWebview, getWebview } from "./webview-store.js";
 import {
   authoritativeAiProtection, isLiveSpaceKey, scheduleWebviewThrottling,
-  discardWebview, sleepDeadSpaceWebviews, wakeWebview,
+  discardWebview, sleepDeadSpaceWebviews, syncQaWebviewPlacement, wakeWebview,
 } from "./webview.js";
 import { addTab, ensureTabSpace, getTabs, getTabSpaces } from "../center/tab-store.js";
 import { callHook } from "../core/hooks.js";
@@ -81,7 +81,7 @@ function aiTabsOwnedHere() {
       // 저장된 탭 84개 중 24개가 이 표시만으로 부팅마다 크로미움 프로세스를 하나씩 생성했다.
       // 판정은 authoritativeAiProtection 한 곳에만 둔다. 여기에 조건을 하나 더 얹으면 띄우는
       // 기준과 안 재우는 기준이 갈라져서, 만들자마자 재워지거나 재웠는데 다시 만들어진다.
-      if (t && protectedIds && protectedIds.has(t.id)) out.push({ sp, t });
+      if (t && (t.qaRunId || (protectedIds && protectedIds.has(t.id)))) out.push({ sp, t });
     }
   }
   return out;
@@ -181,10 +181,12 @@ export function applyBrowserState(st) {
   renderBookmarks(); renderUrlDatalist(); syncBookmarkStar();
   updateProfileBtn();                  // 계정 목록이 늦게 와도 버튼 라벨이 따라온다
   callHook("accounts.stateChanged");  // 계정 화면의 "쓰는 스페이스" 칩이 서버의 기본 계정을 따라온다
+  callHook("bookmarkmgr.stateChanged"); // 북마크 관리 화면이 다른 창·북마크 막대의 수정을 따라온다
   reconcileBrowserMode();                                     // 분리창: 탭/webview를 서버 상태에 동기화
   reconcileDocTabs();                                         // 분리창: docx/sheet 탭을 자체 에디터로 동기화
   if (typeof reconcileConsoleDock === "function") reconcileConsoleDock(); // 콘솔: 도킹 상태 반영(슬라이스 4)
   reconcileAiTabs();                                          // 에이전트 탭은 보고 있지 않아도 살려 둔다
+  syncQaWebviewPlacement();
   syncDockedTabLabels();                                       // 콘솔 도킹 브라우저 탭 라벨을 서버 name/title에 맞춤
   // 지금 화면에 그려지는 탭이 무엇인지 서버에 다시 알린다. 재접속 직후 한 번만 보내면 그 시점엔
   // 아직 이 상태(sbState)가 오지 않아 활성 탭을 몰라 건너뛴다. 서버는 그 뒤로 "보이는 탭 없음"으로

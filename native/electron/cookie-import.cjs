@@ -7,8 +7,8 @@ const { applyHardening } = require("./browser-hardening.cjs");
 // 두면 두 벌이 달라져, webview 는 허용되는데 UA 저장·cookie import 는 거절되는 프로필이 생긴다.
 // 그래서 판정을 그 모듈에서 가져다 쓴다.
 const { isProfilePartition } = require("./profile-session-policy.cjs");
-const { createDecipheriv, pbkdf2Sync } = require("node:crypto");
-const { execFileSync } = require("node:child_process");
+const { createDecipheriv, createHash, pbkdf2Sync } = require("node:crypto");
+const { execFile, execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -22,8 +22,9 @@ const COOKIE_DB_PATH = Symbol("cookieDbPath");
 const COOKIE_CAS_TABLE = "iris_cookie_import_baseline";
 const COOKIE_CAS_GUARD = "iris_cookie_import_guard";
 const { baseDomain } = require("./chrome-auth.cjs");
+const { stateHome } = require("../../server/state-home.cjs");
 const { cookieFingerprint, loginFingerprint, sourceRevision, planCookieRefresh } = require("./cookie-sync-policy.cjs");
-const { replaceCookieSnapshot } = require("./cookie-snapshot.cjs");
+const { replaceCookieSnapshot, addMissingCookies } = require("./cookie-snapshot.cjs");
 const { createCookieTransfer } = require("./cookie-transfer.cjs");
 const cookieTransfers = new WeakMap();
 const cookieScopes = new WeakMap();
@@ -73,12 +74,25 @@ function rememberSync(partition, base, record) {
     fs.renameSync(tmp, file);
   } catch { /* 현재 실행의 재시도 차단은 메모리 기록으로 유지한다. */ }
 }
-async function rememberImportedSnapshot(partition, entry, cookies, { pending = false } = {}) {
+function forgetSync(partition, base) {
+  const records = syncRecords(), key = partition + "\n" + base;
+  if (!(key in records)) return;
+  delete records[key];
+  try {
+    const file = syncRecordsPath(), tmp = file + ".tmp-" + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(records), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch { /* 이번 실행 동안은 메모리 기록으로 막음 */ }
+}
+// matchingOnly: 가져온 뒤 Iris 로그인이 Chrome 과 다른 사이트는 기록을 지움
+// 기록이 남으면 자동 점검이 나중에 Chrome 쪽 변경으로 그 Iris 로그인을 바꿈
+async function rememberImportedSnapshot(partition, entry, cookies, { pending = false, matchingOnly = false } = {}) {
   const target = await session.fromPartition(partition).cookies.get({});
   for (const base of new Set(cookies.map(c => baseDomain(c.domain)))) {
     const select = (list) => list.filter(c => baseDomain(c.domain) === base);
     const sourceFingerprint = loginFingerprint(select(cookies), base);
     const revision = sourceRevision(select(cookies), base);
+    if (matchingOnly && loginFingerprint(select(target), base) !== sourceFingerprint) { forgetSync(partition, base); continue; }
     // pending raw replay는 아직 target에 들어가지 않았다. source cohort와 이 브라우저에 남길
     // 결속 쿠키를 합친 기대 상태를 기록해야 재생 성공 뒤 정상 refresh provenance가 이어진다.
     // CAS가 replay를 버리면 실제 target과 이 기대 hash가 달라져 local-session-changed로 보존된다.
@@ -333,6 +347,27 @@ function stripHmac(buf) { return hasHmacPrefix(buf) ? buf.subarray(HMAC_LEN) : b
 // Keychain에서 Safe Storage 비밀번호 → PBKDF2 → 16바이트 AES 키.
 // 프로세스가 실행되는 동안 한 번만 읽어 로그인 계승 중 키체인 승인을 반복해서 띄우지 않는다.
 const macKeyCache = new Map();
+const macKeyRequests = new Map();
+async function getMacKeyAsync(service, account) {
+  const cacheKey = service + "\0" + account;
+  if (macKeyCache.has(cacheKey)) return macKeyCache.get(cacheKey);
+  if (macKeyRequests.has(cacheKey)) return macKeyRequests.get(cacheKey);
+  // 키체인 승인을 기다리는 동안 Electron 메인 스레드를 막지 않는다.
+  const request = new Promise((resolve, reject) => {
+    execFile("/usr/bin/security", ["find-generic-password", "-s", service, "-a", account, "-w"],
+      { encoding: "utf8", timeout: 30000 }, (error, stdout) => {
+        if (error) {
+          reject(new Error(error.killed ? "키체인 승인 대기 시간이 지났습니다. 다시 시도해 주세요." : "키체인 접근이 거절되었거나 취소되었습니다."));
+          return;
+        }
+        const key = pbkdf2Sync(stdout.trim(), PBKDF2_SALT, PBKDF2_ITER, PBKDF2_KEYLEN, "sha1");
+        macKeyCache.set(cacheKey, key);
+        resolve(key);
+      });
+  });
+  macKeyRequests.set(cacheKey, request);
+  try { return await request; } finally { macKeyRequests.delete(cacheKey); }
+}
 function getMacKey(service, account) {
   const cacheKey = service + "\0" + account;
   const cached = macKeyCache.get(cacheKey);
@@ -576,7 +611,12 @@ function decryptCookieRows(sourceRows, key, hostFilter) {
     let rawValue;
     try {
       const enc = Buffer.isBuffer(sourceRow.encrypted_value) ? sourceRow.encrypted_value : Buffer.alloc(0);
-      rawValue = enc.length ? decryptValueRaw(enc, key) : storedValueBuffer(sourceRow.value);
+      rawValue = enc.length ? decryptValueRaw(enc, key, false) : storedValueBuffer(sourceRow.value);
+      // Chrome은 암호화된 값 앞에 도메인 SHA-256을 붙인다. 빈 값도 해시 32바이트를 제거해야 한다.
+      if (enc.length && rawValue.length >= HMAC_LEN
+        && rawValue.subarray(0, HMAC_LEN).equals(createHash("sha256").update(domain).digest())) {
+        rawValue = rawValue.subarray(HMAC_LEN);
+      }
     } catch { decryptSkipped++; continue; }
     list.push({
       domain, name, value: rawValue.toString("latin1"), rawValue, sourceRow,
@@ -960,7 +1000,7 @@ async function putCookies(targetPartition, list, {
         return { apply: true };
       },
     });
-  } catch { applied = { error: "cookie-transfer-failed", rolledBack: true, changed: 0 }; }
+  } catch (e) { applied = { error: "cookie-transfer-failed", rolledBack: true, changed: 0, reason: thrownReason(e) }; }
   if (["source-link-changed", "source-changed", "target-changed"].includes(applied.skipped)) {
     return { error: applied.skipped, rolledBack: true, imported: 0, live: 0, staged: 0,
       skipped: list.length, domains: [...domains].sort() };
@@ -971,6 +1011,7 @@ async function putCookies(targetPartition, list, {
     return { imported: applied.live, live: applied.live, staged: 0, skipped: applied.skipped || 0,
       domains: [...domains].sort() };
   }
+  logApplyFailure(part, applied, "put");
 
   // live 적용이 실패하면 성공했던 일부도 rollback됐다. 따라서 실패 행만 스테이징하지 않고 원본
   // cohort 전체를 다음 콜드스타트에 같은 사이트 범위의 완결된 snapshot으로 교체한다.
@@ -1056,23 +1097,16 @@ async function refreshFromChrome(profileEntry, targetPartition, hostFilter, { ba
   return { ...result, read: cookies.length, reason: decision && decision.reason };
 }
 
-async function legacyImport(sess, list, profileEntry, total) {
-  let result;
+// 바로 적용하지 못한 이유. 교체를 되돌린 뒤에는 화면에 "다음 실행 때 적용"만 남아 원인을 알 수 없음
+function logApplyFailure(partition, applied, outcome) {
   try {
-    result = await replaceCookieSnapshot({ session: sess, transfer: transferFor(sess), scope: scopeFor(sess, null), list,
-      preserveCookie: c => isIntegrityCookie(c.name, c.domain) || isClientBoundCookie(c.name) });
-  } catch { result = { error: "cookie-transfer-failed", rolledBack: true }; }
-  if (result.error) return { error: result.rolledBack
-    ? "쿠키 적용에 실패해 기존 로그인을 유지했습니다."
-    : "쿠키 적용과 기존 로그인 복구가 모두 실패했습니다.", rolledBack: result.rolledBack === true };
-  return { imported: result.live, live: result.live, staged: 0,
-    skipped: total - result.live,
-    domains: [...new Set(list.map(c => String(c.domain || "").replace(/^\./, "")))].sort(),
-    source: profileEntry.label, total };
+    const line = JSON.stringify({ partition, outcome, error: applied && applied.error, reason: applied && applied.reason });
+    fs.appendFileSync(path.join(stateHome(), "cookie-import.log"), `${new Date().toISOString()} ${line.slice(0, 1000)}\n`);
+  } catch {}
 }
+function thrownReason(e) { return { message: String(e && e.message || e).slice(0, 200) }; }
 
-// 지정 프로필의 쿠키를 대상 파티션에 주입. 메모리에서 거절된 원시 바이트 쿠키는 대상 DB 스키마로
-// 옮긴 스테이징 사본을 다음 콜드스타트에 재생한다.
+// 지정 프로필의 쿠키 중 대상 파티션에 없는 것만 넣음
 async function importCookiesFromChrome(profileEntry, targetPartition) {
   if (process.platform !== "darwin") return { error: "Chrome 직접 임포트는 macOS만 지원합니다." };
   const part = (typeof targetPartition === "string" && isProfilePartition(targetPartition)) ? targetPartition : "persist:acbrowser";
@@ -1085,7 +1119,7 @@ async function importCookiesFromChrome(profileEntry, targetPartition) {
   const needsKey = source.rows.some((r) => Buffer.isBuffer(r.encrypted_value) && r.encrypted_value.length > 0);
   let key = null;
   if (needsKey) {
-    try { key = getMacKey(profileEntry.browser.service, profileEntry.browser.account); }
+    try { key = await getMacKeyAsync(profileEntry.browser.service, profileEntry.browser.account); }
     catch (e) { return { error: "Keychain 접근 실패(취소했거나 권한 없음): " + e.message }; }
   }
   const decoded = decryptCookieRows(source.rows, key);
@@ -1094,63 +1128,28 @@ async function importCookiesFromChrome(profileEntry, targetPartition) {
   const importList = decoded.list.filter(c => !c.expirationDate || c.expirationDate > now);
   if (!importList.length) return { error: "가져올 수 있는 쿠키가 없습니다." };
 
-  let liveCookiesPath;
-  try {
-    liveCookiesPath = await ensureTargetCookiesPath(sess);
-    if (!liveCookiesPath) throw new Error("대상 Cookies DB가 없습니다.");
-  } catch {
-    // 대상 DB 경로를 못 얻어도 Electron API 경로로 기능 자체는 보존한다.
-    const res = await legacyImport(sess, importList, profileEntry, source.rows.length);
-    if (res.error) return res;
-    if (liveCookiesPath) clearPendingCookieImport(liveCookiesPath);
-    applyImportedUserAgent(sess, part, profileEntry.browser);
-    try { await rememberImportedSnapshot(part, profileEntry, importList); } catch {}
-    return res;
-  }
-
-  // API가 어느 한 행을 거절해도 원래 로그인으로 돌아갈 수 있어야 한다. raw fallback을 먼저
-  // 만들어 스키마·원본 행 전체를 preflight한다. rollback 뒤에는 cookies.set이 DB 표현을 다시
-  // 쓸 수 있으므로, 실제 등록할 사본과 CAS baseline은 복구된 target의 같은 snapshot에서 재생성한다.
-  let staging = null;
-  try { staging = stageCookieRows(liveCookiesPath, importList, { preserveTargetBound: true }); } catch {}
+  // Iris 에 이미 있는 쿠키(같은 도메인·경로·이름)는 값이 달라도 그대로. 없는 것만 추가
   let applied;
   try {
-    applied = await replaceCookieSnapshot({ session: sess, transfer: transferFor(sess), scope: scopeFor(sess, null), list: importList,
-      preserveCookie: c => isIntegrityCookie(c.name, c.domain) || isClientBoundCookie(c.name) });
-  } catch { applied = { error: "cookie-transfer-failed", rolledBack: true, changed: 0 }; }
-
-  let live = 0, staged = 0;
-  if (applied.changed) {
-    live = applied.live;
-    clearPendingCookieImport(liveCookiesPath);
-    if (staging) discardStagingDatabase(staging);
-  } else if (applied.rolledBack === true && staging) {
-    discardStagingDatabase(staging);
-    staging = null;
-    try { staging = stageCookieRows(liveCookiesPath, importList, { preserveTargetBound: true }); } catch {}
-    if (staging && registerPendingCookieImport(liveCookiesPath, staging, "replace")) staged = importList.length;
-    else {
-      clearPendingCookieImport(liveCookiesPath);
-      if (staging) discardStagingDatabase(staging);
-      return { error: "쿠키 적용에 실패해 기존 로그인을 유지했습니다.", rolledBack: true };
-    }
-  } else {
-    clearPendingCookieImport(liveCookiesPath);
-    if (staging) discardStagingDatabase(staging);
+    applied = await addMissingCookies({ session: sess, transfer: transferFor(sess), scope: scopeFor(sess, null), list: importList });
+  } catch (e) { applied = { error: "cookie-transfer-failed", rolledBack: true, reason: thrownReason(e) }; }
+  if (applied.error) {
+    logApplyFailure(part, applied, "failed");
     return { error: applied.rolledBack
       ? "쿠키 적용에 실패해 기존 로그인을 유지했습니다."
-      : "쿠키 적용과 기존 로그인 복구가 모두 실패했습니다.", rolledBack: applied.rolledBack === true };
+      : "쿠키 적용에 실패했고 일부 쿠키를 되돌리지 못했습니다.", rolledBack: applied.rolledBack === true };
   }
-
+  // 이전 버전이 남긴 전체 교체 사본이 다음 실행 때 지금 쿠키를 덮지 않게
+  const liveCookiesPath = targetCookiesPath(sess);
+  if (liveCookiesPath) clearPendingCookieImport(liveCookiesPath);
   applyImportedUserAgent(sess, part, profileEntry.browser);
-
-  try { await rememberImportedSnapshot(part, profileEntry, importList, { pending: staged > 0 }); } catch {}
-  const imported = live + staged;
+  try { await rememberImportedSnapshot(part, profileEntry, importList, { matchingOnly: true }); } catch {}
   return {
-    imported,
-    live,
-    staged,
-    skipped: source.rows.length - imported,
+    imported: applied.added,
+    live: applied.added,
+    staged: 0,
+    kept: applied.kept,
+    skipped: source.rows.length - applied.added,
     domains: [...new Set(importList.map(c => c.domain.replace(/^\./, "")))].sort(),
     source: profileEntry.label,
     total: source.rows.length,

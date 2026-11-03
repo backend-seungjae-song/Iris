@@ -102,12 +102,13 @@ export default async function run() {
       if (bad.length) throw new Error(`코드에 없는 문구: ${bad.join(" / ")}`);
       return true;
     });
-    // 문서는 찾아 읽어야 보이고, CLAUDE.md는 이 저장소에서 일하면 그냥 읽힌다. 두 규칙(다운타임
-    // 최소·환경 분리)은 모르고 어기면 사용자 데이터가 지워지므로 자동으로 읽히는 위치에 둔다.
+    // 문서는 찾아 읽어야 보이고, AGENTS.md는 이 저장소에서 일하면 그냥 읽힌다(Codex 직접, Claude Code는
+    // CLAUDE.md의 @AGENTS.md import). 두 규칙(다운타임 최소·환경 분리)은 모르고 어기면 사용자 데이터가
+    // 지워지므로 자동으로 읽히는 위치에 둔다.
     check("두 규칙이 자동으로 읽히는 자리에 있다", () => {
-      const p = path.join(ROOT, "CLAUDE.md");
-      if (!existsSync(p)) return false;
-      const c = read("CLAUDE.md");
+      if (!existsSync(path.join(ROOT, "CLAUDE.md")) || !existsSync(path.join(ROOT, "AGENTS.md"))) return false;
+      if (!/^@AGENTS\.md$/m.test(read("CLAUDE.md"))) return false;
+      const c = read("AGENTS.md");
       return /중단 시간 최소화/.test(c) && /개발 환경과 설치 앱의 분리/.test(c)
         && /IRIS_STATE_DIR/.test(c) && /launchctl bootout/.test(c);
     });

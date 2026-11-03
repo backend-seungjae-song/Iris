@@ -23,8 +23,58 @@ import {
 } from "../sources.mjs";
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
 
+const SHARED_QA_MODULES = [
+  "server/qa-protocol.js",
+  "server/qa-session-contract.js",
+  "server/qa-row-contract.js",
+  "server/qa-rows.js",
+  "server/qa-list-review.js",
+  "server/qa-session-analysis.js",
+  "server/qa-expiry-guard.cjs",
+];
+const QA_STATE_MODULES = new Set([
+  "server/qa-ownership.js",
+  "server/qa-journal.js",
+  "server/browser-runtime.js",
+  "server/browser-commands.js",
+]);
+
+function localImports(rel) {
+  const source = read(rel);
+  const specs = [
+    ...source.matchAll(/\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?["'](\.\.?\/[^"']+)["']/g),
+    ...source.matchAll(/\bimport\(\s*["'](\.\.?\/[^"']+)["']\s*\)/g),
+    ...source.matchAll(/\brequire\(\s*["'](\.\.?\/[^"']+)["']\s*\)/g),
+  ].map((match) => match[1]);
+  return [...new Set(specs.map((spec) => {
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(rel), spec));
+    if (path.posix.extname(base)) return base;
+    return [base + ".js", base + ".cjs", base + ".mjs"].find((candidate) => existsSync(path.join(ROOT, candidate))) || base;
+  }).filter((candidate) => existsSync(path.join(ROOT, candidate))))];
+}
+
+function stateImportPaths(root) {
+  const queue = [[root, [root]]], seen = new Set(), found = [];
+  while (queue.length) {
+    const [current, chain] = queue.shift();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    for (const imported of localImports(current)) {
+      const next = [...chain, imported];
+      if (QA_STATE_MODULES.has(imported)) found.push(next.join(" -> "));
+      else queue.push([imported, next]);
+    }
+  }
+  return found;
+}
+
 export default async function run() {
 console.log("[14] 계약·도구 — 파생·등급·권한·집계·측정");
+check("QA 공유 계약은 공용 서버 상태 모듈을 전이적으로 싣지 않는다", () => {
+  const violations = SHARED_QA_MODULES.flatMap(stateImportPaths);
+  if (violations.length) throw new Error(violations.join(" / "));
+  return true;
+});
 const homeTools = path.join(process.env.HOME, ".claude/.claude-system");
 if (!existsSync(homeTools)) {
   console.log("  못 잼 (skipped: 홈 도구 없음) — 홈 QA 도구 계약 21건");

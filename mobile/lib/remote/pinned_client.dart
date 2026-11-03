@@ -10,6 +10,7 @@ import 'package:iris_remote/remote/protocol.dart';
 const int maximumRemoteFrameBytes = 64 * 1024;
 const int maximumBrowserFrameBytes = 520 * 1024;
 const int maximumBrowserDraftBytes = 400 * 1024;
+const int maximumBrowserTabsBytes = 256 * 1024;
 
 int remoteInboundFrameLimit(String data) {
   if (utf8.encode(data).length <= maximumRemoteFrameBytes) {
@@ -21,6 +22,9 @@ int remoteInboundFrameLimit(String data) {
       if (decoded['type'] == 'browser.frame') return maximumBrowserFrameBytes;
       if (decoded['type'] == 'browser.draft.result') {
         return maximumBrowserDraftBytes;
+      }
+      if (decoded['type'] == 'browser.tabs.result') {
+        return maximumBrowserTabsBytes;
       }
     }
   } on FormatException {

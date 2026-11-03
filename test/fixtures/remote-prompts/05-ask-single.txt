@@ -1,0 +1,44 @@
+
+
+  Read 1 file
+
+⏺ Update(notes.txt)
+  ⎿  Added 1 line, removed 1 line
+      1 -line one
+      1 +line 1
+      2  line two
+
+⏺ 2단계 완료: notes.txt 첫 줄을 line 1로 바꿨습니다.
+
+  3단계: new.md를 만들고 내용을 hello로 씁니다.
+
+⏺ Write(new.md)
+  ⎿  Wrote 1 line to new.md
+      1 hello
+
+⏺ 4단계: WebFetch로 https://example.com을 가져옵니다. 도구 스키마를
+  먼저 불러옵니다.
+
+⏺ Fetch(https://example.com)
+  ⎿  Received 577 bytes (200 OK)
+
+⏺ 4단계 완료: https://example.com의 제목은 "Example Domain"이고,
+  문서 예제용 도메인이라는 내용이었습니다.
+
+  5단계: AskUserQuestion으로 단일 선택 질문을 하나 합니다.
+───────────────────────────────────────────────────────────────────
+ ☐ 단일 선택
+
+테스트 5단계입니다. 단일 선택으로 가장 가까운 답을 골라 주세요.
+
+❯ 1. A (Recommended)
+     옵션 A를 선택합니다.
+  2. B
+     옵션 B를 선택합니다.
+  3. C
+     옵션 C를 선택합니다.
+  4. Type something.
+───────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

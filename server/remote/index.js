@@ -10,6 +10,7 @@ import { prepareGatewayCertificate } from "./certificate.js";
 import { REMOTE_RPC_VERSION } from "./contract/ipc.js";
 import { createChannelRuntime } from "./channel-runtime.js";
 import { createQuestionHookInstaller } from "./installer.js";
+import { createResumeStore } from "./resume-store.js";
 import { handleRemoteLocalApi } from "./local-api.js";
 import { createMessageBridge } from "./messaging.js";
 import { resolveTailscaleAddress } from "./network.js";
@@ -73,6 +74,8 @@ export function createRemoteLifecycle(options) {
     isRemoteEnabled: () => isRemoteEnabled(),
     hasRegisteredDevices: () => registry.effectiveState().devices.length > 0,
     onChannelsChanged: agentStore.changed,
+    hasPhoneSessions: () => (rpcHost?.authenticatedCount?.() || 0) > 0,
+    log,
   });
   const channelRuntime = options.channelRuntime || createChannelRuntime({ socketPath: agentSocket.socketPath });
   const installer = options.installer || createQuestionHookInstaller({
@@ -102,7 +105,7 @@ export function createRemoteLifecycle(options) {
     cleanShutdownRecorded: false,
     pinConfigured: false,
     pausedForPin: false,
-    pinIdleMinutes: 30,
+    pinIdleMinutes: 10,
   };
 
   function publicDevices() {
@@ -135,6 +138,7 @@ export function createRemoteLifecycle(options) {
     isRemoteEnabled,
     verifyPin: (pin, identity) => pinStore.verify(pin, identity),
     getIdleMs: () => sessionPolicy.getPinIdleMinutes() * 60_000,
+    resumeStore: options.resumeStore === undefined ? createResumeStore() : options.resumeStore,
     onExpire(connId, reason) { rpcHost?.closeConnection?.(connId, reason); },
   });
 
@@ -169,8 +173,8 @@ export function createRemoteLifecycle(options) {
     });
   }
 
-  function closeSessions(scope, reason) {
-    for (const connId of auth.invalidate(scope)) rpcHost?.closeConnection?.(connId, reason);
+  function closeSessions(scope, reason, keepConnId) {
+    for (const connId of auth.invalidate(scope)) if (connId !== keepConnId) rpcHost?.closeConnection?.(connId, reason);
   }
 
   function stopRuntime(reason) {
@@ -237,6 +241,8 @@ export function createRemoteLifecycle(options) {
     getHerdr: () => ctx.herdr,
     agentStore,
     requestStore,
+    terminalQuestions: agentSocket.questions,
+    onPhoneSessionsChanged: () => agentSocket.refreshAvailability?.(),
     messageBridge,
     broadcast: ctx.broadcast,
     ...(options.rpcOptions || {}),
@@ -246,6 +252,12 @@ export function createRemoteLifecycle(options) {
       if (line) log(line);
     },
     onPairRequest(entry, message) { return pairing.request(entry, message); },
+    // 폰이 보낸 자기 기기 삭제: 응답을 보낼 수 있게 요청한 연결만 남겼다가 잠시 뒤 닫는다
+    async onDeviceUnregister(deviceId, connId) {
+      const result = await requestRegistryChange({ type: "remove-device", deviceId }, "device-unregistered", connId);
+      setTimeout(() => rpcHost?.closeConnection?.(connId, "device-unregistered"), 1000).unref?.();
+      return result;
+    },
     onStatus: onGatewayStatus,
     onFailureLimit: onGatewayFailureLimit,
   });
@@ -392,7 +404,7 @@ export function createRemoteLifecycle(options) {
     return result;
   }
 
-  async function requestRegistryChange(operation, reason = operation?.type) {
+  async function requestRegistryChange(operation, reason = operation?.type, keepConnId) {
     if (!initialized) return { ok: false, error: "initializing" };
     if (operation?.type === "enable") return requestEnable();
     if (operation?.type === "disable") return requestDisable({ reason });
@@ -402,7 +414,7 @@ export function createRemoteLifecycle(options) {
     const changed = registry.change(operation);
     if (!changed.ok) return changed;
     if (operation.type === "remove-device" && !changed.unchanged) {
-      closeSessions({ scope: "device", deviceId: operation.deviceId }, reason || "device-removed");
+      closeSessions({ scope: "device", deviceId: operation.deviceId }, reason || "device-removed", keepConnId);
       agentSocket.refreshAvailability?.();
     }
     const saved = changed.unchanged && !registry.status().dirty
@@ -545,6 +557,8 @@ export function createRemoteLifecycle(options) {
     unsubscribeFeatureState();
     unsubscribeAgents();
     unsubscribeRequests();
+    // 정상 종료의 연결 정리가 토큰까지 폐기하기 전에 현재 토큰을 저장하고 이후 저장을 막는다
+    auth.flushResumeTokens?.();
     const stopped = stopRuntime("server-shutdown");
     const saved = !initialized || !registry.status().valid || registry.saveSync();
     const cleanShutdownRecorded = stopped && saved && registry.markCleanShutdownSync();
@@ -572,6 +586,7 @@ export function createRemoteLifecycle(options) {
       sessionPolicy.initialize(),
     ]);
     initialized = true;
+    auth.restoreResumeTokens?.();
     setState({ questionHookInstalled: await installer.isInstalled() });
     if (!result.ok) {
       errorState(result.error || "registry-invalid", result.error === "registry-save-failed" ? "stop" : "enable");

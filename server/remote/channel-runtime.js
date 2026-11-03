@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import stateHomeModule from "../state-home.cjs";
-import { registerLaunchOptions } from "../agent-launch.js";
 
 const { stateHome } = stateHomeModule;
 const DEFAULT_SCRIPT = fileURLToPath(new URL("./channel/iris-channel.mjs", import.meta.url));
@@ -23,14 +22,14 @@ export function createChannelRuntime(options = {}) {
   const nodePath = options.nodePath || process.execPath;
   const asNode = options.asNode ?? true;
   const configPath = options.configPath || path.join(root, "remote", "iris-channel.mcp.json");
-  const register = options.registerLaunchOptions || registerLaunchOptions;
   if (![socketPath, scriptPath, nodePath, configPath].every((value) => typeof value === "string" && path.isAbsolute(value))) {
     throw new TypeError("channel runtime paths must be absolute");
   }
-  let unregister = null;
+  let started = false;
 
+  // 이 설정 파일을 claude 에 넘기는 것은 ~/.claude/bin/claude-pane. 원격이 꺼지면 채널 서버가 재연결 대기
   async function start() {
-    if (unregister) return;
+    if (started) return;
     await fsp.mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 });
     await fsp.chmod(path.dirname(configPath), 0o700);
     if (process.platform === "win32") privatePath(path.dirname(configPath));
@@ -40,15 +39,12 @@ export function createChannelRuntime(options = {}) {
           ...(asNode ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}) },
       },
     });
-    unregister = register((kind) => kind === "claude"
-      ? ["--mcp-config", configPath, "--dangerously-load-development-channels", "server:iris-remote"]
-      : []);
+    started = true;
   }
 
   function stop() {
-    unregister?.();
-    unregister = null;
+    started = false;
   }
 
-  return { configPath, socketPath, start, stop, active: () => !!unregister };
+  return { configPath, socketPath, start, stop, active: () => started };
 }

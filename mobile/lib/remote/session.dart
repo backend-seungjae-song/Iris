@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:iris_remote/remote/connection_key.dart';
 import 'package:iris_remote/remote/pinned_client.dart';
+import 'package:iris_remote/diagnostics/app_log.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/store/pairing_store.dart';
 
@@ -40,7 +41,9 @@ class ActiveRemoteSession {
     required this.responseTimeout,
     this._resumeToken,
     this._resume,
+    this._onResumeToken,
     this.pingInterval = const Duration(seconds: 30),
+    this.touchWindow = const Duration(seconds: 45),
     this.transcriptTimeout = const Duration(seconds: 30),
     this.browserActionTimeout = const Duration(seconds: 120),
     this.browserFrameTimeout = const Duration(seconds: 75),
@@ -55,22 +58,26 @@ class ActiveRemoteSession {
     required RemoteConnection connection,
     Duration responseTimeout = const Duration(seconds: 10),
     Duration pingInterval = const Duration(seconds: 30),
+    Duration touchWindow = const Duration(seconds: 45),
     Duration transcriptTimeout = const Duration(seconds: 30),
     Duration browserActionTimeout = const Duration(seconds: 120),
     Duration browserFrameTimeout = const Duration(seconds: 75),
     String? resumeToken,
     Future<ResumedRemoteConnection> Function(String token)? resume,
+    Future<void> Function(String? token)? onResumeToken,
   }) => ActiveRemoteSession._(
     macName,
     List<String>.unmodifiable(capabilities),
     connection,
     responseTimeout: responseTimeout,
     pingInterval: pingInterval,
+    touchWindow: touchWindow,
     transcriptTimeout: transcriptTimeout,
     browserActionTimeout: browserActionTimeout,
     browserFrameTimeout: browserFrameTimeout,
     resumeToken: resumeToken,
     resume: resume,
+    onResumeToken: onResumeToken,
   );
 
   final String macName;
@@ -78,7 +85,10 @@ class ActiveRemoteSession {
   RemoteConnection? _connection;
   String? _resumeToken;
   final Future<ResumedRemoteConnection> Function(String token)? _resume;
+  // 새 재접속 토큰이 생기면 저장하고 연결이 끝나면 null 로 지움
+  final Future<void> Function(String? token)? _onResumeToken;
   final Duration responseTimeout;
+  final Duration touchWindow;
   final Duration pingInterval;
   final Duration transcriptTimeout;
   final Duration browserActionTimeout;
@@ -86,6 +96,8 @@ class ActiveRemoteSession {
   final StreamController<List<RemoteAgent>> _agents =
       StreamController<List<RemoteAgent>>.broadcast();
   final StreamController<List<RemoteRequest>> _requests =
+      StreamController<List<RemoteRequest>>.broadcast();
+  final StreamController<List<RemoteRequest>> _terminalQuestions =
       StreamController<List<RemoteRequest>>.broadcast();
   final StreamController<TranscriptAppend> _transcriptAppends =
       StreamController<TranscriptAppend>.broadcast();
@@ -121,11 +133,17 @@ class ActiveRemoteSession {
   Stream<List<RemoteAgent>> get agents => _agents.stream;
 
   Stream<List<RemoteRequest>> get requests => _requests.stream;
+  Stream<List<RemoteRequest>> get terminalQuestions =>
+      _terminalQuestions.stream;
 
   Stream<TranscriptAppend> get transcriptAppends => _transcriptAppends.stream;
 
   Stream<TerminalFrame> get terminalFrames => _terminalFrames.stream;
 
+  final StreamController<BrowserFrameStatus> _browserFrameStatuses =
+      StreamController.broadcast();
+  Stream<BrowserFrameStatus> get browserFrameStatuses =>
+      _browserFrameStatuses.stream;
   Stream<BrowserFrame> get browserFrames => _browserFrames.stream;
 
   Stream<RemoteConnectionStatus> get connectionStates =>
@@ -142,7 +160,19 @@ class ActiveRemoteSession {
 
   void watch() {
     _watching = true;
-    unawaited(_sendPaced(watchRequest(_newRid())).catchError((_) {}));
+    unawaited(refreshSessions().catchError((_) {}));
+  }
+
+  Future<void> refreshSessions() {
+    _watching = true;
+    final request = watchRequest(_newRid());
+    if (supports('session.watch')) {
+      request['type'] = 'session.watch';
+      if (supports('terminal.prompts')) request['prompts'] = true;
+      if (supports('terminal.prompt-fallback'))
+        request['promptFallback'] = true;
+    }
+    return _sendPaced(request);
   }
 
   void watchTranscript(String agent) {
@@ -164,6 +194,10 @@ class ActiveRemoteSession {
   Future<AgentStopResult> stopAgent(String agent) => _request<AgentStopResult>(
     (rid) => agentStopRequest(rid: rid, agent: agent),
   );
+
+  // Mac의 기기 목록에서 이 폰을 지우도록 요청한다. 서버가 응답한 뒤 연결을 닫는다
+  Future<RemoteActionResult> unregisterDevice() =>
+      _request<RemoteActionResult>((rid) => deviceUnregisterRequest(rid: rid));
 
   Future<AgentMessageResult> messageAgent(
     String agent,
@@ -295,7 +329,10 @@ class ActiveRemoteSession {
         rid: rid,
         tab: tab,
         width: width,
-        fps: fps,
+        fps: supports('browser.frame.fast')
+            ? fps.clamp(1, 20)
+            : fps.clamp(1, 4),
+        fast: supports('browser.frame.fast'),
         desktop: desktop,
       ),
       timeout: browserFrameTimeout,
@@ -322,6 +359,28 @@ class ActiveRemoteSession {
     ),
     timeout: browserActionTimeout,
     timeoutMessage: '컴퓨터가 브라우저 조작을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
+  );
+
+  Future<RemoteActionResult> browserWheel(
+    String tab, {
+    required double x,
+    required double y,
+    required int width,
+    required int height,
+    required int dx,
+    required int dy,
+  }) => _request<RemoteActionResult>(
+    (rid) => browserWheelRequest(
+      rid: rid,
+      tab: tab,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      dx: dx,
+      dy: dy,
+    ),
+    timeout: browserActionTimeout,
   );
 
   Future<RemoteActionResult?> browserMouse(
@@ -352,7 +411,7 @@ class ActiveRemoteSession {
         timeout: browserActionTimeout,
         timeoutMessage: '컴퓨터가 마우스 조작을 끝내지 못했습니다. 페이지 상태를 확인한 뒤 다시 시도하세요.',
       ),
-      replaceable: const {'move', 'drag', 'wheel'}.contains(action),
+      replaceable: const {'move', 'drag'}.contains(action),
     );
   }
 
@@ -704,6 +763,7 @@ class ActiveRemoteSession {
             return;
           }
           _resumeToken = resumed.resumeToken;
+          _saveResumeToken(resumed.resumeToken);
           _connection = resumed.connection;
           _connectionEpoch++;
           _recentSends.clear();
@@ -773,22 +833,23 @@ class ActiveRemoteSession {
   }
 
   void _send(Map<String, Object> message) {
-    if (_ending) throw const RemoteFailure('컴퓨터과 연결이 끊겼습니다.');
+    if (_ending) throw const RemoteFailure('컴퓨터와 연결이 끊겼습니다.');
     final connection = _connection;
     if (connection == null) {
       if (_foreground) unawaited(recoverNow());
-      throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+      throw const RemoteFailure('컴퓨터와 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
     }
     try {
       connection.sendJson(message);
+      AppLog.write('send', '${message['type']} rid=${message['rid'] ?? '-'}');
     } catch (error) {
       unawaited(_connectionLost(connection, error));
-      throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+      throw const RemoteFailure('컴퓨터와 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
     }
   }
 
-  // 서버 평균 초당 10개 제한 아래의 9개 전송과 네트워크 몰림 여유
-  static const _sendsPerSecond = 9;
+  // 서버 평균 초당 40개 제한 아래의 36개 전송과 네트워크 몰림 여유
+  static const _sendsPerSecond = 36;
   final List<DateTime> _recentSends = [];
   Future<void> _paceTail = Future<void>.value();
 
@@ -796,7 +857,7 @@ class ActiveRemoteSession {
     final epoch = _connectionEpoch;
     final next = _paceTail.then((_) async {
       if (epoch != _connectionEpoch) {
-        throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+        throw const RemoteFailure('컴퓨터와 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
       }
       while (true) {
         final now = DateTime.now();
@@ -810,7 +871,7 @@ class ActiveRemoteSession {
               const Duration(milliseconds: 5),
         );
         if (epoch != _connectionEpoch) {
-          throw const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+          throw const RemoteFailure('컴퓨터와 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
         }
       }
       _recentSends.add(DateTime.now());
@@ -845,13 +906,24 @@ class ActiveRemoteSession {
     }
   }
 
+  DateTime _lastTouch = DateTime.now();
+
+  bool get _recentlyTouched =>
+      DateTime.now().difference(_lastTouch) < touchWindow;
+
+  // 화면을 만진 시각. 서버가 PIN 기한을 늘릴지 정하는 근거
+  void noteTouch() => _lastTouch = DateTime.now();
+
   Future<void> _ping() async {
     if (_ending || _connection == null) {
       if (_foreground) unawaited(recoverNow());
       return;
     }
     try {
-      await _request<Pong>((rid) => pingRequest(rid, active: _foreground));
+      // 화면을 켜 두기만 한 시간은 활동이 아니라서 최근 조작이 있을 때만 활동으로 알림
+      await _request<Pong>(
+        (rid) => pingRequest(rid, active: _foreground && _recentlyTouched),
+      );
     } catch (error) {
       final connection = _connection;
       if (connection != null) await _connectionLost(connection, error);
@@ -862,8 +934,15 @@ class ActiveRemoteSession {
     while (!_ending && identical(_connection, connection)) {
       try {
         final message = parseServerMessage(await connection.receive());
+        AppLog.write(
+          'recv',
+          message is RemoteError
+              ? 'RemoteError code=${message.code}'
+              : '${message.runtimeType}',
+        );
         _accept(message);
-      } on ProtocolException {
+      } on ProtocolException catch (error) {
+        AppLog.write('protocol-error', error.message);
         // 인증 뒤 알 수 없는 서버 메시지는 현재 상태를 바꾸지 않음
       } catch (error) {
         await _connectionLost(connection, error);
@@ -876,6 +955,7 @@ class ActiveRemoteSession {
     Object failure,
   ) async {
     if (_ending || !identical(_connection, connection)) return;
+    AppLog.write('connection-lost', '${failure.runtimeType}');
     _connection = null;
     _connectionEpoch++;
     _recentSends.clear();
@@ -885,7 +965,7 @@ class ActiveRemoteSession {
             'PIN 기한이 지나 다시 확인이 필요합니다. 접속 PIN을 입력하세요.',
             requiresPin: true,
           )
-        : const RemoteFailure('컴퓨터과 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
+        : const RemoteFailure('컴퓨터와 다시 연결하고 있습니다. 잠시 후 다시 시도하세요.');
     if (!error.requiresPin) {
       _setConnectionStatus(RemoteConnectionStatus.reconnecting);
     }
@@ -913,12 +993,16 @@ class ActiveRemoteSession {
     switch (message) {
       case AgentsMessage():
         _agents.add(message.agents);
+      case TerminalQuestionsMessage():
+        _terminalQuestions.add(message.questions);
       case RequestsMessage():
         _requests.add(message.requests);
       case TranscriptAppend():
         _transcriptAppends.add(message);
       case TerminalFrame():
         _terminalFrames.add(message);
+      case BrowserFrameStatus():
+        _browserFrameStatuses.add(message);
       case BrowserFrame():
         _browserFrames.add(message);
       case RemoteError():
@@ -993,16 +1077,22 @@ class ActiveRemoteSession {
     if (pending != null && !pending.isCompleted) pending.complete(message);
   }
 
+  void _saveResumeToken(String? token) {
+    final save = _onResumeToken;
+    if (save != null) unawaited(save(token).catchError((Object _) {}));
+  }
+
   Future<void> _terminate([Object? failure]) async {
     if (_ending) return;
     _ending = true;
+    _saveResumeToken(null);
     _connectionEpoch++;
     _recentSends.clear();
     if (failure is RemoteFailure) {
       _disconnectReason = failure;
     }
     _pingTimer.cancel();
-    final error = failure ?? const RemoteFailure('컴퓨터과 연결이 끊겼습니다.');
+    final error = failure ?? const RemoteFailure('컴퓨터와 연결이 끊겼습니다.');
     for (final completer in _pending.values) {
       if (!completer.isCompleted) completer.completeError(error);
     }
@@ -1015,9 +1105,11 @@ class ActiveRemoteSession {
       await Future.wait([
         _agents.close(),
         _requests.close(),
+        _terminalQuestions.close(),
         _transcriptAppends.close(),
         _terminalFrames.close(),
         _browserFrames.close(),
+        _browserFrameStatuses.close(),
         _connectionStates.close(),
       ]);
       if (!_disconnected.isCompleted) _disconnected.complete();
@@ -1118,6 +1210,11 @@ class RemoteSession {
   final String deviceName;
   final Duration responseTimeout;
 
+  ActiveRemoteSession? _active;
+
+  // 앱 어디서든 화면을 만지면 현재 연결에 알린다
+  void noteTouch() => _active?.noteTouch();
+
   Future<PendingPairing> pair(PairingQr qr) async {
     PinnedConnection? connection;
     try {
@@ -1159,20 +1256,49 @@ class RemoteSession {
     PairingSettings settings, {
     required String pin,
     Future<void> Function()? onAuthenticated,
+    Future<void> Function(String? token)? onResumeToken,
   }) async {
     final authenticated = await _openAuthenticated(
       settings,
       pin: pin,
       onAuthenticated: onAuthenticated,
     );
-    return ActiveRemoteSession._(
+    return _activeFrom(settings, authenticated, onResumeToken);
+  }
+
+  // 저장해 둔 재접속 토큰으로 PIN 없이 연결. 기기 키 서명은 그대로 확인
+  Future<ActiveRemoteSession> resume(
+    PairingSettings settings, {
+    required String token,
+    Future<void> Function(String? token)? onResumeToken,
+  }) async {
+    final authenticated = await _openAuthenticated(
+      settings,
+      resumeToken: token,
+    );
+    return _activeFrom(settings, authenticated, onResumeToken);
+  }
+
+  Future<ActiveRemoteSession> _activeFrom(
+    PairingSettings settings,
+    ResumedRemoteConnection authenticated,
+    Future<void> Function(String? token)? onResumeToken,
+  ) async {
+    // 첫 토큰은 저장이 끝난 뒤 돌려줘서 앱이 바로 꺼져도 서버와 폰의 토큰이 같게 한다
+    try {
+      await onResumeToken?.call(authenticated.resumeToken);
+    } catch (_) {}
+    final session = ActiveRemoteSession._(
       authenticated.capabilities.macName,
       List<String>.unmodifiable(authenticated.capabilities.requests),
       authenticated.connection,
       responseTimeout: responseTimeout,
       resumeToken: authenticated.resumeToken,
       resume: (token) => _openAuthenticated(settings, resumeToken: token),
+      onResumeToken: onResumeToken,
     );
+    _active = session;
+    return session;
   }
 
   Future<ResumedRemoteConnection> _openAuthenticated(
@@ -1311,10 +1437,25 @@ RemoteFailure _remoteError(String code) {
       '컴퓨터의 원격 요청 한도에 도달했습니다. 진행 중인 요청이 끝난 뒤 다시 시도하세요.',
     ),
     'unsupported-request' => const RemoteFailure(
-      '컴퓨터의 Iris가 이 요청을 지원하지 않습니다. 컴퓨터과 폰 앱의 버전을 확인하세요.',
+      '컴퓨터의 Iris가 이 요청을 지원하지 않습니다. 컴퓨터와 폰 앱의 버전을 확인하세요.',
     ),
+    'gh_missing' => const RemoteFailure('Mac에 GitHub CLI(gh)가 설치되어 있지 않습니다.'),
+    'auth_required' => const RemoteFailure(
+      'Mac의 GitHub CLI가 로그인되어 있지 않습니다. gh auth login을 실행하세요.',
+    ),
+    'no_pr' => const RemoteFailure('현재 브랜치에 연결된 GitHub PR이 없습니다.'),
+    'no_remote' => const RemoteFailure(
+      '이 저장소에 원격 저장소가 없어 GitHub PR을 찾을 수 없습니다.',
+    ),
+    'not_github' => const RemoteFailure('이 저장소의 원격 저장소가 GitHub가 아닙니다.'),
+    'timeout' => const RemoteFailure('GitHub 응답 시간이 초과되었습니다. 다시 시도하세요.'),
+    'output_limit' => const RemoteFailure('GitHub 응답이 너무 커서 표시할 수 없습니다.'),
+    'command_failed' => const RemoteFailure('GitHub 정보를 읽지 못했습니다.'),
+    'bad_response' => const RemoteFailure('GitHub PR 응답을 이해하지 못했습니다.'),
+    'unsupported_host' => const RemoteFailure('이 GitHub 서버의 정보를 읽을 수 없습니다.'),
+    'invalid_run' => const RemoteFailure('이 PR에 속한 검사를 선택하세요.'),
     'invalid-request' => const RemoteFailure(
-      '컴퓨터가 요청 형식을 이해하지 못했습니다. 컴퓨터과 폰 앱을 다시 연결하세요.',
+      '컴퓨터가 요청 형식을 이해하지 못했습니다. 컴퓨터와 폰 앱을 다시 연결하세요.',
     ),
     'browser-controller-unavailable' => const RemoteFailure(
       '컴퓨터의 Iris 브라우저 제어기가 연결되지 않았습니다. Iris 앱에서 브라우저를 연 뒤 다시 시도하세요.',
@@ -1343,13 +1484,19 @@ RemoteFailure _remoteError(String code) {
     'terminal-layout-unavailable' => const RemoteFailure(
       '터미널 화면 크기를 확인할 수 없습니다. 다시 연결하세요.',
     ),
+    'terminal-read-timeout' => const RemoteFailure(
+      '터미널 읽기 시간이 초과되었습니다. 자동으로 다시 시도합니다.',
+    ),
+    'terminal-screen-stale' => const RemoteFailure(
+      '출력은 바뀌지만 화면이 갱신되지 않습니다. Mac에서 이 터미널을 확인하세요.',
+    ),
     'terminal-read-unavailable' => const RemoteFailure(
-      '터미널 화면을 읽지 못했습니다. 컴퓨터에서 pane 상태를 확인하세요.',
+      '터미널 화면을 읽지 못했습니다. 컴퓨터에서 터미널 상태를 확인하세요.',
     ),
     'unavailable' => const RemoteFailure(
       '컴퓨터에서 요청한 기능을 지금 사용할 수 없습니다. Iris에서 해당 기능 상태를 확인한 뒤 다시 시도하세요.',
     ),
-    _ => const RemoteFailure('컴퓨터가 알 수 없는 오류를 보냈습니다. 컴퓨터과 폰 앱의 버전을 확인하세요.'),
+    _ => const RemoteFailure('컴퓨터가 알 수 없는 오류를 보냈습니다. 컴퓨터와 폰 앱의 버전을 확인하세요.'),
   };
 }
 

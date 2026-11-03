@@ -70,6 +70,11 @@ void main() {
     );
     expect(remoteInboundFrameLimit(frame), maximumBrowserFrameBytes);
     expect(remoteInboundFrameLimit(draft), maximumBrowserDraftBytes);
+    final tabs = jsonEncode({
+      'type': 'browser.tabs.result',
+      'tabs': 'A' * (100 * 1024),
+    });
+    expect(remoteInboundFrameLimit(tabs), maximumBrowserTabsBytes);
     expect(remoteInboundFrameLimit(generic), maximumRemoteFrameBytes);
     expect(utf8.encode(exactFrame).length, maximumBrowserFrameBytes);
     expect(utf8.encode(exactDraft).length, maximumBrowserDraftBytes);

@@ -353,7 +353,7 @@ export default async function run() {
   check("[T-B1-8] 내려간 뒤에 올라온다 — 선커밋 후에만 nextSheetIdx를 적용함", () => {
     const owner = /(?:let|const)\s+renderedFileOwner\b/.test(centerTabs);
     const body = b4Function(centerTabs, "withFileViewTransition");
-    const capture = body.search(/(?:const|let)\s+\w+\s*=\s*renderedFileOwner\b/);
+    const capture = body.search(/(?:const|let)\s+\w+\s*=\s*slot\.owner\b/);
     const leave = body.search(/callHook\(\s*"viewer\.leaveTab"/);
     const enter = body.search(/callHook\(\s*"viewer\.enterTab"/);
     const commit = /svCloseEdit\(\s*t\s*,\s*true\s*\)/.test(b4Function(sheetEdit, "svLeaveTab"));
@@ -391,10 +391,10 @@ export default async function run() {
   check("[T-B1-11] Monaco loader onerror는 owner·token 일치 guard 뒤 공통 경계로 렌더함", () => {
     const at = textEditor.indexOf("sc.onerror ="), end = textEditor.indexOf("document.head.appendChild(sc)", at);
     const body = at >= 0 && end > at ? textEditor.slice(at, end) : "";
-    const guard = body.search(/if\s*\([^)]*owner[^)]*(?:!==?|===?)[^)]*(?:renderedFileOwner|getRenderedFileOwner\s*\(\))[^)]*\)/);
-    const token = body.search(/if\s*\([^)]*token[^)]*(?:!==?|===?)[^)]*(?:renderedFileToken|renderToken|fileViewToken|getRenderedFileToken\s*\(\))[^)]*\)/);
+    const guard = body.search(/if\s*\([^)]*owner[^)]*(?:!==?|===?)[^)]*(?:renderedFileOwner|getRenderedFileOwner\s*\(pane\))[^)]*\)/);
+    const token = body.search(/if\s*\([^)]*token[^)]*(?:!==?|===?)[^)]*(?:renderedFileToken|renderToken|fileViewToken|getRenderedFileToken\s*\(pane\))[^)]*\)/);
     const transition = body.indexOf("withFileViewTransition(");
-    const mutate = Math.max(body.indexOf("fileview.innerHTML"), body.indexOf("renderError"));
+    const mutate = Math.max(body.indexOf("fileRoot(pane).innerHTML"), body.indexOf("renderError"));
     return guard >= 0 && token >= 0 && transition > guard && transition > token && mutate > transition;
   });
 
@@ -892,12 +892,12 @@ export default async function run() {
     const renderAt = commit.body.search(/\brenderFileView\s*\(/);
     const beforeRender = commit.body.slice(0, renderAt);
     const activeIdentity = /\bcenterSpace\b/.test(beforeRender)
-      && /getActiveTabId\s*\(/.test(beforeRender)
+      && /isTabVisible\s*\(centerSpace,\s*tab\.id\)/.test(beforeRender)
       && /getTabs\s*\(/.test(beforeRender)
       && /(?:find|some)\s*\(/.test(beforeRender)
       && /===?\s*(?:t|tab|tabRef|target|targetTab)\b/.test(beforeRender);
     const guardedRender = /if\s*\([\s\S]{0,900}\)\s*(?:\{\s*)?[\s\S]{0,350}\brenderFileView\s*\(/.test(beforeRender.slice(-1400) + commit.body.slice(renderAt, renderAt + 80));
-    b3Assert(activeIdentity && guardedRender, "대상이 현재 center의 live active 탭일 때만 renderFileView하는 identity gate가 없음");
+    b3Assert(activeIdentity && guardedRender, "현재 스페이스에서 보이는 동일 탭 객체인지 확인하지 않음");
     return true;
   });
 

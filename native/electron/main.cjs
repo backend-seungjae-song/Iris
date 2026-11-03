@@ -17,12 +17,17 @@ const { pinUserDataHome } = require("./user-data-home.cjs");
 // 기록이 설치된 앱의 것과 섞여, 어느 환경의 기록인지 구분할 수 없다.
 // 어디인지는 state-home.cjs 한 곳이 정한다.
 const IRIS_HOME = stateHome();
+const QA_HIDDEN = process.argv.includes("--qa-hidden") && IRIS_HOME === path.join(require("node:os").homedir(), ".iris-dev");
+if (QA_HIDDEN && process.platform === "darwin") app.setActivationPolicy("accessory");
 // 쿠키·로그인 세션이 사는 폴더도 상태 폴더에 매단다. cookie-import는 require 시점에 이전 실행의
 // 스테이징 DB를 재생하므로, 그 모듈과 이를 전이 로드하는 password-import보다 먼저 고정해야 한다.
 // 설치본이면 아무것도 하지 않는다.
 const pinnedUserData = pinUserDataHome(app, IRIS_HOME);
 // 이미 실행 중인 앱의 쿠키 DB를 두 번째 프로세스의 시작 복원이 건드리면 안 된다.
 if (!app.requestSingleInstanceLock()) { app.quit(); return; }
+// 크래시 덤프를 업로드 없이 userData/Crashpad 에만 남김. macOS 보고서에는 없는 Chromium crash key
+// (예: 맞지 않는 프로세스를 고른 사이트)가 덤프에 남음. 이후에 뜨는 프로세스만 수집하므로 가능한 한 먼저
+require("electron").crashReporter.start({ uploadToServer: false, compress: true });
 
 if (pinnedUserData) console.log(`[iris] 개발 갈래 쿠키 폴더: ${pinnedUserData}`);
 
@@ -37,6 +42,8 @@ const passwordImport = require("./password-import.cjs");
 const { boundsVisible: windowBoundsVisible } = require("./window-bounds.cjs");
 const { ServerHost } = require("./server-host.cjs");
 const { createAudioDiagnostics } = require("./audio-diagnostics.cjs");
+const { createProcessMemoryLog } = require("./process-memory-log.cjs");
+const { createResourceGuard } = require("./resource-guard.cjs");
 const { createCertificateTrust } = require("./certificate-trust.cjs");
 const { createChromeImportRegistry } = require("./chrome-import-registry.cjs");
 const { createCredentialService } = require("./credential-service.cjs");
@@ -71,8 +78,8 @@ const { localLoginFor } = require("../../server/local-login.cjs");
 const { port: acPort } = require("../../server/env.cjs");
 const { createTouchDragArm } = require("./touch-drag-arm.cjs");
 const { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setShownKnownProbe, applyViewportTo, setTouchDrag, forgetSecrets, clearAutoViewport, setShownProbe, setDefaultViewport, noteChildSession, dropChildSession, noteFrameOrigin, injectOverlayAllFrames, hoverAtPoint, diagSince,
-  registerSessionPrimer, noteNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, runCdp, aiDriving, aiDrivingAnywhere,
-  holdAiCausality, setPaintableProbe, setContextActionProvider } = require("./cdp-control.cjs"); // AI→브라우저 CDP 제어 실행기
+  registerSessionPrimer, noteNavigation, noteDocumentNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, runCdp, aiDriving, aiDrivingAnywhere,
+  holdAiCausality, setPaintableProbe, setContextActionProvider, noteUserKey } = require("./cdp-control.cjs"); // AI→브라우저 CDP 제어 실행기
 const downloadState = require("./download-state.cjs");
 
 
@@ -108,6 +115,7 @@ const { installDownloadHook, noteExplicitSave } = createDownloadHook({
   fs, path, downloadState,
   allWindows: () => BrowserWindow.getAllWindows(),
   aiDriving,
+  downloadsDir: () => app.getPath("downloads"),
   // 내려받기가 실패한 사유를 남긴다. 기록 없이 취소되면 호출자가 사이트가 막은 것으로 잘못 판단한다.
   noteBlockedDownload: (wc, item) => {
     try {
@@ -197,6 +205,8 @@ const profileSessionPolicy = createProfileSessionPolicy({
 });
 const { attachGoogleAuthUserAgent } = require("./google-auth-user-agent.cjs");
 app.on("web-contents-created", (_event, contents) => {
+  // 사용자 키 시각. QA 가 포커스를 빌릴지 판정(cdp-control.cjs qaPrepareFocus)
+  contents.on("before-input-event", (_ev, input) => { if (input.type === "keyDown") noteUserKey(contents.id); });
   // 팝업도 생성 직후부터 같은 정책을 받아야 첫 OAuth 탐색이 옛 UA로 시작하지 않는다.
   if (contents.getType() === "webview" || profileSessionPolicy.ownsSession(contents.session)) {
     // 인증 호스트를 떠나 정체성 전용 attach 를 내려놓으면 부착 정책이 그 탭을 다시 판정한다.
@@ -207,6 +217,16 @@ const audioDiagnostics = createAudioDiagnostics({ app, env: process.env });
 const AUDIO_DIAG_ENABLED = audioDiagnostics.isEnabled();
 function audioDiagLog(event, details = {}) { audioDiagnostics.log(event, details); }
 function startAudioDiagnostics() { audioDiagnostics.start(); }
+// 기기 메모리·배터리 감시. 심각하면 앱 창들에 쉬는 탭을 재우라고 알림
+const resourceGuard = createResourceGuard({
+  dir: path.join(IRIS_HOME, "diagnostics"),
+  notify: ({ title, body }) => { if (Notification.isSupported()) new Notification({ title, body }).show(); },
+  discardTabs: () => { for (const win of BrowserWindow.getAllWindows()) { try { if (!win.isDestroyed()) win.webContents.send("ac-memory-pressure"); } catch {} } },
+});
+const processMemoryLog = createProcessMemoryLog({
+  app, allWebContents: () => webContents.getAllWebContents(), allWindows: () => BrowserWindow.getAllWindows(),
+  screen, dir: path.join(IRIS_HOME, "diagnostics"),
+});
 
 // 터미널 붙여넣기용 클립보드 읽기(동기). sandbox preload는 clipboard 모듈이 없어 메인이 대신 읽는다.
 // 읽기·쓰기 모두 이 앱의 렌더러만 받는다. webview 게스트가 사용자 클립보드를 읽거나 덮어쓰지 못하게 한다.
@@ -338,6 +358,7 @@ setViewportNotify((wcId, vp) => {
 // 그래서 요청 수를 세어 마지막 요청이 해제하게 한다.
 setCaptureHold(async (wcId, on) => {
   const id = Number(wcId);
+  if (!captureHoldState.needsHold(on, visibilityRegistry.isShown(id))) return false;
   const guest = webContents.fromId(id);
   if (guest && !guest.isDestroyed() && on) setThrottleReason(guest, "capture", true);
   const host = guest && !guest.isDestroyed() && guest.hostWebContents;
@@ -359,11 +380,11 @@ setCaptureHold(async (wcId, on) => {
 });
 // 탭이 화면에 나왔다는 통지. 보이지 않을 때 대신 넣어 준 화면 크기를 그대로 두면 사용자가 그 탭으로
 // 이동했을 때 창 크기와 어긋나게 그려지므로, 나오는 즉시 해제한다(사용자가 직접 정한 크기는 유지한다).
-// 서버가 지목 메시지를 수락하는 증명. 파일은 서버가 만들고 권한은 0600이며, 앱만 렌더러에 전달한다.
+// 서버가 지목 메시지를 수락하는 증명. 앱이 띄운 서버와는 파이프로만 주고받고, 붙기만 한 서버는 그 서버가 만든 파일(0600) 값. 앱만 렌더러에 전달한다.
 // (루프백이라는 사실만으로는 앱과 임의의 로컬 프로세스를 구분할 수 없어, 증명이 없으면 어떤 프로세스든
 // 자기 자신에게 임의의 탭을 지목하고 곧바로 조작할 수 있다.)
 ipcMain.on("ac-ui-token", (e) => {
-  try { e.returnValue = fs.readFileSync(path.join(IRIS_HOME, "ui-token"), "utf8").trim(); }
+  try { e.returnValue = serverHost.currentUiToken(); }
   catch { e.returnValue = ""; }
 });
 // 창(호스트)마다 현재 그려지는 탭은 하나이므로, 호스트별로 마지막 보고만 보관하면 판정할 수 있다.
@@ -394,7 +415,7 @@ ipcMain.on("ac-tab-shown", (_e, m) => {
     const shown = webContents.fromId(wc);
     if (shown && !shown.isDestroyed() && shown.hostWebContents === _e.sender) setThrottleReason(shown, "shown:" + _e.sender.id, true);
     clearAutoViewport(wc, webContents);
-    if (m.w > 200 && m.h > 200) setDefaultViewport(m.w, m.h);   // 안 보이는 탭에 물려줄 기준 크기
+    if (m.w > 200 && m.h > 200) setDefaultViewport(m.w, m.h, wc);   // 안 보이는 탭에 물려줄 기준 크기
     // 방금 화면에서 내려간 탭에 그 크기를 물려준다("보이는 탭" 갱신 뒤라야 이 판정이 맞다).
     // 안 물려주면 그 탭의 페이지는 폭 0이 되고, 배경에서 일어나는 이동(결제 리다이렉트가
     // 대표적)이 폰으로 판정된다.
@@ -580,6 +601,30 @@ function appDrawsLink(url) {
   if (dot < 0) return false;
   return appDrawnLinkExts.includes(decodeURIComponent(pathname.slice(dot + 1)).toLowerCase());
 }
+// 설정 「링크 열기」 계정 규칙의 사본: 주소 규칙과 그 계정의 세션 이름. 정본은 렌더러의 브라우저 상태
+// - 페이지 안 링크·리디렉트는 렌더러 이벤트가 요청이 나간 뒤에 와서, 요청 전에 막으려면 여기서 판정해야 함
+// - 판정 함수는 렌더러와 같은 web/js/browser/link-rules.js. 불러오기 전·규칙을 받기 전에는 가로채지 않음
+let linkAccountRules = [];
+let linkRules = null;
+import(require("node:url").pathToFileURL(path.join(__dirname, "../../web/js/browser/link-rules.js")).href)
+  .then((m) => { linkRules = m; })
+  .catch((err) => console.log("[link-rules] load failed", err && err.message));
+ipcMain.on("ac-link-account-rules", (e, list) => {
+  if (!isTrustedSender(e)) return;
+  if (!Array.isArray(list) || list.length > 500) return;
+  linkAccountRules = list.filter((r) => r && typeof r.pattern === "string" && r.pattern.length <= 300
+    && typeof r.partition === "string" && matchesProfilePartition(r.partition))
+    .map((r) => ({ pattern: r.pattern, partition: r.partition }));
+});
+// 이 탭이 지금 주소에서 url 로 가면 다른 계정 규칙에 걸리는지. 같은 규칙 안 이동·이미 그 계정이면 false
+function linkAccountFor(wc, url) {
+  if (!linkRules || !linkAccountRules.length) return false;
+  let cur = "";
+  try { cur = wc.getURL(); } catch {}
+  const rule = linkRules.linkRuleForPageTab(url, cur, linkAccountRules);
+  if (!rule) return false;
+  try { return session.fromPartition(rule.partition) !== wc.session; } catch { return false; }
+}
 // 분리 브라우저 창에는 글자 탭 영역이, 메모 창에는 브라우저가 없으므로 콘솔 창이 열고 그 창을 앞으로 가져온다.
 ipcMain.on("ac-open-in-console", (e, target) => {
   if (!isTrustedSender(e)) return;
@@ -607,6 +652,7 @@ createWebviewLifecycle({
   openerScript: OPENER_SCRIPT,
   registerSessionPrimer,
   noteNavigation,
+  noteDocumentNavigation,
   forgetAttachPolicy,
   noteFrameOrigin,
   dropChildSession,
@@ -633,6 +679,7 @@ createWebviewLifecycle({
     noteExplicitSave,
   }).attach,
   appDrawsLink,
+  linkAccountFor,
   // https 문서는 앱 주소로 referrer 를 보내지 않아 대개 빈 값이다. 그때는 탭 주소로 대신하고,
   // 탭 안에 다른 출처 프레임이 있으면 그 프레임의 요청일 수 있다고 표시한다.
   openAppUrl: (wc, url, referrerUrl) => {
@@ -712,6 +759,7 @@ const windowLayout = createWindowLayout({
 });
 
 const mainWindow = createMainWindow({
+  hidden: QA_HIDDEN,
   app,
   BrowserWindow,
   dialog,
@@ -809,6 +857,18 @@ function takesSwitcherToggle(w) {
 }
 let lastSwitchWindow = null;
 app.on("browser-window-focus", (_e, w) => { if (takesSwitcherToggle(w)) lastSwitchWindow = w; });
+// 창 전환이 이 앱의 창을 알아보는 값. id 는 getMediaSourceId() "window:<CGWindowID>:0" 의 창 번호
+function switcherWindowFacts(win) {
+  const facts = { id: null, title: null, bounds: null };
+  try { facts.title = win.getTitle(); } catch {}
+  try { const b = win.getBounds(); facts.bounds = [b.x, b.y, b.width, b.height]; } catch {}
+  try {
+    const m = /^window:(\d+):/.exec(win.getMediaSourceId());
+    if (m) facts.id = Number(m[1]);
+  } catch {}
+  return facts;
+}
+
 switcherHost = createSwitcherHost({
   core: switcherCore,
   catalog: windowCatalog,
@@ -821,18 +881,16 @@ switcherHost = createSwitcherHost({
   defaultRelay: DEFAULT_RELAY,
   killProbe: (pid) => { process.kill(pid, 0); return true; },
   ownPid: process.pid,
+  // 포커스가 이 앱 창에 있으면 그 창 제목. 다른 앱이 앞이면 null
+  ownFocusedWindow: () => {
+    const win = BrowserWindow.getFocusedWindow();
+    return win && !win.isDestroyed() ? switcherWindowFacts(win) : null;
+  },
   // 이 앱의 자기 창은 앱이 직접 올린다. 자기 창이 아니면 false 를 돌려 기존 경로로 보낸다.
   raiseOwnWindow: (target) => {
     if (!target) return false;
     const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
-    const title = (w) => { try { return w.getTitle(); } catch { return null; } };
-    const sameBounds = (w) => {
-      try {
-        const b = w.getBounds();
-        return Array.isArray(target.bounds) && b.x === target.bounds[0] && b.y === target.bounds[1];
-      } catch { return false; }
-    };
-    const win = wins.find((w) => title(w) === target.matchTitle) || wins.find(sameBounds);
+    const win = wins[switcherCore.findOwnWindow(target, wins.map(switcherWindowFacts))];
     if (!win) return false;
     try {
       if (win.isMinimized()) win.restore();
@@ -939,6 +997,33 @@ ipcMain.on("ac-notify", (event, message) => {
 });
 ipcMain.on("ac-open-browser", (_e, opts) => { try { browserWindowManager.createBrowserModeWindow(false, opts); } catch {} });
 ipcMain.on("ac-open-shared-browser", (_e, opts) => { try { browserWindowManager.createBrowserModeWindow(true, opts); } catch {} });
+// 다른 앱에서 누른 웹 링크. macOS 는 앱 준비 전에도 보내므로 whenReady 전 최상위에서 등록
+const { createLinkInbox, createDefaultBrowser, linkTarget } = require("./default-browser.cjs");
+// 링크를 받을 창을 앞으로. 이미 열린 창도 최소화·다른 앱 뒤에 있을 수 있어 focus 만으로는 보이지 않음
+function bringLinkWindow(role) {
+  const w = role === "session" ? getMainWindow() : browserWindowManager.createBrowserModeWindow(true);
+  if (!w || w.isDestroyed()) return;
+  if (w.isMinimized()) w.restore();
+  w.show(); w.focus();
+  app.focus({ steal: true });
+}
+const linkInbox = createLinkInbox({
+  isAppReady: () => app.isReady(),
+  target: () => linkTarget(readUiState().linkTarget),
+  openWindow: (role) => { try { bringLinkWindow(role); } catch {} },
+});
+app.on("open-url", (e, url) => { e.preventDefault(); linkInbox.receive(url); });
+ipcMain.on("ac-shared-browser-ready", (e) => { if (isTrustedSender(e)) linkInbox.windowReady(e.sender, "shared"); });
+ipcMain.on("ac-console-link-ready", (e) => { if (isTrustedSender(e)) linkInbox.windowReady(e.sender, "session"); });
+// Iris 안에서 링크를 열 창. 값을 주면 저장, 주지 않으면 조회
+ipcMain.handle("ac-link-target", (e, value) => {
+  if (!isTrustedSender(e)) return null;
+  if (value === "shared" || value === "session") writeUiState({ linkTarget: value });
+  return linkTarget(readUiState().linkTarget);
+});
+const defaultBrowser = createDefaultBrowser({ execFile });
+ipcMain.handle("ac-default-browser-status", (e) => isTrustedSender(e) ? defaultBrowser.status() : { ok: false });
+ipcMain.handle("ac-default-browser-choose", (e, id) => isTrustedSender(e) ? defaultBrowser.choose(String(id || "")) : { ok: false });
 ipcMain.on("ac-dock-browser", () => { browserWindowManager.dockBrowserModeWindows(); });
 memoWindowManager.registerMemoIpc();
 // 네이티브 기능은 표를 통해서만 등록된다. 이 위치에 기능 이름이 나오지 않는 것이 핵심이다.
@@ -953,6 +1038,8 @@ bootNativeCapabilities({
     webviewPreloadPath: path.join(__dirname, "webview-preload.cjs"),
     // 상태 폴더와 CDP 연결도 앱 셸의 공용 요소다. 기능이 각자 경로를 조합하거나 세션을 새로 열지 않는다.
     stateDir: IRIS_HOME,
+    // 개발 앱 QA 실측의 숨김 실행. 기능이 띄우는 창도 화면에 보이지 않음
+    hidden: QA_HIDDEN,
     runCdp,
     windowLayout,
     guardWebviewPartition,
@@ -1032,8 +1119,8 @@ app.on("will-quit", () => { try { switcherHost.stop(); } catch {} });
 app.whenReady().then(async () => {
   const webauthn = require("./webauthn-platform.cjs").configurePlatformWebAuthn(app);
   console.log(`[webauthn] ${webauthn.reason}`);
-  pickMode.registerGlobalShortcut();
-  switcherHost.start(); // ready 기준 +3초·+8초 재결합 창을 여기서 연다.
+  if (!QA_HIDDEN) pickMode.registerGlobalShortcut();
+  if (!QA_HIDDEN) switcherHost.start(); // ready 기준 +3초·+8초 재결합 창을 여기서 연다.
   const started = await serverHost.start();
   // 네트워크 정책이 다른 이전 서버는 연결 선택지 없이 종료. 외부 수신 가능 서버 연결 방지
   if (started && started.policyMismatch) {
@@ -1067,6 +1154,9 @@ app.whenReady().then(async () => {
   }
   appMenu.build();
   startAudioDiagnostics();
+  if (!QA_HIDDEN) resourceGuard.start();
+  processMemoryLog.start();
+  if (process.platform !== "win32") process.on("SIGUSR2", () => processMemoryLog.snapshotRequested());
   // 사용자의 실제 Chrome이 원격 디버깅 플래그로 실행 중이면 그 창에서는 구글 로그인이 막힌다.
   // 알리지 않으면 "브라우저가 안전하지 않다"는 메시지의 원인을 찾기 어려우므로, 시작할 때 한 번 알린다.
   try {
@@ -1088,9 +1178,10 @@ app.whenReady().then(async () => {
   // 재오픈된 창의 reconcileBrowserMode가 webview를 되살리고 렌더러가 활성 탭 wc를 자동 보고 → 사용자
   // 클릭 없이 CDP 제어 재개. 닫아둔 상태(browserOpen=false)면 열지 않는다. 서버만 재시작된 경우엔
   // 라이브 webview가 ws.onopen에서 wc를 재보고하므로 그대로 재인식된다.
-  if (readUiState().browserOpen) setTimeout(() => { try { if (readUiState().browserOpen) browserWindowManager.createBrowserModeWindow(false); } catch {} }, 1500);
-  if (readUiState().sharedOpen) setTimeout(() => { try { if (readUiState().sharedOpen) browserWindowManager.createBrowserModeWindow(true); } catch {} }, 1700); // 타이머 발화 시 재확인(그 사이 사용자가 닫았으면 열지 않음)
-  for (const [index, record] of memoWindowManager.memoWindowSnapshot().records.entries()) {
+  if (!QA_HIDDEN && readUiState().browserOpen) setTimeout(() => { try { if (readUiState().browserOpen) browserWindowManager.createBrowserModeWindow(false); } catch {} }, 1500);
+  linkInbox.appReady();
+  if (!QA_HIDDEN && readUiState().sharedOpen) setTimeout(() => { try { if (readUiState().sharedOpen) browserWindowManager.createBrowserModeWindow(true); } catch {} }, 1700); // 타이머 발화 시 재확인(그 사이 사용자가 닫았으면 열지 않음)
+  for (const [index, record] of (QA_HIDDEN ? [] : memoWindowManager.memoWindowSnapshot().records).entries()) {
     setTimeout(() => { try { if (memoWindowManager.hasMemoRecord(record.instanceId)) memoWindowManager.createMemoModeWindow(record); } catch {} }, 1850 + index * 80);
   }
   // Dock 클릭. 다른 창이 남아 있어도 콘솔이 없으면 다시 연다

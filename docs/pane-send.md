@@ -46,11 +46,31 @@ herdr 대상 pane 에 사람 입력으로 넣는다
 `CONTROL_CAPS.send` 가 꺼져 있으면 전송을 거부한다. `ws._local` 로 원격 피어의 전송도
 거부한다. 원격 피어가 로컬 AI 를 통해 원격 셸 금지를 우회하지 못하게 하기 위한 제한이다.
 
-터미널에서는 herdr CLI 로 같은 입력을 전달한다.
+터미널에서는 `iris-pane-send` 로 같은 입력을 전달한다. 입력창을 확인한 뒤 `herdr pane run` 으로 보내고,
+제출됐는지 다시 읽어 확인한다. 입력창이 비었다는 것만으로는 제출로 보지 않는다. 큰 붙여넣기가 입력창에
+나타나기 전에 읽으면 비어 보여서, 접힌 `[Pasted text …]` 가 남았는데도 `submitted:true` 를 낸 사례가
+있었다(2026-11-02). 보낸 글의 첫 줄이 대화 기록에 새로 보이거나(`evidence:"echo"`) 세션이 working 이
+되어야(`evidence:"working"`) `submitted:true` 다. 둘 다 보지 못하면 `submitted:"unknown"` 이다. 보낸 글이
+1초 넘게 입력창에 남으면 Enter 를 한 번 더 보내고 `retriedEnter:true` 를 붙인다.
 
 ```
-herdr pane run <paneId> "/compact"
+iris-pane-send <paneId> "/compact"
+iris-pane-send <paneId> --check      # 보내지 않고 입력창 상태만 본다
 ```
+
+빈 입력창에 보이는 `Try "…"`, `Ask Codex to do anything` 와 자동 추천 문구는 흐린 글자로 그려진다.
+`herdr pane read` 를 `--ansi` 없이 읽으면 사람이 쓰다 만 글과 구분되지 않아, 보내는 세션이 빈
+입력창을 보고 전송을 미룬 사례가 반복됐다(2026-10-18~26, 10여 건). `iris-pane-send` 는 흐리지 않은
+글자만 사람이 쓴 글로 센다. pane 포커스는 판정에 쓰지 않는다.
+
+| 종료 코드 | 의미 |
+|---|---|
+| 0 | 보냈고 입력창이 비었다. `submitted` 가 `true` 면 제출 확인, `"unknown"` 이면 다시 읽어 확인한다(`--check` 에서는 비어 있음) |
+| 3 | 입력창에 사람이 쓴 글이 있어 보내지 않았다 |
+| 4 | 입력창을 찾지 못해 보내지 않았다. `--force` 로 보낼 수 있다 |
+| 5 | 보냈지만 입력창에 글이 남아 제출되지 않았다 |
+
+어느 위치에서나 부르려면 링크를 만든다: `ln -s "$PWD/bin/iris-pane-send.mjs" ~/.local/bin/iris-pane-send`
 
 ## 현재 세션의 /model 실행 절차
 
@@ -143,7 +163,7 @@ function sendTo(paneId, text) {
 ⟦Iris⟧ 세션 지목 · 판 만들기
 주소: herdr pane w18:p1Q
 …
-보내기: herdr pane run w18:p1Q "<명령>"
+보내기: iris-pane-send w18:p1Q "<명령>"
 ⟦/Iris⟧
 ```
 

@@ -92,7 +92,8 @@ export function rootsCoverage() {
   // 실제 코드 폴더를 다 덮는가이고, 목록이 비면 그 질문 자체가 사라진다. 판정 불가가 아니라 실패다.
   if (tracked.length < 50) return { missing: [], unmeasured: `git 이 아는 파일이 ${tracked.length}개뿐 — 이 목록으로는 아무것도 못 지킨다` };
   const covered = new Set(codeFiles());
-  const missing = tracked.filter((f) => CODE_EXT.test(f) && !NOT_OURS.test(f) && !covered.has(f));
+  const missing = tracked.filter((f) => existsSync(path.join(ROOT, f))
+    && CODE_EXT.test(f) && !NOT_OURS.test(f) && !covered.has(f));
   return { ok: missing.length === 0, missing };
 }
 
@@ -134,7 +135,7 @@ const REPO_PATH = /((?:web|server|native\/electron|bin|scripts|test)\/[A-Za-z0-9
 // 셸에서는 실행을 뜻하는 단어가 그 줄에 있을 때만 실행이다. `echo scripts/x.sh` 는 부르는 것이 아니다.
 // 경로 앞에 셸 확장이 붙기도 한다(`exec bash "$(dirname "$0")/scripts/setup.sh"`). 그래서
 // 경로를 통째로 잡으려 들지 않고, 그 줄에서 저장소 경로만 따로 집는다.
-const SH_RUN_WORD = /(?:^|[;&|(]|\bthen\b|\belse\b|\bdo\b|\brun\b|\bexec\b|\|\|)\s*(?:sudo\s+)?(?:node|electron|bash|sh)\s/;
+const SH_RUN_WORD = /(?:^|[;&|(]|\bthen\b|\belse\b|\bdo\b|\brun\b|\bexec\b|\|\|)\s*(?:sudo\s+)?(?:(?:node|electron|bash|sh)\s|(?:source|\.)\s)/;
 
 // 주석은 코드가 아니다. 지우고 나서 센다. 주석 처리한 import 가 유효한 간선으로 잡히는
 // 것도 같은 결함이다.
@@ -467,11 +468,11 @@ const DOC_EXAMPLE = /^(?:\s*(?:예시|보기|가정)|.*—\s*예시)/;
 // 나중에 누가 찾아내면 그 안의 사실이 언제부터 틀렸는지 알 방법이 없다.
 //
 // 관례상 스스로 진입점인 것들이 있다. README 는 저장소의 첫 화면이고 LICENSE·NOTICE·SECURITY·
-// CONTRIBUTING 은 GitHub 이 자기 자리에 띄운다. CLAUDE.md 는 도구가 규약으로 집는다.
+// CONTRIBUTING 은 GitHub 이 자기 자리에 띄운다. CLAUDE.md·AGENTS.md 는 도구가 규약으로 집는다.
 // 이 목록은 "안 걸려 있어도 읽힌다"가 성립하는 것만 담는다. 늘리면 그만큼 이 검사의 범위가 줄어든다.
 const DOC_ENTRIES = new Set([
   "README.md", "LICENSE", "NOTICE", "SECURITY.md", "CONTRIBUTING.md",
-  "THIRD-PARTY.md", "DESIGN.md", "CLAUDE.md",
+  "THIRD-PARTY.md", "DESIGN.md", "CLAUDE.md", "AGENTS.md",
 ]);
 // 이식해 온 것에 딸려 온 고지. 우리가 거는 것이 아니라 그 코드와 함께 있어야 하는 파일이다.
 const DOC_VENDOR = /(^|\/)vendor\//;

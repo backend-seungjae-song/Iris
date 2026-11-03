@@ -1,0 +1,3048 @@
+[
+  {
+    "name": "click-ref-input",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "at": {
+          "x": 20,
+          "y": 30
+        },
+        "via": "input",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseMoved",
+          "x": 20,
+          "y": 30
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mousePressed",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseReleased",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-ref-element-focus-guard",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "at": {
+          "x": 20,
+          "y": 30
+        },
+        "via": "element",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "awaitPromise": false,
+          "userGesture": true,
+          "functionDeclaration": "function(n){\n              const o = { bubbles:true, cancelable:true, view:window, button:0, buttons:1, detail:n };\n              this.dispatchEvent(new PointerEvent(\"pointerdown\", o));\n              this.dispatchEvent(new MouseEvent(\"mousedown\", o));\n              this.dispatchEvent(new PointerEvent(\"pointerup\", o));\n              this.dispatchEvent(new MouseEvent(\"mouseup\", o));\n              if (typeof this.focus === \"function\") { try { this.focus(); } catch(e){} }\n              this.click();\n              if (n === 2) this.dispatchEvent(new MouseEvent(\"dblclick\", o));\n            }",
+          "arguments": [
+            {
+              "value": 1
+            }
+          ]
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-ref-hidden-layout",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "at": {
+          "x": 20,
+          "y": 30
+        },
+        "via": "element",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Emulation.setDeviceMetricsOverride",
+        {
+          "width": 1280,
+          "height": 900,
+          "deviceScaleFactor": 1,
+          "mobile": false
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "awaitPromise": false,
+          "userGesture": true,
+          "functionDeclaration": "function(n){\n              const o = { bubbles:true, cancelable:true, view:window, button:0, buttons:1, detail:n };\n              this.dispatchEvent(new PointerEvent(\"pointerdown\", o));\n              this.dispatchEvent(new MouseEvent(\"mousedown\", o));\n              this.dispatchEvent(new PointerEvent(\"pointerup\", o));\n              this.dispatchEvent(new MouseEvent(\"mouseup\", o));\n              if (typeof this.focus === \"function\") { try { this.focus(); } catch(e){} }\n              this.click();\n              if (n === 2) this.dispatchEvent(new MouseEvent(\"dblclick\", o));\n            }",
+          "arguments": [
+            {
+              "value": 1
+            }
+          ]
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Emulation.clearDeviceMetricsOverride",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { try { return document.getAnimations().filter((a) => {\n            if (a.playState !== \"running\") return false;\n            try { const t = a.effect && a.effect.getTiming();\n                  if (t && (t.iterations === Infinity || !isFinite(t.iterations))) return false; } catch (e) {}\n            return true; }).length; } catch (e) { return 0; } })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "hold",
+        false
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-ref-iframe",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "at": {
+          "x": 20,
+          "y": 30
+        },
+        "via": "element",
+        "frame": "iframe",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 21
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 21
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 21
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-21",
+          "awaitPromise": false,
+          "userGesture": true,
+          "functionDeclaration": "function(n){\n              const o = { bubbles:true, cancelable:true, view:window, button:0, buttons:1, detail:n };\n              this.dispatchEvent(new PointerEvent(\"pointerdown\", o));\n              this.dispatchEvent(new MouseEvent(\"mousedown\", o));\n              this.dispatchEvent(new PointerEvent(\"pointerup\", o));\n              this.dispatchEvent(new MouseEvent(\"mouseup\", o));\n              if (typeof this.focus === \"function\") { try { this.focus(); } catch(e){} }\n              this.click();\n              if (n === 2) this.dispatchEvent(new MouseEvent(\"dblclick\", o));\n            }",
+          "arguments": [
+            {
+              "value": 1
+            }
+          ]
+        },
+        "frame-1"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-ref-no-snapshot",
+    "cmd": "click",
+    "response": {
+      "ok": false,
+      "error": "이 탭에서 먼저 snapshot을 실행하세요(ref 맵 없음).",
+      "code": "no_snapshot"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-ref-unknown",
+    "cmd": "click",
+    "response": {
+      "ok": false,
+      "error": "알 수 없는 ref: @zz",
+      "code": "not_found"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-ref-box-failure",
+    "cmd": "click",
+    "response": {
+      "ok": false,
+      "error": "노드 없음"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "dblclick-ref-input",
+    "cmd": "dblclick",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "at": {
+          "x": 20,
+          "y": 30
+        },
+        "via": "input",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "dblclick"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseMoved",
+          "x": 20,
+          "y": 30
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mousePressed",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 2
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseReleased",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 2
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-blocked-host",
+    "cmd": "click",
+    "response": {
+      "ok": false,
+      "error": "로그인 호스트에서는 CDP 를 붙이지 않아 click 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
+      "code": "cdp_blocked"
+    },
+    "effects": []
+  },
+  {
+    "name": "click-sel-native",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "at": {
+          "x": 120,
+          "y": 81
+        },
+        "via": "native",
+        "ref": "#save",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachIdle"
+      ],
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#save\");if(!e)return null;e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return null;return {x:r.left+r.width/2,y:r.top+r.height/2};})()",
+        true
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseMove",
+          "x": 116,
+          "y": 78
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseMove",
+          "x": 120,
+          "y": 81
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseDown",
+          "x": 120,
+          "y": 81,
+          "button": "left",
+          "clickCount": 1
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseUp",
+          "x": 120,
+          "y": 81,
+          "button": "left",
+          "clickCount": 1
+        }
+      ]
+    ]
+  },
+  {
+    "name": "dblclick-sel-native",
+    "cmd": "dblclick",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "at": {
+          "x": 120,
+          "y": 81
+        },
+        "via": "native",
+        "ref": "#save",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachIdle"
+      ],
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#save\");if(!e)return null;e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return null;return {x:r.left+r.width/2,y:r.top+r.height/2};})()",
+        true
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseMove",
+          "x": 116,
+          "y": 78
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseMove",
+          "x": 120,
+          "y": 81
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseDown",
+          "x": 120,
+          "y": 81,
+          "button": "left",
+          "clickCount": 2
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseUp",
+          "x": 120,
+          "y": 81,
+          "button": "left",
+          "clickCount": 2
+        }
+      ]
+    ]
+  },
+  {
+    "name": "click-sel-js-focus-guard",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "via": "js-nocdp",
+        "ref": "#save",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachIdle"
+      ],
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#save\");if(!e)return {found:false};e.scrollIntoView({block:'center',inline:'center'});const b=e.getBoundingClientRect();if(e.offsetParent===null&&getComputedStyle(e).position!=='fixed')return {found:true,ok:false,why:'숨겨진 요소'};if(e.disabled)return {found:true,ok:false,why:'비활성 요소'};if(b.width<=0||b.height<=0)return {found:true,ok:false,why:'크기가 0인 요소'};if(typeof e.focus==='function'){try{e.focus({preventScroll:true});}catch(_){}}for(let i=0;i<1;i++)e.click();return {found:true,ok:true};})()",
+        true
+      ]
+    ]
+  },
+  {
+    "name": "click-sel-js-hidden-tab",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "via": "js-nocdp",
+        "ref": "#save",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachIdle"
+      ],
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#save\");if(!e)return {found:false};e.scrollIntoView({block:'center',inline:'center'});const b=e.getBoundingClientRect();if(e.offsetParent===null&&getComputedStyle(e).position!=='fixed')return {found:true,ok:false,why:'숨겨진 요소'};if(e.disabled)return {found:true,ok:false,why:'비활성 요소'};if(b.width<=0||b.height<=0)return {found:true,ok:false,why:'크기가 0인 요소'};if(typeof e.focus==='function'){try{e.focus({preventScroll:true});}catch(_){}}for(let i=0;i<1;i++)e.click();return {found:true,ok:true};})()",
+        true
+      ]
+    ]
+  },
+  {
+    "name": "click-sel-js-refused",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": false,
+        "error": "숨겨진 요소",
+        "via": "js-nocdp",
+        "ref": "#save",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachIdle"
+      ],
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#save\");if(!e)return {found:false};e.scrollIntoView({block:'center',inline:'center'});const b=e.getBoundingClientRect();if(e.offsetParent===null&&getComputedStyle(e).position!=='fixed')return {found:true,ok:false,why:'숨겨진 요소'};if(e.disabled)return {found:true,ok:false,why:'비활성 요소'};if(b.width<=0||b.height<=0)return {found:true,ok:false,why:'크기가 0인 요소'};if(typeof e.focus==='function'){try{e.focus({preventScroll:true});}catch(_){}}for(let i=0;i<1;i++)e.click();return {found:true,ok:true};})()",
+        true
+      ]
+    ]
+  },
+  {
+    "name": "click-sel-detached-before",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "at": {
+          "x": 5,
+          "y": 6
+        },
+        "via": "native",
+        "ref": "#save",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#save\");if(!e)return null;e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return null;return {x:r.left+r.width/2,y:r.top+r.height/2};})()",
+        true
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseMove",
+          "x": 1,
+          "y": 3
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseMove",
+          "x": 5,
+          "y": 6
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseDown",
+          "x": 5,
+          "y": 6,
+          "button": "left",
+          "clickCount": 1
+        }
+      ],
+      [
+        "wc.input",
+        {
+          "type": "mouseUp",
+          "x": 5,
+          "y": 6,
+          "button": "left",
+          "clickCount": 1
+        }
+      ]
+    ]
+  },
+  {
+    "name": "click-sel-not-found-falls-to-cdp",
+    "cmd": "click",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "#save",
+        "at": {
+          "x": 20,
+          "y": 30
+        },
+        "via": "element",
+        "frame": "iframe",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "detachIdle"
+      ],
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#save\");if(!e)return {found:false};e.scrollIntoView({block:'center',inline:'center'});const b=e.getBoundingClientRect();if(e.offsetParent===null&&getComputedStyle(e).position!=='fixed')return {found:true,ok:false,why:'숨겨진 요소'};if(e.disabled)return {found:true,ok:false,why:'비활성 요소'};if(b.width<=0||b.height<=0)return {found:true,ok:false,why:'크기가 0인 요소'};if(typeof e.focus==='function'){try{e.focus({preventScroll:true});}catch(_){}}for(let i=0;i<1;i++)e.click();return {found:true,ok:true};})()",
+        true
+      ],
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getDocument",
+        {
+          "depth": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.querySelector",
+        {
+          "nodeId": 1,
+          "selector": "#save"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.getDocument",
+        {
+          "depth": 1
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.querySelector",
+        {
+          "nodeId": 2,
+          "selector": "#save"
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.describeNode",
+        {
+          "nodeId": 9
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 31
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 31
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 31
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-31",
+          "awaitPromise": false,
+          "userGesture": true,
+          "functionDeclaration": "function(n){\n              const o = { bubbles:true, cancelable:true, view:window, button:0, buttons:1, detail:n };\n              this.dispatchEvent(new PointerEvent(\"pointerdown\", o));\n              this.dispatchEvent(new MouseEvent(\"mousedown\", o));\n              this.dispatchEvent(new PointerEvent(\"pointerup\", o));\n              this.dispatchEvent(new MouseEvent(\"mouseup\", o));\n              if (typeof this.focus === \"function\") { try { this.focus(); } catch(e){} }\n              this.click();\n              if (n === 2) this.dispatchEvent(new MouseEvent(\"dblclick\", o));\n            }",
+          "arguments": [
+            {
+              "value": 1
+            }
+          ]
+        },
+        "frame-1"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "click-sel-nowhere",
+    "cmd": "click",
+    "response": {
+      "ok": false,
+      "error": "선택자에 맞는 요소가 없습니다: #nope",
+      "code": "not_found"
+    },
+    "effects": [
+      [
+        "detachIdle"
+      ],
+      [
+        "wc.exec",
+        "(()=>{const e=document.querySelector(\"#nope\");if(!e)return null;e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return null;return {x:r.left+r.width/2,y:r.top+r.height/2};})()",
+        true
+      ],
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "click"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getDocument",
+        {
+          "depth": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.querySelector",
+        {
+          "nodeId": 1,
+          "selector": "#nope"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "hover-ref",
+    "cmd": "hover",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "at": {
+          "x": 20,
+          "y": 30
+        },
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "hover"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseMoved",
+          "x": 20,
+          "y": 30
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "hover-ref-iframe",
+    "cmd": "hover",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "frame": "iframe",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "hover"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 21
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 21
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-21",
+          "functionDeclaration": "function(){ const o={bubbles:true,cancelable:true,view:window};\n              this.dispatchEvent(new PointerEvent(\"pointerover\",o)); this.dispatchEvent(new MouseEvent(\"mouseover\",o));\n              this.dispatchEvent(new PointerEvent(\"pointermove\",o)); this.dispatchEvent(new MouseEvent(\"mousemove\",o)); }"
+        },
+        "frame-1"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-ref-input",
+    "cmd": "fill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "via": "입력",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.focus",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const el=document.activeElement; if(!el)return;\n        if(el.isContentEditable){const r=document.createRange(),s=getSelection();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);}\n        else if(el.select)el.select(); else if(document.execCommand)document.execCommand(\"selectAll\");})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "iris"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false}; const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===\"iris\", got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-ref-direct-focus-guard",
+    "cmd": "fill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "via": "값 직접 설정",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "returnByValue": true,
+          "awaitPromise": false,
+          "userGesture": true,
+          "functionDeclaration": "function(t){ const el=this;\n            try { el.focus(); } catch(e) {}\n            if (el.isContentEditable) {\n              const doc=el.ownerDocument, sel=doc.getSelection(), range=doc.createRange();\n              range.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(range);\n              let inserted=false; try { inserted=doc.execCommand(\"insertText\",false,t); } catch(e) {}\n              // execCommand는 리치 편집기의 입력 파이프라인·undo를 살리는 첫 길이다. 구현이 없거나\n              // 편집기가 값을 바꾸면 마지막에 DOM을 정확히 맞추고 input을 알린다.\n              if (!inserted || (el.textContent || \"\") !== t) {\n                el.textContent=t; const end=doc.createRange(); end.selectNodeContents(el); end.collapse(false);\n                sel.removeAllRanges(); sel.addRange(end); el.dispatchEvent(new Event(\"input\",{bubbles:true}));\n              }\n            } else if (el.value !== undefined) {\n              const p=Object.getPrototypeOf(el), d=Object.getOwnPropertyDescriptor(p,\"value\");\n              if (d && d.set) d.set.call(el, t); else el.value = t;\n              el.dispatchEvent(new Event(\"input\",{bubbles:true}));\n            } else { el.textContent = t; el.dispatchEvent(new Event(\"input\",{bubbles:true})); }\n            el.dispatchEvent(new Event(\"change\",{bubbles:true}));\n            const v = (el.value !== undefined ? el.value : el.textContent) || \"\";\n            return { ok: v === t, got: String(v).slice(0,200), contenteditable: !!el.isContentEditable }; }",
+          "arguments": [
+            {
+              "value": "iris"
+            }
+          ]
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-ref-hidden-tab-hold",
+    "cmd": "fill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "via": "리치 편집기 직접 설정",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "returnByValue": true,
+          "awaitPromise": false,
+          "userGesture": true,
+          "functionDeclaration": "function(t){ const el=this;\n            try { el.focus(); } catch(e) {}\n            if (el.isContentEditable) {\n              const doc=el.ownerDocument, sel=doc.getSelection(), range=doc.createRange();\n              range.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(range);\n              let inserted=false; try { inserted=doc.execCommand(\"insertText\",false,t); } catch(e) {}\n              // execCommand는 리치 편집기의 입력 파이프라인·undo를 살리는 첫 길이다. 구현이 없거나\n              // 편집기가 값을 바꾸면 마지막에 DOM을 정확히 맞추고 input을 알린다.\n              if (!inserted || (el.textContent || \"\") !== t) {\n                el.textContent=t; const end=doc.createRange(); end.selectNodeContents(el); end.collapse(false);\n                sel.removeAllRanges(); sel.addRange(end); el.dispatchEvent(new Event(\"input\",{bubbles:true}));\n              }\n            } else if (el.value !== undefined) {\n              const p=Object.getPrototypeOf(el), d=Object.getOwnPropertyDescriptor(p,\"value\");\n              if (d && d.set) d.set.call(el, t); else el.value = t;\n              el.dispatchEvent(new Event(\"input\",{bubbles:true}));\n            } else { el.textContent = t; el.dispatchEvent(new Event(\"input\",{bubbles:true})); }\n            el.dispatchEvent(new Event(\"change\",{bubbles:true}));\n            const v = (el.value !== undefined ? el.value : el.textContent) || \"\";\n            return { ok: v === t, got: String(v).slice(0,200), contenteditable: !!el.isContentEditable }; }",
+          "arguments": [
+            {
+              "value": "iris"
+            }
+          ]
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { try { return document.getAnimations().filter((a) => {\n            if (a.playState !== \"running\") return false;\n            try { const t = a.effect && a.effect.getTiming();\n                  if (t && (t.iterations === Infinity || !isFinite(t.iterations))) return false; } catch (e) {}\n            return true; }).length; } catch (e) { return 0; } })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "hold",
+        false
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-ref-iframe",
+    "cmd": "fill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "via": "값 직접 설정",
+        "frame": "iframe",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 21
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 21
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-21",
+          "returnByValue": true,
+          "awaitPromise": false,
+          "userGesture": true,
+          "functionDeclaration": "function(t){ const el=this;\n            try { el.focus(); } catch(e) {}\n            if (el.isContentEditable) {\n              const doc=el.ownerDocument, sel=doc.getSelection(), range=doc.createRange();\n              range.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(range);\n              let inserted=false; try { inserted=doc.execCommand(\"insertText\",false,t); } catch(e) {}\n              // execCommand는 리치 편집기의 입력 파이프라인·undo를 살리는 첫 길이다. 구현이 없거나\n              // 편집기가 값을 바꾸면 마지막에 DOM을 정확히 맞추고 input을 알린다.\n              if (!inserted || (el.textContent || \"\") !== t) {\n                el.textContent=t; const end=doc.createRange(); end.selectNodeContents(el); end.collapse(false);\n                sel.removeAllRanges(); sel.addRange(end); el.dispatchEvent(new Event(\"input\",{bubbles:true}));\n              }\n            } else if (el.value !== undefined) {\n              const p=Object.getPrototypeOf(el), d=Object.getOwnPropertyDescriptor(p,\"value\");\n              if (d && d.set) d.set.call(el, t); else el.value = t;\n              el.dispatchEvent(new Event(\"input\",{bubbles:true}));\n            } else { el.textContent = t; el.dispatchEvent(new Event(\"input\",{bubbles:true})); }\n            el.dispatchEvent(new Event(\"change\",{bubbles:true}));\n            const v = (el.value !== undefined ? el.value : el.textContent) || \"\";\n            return { ok: v === t, got: String(v).slice(0,200), contenteditable: !!el.isContentEditable }; }",
+          "arguments": [
+            {
+              "value": "iris"
+            }
+          ]
+        },
+        "frame-1"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-ref-press-fallback",
+    "cmd": "fill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "via": "눌러서 입력",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.focus",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const el=document.activeElement; if(!el)return;\n        if(el.isContentEditable){const r=document.createRange(),s=getSelection();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);}\n        else if(el.select)el.select(); else if(document.execCommand)document.execCommand(\"selectAll\");})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "iris"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false}; const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===\"iris\", got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseMoved",
+          "x": 20,
+          "y": 30
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mousePressed",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseReleased",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const el=document.activeElement; if(!el)return;\n          if(el.isContentEditable){const r=document.createRange(),s=getSelection();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);}\n          else if(el.select)el.select(); else if(document.execCommand)document.execCommand(\"selectAll\");})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "iris"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false}; const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===\"iris\", got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-ref-forced-fallback",
+    "cmd": "fill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "via": "값 직접 설정",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.focus",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const el=document.activeElement; if(!el)return;\n        if(el.isContentEditable){const r=document.createRange(),s=getSelection();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);}\n        else if(el.select)el.select(); else if(document.execCommand)document.execCommand(\"selectAll\");})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "iris"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false}; const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===\"iris\", got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseMoved",
+          "x": 20,
+          "y": 30
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mousePressed",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseReleased",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const el=document.activeElement; if(!el)return;\n          if(el.isContentEditable){const r=document.createRange(),s=getSelection();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);}\n          else if(el.select)el.select(); else if(document.execCommand)document.execCommand(\"selectAll\");})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "iris"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false}; const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===\"iris\", got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false,err:\"입력칸에 포커스가 없습니다\"};\n          const t=\"iris\";\n          if(el.isContentEditable){const s=getSelection(),r=document.createRange();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);\n            let inserted=false;try{inserted=document.execCommand(\"insertText\",false,t);}catch(e){}\n            if(!inserted||(el.textContent||\"\")!==t){el.textContent=t;const end=document.createRange();end.selectNodeContents(el);end.collapse(false);\n              s.removeAllRanges();s.addRange(end);el.dispatchEvent(new Event(\"input\",{bubbles:true}));}}\n          else if(el.value!==undefined){const p=Object.getPrototypeOf(el);const d=Object.getOwnPropertyDescriptor(p,\"value\");\n            if(d&&d.set)d.set.call(el,t); else el.value=t;el.dispatchEvent(new Event(\"input\",{bubbles:true}));}\n          else{el.textContent=t;el.dispatchEvent(new Event(\"input\",{bubbles:true}));}\n          el.dispatchEvent(new Event(\"change\",{bubbles:true}));\n          const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===t, got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-ref-all-fail",
+    "cmd": "fill",
+    "response": {
+      "ok": false,
+      "error": "입력이 반영되지 않았습니다 (현재 값: x)"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.focus",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const el=document.activeElement; if(!el)return;\n        if(el.isContentEditable){const r=document.createRange(),s=getSelection();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);}\n        else if(el.select)el.select(); else if(document.execCommand)document.execCommand(\"selectAll\");})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "iris"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false}; const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===\"iris\", got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "innerWidth",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.enable",
+        {},
+        null
+      ],
+      [
+        "cdp",
+        "DOM.scrollIntoViewIfNeeded",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "DOM.getBoxModel",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseMoved",
+          "x": 20,
+          "y": 30
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mousePressed",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.dispatchMouseEvent",
+        {
+          "type": "mouseReleased",
+          "x": 20,
+          "y": 30,
+          "button": "left",
+          "clickCount": 1
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{const el=document.activeElement; if(!el)return;\n          if(el.isContentEditable){const r=document.createRange(),s=getSelection();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);}\n          else if(el.select)el.select(); else if(document.execCommand)document.execCommand(\"selectAll\");})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "iris"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false}; const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===\"iris\", got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(()=>{const el=document.activeElement; if(!el) return {ok:false,err:\"입력칸에 포커스가 없습니다\"};\n          const t=\"iris\";\n          if(el.isContentEditable){const s=getSelection(),r=document.createRange();r.selectNodeContents(el);s.removeAllRanges();s.addRange(r);\n            let inserted=false;try{inserted=document.execCommand(\"insertText\",false,t);}catch(e){}\n            if(!inserted||(el.textContent||\"\")!==t){el.textContent=t;const end=document.createRange();end.selectNodeContents(el);end.collapse(false);\n              s.removeAllRanges();s.addRange(end);el.dispatchEvent(new Event(\"input\",{bubbles:true}));}}\n          else if(el.value!==undefined){const p=Object.getPrototypeOf(el);const d=Object.getOwnPropertyDescriptor(p,\"value\");\n            if(d&&d.set)d.set.call(el,t); else el.value=t;el.dispatchEvent(new Event(\"input\",{bubbles:true}));}\n          else{el.textContent=t;el.dispatchEvent(new Event(\"input\",{bubbles:true}));}\n          el.dispatchEvent(new Event(\"change\",{bubbles:true}));\n          const v=(el.value!==undefined?el.value:el.textContent)||\"\"; return {ok:v===t, got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "fill-window-not-drawing",
+    "cmd": "fill",
+    "response": {
+      "ok": false,
+      "error": "이 탭을 담은 창이 최소화 상태라 화면을 그리지 않습니다 — fill 를 보내도 도달하지 않습니다. 창을 띄워 달라고 사람에게 부탁하고 다시 하세요(browser_ask_user).",
+      "code": "window_not_drawing"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "fill"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "type-owns-focus",
+    "cmd": "type",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "type"
+      ],
+      [
+        "cdp",
+        "Input.insertText",
+        {
+          "text": "안녕"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "type-expression-focus-guard",
+    "cmd": "type",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "via": "페이지 안 입력",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "type"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n    const t = \"안녕\";\n    let el = document.activeElement;\n    while (el && /^i?frame$/i.test(el.tagName)) {\n      let inner = null; try { inner = el.contentDocument && el.contentDocument.activeElement; } catch (e) {}\n      if (!inner) return { ok: false, crossFrame: true };\n      el = inner;\n    }\n    if (!el || el === el.ownerDocument.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n    const doc = el.ownerDocument;\n    const field = el.matches && el.matches(\"input,textarea\");\n    if (!field && !el.isContentEditable) return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n    const before = field ? el.value : el.textContent;\n    let put = false; try { put = doc.execCommand(\"insertText\", false, t); } catch (e) {}\n    if (!put || (t && (field ? el.value : el.textContent) === before)) {\n      if (field) {\n        const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s;\n        const proto = Object.getPrototypeOf(el), d = Object.getOwnPropertyDescriptor(proto, \"value\");\n        const next = el.value.slice(0, s) + t + el.value.slice(e);\n        if (d && d.set) d.set.call(el, next); else el.value = next;\n        try { el.selectionStart = el.selectionEnd = s + t.length; } catch (e) {}\n      } else {\n        const sel = doc.getSelection();\n        if (sel && sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(doc.createTextNode(t)); r.collapse(false); }\n        else el.textContent = (el.textContent || \"\") + t;\n      }\n      el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n      return { ok: true, via: \"값 직접 설정\" };\n    }\n    return { ok: true, via: \"페이지 안 입력\" };\n  })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "type-cross-frame",
+    "cmd": "type",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "via": "페이지 안 입력",
+        "frame": "iframe",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "type"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n    const t = \"안녕\";\n    let el = document.activeElement;\n    while (el && /^i?frame$/i.test(el.tagName)) {\n      let inner = null; try { inner = el.contentDocument && el.contentDocument.activeElement; } catch (e) {}\n      if (!inner) return { ok: false, crossFrame: true };\n      el = inner;\n    }\n    if (!el || el === el.ownerDocument.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n    const doc = el.ownerDocument;\n    const field = el.matches && el.matches(\"input,textarea\");\n    if (!field && !el.isContentEditable) return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n    const before = field ? el.value : el.textContent;\n    let put = false; try { put = doc.execCommand(\"insertText\", false, t); } catch (e) {}\n    if (!put || (t && (field ? el.value : el.textContent) === before)) {\n      if (field) {\n        const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s;\n        const proto = Object.getPrototypeOf(el), d = Object.getOwnPropertyDescriptor(proto, \"value\");\n        const next = el.value.slice(0, s) + t + el.value.slice(e);\n        if (d && d.set) d.set.call(el, next); else el.value = next;\n        try { el.selectionStart = el.selectionEnd = s + t.length; } catch (e) {}\n      } else {\n        const sel = doc.getSelection();\n        if (sel && sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(doc.createTextNode(t)); r.collapse(false); }\n        else el.textContent = (el.textContent || \"\") + t;\n      }\n      el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n      return { ok: true, via: \"값 직접 설정\" };\n    }\n    return { ok: true, via: \"페이지 안 입력\" };\n  })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const a = document.activeElement; return !!a && a !== document.body\n          && ((a.matches && a.matches(\"input,textarea\")) || a.isContentEditable); })()",
+          "returnByValue": true
+        },
+        "frame-1"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { const a = document.activeElement; return !!a && a !== document.body\n          && ((a.matches && a.matches(\"input,textarea\")) || a.isContentEditable); })()",
+          "returnByValue": true
+        },
+        "frame-2"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n    const t = \"안녕\";\n    let el = document.activeElement;\n    while (el && /^i?frame$/i.test(el.tagName)) {\n      let inner = null; try { inner = el.contentDocument && el.contentDocument.activeElement; } catch (e) {}\n      if (!inner) return { ok: false, crossFrame: true };\n      el = inner;\n    }\n    if (!el || el === el.ownerDocument.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n    const doc = el.ownerDocument;\n    const field = el.matches && el.matches(\"input,textarea\");\n    if (!field && !el.isContentEditable) return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n    const before = field ? el.value : el.textContent;\n    let put = false; try { put = doc.execCommand(\"insertText\", false, t); } catch (e) {}\n    if (!put || (t && (field ? el.value : el.textContent) === before)) {\n      if (field) {\n        const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s;\n        const proto = Object.getPrototypeOf(el), d = Object.getOwnPropertyDescriptor(proto, \"value\");\n        const next = el.value.slice(0, s) + t + el.value.slice(e);\n        if (d && d.set) d.set.call(el, next); else el.value = next;\n        try { el.selectionStart = el.selectionEnd = s + t.length; } catch (e) {}\n      } else {\n        const sel = doc.getSelection();\n        if (sel && sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(doc.createTextNode(t)); r.collapse(false); }\n        else el.textContent = (el.textContent || \"\") + t;\n      }\n      el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n      return { ok: true, via: \"값 직접 설정\" };\n    }\n    return { ok: true, via: \"페이지 안 입력\" };\n  })()",
+          "returnByValue": true
+        },
+        "frame-2"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "type-no-cursor",
+    "cmd": "type",
+    "response": {
+      "ok": false,
+      "error": "커서가 어디에도 없습니다"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "type"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n    const t = \"x\";\n    let el = document.activeElement;\n    while (el && /^i?frame$/i.test(el.tagName)) {\n      let inner = null; try { inner = el.contentDocument && el.contentDocument.activeElement; } catch (e) {}\n      if (!inner) return { ok: false, crossFrame: true };\n      el = inner;\n    }\n    if (!el || el === el.ownerDocument.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n    const doc = el.ownerDocument;\n    const field = el.matches && el.matches(\"input,textarea\");\n    if (!field && !el.isContentEditable) return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n    const before = field ? el.value : el.textContent;\n    let put = false; try { put = doc.execCommand(\"insertText\", false, t); } catch (e) {}\n    if (!put || (t && (field ? el.value : el.textContent) === before)) {\n      if (field) {\n        const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s;\n        const proto = Object.getPrototypeOf(el), d = Object.getOwnPropertyDescriptor(proto, \"value\");\n        const next = el.value.slice(0, s) + t + el.value.slice(e);\n        if (d && d.set) d.set.call(el, next); else el.value = next;\n        try { el.selectionStart = el.selectionEnd = s + t.length; } catch (e) {}\n      } else {\n        const sel = doc.getSelection();\n        if (sel && sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(doc.createTextNode(t)); r.collapse(false); }\n        else el.textContent = (el.textContent || \"\") + t;\n      }\n      el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n      return { ok: true, via: \"값 직접 설정\" };\n    }\n    return { ok: true, via: \"페이지 안 입력\" };\n  })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "key-enter",
+    "cmd": "key",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "key": "Enter",
+        "code": "Enter",
+        "modifiers": [],
+        "did": "폼 보냄",
+        "prevented": false,
+        "on": "INPUT",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "key"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => {\n          const key = \"Enter\", code = \"Enter\", vk = 13;\n          const M = {\"shiftKey\":false,\"ctrlKey\":false,\"altKey\":false,\"metaKey\":false};\n          const el = document.activeElement && document.activeElement !== document.body\n            ? document.activeElement : (document.body || document.documentElement);\n          const init = { key, code, keyCode: vk, which: vk, bubbles: true, cancelable: true,\n                         composed: true, ...M };\n          const down = el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          let did = \"이벤트만\";\n          const editable = el.matches && el.matches(\"input,textarea\") ? \"field\"\n            : (el.isContentEditable ? \"ce\" : null);\n          const typed = !M.ctrlKey && !M.metaKey && [...key].length === 1 ? key\n                      : (!M.ctrlKey && !M.metaKey && key === \"Enter\" && el.tagName === \"TEXTAREA\") ? \"\\n\" : null;\n          if (down && editable === \"field\") {\n            const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s;\n            if (typed != null) {\n              el.value = el.value.slice(0, s) + typed + el.value.slice(e);\n              el.selectionStart = el.selectionEnd = s + typed.length;\n              did = \"입력\";\n            } else if (key === \"Backspace\") {\n              const from = s === e ? Math.max(0, s - 1) : s;\n              el.value = el.value.slice(0, from) + el.value.slice(e);\n              el.selectionStart = el.selectionEnd = from; did = \"지움\";\n            } else if (key === \"Delete\") {\n              const to = s === e ? e + 1 : e;\n              el.value = el.value.slice(0, s) + el.value.slice(to);\n              el.selectionStart = el.selectionEnd = s; did = \"지움\";\n            }\n            if (did !== \"이벤트만\") {\n              el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n              el.dispatchEvent(new Event(\"change\", { bubbles: true }));\n            }\n          } else if (down && editable === \"ce\" && typed != null) {\n            document.execCommand(\"insertText\", false, typed); did = \"입력\";\n          }\n          if (down && key === \"Tab\") {\n            // 포커스 이동은 브라우저가 해 주지 않으므로 여기서 옮긴다. 그러지 않으면 Tab이\n            // 이벤트만 전달되고 아무 일도 일어나지 않는 상태가 된다.\n            const all = [...document.querySelectorAll(\n              'a[href],button,input,select,textarea,[tabindex]:not([tabindex=\"-1\"]),[contenteditable=\"true\"]')]\n              .filter((x) => !x.disabled && x.offsetParent !== null);\n            const i = all.indexOf(el);\n            const next = all[(i + (M.shiftKey ? -1 : 1) + all.length) % (all.length || 1)];\n            if (next) { next.focus(); did = \"포커스 이동\"; }\n          }\n          if (down && key === \"Enter\" && el.form && el.tagName === \"INPUT\") {\n            // submit 이벤트만 보내면 브라우저의 기본 제출은 일어나지 않고, 페이지가 그 이벤트를\n            // 듣고 있을 때만 동작한다. requestSubmit은 검증까지 거쳐 실제로 제출한다.\n            if (typeof el.form.requestSubmit === \"function\") { el.form.requestSubmit(); did = \"폼 보냄\"; }\n            else { el.form.dispatchEvent(new Event(\"submit\", { bubbles: true, cancelable: true })); did = \"폼 보냄(이벤트만)\"; }\n          }\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return JSON.stringify({ did, prevented: !down,\n            on: (el.getAttribute && el.getAttribute(\"data-testid\")) || el.tagName });\n        })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "key-bad-name",
+    "cmd": "key",
+    "response": {
+      "ok": false,
+      "error": "모르는 수식키: \"Hyper\" — shift·ctrl·alt·meta(cmd)만 됩니다"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "key"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "select-ref",
+    "cmd": "select",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "selected": "한국",
+        "value": "KR",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "select"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "functionDeclaration": "function(val){ var el=this,sel=null,opt=null; if(el.tagName==='SELECT'){sel=el;} else if(el.tagName==='OPTION'){opt=el; sel=el.closest('select');} if(!sel) return {ok:false,err:'<select>/option 요소가 아닙니다'}; if(!opt){ var opts=Array.from(sel.options); opt=opts.find(function(o){return o.value===val||o.textContent.trim()===val;}); } if(!opt) return {ok:false,err:'옵션을 찾을 수 없음: '+val}; sel.value=opt.value; sel.dispatchEvent(new Event('input',{bubbles:true})); sel.dispatchEvent(new Event('change',{bubbles:true})); return {ok:true,selected:opt.textContent.trim(),value:opt.value}; }",
+          "arguments": [
+            {
+              "value": "KR"
+            }
+          ],
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "select-ref-missing-option",
+    "cmd": "select",
+    "response": {
+      "ok": false,
+      "error": "옵션을 찾을 수 없음: ZZ"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "select"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "functionDeclaration": "function(val){ var el=this,sel=null,opt=null; if(el.tagName==='SELECT'){sel=el;} else if(el.tagName==='OPTION'){opt=el; sel=el.closest('select');} if(!sel) return {ok:false,err:'<select>/option 요소가 아닙니다'}; if(!opt){ var opts=Array.from(sel.options); opt=opts.find(function(o){return o.value===val||o.textContent.trim()===val;}); } if(!opt) return {ok:false,err:'옵션을 찾을 수 없음: '+val}; sel.value=opt.value; sel.dispatchEvent(new Event('input',{bubbles:true})); sel.dispatchEvent(new Event('change',{bubbles:true})); return {ok:true,selected:opt.textContent.trim(),value:opt.value}; }",
+          "arguments": [
+            {
+              "value": "ZZ"
+            }
+          ],
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "check-ref",
+    "cmd": "check",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "was": true,
+        "now": false,
+        "via": "input",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "check"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "returnByValue": true,
+          "userGesture": true,
+          "arguments": [
+            {
+              "value": false
+            }
+          ],
+          "functionDeclaration": "function(want){ var el=this;\n          var t=(el.getAttribute&&(el.getAttribute('type')||'')).toLowerCase();\n          if (el.tagName!=='INPUT'||(t!=='checkbox'&&t!=='radio')) {\n            // aria 로만 표현한 토글도 흔하므로, 현재 상태를 읽고 필요할 때만 누른다.\n            var a=el.getAttribute&&el.getAttribute('aria-checked');\n            if (a==null) return {ok:false,err:'체크박스·라디오가 아닙니다'};\n            var cur=(a==='true');\n            if (cur!==want) el.click();\n            // 누른 뒤의 값을 다시 읽는다. 요청값을 그대로 돌려주면 \"그대로 뒀다\"와 \"바꿨다\"를\n            // 구별할 수 없고, 페이지가 되돌린 경우까지 성공으로 보고한다.\n            var now=(el.getAttribute('aria-checked')==='true');\n            return {ok: now===want, was:cur, now:now, via:'aria'};\n          }\n          if (t==='radio' && !want) return {ok:false,err:'라디오는 끌 수 없습니다 — 다른 항목을 켜세요'};\n          var was=!!el.checked;\n          if (was!==want) { el.click(); }\n          if (!!el.checked!==want) { el.checked=want; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }\n          return {ok: !!el.checked===want, was:was, now:!!el.checked, via:'input'}; }"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "check-ref-reverted",
+    "cmd": "check",
+    "response": {
+      "ok": false,
+      "error": "상태 지정 실패"
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "check"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "returnByValue": true,
+          "userGesture": true,
+          "arguments": [
+            {
+              "value": true
+            }
+          ],
+          "functionDeclaration": "function(want){ var el=this;\n          var t=(el.getAttribute&&(el.getAttribute('type')||'')).toLowerCase();\n          if (el.tagName!=='INPUT'||(t!=='checkbox'&&t!=='radio')) {\n            // aria 로만 표현한 토글도 흔하므로, 현재 상태를 읽고 필요할 때만 누른다.\n            var a=el.getAttribute&&el.getAttribute('aria-checked');\n            if (a==null) return {ok:false,err:'체크박스·라디오가 아닙니다'};\n            var cur=(a==='true');\n            if (cur!==want) el.click();\n            // 누른 뒤의 값을 다시 읽는다. 요청값을 그대로 돌려주면 \"그대로 뒀다\"와 \"바꿨다\"를\n            // 구별할 수 없고, 페이지가 되돌린 경우까지 성공으로 보고한다.\n            var now=(el.getAttribute('aria-checked')==='true');\n            return {ok: now===want, was:cur, now:now, via:'aria'};\n          }\n          if (t==='radio' && !want) return {ok:false,err:'라디오는 끌 수 없습니다 — 다른 항목을 켜세요'};\n          var was=!!el.checked;\n          if (was!==want) { el.click(); }\n          if (!!el.checked!==want) { el.checked=want; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }\n          return {ok: !!el.checked===want, was:was, now:!!el.checked, via:'input'}; }"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "clear-ref",
+    "cmd": "clear",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "cleared": true,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "clear"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "returnByValue": true,
+          "userGesture": true,
+          "functionDeclaration": "function(){ var el=this; if(el.focus)el.focus();\n          if (el.isContentEditable) { el.innerHTML=''; }\n          else if ('value' in el) {\n            var p = Object.getPrototypeOf(el), d = Object.getOwnPropertyDescriptor(p,'value');\n            if (d && d.set) d.set.call(el,''); else el.value='';\n          } else return {ok:false,err:'비울 수 있는 요소가 아닙니다'};\n          el.dispatchEvent(new Event('input',{bubbles:true}));\n          el.dispatchEvent(new Event('change',{bubbles:true}));\n          return {ok:true, left: el.isContentEditable ? (el.textContent||'').length : String(el.value||'').length}; }"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "clear-ref-left",
+    "cmd": "clear",
+    "response": {
+      "ok": false,
+      "error": "비운 뒤에도 내용이 남아 있습니다(3자) — 페이지가 값을 되돌립니다."
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "clear"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "returnByValue": true,
+          "userGesture": true,
+          "functionDeclaration": "function(){ var el=this; if(el.focus)el.focus();\n          if (el.isContentEditable) { el.innerHTML=''; }\n          else if ('value' in el) {\n            var p = Object.getPrototypeOf(el), d = Object.getOwnPropertyDescriptor(p,'value');\n            if (d && d.set) d.set.call(el,''); else el.value='';\n          } else return {ok:false,err:'비울 수 있는 요소가 아닙니다'};\n          el.dispatchEvent(new Event('input',{bubbles:true}));\n          el.dispatchEvent(new Event('change',{bubbles:true}));\n          return {ok:true, left: el.isContentEditable ? (el.textContent||'').length : String(el.value||'').length}; }"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "focus-ref",
+    "cmd": "focus",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "ref": "@e1",
+        "focused": true,
+        "tag": "input",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "focus"
+      ],
+      [
+        "cdp",
+        "DOM.resolveNode",
+        {
+          "backendNodeId": 11
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.callFunctionOn",
+        {
+          "objectId": "obj-11",
+          "returnByValue": true,
+          "userGesture": true,
+          "functionDeclaration": "function(){ var el=this; if(el.scrollIntoView)el.scrollIntoView({block:'center'}); if(!el.focus) return {ok:false,err:'포커스를 줄 수 없는 요소입니다'}; el.focus(); return {ok: document.activeElement===el, tag: el.tagName.toLowerCase()}; }"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "scroll-down",
+    "cmd": "scroll",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "scrolled": "down",
+        "y": 600,
+        "h": 3000,
+        "vh": 700,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "scroll"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{scrollBy(0, Math.round(innerHeight*0.85));return {y:Math.round(scrollY),h:document.body.scrollHeight,vh:innerHeight};})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "scroll-pixels-hidden-tab",
+    "cmd": "scroll",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "scrolled": "-120",
+        "y": 0,
+        "h": 3000,
+        "vh": 700,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "scroll"
+      ],
+      [
+        "hold",
+        true
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{scrollBy(0, -120);return {y:Math.round(scrollY),h:document.body.scrollHeight,vh:innerHeight};})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(() => { try { return document.getAnimations().filter((a) => {\n            if (a.playState !== \"running\") return false;\n            try { const t = a.effect && a.effect.getTiming();\n                  if (t && (t.iterations === Infinity || !isFinite(t.iterations))) return false; } catch (e) {}\n            return true; }).length; } catch (e) { return 0; } })()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "hold",
+        false
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "scrollto",
+    "cmd": "scrollto",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "y": 900,
+        "x": 0,
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "scrollto"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(()=>{scrollTo(0,900);return {y:Math.round(scrollY),x:Math.round(scrollX)};})()",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "bulkfill-ok",
+    "cmd": "bulkfill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": true,
+        "typed": 3,
+        "total": 3,
+        "advance": "Tab",
+        "via": "입력칸",
+        "landed": "확인됨",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "bulkfill"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(document.body ? document.body.innerText : '')",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n          const t = \"가\";\n          const key = \"Tab\", vk = 9;\n          let el = document.activeElement;\n          if (!el || el === document.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n          let via = null;\n          if (el.isContentEditable) {\n            try { el.focus(); } catch (e) {}\n            el.dispatchEvent(new InputEvent(\"beforeinput\", { bubbles: true, cancelable: true, data: t, inputType: \"insertText\" }));\n            let put = false;\n            try { put = document.execCommand(\"insertText\", false, t); } catch (e) { put = false; }\n            if (!put) { el.textContent = (el.textContent || \"\") + t; }\n            el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n            via = put ? \"편집영역\" : \"편집영역(직접)\";\n          } else if (\"value\" in el) {\n            const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), \"value\");\n            if (set && set.set) set.set.call(el, t); else el.value = t;\n            el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n            via = \"입력칸\";\n          } else {\n            return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n          }\n          const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };\n          el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return { ok: true, via };\n        })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n          const t = \"나\";\n          const key = \"Tab\", vk = 9;\n          let el = document.activeElement;\n          if (!el || el === document.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n          let via = null;\n          if (el.isContentEditable) {\n            try { el.focus(); } catch (e) {}\n            el.dispatchEvent(new InputEvent(\"beforeinput\", { bubbles: true, cancelable: true, data: t, inputType: \"insertText\" }));\n            let put = false;\n            try { put = document.execCommand(\"insertText\", false, t); } catch (e) { put = false; }\n            if (!put) { el.textContent = (el.textContent || \"\") + t; }\n            el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n            via = put ? \"편집영역\" : \"편집영역(직접)\";\n          } else if (\"value\" in el) {\n            const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), \"value\");\n            if (set && set.set) set.set.call(el, t); else el.value = t;\n            el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n            via = \"입력칸\";\n          } else {\n            return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n          }\n          const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };\n          el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return { ok: true, via };\n        })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n          const t = \"다\";\n          const key = \"Tab\", vk = 9;\n          let el = document.activeElement;\n          if (!el || el === document.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n          let via = null;\n          if (el.isContentEditable) {\n            try { el.focus(); } catch (e) {}\n            el.dispatchEvent(new InputEvent(\"beforeinput\", { bubbles: true, cancelable: true, data: t, inputType: \"insertText\" }));\n            let put = false;\n            try { put = document.execCommand(\"insertText\", false, t); } catch (e) { put = false; }\n            if (!put) { el.textContent = (el.textContent || \"\") + t; }\n            el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n            via = put ? \"편집영역\" : \"편집영역(직접)\";\n          } else if (\"value\" in el) {\n            const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), \"value\");\n            if (set && set.set) set.set.call(el, t); else el.value = t;\n            el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n            via = \"입력칸\";\n          } else {\n            return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n          }\n          const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };\n          el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return { ok: true, via };\n        })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(document.body ? document.body.innerText : '')",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "bulkfill-hidden-tab",
+    "cmd": "bulkfill",
+    "response": {
+      "ok": false,
+      "error": "보이지 않는 탭에는 대량으로 넣지 않습니다 — 그 탭을 먼저 띄우세요."
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "bulkfill"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "bulkfill-bad-advance",
+    "cmd": "bulkfill",
+    "response": {
+      "ok": false,
+      "error": "이동키는 Enter·Tab·ArrowDown·ArrowRight 중 하나여야 합니다: \"Escape\""
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "bulkfill"
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "bulkfill-stops-secret",
+    "cmd": "bulkfill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": false,
+        "typed": 1,
+        "total": 3,
+        "advance": "Enter",
+        "stoppedAt": 2,
+        "error": "2번째(\"••••\")에서 멈췄습니다: 커서가 어디에도 없습니다 — 앞 1칸은 이미 들어갔습니다.",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "bulkfill"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(document.body ? document.body.innerText : '')",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n          const t = \"가\";\n          const key = \"Enter\", vk = 13;\n          let el = document.activeElement;\n          if (!el || el === document.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n          let via = null;\n          if (el.isContentEditable) {\n            try { el.focus(); } catch (e) {}\n            el.dispatchEvent(new InputEvent(\"beforeinput\", { bubbles: true, cancelable: true, data: t, inputType: \"insertText\" }));\n            let put = false;\n            try { put = document.execCommand(\"insertText\", false, t); } catch (e) { put = false; }\n            if (!put) { el.textContent = (el.textContent || \"\") + t; }\n            el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n            via = put ? \"편집영역\" : \"편집영역(직접)\";\n          } else if (\"value\" in el) {\n            const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), \"value\");\n            if (set && set.set) set.set.call(el, t); else el.value = t;\n            el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n            via = \"입력칸\";\n          } else {\n            return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n          }\n          const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };\n          el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return { ok: true, via };\n        })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n          const t = \"hunter2-pw\";\n          const key = \"Enter\", vk = 13;\n          let el = document.activeElement;\n          if (!el || el === document.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n          let via = null;\n          if (el.isContentEditable) {\n            try { el.focus(); } catch (e) {}\n            el.dispatchEvent(new InputEvent(\"beforeinput\", { bubbles: true, cancelable: true, data: t, inputType: \"insertText\" }));\n            let put = false;\n            try { put = document.execCommand(\"insertText\", false, t); } catch (e) { put = false; }\n            if (!put) { el.textContent = (el.textContent || \"\") + t; }\n            el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n            via = put ? \"편집영역\" : \"편집영역(직접)\";\n          } else if (\"value\" in el) {\n            const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), \"value\");\n            if (set && set.set) set.set.call(el, t); else el.value = t;\n            el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n            via = \"입력칸\";\n          } else {\n            return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n          }\n          const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };\n          el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return { ok: true, via };\n        })()"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  },
+  {
+    "name": "bulkfill-stops",
+    "cmd": "bulkfill",
+    "response": {
+      "ok": true,
+      "data": {
+        "ok": false,
+        "typed": 1,
+        "total": 3,
+        "advance": "Enter",
+        "stoppedAt": 2,
+        "error": "2번째(\"나\")에서 멈췄습니다: 커서가 어디에도 없습니다 — 앞 1칸은 이미 들어갔습니다.",
+        "moments": [
+          {
+            "kind": "toast",
+            "text": "저장됨"
+          }
+        ]
+      }
+    },
+    "effects": [
+      [
+        "ai.enter"
+      ],
+      [
+        "ensureReady",
+        "bulkfill"
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "expression": "(document.body ? document.body.innerText : '')",
+          "returnByValue": true
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n          const t = \"가\";\n          const key = \"Enter\", vk = 13;\n          let el = document.activeElement;\n          if (!el || el === document.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n          let via = null;\n          if (el.isContentEditable) {\n            try { el.focus(); } catch (e) {}\n            el.dispatchEvent(new InputEvent(\"beforeinput\", { bubbles: true, cancelable: true, data: t, inputType: \"insertText\" }));\n            let put = false;\n            try { put = document.execCommand(\"insertText\", false, t); } catch (e) { put = false; }\n            if (!put) { el.textContent = (el.textContent || \"\") + t; }\n            el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n            via = put ? \"편집영역\" : \"편집영역(직접)\";\n          } else if (\"value\" in el) {\n            const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), \"value\");\n            if (set && set.set) set.set.call(el, t); else el.value = t;\n            el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n            via = \"입력칸\";\n          } else {\n            return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n          }\n          const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };\n          el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return { ok: true, via };\n        })()"
+        },
+        null
+      ],
+      [
+        "cdp",
+        "Runtime.evaluate",
+        {
+          "returnByValue": true,
+          "expression": "(() => {\n          const t = \"나\";\n          const key = \"Enter\", vk = 13;\n          let el = document.activeElement;\n          if (!el || el === document.body) return { ok: false, why: \"커서가 어디에도 없습니다\" };\n          let via = null;\n          if (el.isContentEditable) {\n            try { el.focus(); } catch (e) {}\n            el.dispatchEvent(new InputEvent(\"beforeinput\", { bubbles: true, cancelable: true, data: t, inputType: \"insertText\" }));\n            let put = false;\n            try { put = document.execCommand(\"insertText\", false, t); } catch (e) { put = false; }\n            if (!put) { el.textContent = (el.textContent || \"\") + t; }\n            el.dispatchEvent(new InputEvent(\"input\", { bubbles: true, data: t, inputType: \"insertText\" }));\n            via = put ? \"편집영역\" : \"편집영역(직접)\";\n          } else if (\"value\" in el) {\n            const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), \"value\");\n            if (set && set.set) set.set.call(el, t); else el.value = t;\n            el.dispatchEvent(new Event(\"input\", { bubbles: true }));\n            via = \"입력칸\";\n          } else {\n            return { ok: false, why: \"글을 넣을 수 없는 요소입니다: \" + el.tagName };\n          }\n          const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };\n          el.dispatchEvent(new KeyboardEvent(\"keydown\", init));\n          el.dispatchEvent(new KeyboardEvent(\"keyup\", init));\n          return { ok: true, via };\n        })()"
+        },
+        null
+      ],
+      [
+        "ai.leave"
+      ]
+    ]
+  }
+]

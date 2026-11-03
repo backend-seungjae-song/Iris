@@ -35,6 +35,7 @@ import {
   removeClosedTab,
   takeClosedTab,
   resolveCdpResult,
+  handleCdpExecutorEvent,
   resolveTabWcWaiters,
   setActiveTab,
   setDialogPlan,
@@ -172,7 +173,8 @@ export function handleBrowserMessage(ws, msg) {
     if (ws._local) noteEmulatorReply(msg);
   }
   else if (msg.type === "ai-ask-answer") {
-    if (ws._local && msg.id) answerUserAsk(msg.id, msg.answer);
+    // 승인 창의 답은 앱 UI 연결만. 로컬 프로세스가 대신 승인하지 못하게
+    if (ws._local && ws._ui && msg.id) answerUserAsk(msg.id, msg.answer);
   }
   else if (msg.type === "browser-profiles") {
     if (ws._local && Array.isArray(msg.profiles)) {
@@ -257,7 +259,8 @@ export function handleBrowserMessage(ws, msg) {
     // 실행기 소켓만 다시 붙으면 창 소켓은 그대로라 탭 보고가 다시 오지 않는다. 끊길 때 비운 탭 목록을 창에 다시 요청.
     else if (registerCdpExecutor(ws, msg)) broadcastLocal({ type: "browser-tabs-resync" });
   }
-  else if (msg.type === "cdp-result") { resolveCdpResult(ws, msg); } // 실행기 소켓(로컬 등록)만 결과를 발급해 원격 WS의 위조 결과를 차단한다
+  else if (["cdp-result", "worker.accepted", "worker.retired"].includes(msg.type)) { resolveCdpResult(ws, msg); }
+  else if (msg.type === "relay-event" || msg.type === "browser-target-generation") { handleCdpExecutorEvent(ws, msg); }
   // 렌더러가 (스페이스, 활성 브라우저 탭)을 보고한다. 받는 즉시 정체성으로 변환한다. 활성 표시는
   // 오래 유지되는 값이라 wc로 두면 재발급된 번호가 다른 탭을 활성으로 만든다.
   else if (msg.type === "browser-active-wc") { if (ws._local && msg.wc && msg.space) { const id = msg.tabId || tabIdOfWc(msg.wc); if (id) setActiveTab(msg.space, id); } }

@@ -11,68 +11,151 @@
 import fs from "node:fs";
 import path from "node:path";
 import { claudeHome } from "./agent-homes.js";
-import { agentSessionPathFor, sessionIdsFromTranscriptTail,
-  validateAgentSessionPath } from "./agent-session-path.js";
+import { agentSessionPathFor, sessionIdsFromTranscriptTail, sessionPathRoots,
+  validateAgentSessionPath, validateResolvedAgentSessionPath } from "./agent-session-path.js";
 
 // 세션 UUID → { sessionFile, sessionDir } 역인덱스. slug를 모르는 채로 찾는다.
 export function indexProjects(projectsRoot = claudeHome("projects")) {
-  const idx = new Map();
-  const aliases = new Map();
-  let projDirs;
+  const scan = beginProjectScan(projectsRoot);
+  if (!scan) return new Map();
+  for (const p of scan.dirs) scanProjectDir(scan, p);
+  return finishProjectScan(scan);
+}
+
+// 기록 파일이 수천 개라 파일마다 realpath·stat 을 부르면 색인 한 번이 수백 ms 동안 이벤트 루프를 막는다.
+// 루트의 realpath 를 한 번 구하고, 심링크가 아닌 폴더·파일(dirent 가 보장)은 이름을 이어 붙여 경로를 확정한다.
+function beginProjectScan(projectsRoot) {
+  let dirs, rootReal;
   try {
-    projDirs = fs.readdirSync(projectsRoot, { withFileTypes: true });
+    dirs = fs.readdirSync(projectsRoot, { withFileTypes: true });
+    rootReal = fs.realpathSync(projectsRoot);
   } catch {
-    return idx;
+    return null;
   }
-  for (const p of projDirs) {
-    if (!p.isDirectory()) continue;
-    const projPath = path.join(projectsRoot, p.name);
-    let entries;
-    try {
-      entries = fs.readdirSync(projPath, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      const full = path.join(projPath, e.name);
-      if (e.isDirectory()) {
-        const rec = idx.get(e.name) || {};
-        rec.dir = full;
-        idx.set(e.name, rec);
-      } else if (e.name.endsWith(".jsonl")) {
-        const verified = validateAgentSessionPath("claude", full, { claudeRoot: projectsRoot });
-        if (!verified) continue;
-        const uuid = e.name.slice(0, -6);
-        const rec = idx.get(uuid) || {};
-        rec.file = verified;
-        idx.set(uuid, rec);
-        for (const alias of sessionIdsFromTranscriptTail(verified)) {
-          if (!aliases.has(alias)) aliases.set(alias, new Set());
-          aliases.get(alias).add(rec);
-        }
+  return { projectsRoot, rootReal, dirs, idx: new Map(), aliases: new Map(), allowed: sessionPathRoots({ claudeRoot: projectsRoot }) };
+}
+
+function scanProjectDir(scan, p) {
+  if (!p.isDirectory()) return;
+  const { idx, aliases, allowed } = scan;
+  const projPath = path.join(scan.projectsRoot, p.name);
+  const projReal = path.join(scan.rootReal, p.name);
+  let entries;
+  try {
+    entries = fs.readdirSync(projPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    const full = path.join(projPath, e.name);
+    if (e.isDirectory()) {
+      const rec = idx.get(e.name) || {};
+      rec.dir = full;
+      idx.set(e.name, rec);
+    } else if (e.name.endsWith(".jsonl")) {
+      const verified = e.isFile()
+        ? validateResolvedAgentSessionPath("claude", path.join(projReal, e.name), { roots: allowed })
+        : validateAgentSessionPath("claude", full, { roots: allowed });
+      if (!verified) continue;
+      const uuid = e.name.slice(0, -6);
+      const rec = idx.get(uuid) || {};
+      rec.file = verified;
+      idx.set(uuid, rec);
+      for (const alias of sessionIdsFromTranscriptTail(verified)) {
+        if (!aliases.has(alias)) aliases.set(alias, new Set());
+        aliases.get(alias).add(rec);
       }
     }
   }
-  for (const [alias, records] of aliases) {
-    if (!idx.has(alias) && records.size === 1) idx.set(alias, records.values().next().value);
-  }
-  return idx;
 }
 
-// 부모 transcript(.jsonl)를 훑어: Agent tool_use id → 결과 도착 여부, 그리고 자식 tool_use 소유.
-function scanTranscript(file) {
-  const agentUse = new Map(); // tool_use.id → { desc }
-  const resulted = new Set(); // tool_result가 도착한 tool_use.id
-  const ownerOf = new Map(); // 모든 tool_use.id → 이 파일(부모 식별용)
-  let text;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return { agentUse, resulted, ownerOf };
+function finishProjectScan(scan) {
+  for (const [alias, records] of scan.aliases) {
+    if (!scan.idx.has(alias) && records.size === 1) scan.idx.set(alias, records.values().next().value);
   }
+  return scan.idx;
+}
+
+// 관제 재계산이 쓰는 색인. 처음 필요할 때 한 번 동기로 만들고, 그 뒤로는 쓰인 직후 뒤에서 폴더 50개씩
+// 끊어 다시 만들어 다음 재계산이 기다리지 않게 한다. 색인은 새 세션 파일이 생긴 뒤 한 갱신 주기 동안
+// 그 파일을 모를 수 있다. 그동안 그 세션은 기록 없이 표시되고 다음 재계산에서 채워진다.
+const PROJECT_INDEX_CHUNK = 50;
+let projectIndexCache = null; // { root, idx }
+let projectIndexRefresh = null;
+let projectIndexDirty = false;
+
+export function refreshProjectIndex(projectsRoot = claudeHome("projects")) {
+  if (projectIndexRefresh) { projectIndexDirty = true; return projectIndexRefresh; }
+  projectIndexRefresh = (async () => {
+    try {
+      await new Promise((resolve) => setImmediate(resolve)); // 부른 재계산이 끝난 뒤에 시작한다
+      const scan = beginProjectScan(projectsRoot);
+      if (!scan) { projectIndexCache = { root: projectsRoot, idx: new Map() }; return; }
+      for (let i = 0; i < scan.dirs.length; i += PROJECT_INDEX_CHUNK) {
+        for (const p of scan.dirs.slice(i, i + PROJECT_INDEX_CHUNK)) scanProjectDir(scan, p);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      projectIndexCache = { root: projectsRoot, idx: finishProjectScan(scan) };
+    } finally {
+      projectIndexRefresh = null;
+      if (projectIndexDirty) { projectIndexDirty = false; refreshProjectIndex(projectsRoot); }
+    }
+  })();
+  return projectIndexRefresh;
+}
+
+// 색인은 hook 이 보고하지 않았고 herdr 도 경로를 모르는 Claude 세션에만 쓰인다. 조회가 없으면 만들지 않고,
+// 조회가 있으면 마지막으로 만든 색인을 돌려주고 뒤에서 새로 만들기 시작한다.
+function lazyProjectIndex() {
+  let built = null;
+  const get = () => {
+    if (built) return built;
+    const root = claudeHome("projects");
+    if (!projectIndexCache || projectIndexCache.root !== root) projectIndexCache = { root, idx: indexProjects(root) };
+    built = projectIndexCache.idx;
+    refreshProjectIndex(root).catch(() => {});
+    return built;
+  };
+  return { get: (key) => get().get(key), has: (key) => get().has(key) };
+}
+
+// transcript(.jsonl) 한 파일의 tool_use id 집합(부모 식별용)
+// 파일별로 읽은 위치까지의 결과를 저장하고 늘어난 줄만 읽음
+// 관제 재계산(4초 주기)마다 파일 전체를 읽던 때 장수 세션(수십 MB)이 겹치면 120초에 GB 단위 할당, 서버 힙 1.5GB
+const toolUseCache = new Map(); // 파일 → { size, offset, ids }
+const TOOL_USE_CACHE_LIMIT = 2000;
+
+function toolUseIds(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    const { size } = fs.fstatSync(fd);
+    let entry = toolUseCache.get(file);
+    // 크기가 줄었으면 새로 쓰인 파일로 보고 처음부터
+    if (!entry || size < entry.size) entry = { size: 0, offset: 0, ids: new Set() };
+    if (size > entry.offset) {
+      const chunk = Buffer.allocUnsafe(size - entry.offset);
+      const read = fs.readSync(fd, chunk, 0, chunk.length, entry.offset);
+      // 마지막 줄바꿈 뒤는 아직 쓰는 중인 줄. 다음 호출에서 읽음
+      const end = chunk.lastIndexOf(0x0a, read - 1) + 1;
+      if (end > 0) collectToolUseIds(chunk.toString("utf8", 0, end), entry.ids);
+      entry.offset += end;
+    }
+    entry.size = size;
+    toolUseCache.delete(file);
+    toolUseCache.set(file, entry);
+    if (toolUseCache.size > TOOL_USE_CACHE_LIMIT) toolUseCache.delete(toolUseCache.keys().next().value);
+    return entry.ids;
+  } catch {
+    return new Set();
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+  }
+}
+
+function collectToolUseIds(text, ids) {
   for (const line of text.split("\n")) {
-    if (!line) continue;
-    if (line.indexOf("tool_use") < 0 && line.indexOf("tool_result") < 0) continue;
+    if (!line || line.indexOf("tool_use") < 0) continue;
     let rec;
     try {
       rec = JSON.parse(line);
@@ -82,18 +165,9 @@ function scanTranscript(file) {
     const content = rec?.message?.content;
     if (!Array.isArray(content)) continue;
     for (const c of content) {
-      if (!c || typeof c !== "object") continue;
-      if (c.type === "tool_use" && c.id) {
-        ownerOf.set(c.id, file);
-        if (c.name === "Agent" || c.name === "Task") {
-          agentUse.set(c.id, { desc: c.input?.description || "" });
-        }
-      } else if (c.type === "tool_result" && c.tool_use_id) {
-        resulted.add(c.tool_use_id);
-      }
+      if (c && typeof c === "object" && c.type === "tool_use" && c.id) ids.add(c.id);
     }
   }
-  return { agentUse, resulted, ownerOf };
 }
 
 // 한 세션 UUID에 대한 실행 중 서브에이전트 트리.
@@ -152,11 +226,9 @@ export function subagentTree(sessionUuid, idx, sessionRec = null) {
 
   // 관련 jsonl을 한 번씩 스캔해 tool_use 소유만 모은다(부모 중첩 판별용).
   // resulted(tool_result 도착)는 더는 liveness 신호가 아니라 수집하지 않는다.
-  const ownerOf = new Map();
-  for (const j of jsonls) {
-    const s = scanTranscript(j);
-    for (const [id, f] of s.ownerOf) ownerOf.set(id, f);
-  }
+  // 같은 id 가 여러 파일에 있으면 목록 뒤쪽 파일이 소유자
+  const idsByFile = jsonls.map((j) => [j, toolUseIds(j)]).reverse();
+  const ownerFileOf = (id) => idsByFile.find(([, ids]) => ids.has(id))?.[0];
 
   // 부모: toolUseId를 tool_use로 가진 jsonl의 소유자 = 부모(세션 or 다른 서브).
   const fileToAgent = new Map(); // jsonl 경로 → agentId (부모 역참조)
@@ -174,7 +246,7 @@ export function subagentTree(sessionUuid, idx, sessionRec = null) {
     const recentlyActive = node.mtime > 0 && now - node.mtime <= RUNNING_MTIME_WINDOW_MS;
     if (!recentlyActive) continue; // 실행 중 = 최근 파일 활동
     // 부모 판별
-    const ownerFile = ownerOf.get(node.toolUseId);
+    const ownerFile = ownerFileOf(node.toolUseId);
     if (ownerFile && fileToAgent.has(ownerFile)) {
       node.parent = fileToAgent.get(ownerFile);
     }
@@ -230,7 +302,7 @@ function treeHasCodex(nodes) {
 }
 
 export function buildMonitorState(agents) {
-  const idx = indexProjects();
+  const idx = lazyProjectIndex();
   return agents.map((a) => {
     const isClaude = String(a.agent || "").toLowerCase() === "claude";
     const reported = isClaude ? agentSessionPathFor(a.pane_id, "claude") : null;

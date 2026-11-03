@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { createCipheriv, createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, "..");
@@ -19,6 +20,23 @@ const { decryptCookieRows } = require(path.join(root, "native/electron/cookie-im
 const row = (host, name, value) => ({
   host_key: host, name, path: "/", value, encrypted_value: Buffer.alloc(0),
   is_secure: 1, is_httponly: 0, samesite: 0, expires_utc: 0,
+});
+
+test("Chrome 도메인 해시는 빈 쿠키에서도 제거하고 실제 값은 보존한다", () => {
+  const key = Buffer.alloc(16, 7), domain = ".example.com";
+  const encrypt = raw => {
+    const cipher = createCipheriv("aes-128-cbc", key, Buffer.alloc(16, " "));
+    return Buffer.concat([Buffer.from("v10"), cipher.update(raw), cipher.final()]);
+  };
+  for (const value of ["", "session-value"]) {
+    const encrypted = encrypt(Buffer.concat([createHash("sha256").update(domain).digest(), Buffer.from(value)]));
+    const { list, decryptSkipped } = decryptCookieRows([{ ...row(domain, "test", ""), encrypted_value: encrypted }], key);
+    assert.equal(decryptSkipped, 0);
+    assert.equal(list[0].value, value);
+  }
+  const legacy = Buffer.alloc(32, 1);
+  const { list } = decryptCookieRows([{ ...row(domain, "legacy", ""), encrypted_value: encrypt(legacy) }], key);
+  assert.deepEqual(list[0].rawValue, legacy);
 });
 
 test("도전 풀이 증표는 어느 도메인에서도 안 실린다", () => {

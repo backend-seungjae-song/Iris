@@ -17,6 +17,11 @@ process.env.CLAUDE_CODE_CHILD_SESSION = "1";
 process.env.CLAUDE_PID = "123";
 process.env.CODEX_COMPANION_TRANSCRIPT_PATH = "/tmp/launching.jsonl";
 process.env.ANTHROPIC_API_KEY = "sk-test";
+// 설치 앱 서버의 실행 식별값 (메인이 서버에만 줌)
+process.env.IRIS_BUNDLE_ID = "bundle-test";
+process.env.IRIS_MAIN_PID = "4242";
+process.env.IRIS_SERVER_ROOT = "/Applications/Iris.app/Contents/Resources/app.asar.unpacked";
+process.env.IRIS_APP_PATH = "/Applications/Iris.app";
 
 const { cleanEnv } = await import("../server/pty.js");
 const env = cleanEnv();
@@ -29,6 +34,9 @@ assert.equal(env.IRIS_STATE_DIR, "/tmp/ac-test-state", "상태 폴더는 물려�
 assert.ok(env.PATH, "PATH는 남아야 한다");
 for (const k of ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_PID", "CODEX_COMPANION_TRANSCRIPT_PATH"]) {
   assert.equal(env[k], undefined, `${k}: 물려주면 pane 의 Claude 훅이 Iris 를 띄운 세션을 자기 세션으로 보고한다`);
+}
+for (const k of ["IRIS_BUNDLE_ID", "IRIS_MAIN_PID", "IRIS_SERVER_ROOT", "IRIS_APP_PATH"]) {
+  assert.equal(env[k], undefined, `${k}: 물려주면 터미널에서 띄운 서버·개발 앱·테스트가 설치 앱 서버의 식별값을 자기 것으로 쓴다`);
 }
 assert.equal(env.ANTHROPIC_API_KEY, "sk-test", "사용자가 정한 API 키는 남아야 한다");
 assert.equal(env.TERM, "xterm-256color");

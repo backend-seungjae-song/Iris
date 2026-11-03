@@ -87,12 +87,12 @@ check("분리돼 있으면 그 창에서 전환", () => /getBrowserState\(\)\.do
 check("파일 탭 우클릭 = 트리 메뉴 재사용", () => /function openFileCtx\(x, y, absPath, isDir, extra\)/.test(contextMenu)
   && /openFileCtx\(e\.clientX, e\.clientY, t\.path, false, extra\)/.test(tabClose));
 check("탭바 우클릭에 닫기 계열", () => /label: "다른 탭 모두 닫기"/.test(tabClose) && /label: "모두 닫기"/.test(tabClose)
-  && /function closeAllTabs\(\)/.test(tabClose));
+  && /function closeAllTabs\(index\)/.test(tabClose));
 // 함수의 존재만 검사하면 실제 동작을 확인하지 못한다. 메뉴가 같은 처리를 그 자리에서
 // 중복 구현하면 이 경고가 한 번도 뜨지 않아도 검사는 통과한다.
 // 그래서 메뉴가 그 함수를 호출하는지까지 검사한다.
 check("모두 닫기는 미저장 편집을 먼저 알린다", () => /저장하지 않은 편집이 \$\{dirty\.length\}개/.test(tabClose)
-  && /label: "모두 닫기", danger: true, act: \(\) => closeAllTabs\(\)/.test(tabClose));
+  && /label: "모두 닫기", danger: true, act: \(\) => closeAllTabs\(index\)/.test(tabClose));
 // 글로우는 명령 순간이 아니라 탭을 점유하는 동안 계속 켜진다. 이너 글로우는 그 탭을 보고 있을 때만 켠다.
 // 글로우와 ● 표시 기준은 점유 탭이 아니라 조작 중 여부다. 점유는 오래 유지되지만 조작은 끝난다.
 // 명령 순간만 켜면 깜박이고, 점유를 기준으로 하면 조작이 끝나도 꺼지지 않는다. 서버가 탭별·세션별로 내려준다.
@@ -118,10 +118,13 @@ check("두 번째 실행은 창을 앞으로", () => /app\.on\("second-instance"
 // inset:0 절대배치 요소를 body 에 붙여 두면 창 전체를 덮는다. 파일 뷰로 옮기는 경로를 거치지
 // 않고 메모가 Monaco 를 먼저 로드하면 그 요소가 body 에 남아 화면을 가린다.
 console.log("\n[10f] 편집기 호스트가 화면을 덮지 않는다");
-check("파일 편집기 호스트는 body에 안 붙는다", () => /monacoHost\.id = "editor-host";[\s\S]{0,400}?\n  \}\n  return monacoHost;/.test(textEditor)
-  && !/monacoHost\.id = "editor-host";[\s\S]{0,400}?document\.body\.appendChild\(monacoHost\)/.test(textEditor));
+check("파일 편집기 호스트는 body에 안 붙는다", () => {
+  const body = b4Function(textEditor, "monacoHostEl");
+  return body.includes('slot.host.className = "editor-host"') && body.includes("return slot.host")
+    && !body.includes("document.body.appendChild");
+});
 check("라이브러리 로드와 파일 편집기 생성 분리", () => /function ensureMonacoLib\(\)/.test(textEditor)
-  && /monacoReady = ensureMonacoLib\(\)\.then/.test(textEditor));
+  && /slot\.ready = ensureMonacoLib\(\)\.then/.test(textEditor));
 check("메모는 라이브러리만 부른다", () => /memoEdReady = ensureMonacoLib\(\)\.then/.test(memoPanel));
 
 // [10g] 연결이 조용히 죽지 않는다

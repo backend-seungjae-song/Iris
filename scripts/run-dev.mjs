@@ -9,6 +9,7 @@ import path from "node:path";
 export function devCommand(mode, { env: source = process.env, home = os.homedir(), electronPath, platform = process.platform } = {}) {
   if (!["server", "app", "seed"].includes(mode)) throw new Error(`모르는 개발 실행 항목: ${mode}`);
   const env = { ...source, IRIS_STATE_DIR: path.join(home, ".iris-dev") };
+  env.IRIS_BUNDLE_ID = "development";
   if (mode !== "seed" || platform === "win32") env.IRIS_PORT = "4291";
   if (mode === "server") env.PORT = "4291";
   if (mode === "app" && platform === "win32") delete env.ELECTRON_RUN_AS_NODE;

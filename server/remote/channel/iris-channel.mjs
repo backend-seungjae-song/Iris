@@ -49,21 +49,30 @@ function consumeSocket(chunk) {
   }
 }
 
-if (socketPath && paneId && cliSession) {
+// 원격이 꺼진 동안 시작한 세션도 나중에 켜지면 연결되도록 재시도
+const RETRY_MS = 2000;
+
+function retryLater() {
+  setTimeout(connect, RETRY_MS).unref();
+}
+
+function connect() {
   let endpoint;
   try { endpoint = connectAgent(socketPath); } catch {}
-  if (endpoint) {
-    agent = endpoint.socket;
-    agent.setEncoding("utf8");
-    agent.on("connect", () => {
-      agentReady = true;
-      writeAgent({ role: "channel", v: 1, paneId, cliSession, ...endpoint.auth });
-    });
-    agent.on("data", consumeSocket);
-    agent.on("error", () => {});
-    agent.on("close", () => { agentReady = false; agent = null; latestPermission = null; });
-  }
+  if (!endpoint) return retryLater();
+  agent = endpoint.socket;
+  socketBuffer = "";
+  agent.setEncoding("utf8");
+  agent.on("connect", () => {
+    agentReady = true;
+    writeAgent({ role: "channel", v: 1, paneId, cliSession, ...endpoint.auth });
+  });
+  agent.on("data", consumeSocket);
+  agent.on("error", () => {});
+  agent.on("close", () => { agentReady = false; agent = null; latestPermission = null; retryLater(); });
 }
+
+if (socketPath && paneId && cliSession) connect();
 
 function handleMcp(message) {
   if (message?.method === "initialize" && message.id !== undefined) {

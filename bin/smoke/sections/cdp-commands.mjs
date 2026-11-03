@@ -317,6 +317,7 @@ export default async function run() {
         isTabShown: () => true,
         run: async () => ({ ok: true }),
         webContentsMod: () => ({}),
+        ownsUserFocus: () => true,
       });
       const result = await commands.click(send, { id: 73 }, { ref: "e41" });
       const mouse = sent.filter((call) => call.method === "Input.dispatchMouseEvent");
@@ -346,6 +347,7 @@ export default async function run() {
           isTabShown: () => true,
           run: async (...args) => { runCalls.push(args); return { ok: true }; },
           webContentsMod: () => wcModule,
+          ownsUserFocus: () => true,
         });
         const result = await commands.fill(send, { id: 84 }, { ref: "e52", sel: "#field", text: "iris" });
         return { result, runCalls, sent, wcModule };
@@ -371,6 +373,48 @@ export default async function run() {
           throw new Error("첫 입력 실패 뒤 run을 통해 click을 부르지 않는다");
         }
       }
+      return true;
+    });
+    // 사용자 키보드 포커스가 다른 탭·앱 셸에 있으면 CDP Input.* 를 보내지 않는다. insertText·dispatchKeyEvent 는
+    // 창의 포커스 위젯(사용자 칸)으로 가고, 좌표 mousePressed 는 키보드 포커스를 이 탭으로 옮긴다(실측).
+    await checkAsync("사용자 포커스가 없는 탭에는 CDP 글·누르기를 보내지 않는다", async () => {
+      const { createInputCommands } = require_("../native/electron/cdp-cmd-input.cjs");
+      const replies = {
+        "DOM.getBoxModel": { model: { content: [0, 0, 20, 0, 20, 10, 0, 10] } },
+        "DOM.resolveNode": { object: { objectId: "o1" } },
+        "Runtime.callFunctionOn": { result: { value: { ok: true, got: "iris", contenteditable: false } } },
+        "Runtime.evaluate": { result: { value: { ok: true, via: "페이지 안 입력" } } },
+      };
+      // ownsUserFocus 를 빼면(null) 안전한 쪽(포커스 없음)으로 보는지도 함께 잰다
+      const run = async (owns, cmd, args) => {
+        const sent = [];
+        const send = async (method, params) => { sent.push(method); return replies[method] || {}; };
+        send.on = () => send;
+        send.frames = () => [null];
+        const commands = createInputCommands({
+          withLayout: async (_send, fn) => await fn(false),
+          nodeFromArgs: async () => ({ backendNodeId: 61, sid: null }),
+          insertTextInChunks: async (s, text) => { await s("Input.insertText", { text }); },
+          isTabShown: () => true,
+          run: async () => { throw new Error("run 을 부르면 안 된다"); },
+          webContentsMod: () => ({}),
+          ...(owns == null ? {} : { ownsUserFocus: () => owns }),
+        });
+        const result = await commands[cmd](send, { id: 1 }, args);
+        return { result, input: sent.filter((m) => m.startsWith("Input.")), focused: sent.includes("DOM.focus") };
+      };
+      for (const owns of [false, null]) {
+        const click = await run(owns, "click", { ref: "e61" });
+        if (click.result?.via !== "element" || click.input.length) throw new Error("포커스 없는 탭을 좌표로 누른다: " + click.input);
+        const fill = await run(owns, "fill", { ref: "e61", text: "iris" });
+        if (fill.result?.via !== "값 직접 설정" || fill.result?.frame || fill.input.length || fill.focused) {
+          throw new Error("포커스 없는 탭의 fill 이 CDP 글 입력을 쓴다: " + fill.input);
+        }
+        const type = await run(owns, "type", { text: "iris" });
+        if (type.result?.via !== "페이지 안 입력" || type.input.length) throw new Error("포커스 없는 탭의 type 이 CDP 글 입력을 쓴다: " + type.input);
+      }
+      const owned = await run(true, "type", { text: "iris" });
+      if (owned.input.join() !== "Input.insertText") throw new Error("포커스 있는 탭의 type 이 기존 경로를 잃었다");
       return true;
     });
     await checkAsync("CDP upload 계획은 절대경로만 받고 한 번 소비되며 없으면 사람 차례를 알린다", async () => {

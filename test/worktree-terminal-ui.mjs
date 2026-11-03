@@ -91,10 +91,10 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
       assert.equal(await page.evaluate(()=>sent.length),before);
     }
     await page.evaluate(()=>{local=true;shellPaneCount(1);render();});
-    for (const [label, launch] of [['새 터미널',''], ['새 Codex 세션','codex'], ['새 Claude 세션','claude']]) {
+    for (const [label, launch] of [['새 Claude 세션','claude'], ['새 Codex 세션','codex'], ['새 터미널','']]) {
       await page.click(`${topic} [data-worktree-action="group-add"]`);
       await page.locator('::-p-text(' + label + ')').click();
-      assert.deepEqual(await page.evaluate(() => sent.at(-1)), {type:'tab.create',workspaceId:'owner',cwd:'/repo-wt/topic',launch});
+      assert.deepEqual(await page.evaluate(() => sent.at(-1)), {type:'tab.create',workspaceId:'owner',cwd:'/repo-wt/topic',launch,...(launch?{name:launch}:{})});
       assert.equal(await page.evaluate(()=>selected),'agent','추가 메뉴가 기존 세션 선택을 바꾸지 않는다');
     }
     assert.equal(await page.$(group('/repo-wt/unused')),null,'안 쓰는 worktree 는 접힌 묶음 안');
@@ -102,7 +102,7 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
     await page.click(`${group('/repo-wt/unused')} [data-worktree-action="group-add"]`);
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
-    assert.deepEqual(await page.evaluate(()=>sent.at(-1)),{type:'tab.create',workspaceId:'owner',cwd:'/repo-wt/unused',launch:'codex'});
+    assert.deepEqual(await page.evaluate(()=>sent.at(-1)),{type:'tab.create',workspaceId:'owner',cwd:'/repo-wt/unused',launch:'codex',name:'codex'});
     await page.click(`${topic} [data-worktree-action="group-toggle"]`);
     assert.equal(await page.$(`${topic} [data-target="agent"]`),null);
     assert.equal(await page.$eval(`${topic} .wt-caret`,el=>getComputedStyle(el).transform),'none');
@@ -141,7 +141,7 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
     assert.equal(await page.$$eval(`${task} [data-target="agent"]`,els=>els.length),1);
     await page.click(`${task} [data-worktree-action="group-add"]`);
     await page.locator('::-p-text(새 Codex 세션)').click();
-    assert.deepEqual(await page.evaluate(() => sent.at(-1)), {type:'tab.create',workspaceId:'owner',cwd:'/multi/.working/task',launch:'codex'});
+    assert.deepEqual(await page.evaluate(() => sent.at(-1)), {type:'tab.create',workspaceId:'owner',cwd:'/multi/.working/task',launch:'codex',name:'codex'});
     assert.equal(await page.$$eval('.wt-repositories, [data-worktree-action="repositories-toggle"]',els=>els.length),0);
     assert.equal(await page.$eval(task,el=>/저장소 \d+개/.test(el.textContent)),false);
     await page.click(`${task} [data-worktree-action="group-menu"]`);

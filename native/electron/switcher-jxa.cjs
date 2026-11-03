@@ -186,15 +186,18 @@ function irisAxBounds(win) {
   return irisBounds({ X: position[0], Y: position[1], Width: size[0], Height: size[1] });
 }
 
-function irisCgMatch(cgWindows, pid, bounds) {
-  var match = null;
-  var count = 0;
+// 같은 위치 창이 여럿이면 제목으로 한 번 더 가림(Iris 콘솔·공유 브라우저처럼 같은 자리를 쓰는 창)
+// 제목까지 같으면 고르지 않음(null)
+function irisCgMatch(cgWindows, pid, bounds, title) {
+  var hits = [];
+  var named = [];
   for (var i = 0; i < cgWindows.length; i += 1) {
     if (cgWindows[i].pid !== pid || !irisSameBounds(cgWindows[i].bounds, bounds)) continue;
-    match = cgWindows[i];
-    count += 1;
+    hits.push(cgWindows[i]);
+    if (title && cgWindows[i].title === title) named.push(cgWindows[i]);
   }
-  return count === 1 ? match : null;
+  if (hits.length === 1) return hits[0];
+  return named.length === 1 ? named[0] : null;
 }
 
 function irisCgFirstMatch(cgWindows, pid, bounds) {
@@ -275,7 +278,7 @@ function irisProcessWindows(p, cgAll, cgOnScreen) {
     var bounds = irisBounds({ X: position[0], Y: position[1], Width: size[0], Height: size[1] });
     if (!bounds) continue;
     var title = irisText(names[i], 400);
-    var cg = irisCgMatch(cgAll, pid, bounds);
+    var cg = irisCgMatch(cgAll, pid, bounds, title);
     var cgId = cg ? cg.cgId : null;
     var id = irisWindowId(cgId, pid, title, bounds);
     // 앞 창의 번호는 그 창의 번호와 같아야 한다.
@@ -450,14 +453,55 @@ function irisSpaceSwitchFailure(reason) {
     || reason === "desktop-unknown" || reason === "desktop-switch-failed";
 }
 
-function irisStep(input, snapshot, raiseWindow) {
+function irisStopMembers(plan, stopId) {
+  for (var i = 0; i < plan.stops.length; i += 1) {
+    if (plan.stops[i].id === stopId) return plan.stops[i].members;
+  }
+  return [];
+}
+
+function irisResolvedStops(plan, resolved) {
+  var ids = [];
+  for (var i = 0; i < plan.stops.length; i += 1) {
+    var members = plan.stops[i].members;
+    for (var j = 0; j < members.length; j += 1) {
+      if (resolved.indexOf(members[j]) >= 0) {
+        ids.push(plan.stops[i].id);
+        break;
+      }
+    }
+  }
+  return ids;
+}
+
+// 묶음의 나머지 창 올리기. 맨 앞 창이 이미 화면에 와 있어 같은 화면의 창만 대상
+function irisRaiseCompanions(resolution, ids, raiseCompanion) {
+  var raised = [];
+  var left = [];
+  for (var i = 0; i < ids.length; i += 1) {
+    var descriptor = irisResolvedWindow(resolution.matches, ids[i]);
+    var outcome = descriptor ? raiseCompanion(descriptor) : { ok: false, reason: "not-found" };
+    if (outcome === true || (outcome && outcome.ok === true)) raised.push(ids[i]);
+    else left.push({ id: ids[i], reason: (outcome && outcome.reason) || "raise-did-not-land" });
+  }
+  return { raised: raised, left: left };
+}
+
+// 단축키 한 번에 차례 하나 올리기. 차례: 창 하나 또는 묶음(core.planStops)
+// 묶음 순서: 맨 앞 창(다른 데스크톱이면 데스크톱 전환) → 나머지 창 → 포커스를 위해 맨 앞 창 다시
+// 맨 앞 창이 이 앱의 창이면 나머지만 올리고 그 창은 앱 담당
+function irisStep(input, snapshot, raiseWindow, raiseCompanion) {
   var targets = Array.isArray(input.targets) ? input.targets : [];
   var windows = snapshot && Array.isArray(snapshot.windows) ? snapshot.windows : [];
+  var companionRaise = typeof raiseCompanion === "function" ? raiseCompanion : raiseWindow;
   irisFillTargetPidStarts(windows, targets);
   var resolution = irisResolveWindows(windows, targets);
   var resolved = resolution.resolved;
   var missing = resolution.missing;
   var attempts = 0;
+  var plan = core.planStops(targets.map(function (target) {
+    return { id: irisSelectedId(target), group: target && target.group };
+  }));
   // 앞 창을 선택 목록의 번호로 변환한다. 스냅샷의 번호와 targets 의 번호는 서로 다른 시점에 만들어져
   // 같은 창이라도 값이 다를 수 있다(저장본에는 번호가 아예 없어 pickKey 로 떨어지기도 한다).
   // 변환하지 않으면 앞 창이 항상 목록 밖으로 판정되어 첫 창만 반복된다.
@@ -468,33 +512,43 @@ function irisStep(input, snapshot, raiseWindow) {
       break;
     }
   }
+  var frontStop = core.stopIdOf(plan, front);
+  if (frontStop == null) frontStop = front;
 
   while (attempts < targets.length && resolved.length > 0) {
     var selected = core.selectTarget({
-      ordered: Array.isArray(input.ordered) ? input.ordered : [],
-      resolved: resolved,
-      front: front,
-      cursor: input.cursor,
+      ordered: plan.ordered,
+      resolved: irisResolvedStops(plan, resolved),
+      front: frontStop,
+      cursor: core.stopIdOf(plan, input.cursor),
       dir: input.dir,
     });
-    var selectedId = irisSelectedId(selected);
-    if (selectedId == null) break;
+    var stopId = irisSelectedId(selected);
+    if (stopId == null) break;
+    var live = irisStopMembers(plan, stopId).filter(function (id) { return resolved.indexOf(id) >= 0; });
+    var selectedId = live[0];
+    var companions = live.slice(1);
     var descriptor = irisResolvedWindow(resolution.matches, selectedId);
     attempts += 1;
     // 이 앱의 자기 창은 osascript 로 전환할 수 없다. AX 는 현재 데스크톱만 보고, open 은 이미 앞에
     // 있는 앱을 호출하는 것이라 아무 동작도 하지 않는다. 앱이 직접 올리도록 id 만 돌려준다.
     // 선택을 두 곳에서 하면 두 판정이 어긋나므로, 선택은 여기 한 곳에만 둔다.
     if (descriptor && irisInteger(input.ownPid) && descriptor.pid === input.ownPid) {
-      return { ok: true, raised: null, own: selectedId, resolved: resolved, missing: missing, front: front };
+      var ownGroup = irisRaiseCompanions(resolution, companions, companionRaise);
+      return { ok: true, raised: null, own: selectedId, also: ownGroup.raised, left: ownGroup.left,
+        resolved: resolved, missing: missing, front: front };
     }
     var outcome = descriptor ? raiseWindow(descriptor) : false;
     if (outcome === true || (outcome && outcome.ok === true)) {
-      return { ok: true, raised: selectedId, resolved: resolved, missing: missing, front: front };
+      var group = irisRaiseCompanions(resolution, companions, companionRaise);
+      if (group.raised.length) raiseWindow(descriptor);
+      return { ok: true, raised: selectedId, also: group.raised, left: group.left,
+        resolved: resolved, missing: missing, front: front };
     }
     resolved = resolved.filter(function (id) { return id !== selectedId; });
     // 전환하지 못한 창에서 멈추면 다음 창으로도 가지 못하고, 사용자에게는 아무 반응이 없는 것으로
     // 보인다. 확인 결과 Chrome 이 막히면 그 뒤 순환 전체가 멈췄다.
-    // 막힌 사실은 적고, 순환은 다음 후보로 계속한다.
+    // 막힌 사실은 적고, 순환은 다음 후보로 계속한다. 묶음이면 다음 창이 맨 앞 창 역할
     if (outcome && irisSpaceSwitchFailure(outcome.reason)) {
       if (!irisMissingHas(missing, selectedId)) missing.push({ id: selectedId, reason: outcome.reason });
       continue;
@@ -679,6 +733,15 @@ function irisRaise(descriptor) {
   return true;
 }
 
+// 묶음의 나머지 창: 데스크톱 전환 없음. 맨 앞 창과 같은 화면에 있는 창만 올림
+function irisRaiseCompanion(descriptor) {
+  if (descriptor && descriptor.reachable === "cg" && irisInteger(descriptor.cgId)
+      && !irisCgWindowIdIsOnScreen(irisCgOnScreenWindowIds(), descriptor.cgId)) {
+    return { ok: false, reason: "other-desktop" };
+  }
+  return irisRaiseAx(descriptor) ? true : { ok: false, reason: "raise-did-not-land" };
+}
+
 function irisPermissionError(error) {
   var detail = String(error && (error.message || error) || "");
   return /-25211|assistive|not authorized|not permitted|accessibility|1002|않은 응용 프로그램|System Events process list unavailable/i.test(detail);
@@ -694,7 +757,7 @@ function run(argv) {
     if (__irisMode === "enumerate") {
       return JSON.stringify({ ok: true, windows: snapshot.windows, front: snapshot.front });
     }
-    return JSON.stringify(irisStep(input, snapshot, irisRaise));
+    return JSON.stringify(irisStep(input, snapshot, irisRaise, irisRaiseCompanion));
   } catch (error) {
     return JSON.stringify({
       ok: false,

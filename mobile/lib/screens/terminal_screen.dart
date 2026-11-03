@@ -4,20 +4,42 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:iris_remote/design/buttons.dart';
 import 'package:iris_remote/design/icon.dart';
-import 'package:iris_remote/design/session_header.dart';
+import 'package:iris_remote/design/motion.dart';
+import 'package:iris_remote/design/agent_tile.dart';
 import 'package:iris_remote/design/sheet.dart';
-import 'package:iris_remote/design/tokens.dart';
+import 'package:iris_remote/design/terminal_chrome.dart';
 import 'package:iris_remote/design/terminal_grid.dart';
+import 'package:iris_remote/design/toast.dart';
+import 'package:iris_remote/design/tokens.dart';
 import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
+import 'package:iris_remote/screens/agent_screen.dart';
+import 'package:iris_remote/screens/browser_screen.dart';
 import 'package:iris_remote/screens/source_control_screen.dart';
+import 'package:iris_remote/screens/terminal_question_card.dart';
 import 'package:iris_remote/state/remote_state.dart';
+
+// 화면에 보이는 터미널의 에이전트 표시. 알림 억제가 읽는 자리
+class TerminalAgentMarker extends StatelessWidget {
+  const TerminalAgentMarker({
+    required this.agentRef,
+    required this.child,
+    super.key,
+  });
+
+  final String agentRef;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
+}
 
 class TerminalScreen extends StatefulWidget {
   const TerminalScreen({
     required this.state,
     required this.agentRef,
     this.onOpenBrowser,
+    this.onOpenChat,
     this.githubFailed = false,
     super.key,
   });
@@ -25,6 +47,8 @@ class TerminalScreen extends StatefulWidget {
   final RemoteState state;
   final String agentRef;
   final VoidCallback? onOpenBrowser;
+  // 없으면 이 에이전트의 대화 화면으로 교체
+  final VoidCallback? onOpenChat;
   final bool githubFailed;
 
   @override
@@ -49,7 +73,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
   DateTime _lastMouseSend = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastWheel = DateTime.fromMillisecondsSinceEpoch(0);
   String? _error;
-  String? _result;
+  // 화면 갱신 멈춤 안내: 기존 화면은 유지
+  bool _stale = false;
+  bool _stick = true;
+  final ScrollController _vScroll = ScrollController();
+  final FocusNode _inputFocus = FocusNode();
   final TextEditingController _input = TextEditingController();
 
   @override
@@ -64,19 +92,23 @@ class _TerminalScreenState extends State<TerminalScreen> {
           _rows = frame.rows;
           _hash = frame.hash;
           _mouseMode = frame.mouseMode;
-          _error = frame.error == null
+          _stale = frame.error == 'terminal-screen-stale';
+          _error = frame.error == null || _stale
               ? null
               : terminalErrorMessage(frame.error!);
         });
       }
     });
     _watch();
+    _input.addListener(() => setState(() {}));
     if (widget.state.supports('terminal.keys.get')) _loadKeys();
   }
 
   @override
   void dispose() {
     _frames?.cancel();
+    _vScroll.dispose();
+    _inputFocus.dispose();
     _input.dispose();
     super.dispose();
   }
@@ -91,7 +123,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
           _rows = frame.rows;
           _hash = frame.hash;
           _mouseMode = frame.mouseMode;
-          _error = frame.error == null
+          _stale = frame.error == 'terminal-screen-stale';
+          _error = frame.error == null || _stale
               ? null
               : terminalErrorMessage(frame.error!);
         });
@@ -118,31 +151,36 @@ class _TerminalScreenState extends State<TerminalScreen> {
       await widget.state.session.inputTerminal(_agentRef, _input.text);
       if (mounted) {
         setState(() {
-          _result = '보냈습니다';
           _history = null;
+          _stick = true;
           _input.clear();
         });
+        _say('보냈습니다', error: false);
       }
     } on Object catch (error) {
-      if (mounted) {
-        setState(
-          () => _result = error is RemoteFailure
-              ? error.message
-              : error is ProtocolException
-              ? error.message
-              : '컴퓨터과 연결이 끊겼습니다.',
-        );
-      }
+      _say(
+        error is RemoteFailure
+            ? error.message
+            : error is ProtocolException
+            ? error.message
+            : '컴퓨터와 연결이 끊겼습니다.',
+      );
     }
   }
 
   Future<void> _pressKey(TerminalKeyButton key) async {
     if (!widget.state.supports('terminal.key')) return;
     try {
-      await widget.state.session.keyTerminal(_agentRef, key.key, key.modifiers);
-      if (mounted) setState(() => _result = '보냈습니다');
+      for (final step in key.steps) {
+        await widget.state.session.keyTerminal(
+          _agentRef,
+          step.key,
+          step.modifiers,
+        );
+      }
+      _say('보냈습니다', error: false);
     } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      _say(error.message);
     }
   }
 
@@ -154,9 +192,766 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _columns = _rows = null;
       _hash = null;
       _history = null;
+      _stick = true;
       _error = null;
+      _stale = false;
     });
     _watch();
+  }
+
+  void _say(String message, {bool error = true}) {
+    if (!mounted) return;
+    showIrisToast(
+      context,
+      message,
+      tone: error ? IrisToastTone.error : IrisToastTone.ok,
+    );
+  }
+
+  void _showLive() {
+    setState(() {
+      _history = null;
+      _stick = true;
+    });
+  }
+
+  // 한 줄씩 이동 버튼. 마우스 화면은 휠, 그 밖은 스크롤과 기록 불러오기
+  void _step(int direction) {
+    final columns = _columns, rows = _rows;
+    if (columns == null || rows == null) return;
+    if (_mouseMode && _history == null) {
+      final center = Offset(_cellWidth * columns / 2, _cellHeight * rows / 2);
+      _mouseMotion('wheel', center, dy: direction);
+      return;
+    }
+    if (!_vScroll.hasClients) return;
+    if (_stick) setState(() => _stick = false);
+    final position = _vScroll.position;
+    if (direction < 0 && position.pixels <= 1) {
+      if (_history == null) unawaited(_loadScrollback());
+      return;
+    }
+    unawaited(
+      _vScroll.animateTo(
+        (position.pixels + direction * _cellHeight).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+        duration: const Duration(milliseconds: 120),
+        curve: irisEase,
+      ),
+    );
+  }
+
+  Widget _sessionTabs(RemoteAgent agent, List<RemoteAgent> agents) {
+    return SizedBox(
+      key: const Key('terminal-sessions'),
+      height: 56,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        itemCount: agents.length + 1,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, index) {
+          if (index == agents.length) {
+            return TerminalSessionChip(
+              leading: IrisIcon(
+                'terminal-window',
+                size: 14,
+                color: context.iris.muted,
+              ),
+              label: 'shell',
+              selected: false,
+              onPressed: null,
+            );
+          }
+          final other = agents[index];
+          return TerminalSessionChip(
+            key: Key('terminal-session-${other.ref}'),
+            leading: IrisStatusDot(
+              status: other.question ? 'question' : other.status,
+              size: 9,
+            ),
+            label: other.name,
+            selected: other.ref == agent.ref,
+            onPressed: () => _selectAgent(other),
+          );
+        },
+      ),
+    );
+  }
+
+  // 더 보기 시트: GitHub, 내 키
+  Future<void> _openMore(RemoteAgent agent, {required bool canGitHub}) async {
+    final colors = context.iris;
+    Widget row(
+      String icon,
+      String label,
+      VoidCallback onTap, {
+      required Key key,
+      bool alert = false,
+    }) => InkWell(
+      key: key,
+      onTap: onTap,
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Row(
+          children: [
+            IrisIcon(icon, size: 22, color: colors.foreground2),
+            const SizedBox(width: 14),
+            Expanded(child: Text(label, style: const TextStyle(fontSize: 16))),
+            if (alert)
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: colors.blocked,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    await showIrisSheet<void>(
+      context: context,
+      horizontalPadding: 0,
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const IrisSheetGrabber(spaced: true),
+          if (canGitHub)
+            row(
+              'github-logo',
+              'GitHub',
+              () {
+                Navigator.of(sheetContext).pop();
+                showSourceControlSheet(
+                  context: context,
+                  session: widget.state.session,
+                  agent: agent,
+                );
+              },
+              key: const Key('terminal-more-github'),
+              alert: widget.githubFailed,
+            ),
+          if (_keys != null)
+            row('keyboard', '내 키', () {
+              Navigator.of(sheetContext).pop();
+              _openKeys();
+            }, key: const Key('terminal-more-keys')),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  void _openChat() {
+    unawaited(
+      Navigator.of(context).pushReplacement<void, void>(
+        MaterialPageRoute(
+          builder: (_) => AgentScreen(state: widget.state, agentRef: _agentRef),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openBrowser() async {
+    final tab = await widget.state.browserTabForAgent(_agentRef);
+    if (!mounted) return;
+    if (tab == null) {
+      showIrisToast(
+        context,
+        '이 스페이스에 브라우저 탭이 없습니다.',
+        tone: IrisToastTone.error,
+      );
+      return;
+    }
+    await Navigator.of(context).pushReplacement<void, void>(
+      MaterialPageRoute(
+        builder: (_) => BrowserScreen(
+          state: widget.state,
+          agentRef: _agentRef,
+          tabRef: tab.ref,
+          onOpenTerminal: () =>
+              Navigator.of(context).pushReplacement<void, void>(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      TerminalScreen(state: widget.state, agentRef: _agentRef),
+                ),
+              ),
+        ),
+      ),
+    );
+  }
+
+  Widget _appBar(RemoteAgent agent) {
+    final colors = context.iris;
+    final canBrowser = widget.state.supports('browser.tabs');
+    final canGitHub =
+        agent.kind != 'terminal' &&
+        (widget.state.supports('git.changes') ||
+            widget.state.supports('github.pr'));
+    return SizedBox(
+      height: 56,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Row(
+          children: [
+            TerminalIconButton(
+              key: const Key('session-back'),
+              icon: 'arrow-left',
+              tooltip: '뒤로',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '터미널',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        height: 22 / 17,
+                      ),
+                    ),
+                    Text(
+                      _columns == null
+                          ? agent.name
+                          : '${agent.name} · ${_history?.columns ?? _columns}열',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 18 / 12.5,
+                        color: colors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (agent.kind != 'terminal')
+              TerminalIconButton(
+                key: const Key('session-chat'),
+                icon: 'chat-circle-dots',
+                tooltip: '대화로 이동',
+                onPressed: widget.onOpenChat ?? _openChat,
+              ),
+            if (canBrowser)
+              TerminalIconButton(
+                key: const Key('session-browser'),
+                icon: 'globe',
+                tooltip: '브라우저로 이동',
+                onPressed:
+                    widget.onOpenBrowser ?? () => unawaited(_openBrowser()),
+              ),
+            if (canGitHub || _keys != null)
+              TerminalIconButton(
+                key: const Key('terminal-more'),
+                icon: 'dots-three',
+                tooltip: '더 보기',
+                onPressed: () => _openMore(agent, canGitHub: canGitHub),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _screenArea(RemoteAgent agent, bool asking) {
+    final colors = context.iris;
+    final terminalColors = TerminalColors(
+      foreground: colors.terminalFg,
+      background: colors.terminal,
+      dim: colors.termDim,
+      red: colors.termRed,
+      green: colors.termGreen,
+      yellow: colors.termYellow,
+      blue: colors.termBlue,
+      cyan: colors.termCyan,
+      cursor: colors.termSelection,
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.terminal,
+        border: Border.symmetric(
+          horizontal: BorderSide(color: colors.separator),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          Widget message(String text) => Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                text,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: colors.muted),
+              ),
+            ),
+          );
+          final Widget body;
+          final columns = _history?.columns ?? _columns;
+          final rows = _history?.lineCount ?? _rows;
+          if (_error != null) {
+            body = message(_error!);
+          } else if (_columns == null || _rows == null) {
+            body = message('터미널 화면 크기를 확인할 수 없습니다. 다시 연결하세요.');
+          } else if (columns! * rows! > 262144) {
+            body = message('터미널 화면이 너무 커 표시할 수 없습니다.');
+          } else {
+            body = _grid(constraints, columns, rows, terminalColors);
+          }
+          return Stack(
+            children: [
+              Positioned.fill(child: body),
+              if (_stale && _error == null)
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  bottom: 10,
+                  child: IrisFadeIn(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colors.level3,
+                        borderRadius: BorderRadius.circular(IrisRadius.card),
+                      ),
+                      child: Text(
+                        terminalErrorMessage('terminal-screen-stale'),
+                        key: const Key('terminal-stale-notice'),
+                        style: TextStyle(
+                          color: colors.foreground2,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (asking)
+                const Positioned(
+                  left: 12,
+                  top: 10,
+                  child: TerminalDetectChip(),
+                ),
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Opacity(
+                  opacity: .92,
+                  child: Column(
+                    children: [
+                      TerminalIconButton(
+                        key: const Key('terminal-line-up'),
+                        tooltip: '한 줄 위로',
+                        background: colors.level2,
+                        ring: true,
+                        onPressed: () => _step(-1),
+                        child: RotatedBox(
+                          quarterTurns: 2,
+                          child: IrisIcon(
+                            'caret-down',
+                            size: 20,
+                            color: colors.foreground2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TerminalIconButton(
+                        key: const Key('terminal-line-down'),
+                        tooltip: '한 줄 아래로',
+                        background: colors.level2,
+                        ring: true,
+                        onPressed: () => _step(1),
+                        child: IrisIcon(
+                          'caret-down',
+                          size: 20,
+                          color: colors.foreground2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _grid(
+    BoxConstraints constraints,
+    int columns,
+    int rows,
+    TerminalColors terminalColors,
+  ) {
+    final width = constraints.maxWidth - 24;
+    final gridWidth = width;
+    final mouseEnabled = _mouseMode && _history == null;
+    final fontSize = terminalFontSize(gridWidth, columns, max: 16);
+    _cellWidth = gridWidth / columns;
+    _cellHeight = fontSize * 1.42;
+    final grid = parseTerminalGrid(
+      _history?.text ?? _screen,
+      columns: columns,
+      rows: rows,
+      colors: terminalColors,
+    );
+    // 실시간 화면은 마지막으로 글자가 있는 줄이 아래 끝에 오도록 따라감
+    final lastRow = grid.cells.lastIndexWhere(
+      (row) => row.any((cell) => cell.value.trim().isNotEmpty),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_stick || _history != null || !_vScroll.hasClients) {
+        return;
+      }
+      final position = _vScroll.position;
+      final target =
+          (8 + (lastRow + 1) * _cellHeight - constraints.maxHeight + 8).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          );
+      if ((position.pixels - target).abs() > 1) _vScroll.jumpTo(target);
+    });
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notice) {
+        if (notice.metrics.axis != Axis.vertical) return false;
+        if (notice is ScrollUpdateNotification && notice.dragDetails != null) {
+          final follow =
+              notice.metrics.pixels >= notice.metrics.maxScrollExtent - 4;
+          if (follow != _stick) {
+            _stick = follow;
+            // 스크롤 알림은 레이아웃 중일 수 있어 다음 프레임에 표시를 갱신
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() {});
+            });
+          }
+        }
+        if (!_mouseMode &&
+            _history == null &&
+            (notice is OverscrollNotification && notice.overscroll < 0 ||
+                notice is ScrollUpdateNotification &&
+                    notice.metrics.pixels < notice.metrics.minScrollExtent)) {
+          unawaited(_loadScrollback());
+        }
+        return false;
+      },
+      child: SingleChildScrollView(
+        controller: _vScroll,
+        physics: mouseEnabled
+            ? const NeverScrollableScrollPhysics()
+            : const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight - 16),
+          child: Align(
+            alignment: Alignment.bottomLeft,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (detail) => _lastPoint = detail.localPosition,
+                onDoubleTapDown: mouseEnabled
+                    ? (detail) => _lastPoint = detail.localPosition
+                    : null,
+                onTap: () => mouseEnabled
+                    ? _mouse('click', _lastPoint)
+                    : _selectAt(_lastPoint),
+                onDoubleTap: mouseEnabled
+                    ? () => _mouse('double', _lastPoint)
+                    : null,
+                onLongPressStart: (detail) {
+                  _lastPoint = detail.localPosition;
+                  _dragging = false;
+                },
+                onLongPressMoveUpdate: mouseEnabled
+                    ? (detail) {
+                        if (!_dragging) {
+                          _dragging = true;
+                          unawaited(_mouse('down', _lastPoint));
+                        }
+                        _lastPoint = detail.localPosition;
+                        _mouseMotion('drag', _lastPoint);
+                      }
+                    : null,
+                onLongPressEnd: (detail) {
+                  if (_dragging) {
+                    unawaited(_mouse('up', detail.localPosition));
+                    _dragging = false;
+                  } else {
+                    unawaited(_copyScreen(grid));
+                  }
+                },
+                onPanUpdate: mouseEnabled
+                    ? (detail) {
+                        if (detail.delta.dy == 0) return;
+                        _mouseMotion(
+                          'wheel',
+                          detail.localPosition,
+                          dy: -detail.delta.dy.sign.toInt(),
+                        );
+                      }
+                    : null,
+                child: Semantics(
+                  label: grid.plainText,
+                  child: CustomPaint(
+                    key: const Key('terminal-output'),
+                    size: Size(gridWidth, rows * _cellHeight),
+                    painter: TerminalGridPainter(
+                      grid,
+                      fontSize,
+                      cursorColor: terminalColors.cursor,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _controls(RemoteAgent agent) {
+    final colors = context.iris;
+    final canInput = widget.state.supports('terminal.input');
+    final row =
+        _keys?.keys.take(5).toList(growable: false) ??
+        const <TerminalKeyButton>[];
+    final more =
+        (_keys?.keys.length ?? 0) > 5 ||
+        widget.state.supports('terminal.keys.set');
+    final hasText = _input.text.isNotEmpty;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: TerminalSegment(
+                  selected: _history == null && _stick ? 0 : 1,
+                  items: [
+                    TerminalSegmentItem(
+                      label: '자동 따라가기',
+                      leading: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: colors.teal,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      onPressed: _showLive,
+                    ),
+                    TerminalSegmentItem(
+                      label: '기록 보기',
+                      leading: IrisIcon(
+                        'clock-counter-clockwise',
+                        size: 16,
+                        color: _history == null
+                            ? colors.muted
+                            : colors.foreground,
+                      ),
+                      onPressed: widget.state.supports('terminal.scrollback')
+                          ? () {
+                              if (_history == null) _loadScrollback();
+                            }
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              TerminalIconButton(
+                key: const Key('terminal-open-keyboard'),
+                icon: 'keyboard',
+                size: 20,
+                tooltip: '키 입력 열기',
+                background: colors.level2,
+                onPressed: canInput ? _inputFocus.requestFocus : null,
+              ),
+            ],
+          ),
+        ),
+        if (row.isNotEmpty)
+          Padding(
+            key: const Key('terminal-key-row'),
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
+            child: Row(
+              children: [
+                for (final (index, key) in row.indexed) ...[
+                  if (index > 0) const SizedBox(width: 5),
+                  Expanded(
+                    flex: key.key == '/compact' ? 2 : 1,
+                    child: TerminalKeyCap(
+                      label: key.label,
+                      onPressed: () => _pressKey(key),
+                    ),
+                  ),
+                ],
+                if (more) ...[
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: TerminalKeyCap(
+                      icon: 'dots-three',
+                      tooltip: '키 더 보기',
+                      onPressed: _openKeys,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        Padding(
+          key: const Key('terminal-composer'),
+          padding: EdgeInsets.fromLTRB(8, 4, 8, 8 + irisBottomInset(context)),
+          child: Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 44,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: colors.level1,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colors.line2),
+                  ),
+                  child: Row(
+                    children: [
+                      if (hasText) ...[
+                        Text(
+                          '❯',
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 14,
+                            color: colors.termGreen,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(
+                        child: TextField(
+                          key: const Key('terminal-input'),
+                          controller: _input,
+                          focusNode: _inputFocus,
+                          enabled: canInput,
+                          style: TextStyle(
+                            color: colors.foreground,
+                            fontFamily: 'monospace',
+                            fontSize: 14,
+                          ),
+                          cursorColor: colors.strong,
+                          decoration: InputDecoration(
+                            hintText: '명령 입력',
+                            hintStyle: TextStyle(
+                              color: colors.muted,
+                              fontFamily: 'monospace',
+                              fontSize: 14,
+                            ),
+                            isCollapsed: true,
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            disabledBorder: InputBorder.none,
+                          ),
+                          onSubmitted: (_) => _sendText(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (hasText) ...[
+                const SizedBox(width: 6),
+                TerminalRunButton(onPressed: canInput ? _sendText : null),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _assist(RemoteAgent agent, List<RemoteRequest> questions) {
+    Widget nav(String label, String key) => Expanded(
+      child: TerminalKeyCap(
+        label: label,
+        onPressed: () => _pressKey(
+          TerminalKeyButton(
+            id: 'nav-${key.toLowerCase()}',
+            label: label,
+            key: key,
+            modifiers: const KeyModifiers(),
+          ),
+        ),
+      ),
+    );
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * .5,
+      ),
+      child: TerminalAssistPanel(
+        bottomInset: irisBottomInset(context),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    for (final question in questions)
+                      TerminalQuestionCard(
+                        request: question,
+                        agentName: agent.name,
+                        session: widget.state.supports('terminal.select')
+                            ? widget.state.session
+                            : null,
+                        onOpen: () {
+                          _watch();
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              key: const Key('terminal-nav-keys'),
+              padding: const EdgeInsets.only(top: 10),
+              child: Row(
+                children: [
+                  nav('↑', 'ArrowUp'),
+                  const SizedBox(width: 6),
+                  nav('↓', 'ArrowDown'),
+                  const SizedBox(width: 6),
+                  nav('Enter', 'Enter'),
+                  const SizedBox(width: 6),
+                  nav('Esc', 'Escape'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -171,287 +966,26 @@ class _TerminalScreenState extends State<TerminalScreen> {
         final agents = widget.state.agents
             .where((item) => item.space == agent.space)
             .toList(growable: false);
-        final row =
-            _keys?.keys.take(5).toList(growable: false) ??
-            const <TerminalKeyButton>[];
-        return Scaffold(
-          backgroundColor: context.iris.terminal,
-          body: SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                ColoredBox(
-                  color: context.iris.background,
-                  child: IrisSessionHeader(
-                    title: agent.name,
-                    subtitle: agent.space,
-                    agentKind: agent.kind,
-                    mode: SessionMode.terminal,
-                    tabs: [
-                      for (final other in agents)
-                        IrisAgentTab(
-                          agent: other,
-                          selected: other.ref == agent.ref,
-                          onPressed: () => _selectAgent(other),
-                        ),
-                      const IrisShellTab(),
-                    ],
-                    onBack: () => Navigator.of(context).pop(),
-                    canTerminal: true,
-                    canChat: agent.kind != 'terminal',
-                    canBrowser:
-                        widget.onOpenBrowser != null &&
-                        widget.state.supports('browser.tabs'),
-                    onChat: () => Navigator.of(context).pop(),
-                    onTerminal: () {},
-                    onBrowser: widget.onOpenBrowser,
-                    onGitHub:
-                        agent.kind != 'terminal' &&
-                            (widget.state.supports('git.changes') ||
-                                widget.state.supports('github.pr'))
-                        ? () => showSourceControlSheet(
-                            context: context,
-                            session: widget.state.session,
-                            agent: agent,
-                          )
-                        : null,
-                    githubFailed: widget.githubFailed,
-                  ),
-                ),
-                if (_history != null)
-                  TextButton(
-                    onPressed: () => setState(() => _history = null),
-                    child: const Text('현재 화면으로'),
-                  ),
-                if (!_mouseMode && widget.state.supports('terminal.mouse'))
-                  const Text(
-                    '이 화면은 마우스 입력을 받지 않습니다',
-                    style: TextStyle(color: Color(0xffc9dcea), fontSize: 12),
-                  ),
-                if (_result != null)
-                  Text(
-                    _result!,
-                    style: const TextStyle(
-                      color: Color(0xffc9dcea),
-                      fontSize: 13,
-                    ),
-                  ),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      if (_error != null) {
-                        return Center(
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(color: Color(0xffc9dcea)),
-                          ),
-                        );
-                      }
-                      if (_columns == null || _rows == null) {
-                        return const Center(
-                          child: Text(
-                            '터미널 화면 크기를 확인할 수 없습니다. 다시 연결하세요.',
-                            style: TextStyle(color: Color(0xffc9dcea)),
-                          ),
-                        );
-                      }
-                      final width = constraints.maxWidth - 24;
-                      final columns = _history?.columns ?? _columns!;
-                      final rows = _history?.lineCount ?? _rows!;
-                      if (columns * rows > 262144) {
-                        return const Center(
-                          child: Text('터미널 화면이 너무 커 표시할 수 없습니다.'),
-                        );
-                      }
-                      final mouseEnabled = _mouseMode && _history == null;
-                      final fontSize = terminalFontSize(width, columns);
-                      _cellWidth = width / columns;
-                      _cellHeight = fontSize * 1.35;
-                      final grid = parseTerminalGrid(
-                        _history?.text ?? _screen,
-                        columns: columns,
-                        rows: rows,
-                      );
-                      return NotificationListener<ScrollNotification>(
-                        onNotification: (notice) {
-                          if (!_mouseMode &&
-                              _history == null &&
-                              (notice is OverscrollNotification &&
-                                      notice.overscroll < 0 ||
-                                  notice is ScrollUpdateNotification &&
-                                      notice.metrics.pixels <
-                                          notice.metrics.minScrollExtent)) {
-                            unawaited(_loadScrollback());
-                          }
-                          return false;
-                        },
-                        child: SingleChildScrollView(
-                          physics: _mouseMode && _history == null
-                              ? const NeverScrollableScrollPhysics()
-                              : const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTapDown: (detail) =>
-                                _lastPoint = detail.localPosition,
-                            onDoubleTapDown: mouseEnabled
-                                ? (detail) => _lastPoint = detail.localPosition
-                                : null,
-                            onTap: () => mouseEnabled
-                                ? _mouse('click', _lastPoint)
-                                : _selectAt(_lastPoint),
-                            onDoubleTap: mouseEnabled
-                                ? () => _mouse('double', _lastPoint)
-                                : null,
-                            onLongPressStart: (detail) {
-                              _lastPoint = detail.localPosition;
-                              _dragging = false;
-                            },
-                            onLongPressMoveUpdate: mouseEnabled
-                                ? (detail) {
-                                    if (!_dragging) {
-                                      _dragging = true;
-                                      unawaited(_mouse('down', _lastPoint));
-                                    }
-                                    _lastPoint = detail.localPosition;
-                                    _mouseMotion('drag', _lastPoint);
-                                  }
-                                : null,
-                            onLongPressEnd: (detail) {
-                              if (_dragging) {
-                                unawaited(_mouse('up', detail.localPosition));
-                                _dragging = false;
-                              } else {
-                                unawaited(_copyScreen(grid));
-                              }
-                            },
-                            onPanUpdate: mouseEnabled
-                                ? (detail) {
-                                    if (detail.delta.dy == 0) return;
-                                    _mouseMotion(
-                                      'wheel',
-                                      detail.localPosition,
-                                      dy: -detail.delta.dy.sign.toInt(),
-                                    );
-                                  }
-                                : null,
-                            child: Semantics(
-                              label: grid.plainText,
-                              child: CustomPaint(
-                                key: const Key('terminal-output'),
-                                size: Size(width, rows * _cellHeight),
-                                painter: TerminalGridPainter(grid, fontSize),
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                if (row.isNotEmpty)
-                  Container(
-                    key: const Key('terminal-key-row'),
-                    height: 58,
-                    padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
-                    color: context.iris.terminal,
-                    child: Row(
-                      children: [
-                        for (final key in row) ...[
-                          if (key.key == '/compact')
-                            SizedBox(
-                              width: 88,
-                              child: _TerminalKey(
-                                keyButton: key,
-                                compact: true,
-                                onPressed: () => _pressKey(key),
-                              ),
-                            )
-                          else
-                            Expanded(
-                              child: _TerminalKey(
-                                keyButton: key,
-                                compact: true,
-                                onPressed: () => _pressKey(key),
-                              ),
-                            ),
-                          const SizedBox(width: 6),
-                        ],
-                        if ((_keys?.keys.length ?? 0) > 5 ||
-                            widget.state.supports('terminal.keys.set'))
-                          SizedBox(
-                            width: 48,
-                            child: _TerminalKey(
-                              icon: 'dots-three',
-                              onPressed: _openKeys,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                Container(
-                  key: const Key('terminal-composer'),
-                  height: 58 + irisBottomInset(context),
-                  padding: EdgeInsets.fromLTRB(
-                    12,
-                    10,
-                    12,
-                    irisBottomInset(context),
-                  ),
-                  color: context.iris.terminal,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          key: const Key('terminal-input'),
-                          controller: _input,
-                          enabled: widget.state.supports('terminal.input'),
-                          style: TextStyle(
-                            color: context.iris.foreground,
-                            fontSize: 17,
-                            height: 1.2,
-                            letterSpacing: -0.17,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: '터미널에 입력',
-                            hintStyle: TextStyle(
-                              color: context.iris.faint,
-                              fontSize: 17,
-                              height: 1.2,
-                              letterSpacing: -0.17,
-                            ),
-                            filled: true,
-                            fillColor: context.iris.level1,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 13,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: BorderSide.none,
-                            ),
-                          ),
-                          onSubmitted: (_) => _sendText(),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IrisRoundButton(
-                        icon: 'arrow-up',
-                        size: 48,
-                        backgroundColor: context.iris.brand,
-                        foregroundColor: context.iris.onBrand,
-                        tooltip: '보내기',
-                        onPressed: widget.state.supports('terminal.input')
-                            ? _sendText
-                            : null,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+        final questions = widget.state.terminalQuestions
+            .where((q) => q.agent == _agentRef)
+            .toList(growable: false);
+        return TerminalAgentMarker(
+          agentRef: _agentRef,
+          child: Scaffold(
+            backgroundColor: context.iris.background,
+            body: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  _appBar(agent),
+                  _sessionTabs(agent, agents),
+                  Expanded(child: _screenArea(agent, questions.isNotEmpty)),
+                  if (questions.isNotEmpty)
+                    _assist(agent, questions)
+                  else
+                    _controls(agent),
+                ],
+              ),
             ),
           ),
         );
@@ -467,9 +1001,14 @@ class _TerminalScreenState extends State<TerminalScreen> {
     final agent = _agentRef;
     try {
       final value = await widget.state.session.terminalScrollback(agent);
-      if (mounted && _agentRef == agent) setState(() => _history = value);
+      if (mounted && _agentRef == agent) {
+        setState(() {
+          _history = value;
+          _stick = false;
+        });
+      }
     } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      _say(error.message);
     } finally {
       _loadingHistory = false;
     }
@@ -512,7 +1051,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
           dy: dy,
         );
       } on RemoteFailure catch (error) {
-        if (mounted) setState(() => _result = error.message);
+        _say(error.message);
         final refreshed = await _watch();
         // 뗌 실패 뒤 최신 화면에서 한 번만 해제
         if (action == 'up' &&
@@ -542,7 +1081,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
               'up',
             );
           } on RemoteFailure catch (error) {
-            if (mounted) setState(() => _result = error.message);
+            _say(error.message);
           }
         }
       }
@@ -575,7 +1114,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         cell.row,
       );
     } on RemoteFailure catch (error) {
-      if (mounted) setState(() => _result = error.message);
+      _say(error.message);
       await _watch();
     }
   }
@@ -713,15 +1252,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
       final result = await widget.state.session.setTerminalKeys(keys);
       if (mounted) setState(() => _keys = result);
     } on Object catch (error) {
-      if (mounted) {
-        setState(
-          () => _result = error is RemoteFailure
-              ? error.message
-              : error is ProtocolException
-              ? error.message
-              : '컴퓨터과 연결이 끊겼습니다.',
-        );
-      }
+      _say(
+        error is RemoteFailure
+            ? error.message
+            : error is ProtocolException
+            ? error.message
+            : '컴퓨터와 연결이 끊겼습니다.',
+      );
     }
   }
 }
@@ -731,13 +1268,11 @@ class _TerminalKey extends StatelessWidget {
     this.keyButton,
     this.icon,
     this.subtitle,
-    this.compact = false,
     required this.onPressed,
   });
   final TerminalKeyButton? keyButton;
   final String? icon;
   final String? subtitle;
-  final bool compact;
   final VoidCallback onPressed;
 
   @override
@@ -763,25 +1298,19 @@ class _TerminalKey extends StatelessWidget {
             FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(
-                _keyDescription(keyButton!, compact: compact),
+                _keyDescription(keyButton!),
                 maxLines: 1,
                 softWrap: false,
                 style: TextStyle(
                   color: context.iris.foreground,
-                  fontSize:
-                      compact &&
-                          _keyDescription(keyButton!, compact: true).length > 6
-                      ? 13
-                      : compact
-                      ? 16
-                      : 15,
+                  fontSize: 15,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
           if (subtitle != null || keyButton != null)
             Text(
-              subtitle ?? _keyLabel(keyButton!, compact: compact),
+              subtitle ?? keyButton!.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -796,8 +1325,7 @@ class _TerminalKey extends StatelessWidget {
   );
 }
 
-String _keyDescription(TerminalKeyButton key, {bool compact = false}) {
-  if (compact && key.id == 'enter') return key.key;
+String _keyDescription(TerminalKeyButton key) {
   if (const {'enter', 'clear', 'status'}.contains(key.id)) {
     return '${key.key} ⏎';
   }
@@ -820,15 +1348,6 @@ String _keyDescription(TerminalKeyButton key, {bool compact = false}) {
     name,
   ];
   return parts.join();
-}
-
-String _keyLabel(TerminalKeyButton key, {required bool compact}) {
-  if (!compact) return key.label;
-  return switch (key.key) {
-    'Tab' when key.modifiers.shift => '모드',
-    'ArrowUp' => '이전',
-    _ => key.label,
-  };
 }
 
 class TerminalKeySettingsScreen extends StatefulWidget {
@@ -1208,11 +1727,68 @@ class TerminalKeyEditorSheet extends StatefulWidget {
   State<TerminalKeyEditorSheet> createState() => _TerminalKeyEditorSheetState();
 }
 
+// 서버가 이름으로 알아보는 키와 화면에 보일 글자
+const _namedKeyChoices = <(String, String)>[
+  ('Enter', '↵ Enter'),
+  ('Escape', 'Esc'),
+  ('Tab', 'Tab'),
+  ('Backspace', '⌫'),
+  ('Delete', '⌦'),
+  ('ArrowUp', '↑'),
+  ('ArrowDown', '↓'),
+  ('ArrowLeft', '←'),
+  ('ArrowRight', '→'),
+  ('Home', 'Home'),
+  ('End', 'End'),
+  ('PageUp', 'PgUp'),
+  ('PageDown', 'PgDn'),
+];
+const _letterKeyChoices = 'abcdefghijklmnopqrstuvwxyz';
+const _digitKeyChoices = '0123456789';
+const _symbolKeyChoices =
+    r'/-=[]\;,.'
+    "'";
+
+String _keyShown(String key) {
+  for (final (name, shown) in _namedKeyChoices) {
+    if (name == key) return shown;
+  }
+  return key.length == 1 ? key.toUpperCase() : key;
+}
+
+String _modifierMarks(KeyModifiers modifiers) =>
+    '${modifiers.ctrl ? '⌃' : ''}${modifiers.alt ? '⌥' : ''}'
+    '${modifiers.shift ? '⇧' : ''}${modifiers.cmd ? '⌘' : ''}';
+
+String _stepShown(TerminalKeyStep step) =>
+    '${_modifierMarks(step.modifiers)}${_keyShown(step.key)}';
+
+String _stepNamed(TerminalKeyStep step) =>
+    '${[if (step.modifiers.ctrl) 'Control', if (step.modifiers.alt) 'Option', if (step.modifiers.shift) 'Shift', if (step.modifiers.cmd) 'Command'].map((name) => '$name + ').join()}'
+    '${_keyShown(step.key)}';
+
 class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
+  static const _maxSteps = 8;
   late final _name = TextEditingController(text: widget.initialName);
-  late final _key = TextEditingController(text: widget.initialKey);
-  bool _text = false;
-  late bool _ctrl = widget.initialCtrl;
+  late final _text = TextEditingController(
+    text:
+        widget.initialKey.length > 1 &&
+            !_namedKeyChoices.any((choice) => choice.$1 == widget.initialKey)
+        ? widget.initialKey
+        : '',
+  );
+  late final List<TerminalKeyStep> _steps =
+      _text.text.isNotEmpty || widget.initialKey.isEmpty
+      ? []
+      : [
+          TerminalKeyStep(
+            key: widget.initialKey,
+            modifiers: KeyModifiers(ctrl: widget.initialCtrl),
+          ),
+        ];
+  late bool _asText = _text.text.isNotEmpty;
+  // 다음에 고를 키에 붙을 보조키
+  late bool _ctrl = _steps.isEmpty && widget.initialCtrl;
   bool _alt = false;
   bool _shift = false;
   bool _cmd = false;
@@ -1221,7 +1797,7 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
   void initState() {
     super.initState();
     _name.addListener(_refresh);
-    _key.addListener(_refresh);
+    _text.addListener(_refresh);
   }
 
   void _refresh() => setState(() {});
@@ -1229,9 +1805,47 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
   @override
   void dispose() {
     _name.dispose();
-    _key.dispose();
+    _text.dispose();
     super.dispose();
   }
+
+  void _addStep(String key) {
+    if (_steps.length >= _maxSteps) return;
+    setState(() {
+      _steps.add(
+        TerminalKeyStep(
+          key: key,
+          modifiers: KeyModifiers(
+            ctrl: _ctrl,
+            alt: _alt,
+            shift: _shift,
+            cmd: _cmd,
+          ),
+        ),
+      );
+      _ctrl = _alt = _shift = _cmd = false;
+    });
+  }
+
+  bool get _hasSent => _asText ? _text.text.isNotEmpty : _steps.isNotEmpty;
+
+  // 이름을 비워 두면 고른 키들이 이름이 된다
+  String get _autoName =>
+      _asText ? _text.text : _steps.map(_stepShown).join(' ');
+
+  String get _label {
+    final typed = _name.text.trim();
+    final value = typed.isEmpty ? _autoName : typed;
+    return value.length > 24 ? value.substring(0, 24) : value;
+  }
+
+  bool get _ready => _hasSent && _label.isNotEmpty;
+
+  String get _sentSummary => !_hasSent
+      ? '고른 키'
+      : _asText
+      ? _text.text
+      : _steps.map(_stepNamed).join(' → ');
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1283,22 +1897,8 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
           ),
         ),
       ),
-      const _Label('이름'),
-      const SizedBox(height: 8),
-      SizedBox(
-        height: 52,
-        width: double.infinity,
-        child: TextField(
-          key: const Key('key-name-input'),
-          controller: _name,
-          maxLength: 24,
-          style: const TextStyle(fontSize: 17, height: 1.2),
-          decoration: const InputDecoration(hintText: '기록 검색', counterText: ''),
-        ),
-      ),
-      const _Label('보낼 것'),
       Container(
-        margin: const EdgeInsets.only(top: 8),
+        margin: const EdgeInsets.only(top: 10),
         height: 44,
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
@@ -1309,54 +1909,136 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
           children: [
             _Choice(
               label: '키 조합',
-              selected: !_text,
-              onTap: () => setState(() => _text = false),
+              selected: !_asText,
+              onTap: () => setState(() => _asText = false),
             ),
             const SizedBox(width: 4),
             _Choice(
-              label: '글자',
-              selected: _text,
-              onTap: () => setState(() => _text = true),
+              label: '글자 입력',
+              selected: _asText,
+              onTap: () => setState(() => _asText = true),
             ),
           ],
         ),
       ),
-      if (!_text)
+      if (_asText)
         Padding(
-          padding: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.only(top: 12),
+          child: SizedBox(
+            height: 52,
+            width: double.infinity,
+            child: TextField(
+              key: const Key('key-value-input'),
+              controller: _text,
+              maxLength: 24,
+              decoration: InputDecoration(
+                hintText: '보낼 글자 (예: /compact)',
+                hintStyle: TextStyle(color: context.iris.muted, fontSize: 16),
+                counterText: '',
+              ),
+            ),
+          ),
+        )
+      else ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
           child: Row(
             children: [
-              _Modifier('⌃', _ctrl, () => setState(() => _ctrl = !_ctrl)),
+              _Modifier(
+                '⌃',
+                'Ctrl',
+                _ctrl,
+                () => setState(() => _ctrl = !_ctrl),
+              ),
               const SizedBox(width: 8),
-              _Modifier('⌥', _alt, () => setState(() => _alt = !_alt)),
+              _Modifier('⌥', 'Opt', _alt, () => setState(() => _alt = !_alt)),
               const SizedBox(width: 8),
-              _Modifier('⇧', _shift, () => setState(() => _shift = !_shift)),
+              _Modifier(
+                '⇧',
+                'Shift',
+                _shift,
+                () => setState(() => _shift = !_shift),
+              ),
               const SizedBox(width: 8),
-              _Modifier('⌘', _cmd, () => setState(() => _cmd = !_cmd)),
+              _Modifier('⌘', 'Cmd', _cmd, () => setState(() => _cmd = !_cmd)),
             ],
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: SizedBox(
+            key: const Key('key-steps'),
+            height: 40,
+            child: _steps.isEmpty
+                ? Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '아래에서 누를 키를 차례로 고르세요 (최대 $_maxSteps개)',
+                      style: TextStyle(
+                        color: context.iris.muted,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _steps.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 6),
+                    itemBuilder: (context, index) => _StepChip(
+                      label: _stepShown(_steps[index]),
+                      onRemove: () => setState(() => _steps.removeAt(index)),
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 168),
+          child: SingleChildScrollView(
+            key: const Key('key-picker'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _KeyGroup(
+                  title: '특수 키',
+                  choices: _namedKeyChoices,
+                  onPick: _addStep,
+                ),
+                _KeyGroup(
+                  title: '문자',
+                  choices: [
+                    for (final c in _letterKeyChoices.split(''))
+                      (c, c.toUpperCase()),
+                  ],
+                  onPick: _addStep,
+                ),
+                _KeyGroup(
+                  title: '숫자·기호',
+                  choices: [
+                    for (final c
+                        in (_digitKeyChoices + _symbolKeyChoices).split(''))
+                      (c, c),
+                  ],
+                  onPick: _addStep,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      const _Label('이름'),
       const SizedBox(height: 8),
       SizedBox(
         height: 52,
         width: double.infinity,
         child: TextField(
-          key: const Key('key-value-input'),
-          controller: _key,
+          key: const Key('key-name-input'),
+          controller: _name,
           maxLength: 24,
+          style: const TextStyle(fontSize: 17, height: 1.2),
           decoration: InputDecoration(
-            hintText: _text ? '/compact' : 'R',
-            hintStyle: TextStyle(
-              color: context.iris.foreground,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-            ),
-            suffixText: _text ? null : '누를 키',
-            suffixStyle: TextStyle(
-              color: context.iris.muted,
-              fontSize: 14,
-              fontWeight: FontWeight.w400,
-            ),
+            hintText: _autoName.isEmpty ? '비워 두면 고른 키가 이름이 됩니다' : _autoName,
+            hintStyle: TextStyle(color: context.iris.muted, fontSize: 16),
             counterText: '',
           ),
         ),
@@ -1376,6 +2058,7 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
             Container(
               width: 72,
               height: 58,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
                 color: context.iris.level2,
                 borderRadius: BorderRadius.circular(12),
@@ -1384,14 +2067,18 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    '${_ctrl ? '⌃' : ''}${_key.text.isEmpty ? 'R' : _key.text}',
+                    _autoName.isEmpty ? '?' : _autoName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   Text(
-                    _name.text.isEmpty ? '미리 보기' : _name.text,
+                    _label.isEmpty ? '미리 보기' : _label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: context.iris.muted, fontSize: 10.5),
                   ),
                 ],
@@ -1399,36 +2086,26 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) => OverflowBox(
-                  alignment: Alignment.centerLeft,
-                  minWidth: constraints.maxWidth / 0.94,
-                  maxWidth: constraints.maxWidth / 0.94,
-                  child: Transform.scale(
-                    scaleX: 0.94,
-                    alignment: Alignment.centerLeft,
-                    child: Text.rich(
-                      TextSpan(
-                        text: '누르면 ${widget.macName} 터미널에 ',
-                        children: [
-                          TextSpan(
-                            text:
-                                '${_ctrl ? 'Control + ' : ''}${_key.text.isEmpty ? 'R' : _key.text}',
-                            style: TextStyle(
-                              color: context.iris.foreground,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const TextSpan(text: '을 보냅니다.'),
-                        ],
-                      ),
+              child: Text.rich(
+                TextSpan(
+                  text: '누르면 ${widget.macName} 터미널로 ',
+                  children: [
+                    TextSpan(
+                      text: _sentSummary,
                       style: TextStyle(
-                        color: context.iris.muted,
-                        fontSize: 14,
-                        height: 1.5,
+                        color: context.iris.foreground,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ),
+                    TextSpan(text: _asText ? ' 글자를 보냅니다.' : ' 키를 보냅니다.'),
+                  ],
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: context.iris.muted,
+                  fontSize: 14,
+                  height: 1.5,
                 ),
               ),
             ),
@@ -1436,39 +2113,143 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
         ),
       ),
       const SizedBox(height: 14),
-      Row(
-        children: [
-          SizedBox(
-            width: 120,
-            child: IrisButton(label: '나머지에', expand: false, onPressed: _finish),
-          ),
-          const SizedBox(width: 10),
-          IrisButton(
-            label: '앞줄에 추가',
-            tone: IrisButtonTone.primary,
-            onPressed: _finish,
-          ),
-        ],
+      IrisButton(
+        label: _hasSent ? '추가' : '키를 고르세요',
+        tone: IrisButtonTone.primary,
+        onPressed: _ready ? _finish : null,
       ),
     ],
   );
 
   void _finish() {
-    final name = _name.text.trim();
-    final key = _key.text;
-    if (name.isEmpty || key.isEmpty) return;
+    if (!_ready) return;
     final id = 'custom-${DateTime.now().microsecondsSinceEpoch}';
+    if (_asText) {
+      Navigator.of(context).pop(
+        TerminalKeyButton(
+          id: id,
+          label: _label,
+          key: _text.text,
+          modifiers: const KeyModifiers(),
+        ),
+      );
+      return;
+    }
     Navigator.of(context).pop(
       TerminalKeyButton(
         id: id,
-        label: name,
-        key: key,
-        modifiers: _text
-            ? const KeyModifiers()
-            : KeyModifiers(ctrl: _ctrl, alt: _alt, shift: _shift, cmd: _cmd),
+        label: _label,
+        key: _steps.first.key,
+        modifiers: _steps.first.modifiers,
+        then: _steps.sublist(1),
       ),
     );
   }
+}
+
+class _StepChip extends StatelessWidget {
+  const _StepChip({required this.label, required this.onRemove});
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.only(left: 12, right: 4),
+    decoration: BoxDecoration(
+      color: context.iris.brand.withValues(alpha: 0.14),
+      border: Border.all(color: context.iris.brand, width: 1.2),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: context.iris.brand,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        SizedBox(
+          width: 32,
+          height: 32,
+          child: IconButton(
+            tooltip: '$label 빼기',
+            padding: EdgeInsets.zero,
+            onPressed: onRemove,
+            icon: Icon(Icons.close, size: 16, color: context.iris.brand),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _KeyGroup extends StatelessWidget {
+  const _KeyGroup({
+    required this.title,
+    required this.choices,
+    required this.onPick,
+  });
+  final String title;
+  final List<(String, String)> choices;
+  final ValueChanged<String> onPick;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+        child: Text(
+          title,
+          style: TextStyle(
+            color: context.iris.muted,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final (key, shown) in choices)
+            _KeyChip(label: shown, onTap: () => onPick(key)),
+        ],
+      ),
+      const SizedBox(height: 6),
+    ],
+  );
+}
+
+class _KeyChip extends StatelessWidget {
+  const _KeyChip({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 40,
+    child: TextButton(
+      onPressed: onTap,
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(44, 40)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 10),
+        ),
+        backgroundColor: WidgetStatePropertyAll(context.iris.level2),
+        foregroundColor: WidgetStatePropertyAll(context.iris.foreground),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+      ),
+    ),
+  );
 }
 
 class _Label extends StatelessWidget {
@@ -1526,8 +2307,9 @@ class _Choice extends StatelessWidget {
 }
 
 class _Modifier extends StatelessWidget {
-  const _Modifier(this.label, this.selected, this.onTap);
-  final String label;
+  const _Modifier(this.symbol, this.name, this.selected, this.onTap);
+  final String symbol;
+  final String name;
   final bool selected;
   final VoidCallback onTap;
   @override
@@ -1537,6 +2319,7 @@ class _Modifier extends StatelessWidget {
       child: TextButton(
         onPressed: onTap,
         style: ButtonStyle(
+          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
           backgroundColor: WidgetStatePropertyAll(
             selected
                 ? context.iris.brand.withValues(alpha: 0.14)
@@ -1554,9 +2337,12 @@ class _Modifier extends StatelessWidget {
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
-        child: Text(
-          label,
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w400),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(symbol, style: const TextStyle(fontSize: 19, height: 1.1)),
+            Text(name, style: const TextStyle(fontSize: 10.5, height: 1.2)),
+          ],
         ),
       ),
     ),

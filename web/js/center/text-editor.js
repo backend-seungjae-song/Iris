@@ -3,7 +3,7 @@ import { pathBasename } from "../core/host-path.js";
 // 제공 API: initTextEditor, 일반 파일 렌더·저장·dirty 함수와 Monaco 로드·상태 접근자.
 // 의존 대상: core/markdown, sheet 편집·렌더·액션, center/file-routing과 tab-close를 같은 영역 import로 사용한다.
 // 유지 조건: 파일별 undo·커서 보존, 외부 변경 충돌 선택, Cmd/Ctrl 저장, fs.write 경로와 기존 분기·순서.
-// 영향 범위: 주입받는 $·esc·cssEsc·extOf·fileview·tabstrip·withFileViewTransition·bindAgentKeys·wsSend·isFileLikeKind·showToast와 tab-store·렌더 소유 상태 접근자.
+// 영향 범위: 주입받는 $·esc·cssEsc·extOf·fileview·withFileViewTransition·bindAgentKeys·wsSend·isFileLikeKind·showToast와 tab-store·렌더 소유 상태 접근자.
 
 import { fileKindOf } from "../core/file-kinds.js";
 import { isMarkdownExtension, markdownWebLink } from "../core/markdown.js";
@@ -13,13 +13,31 @@ import { registerEditorHost, updateEditorHost } from "../core/editor-hosts.js";
 import { bindKeymapAction, shortcutLabel } from "../core/monaco-keys.js";
 import { subscribeKeymap } from "../core/keymap.js";
 import { bindTabCloseTextEditor } from "./tab-close.js";
-import { getActiveTabId, getCenterSpace, getCurrentTabs } from "./tab-store.js";
+import { getActiveTabId, isTabVisible, getCenterSpace, getCurrentTabs } from "./tab-store.js";
+import { paneIndex, paneLayout } from "./pane-store.js";
+import { filePane, paneRows } from "./pane-view.js";
+import { renderTabs, showActiveTab } from "./tabs.js";
 
-let $, esc, cssEsc, extOf, fileview, tabstrip;
+let $, esc, cssEsc, extOf, fileview;
 let withFileViewTransition, bindAgentKeys, wsSend, isFileLikeKind, showToast;
 let getRenderedFileOwner, getRenderedFileToken, openWebLink;
 let initialized = false;
-let fileHostTab = null, fileHostToken = null;
+const editorSlots = new Map();
+const wiredFilePanes = new WeakSet();
+const focusedPane = () => paneLayout(getCenterSpace())?.focus || 0;
+function editorSlot(pane = focusedPane()) {
+  if (!editorSlots.has(pane)) editorSlots.set(pane, { pane, editor: null, ready: null, host: null, tab: null, token: null });
+  return editorSlots.get(pane);
+}
+const fileHostId = (pane) => pane === 0 ? "file" : `file:${pane}`;
+const viewStateKey = (pane, path) => `${pane}\0${path}`;
+function fileRoot(pane) { return filePane(pane) || fileview; }
+function wireFilePane(pane) {
+  const root = fileRoot(pane);
+  if (wiredFilePanes.has(root)) return;
+  wiredFilePanes.add(root);
+  root.addEventListener("click", (event) => fileviewClickHandler(event, pane));
+}
 
 // 막대 도구는 선 아이콘을 쓴다. rail 아이콘과 같은 형식이고 검사가 rail 쪽에서 이미 강제한다.
 // 글자 라벨("미니맵"·"줄바꿈")을 늘어놓으면 모드 버튼과 굵기·길이가 섞여 무엇이 도구인지
@@ -34,23 +52,21 @@ const ICON_MINIMAP = svg('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/
 export const ICON_WRAP = svg('<path d="M2 2.25h12"/><path d="M2 6.75h9.5a2.5 2.5 0 0 1 0 5H8"/>'
   + '<path d="m9.5 9.75 -1.5 2 1.5 2"/><path d="M2 11.25h3"/>');
 
-function fileHostEditable() {
-  return !!(fileHostTab && fileHostTab === getRenderedFileOwner() && fileHostToken === getRenderedFileToken()
-    && fileHostTab.id === getActiveTabId(getCenterSpace())
-    && !callHook("mdpreview.presents", fileHostTab)
-    && monacoEditor?.getModel() === monacoModels.get(fileHostTab.path));
+function fileHostEditable(pane = focusedPane()) {
+  const slot = editorSlot(pane), fileHostTab = slot.tab;
+  const active = paneLayout(getCenterSpace())?.panes[pane]?.active ?? getActiveTabId(getCenterSpace());
+  return !!(fileHostTab && fileHostTab === getRenderedFileOwner(pane) && slot.token === getRenderedFileToken(pane)
+    && fileHostTab.id === active
+    && !callHook("mdpreview.presents", fileHostTab, pane)
+    && slot.editor?.getModel() === monacoModels.get(fileHostTab.path));
 }
-
-// 서식 막대를 붙일지 정하는 조건은 현재 파일이 마크다운인지다.
-// 확장자 판정은 앱 셸의 함수를 그대로 쓴다(md-preview 와 같은 함수). 여기서 다시 구현하면
-// 점 없는 이름·숨김 파일에서 두 곳의 판정이 달라진다.
-function fileHostMarkdown() {
+function fileHostMarkdown(pane = focusedPane()) {
+  const fileHostTab = editorSlot(pane).tab;
   return !!(fileHostTab && isMarkdownExtension(extOf(String(fileHostTab.path || ""))));
 }
-
-function syncFileHost() {
-  updateEditorHost("file", { editable: fileHostEditable(), markdown: fileHostMarkdown(),
-    barEl: fileview.querySelector("[data-editor-tools]") });
+function syncFileHost(pane = focusedPane()) {
+  updateEditorHost(fileHostId(pane), { editable: fileHostEditable(pane), markdown: fileHostMarkdown(pane),
+    barEl: fileRoot(pane).querySelector("[data-editor-tools]") });
 }
 
 // 마우스를 올렸을 때 뜨는 안내로, 이름과 현재 단축키를 보여준다. 아이콘만 있는 버튼은
@@ -63,15 +79,17 @@ export function tipText(label, keyId) {
 }
 // 안내 문구는 켜짐 여부와 무관하고 단축키 표에만 의존하므로 prefs 동기화와 분리한다.
 // 한 함수에 섞으면 그 함수를 따로 검사할 때 여기 이름들까지 알아야 한다.
-function syncFileTips() {
-  for (const button of fileview.querySelectorAll("[data-editor-pref]")) {
+function syncFileTips(pane) {
+  if (pane === undefined) { for (const key of editorSlots.keys()) syncFileTips(key); return; }
+  for (const button of fileRoot(pane).querySelectorAll("[data-editor-pref]")) {
     const key = button.dataset.editorPref;
     button.dataset.tip = tipText(PREF_LABEL[key] || key, PREF_KEY_ID[key]);
   }
 }
-function syncFilePrefs() {
-  monacoEditor?.updateOptions(monacoPrefOpts("file"));
-  for (const button of fileview.querySelectorAll("[data-editor-pref]")) {
+function syncFilePrefs(pane) {
+  if (pane === undefined) { for (const key of editorSlots.keys()) syncFilePrefs(key); return; }
+  editorSlot(pane).editor?.updateOptions(monacoPrefOpts("file"));
+  for (const button of fileRoot(pane).querySelectorAll("[data-editor-pref]")) {
     const enabled = editorPref("file", button.dataset.editorPref);
     button.classList.toggle("on", enabled);
     button.setAttribute("aria-pressed", String(enabled));
@@ -81,9 +99,9 @@ function syncFilePrefs() {
 // 파일 뷰의 편집 엔진은 VSCode 의 Monaco 를 그대로 쓰고, 여기서는 연결만 한다.
 // 파일마다 모델을 만들어 탭 전환 시 교체하고(실행취소·커서가 파일별로 보존된다), 변경을 draft에
 // 반영하고, 저장을 기존 fs.write 경로로 넘긴다. 하이라이트·검색·다중커서·접기·IME는 엔진이 담당한다.
-let monacoEditor = null, monacoReady = null, monacoLibReady = null, monacoHost = null, monacoLoadContext = null;
+let monacoLibReady = null, monacoLoadContext = null;
 const monacoModels = new Map();   // 절대경로 → ITextModel
-const monacoViewState = new Map(); // 절대경로 → 커서·스크롤 상태
+const monacoViewState = new Map(); // 칸·절대경로 → 커서·스크롤 상태
 
 // 모델에 들어가는 텍스트가 사용자 입력인지 구분한다. 코드가 넣는 동안은 아니다.
 // draft 는 사용자가 고쳤다는 뜻만 가져야 한다. 외부 내용을 모델에 넣을 때 변경 알림이
@@ -108,7 +126,7 @@ export function resetModelTextExternally(path, text) {
 }
 
 export function initTextEditor(deps) {
-  ({ $, esc, cssEsc, extOf, fileview, tabstrip,
+  ({ $, esc, cssEsc, extOf, fileview,
     withFileViewTransition, bindAgentKeys, wsSend, isFileLikeKind, showToast,
     getRenderedFileOwner, getRenderedFileToken, openWebLink } = deps);
   bindTabCloseTextEditor({
@@ -118,26 +136,38 @@ export function initTextEditor(deps) {
   });
   if (initialized) return;
   initialized = true;
-  fileview.addEventListener("click", fileviewClickHandler);
+  wireFilePane(0);
   subscribeEditorPrefs((scope) => { if (scope === "file") syncFilePrefs(); });
   // 사용자가 키를 바꾸면 안내도 함께 갱신한다.
   subscribeKeymap(() => syncFileTips());
 }
 
-function monacoHostEl() {
-  if (!monacoHost) {
-    monacoHost = document.createElement("div");
-    monacoHost.id = "editor-host";
-    monacoHost.style.cssText = "position:absolute;inset:0;";
-    // body에 붙이지 않는다. inset:0 절대배치라 body에 있으면 창 전체를 덮는다. 파일을 열 때는
-    // 곧바로 파일 뷰로 옮겨지지만, 다른 곳에서 편집기를 먼저 만들면 옮기는 코드가 없어 그대로
-    // 남아 화면 전체를 가린다. 붙이는 것은 파일 뷰(#editor-wrap)가 한다.
+function monacoHostEl(pane = focusedPane()) {
+  const slot = editorSlot(pane);
+  if (!slot.host) {
+    slot.host = document.createElement("div");
+    slot.host.className = "editor-host";
+    slot.host.style.cssText = "position:absolute;inset:0;";
   }
-  return monacoHost;
+  return slot.host;
 }
 export function getMonacoModels() { return monacoModels; }
 export function getMonacoViewState() { return monacoViewState; }
-export function getMonacoEditor() { return monacoEditor; }
+export function getMonacoEditor(pane = focusedPane()) { return editorSlot(pane).editor; }
+export function transferFilePane(from = 1) {
+  if (from !== 1) return;
+  const tabs = getCurrentTabs(), paths = new Set(tabs.map((tab) => tab.path).filter(Boolean));
+  const source = editorSlots.get(from), model = source?.editor?.getModel();
+  if (source?.tab && tabs.includes(source.tab) && model?.uri?.fsPath === source.tab.path) {
+    monacoViewState.set(viewStateKey(from, source.tab.path), source.editor.saveViewState());
+  }
+  for (const path of paths) {
+    const key = viewStateKey(from, path);
+    if (monacoViewState.has(key)) monacoViewState.set(viewStateKey(0, path), monacoViewState.get(key));
+  }
+  editorSlots.get(0)?.editor?.setModel(null);
+  callHook("mdpreview.paneCollapsed", from);
+}
 export function getMonacoRuntime() { return window.monaco; }
 export function monacoTheme() {
   const cs = getComputedStyle(document.documentElement);
@@ -198,24 +228,25 @@ export function ensureMonacoLib() {
     const sc = document.createElement("script");
     sc.src = "/vendor/monaco/vs/loader.js";
     sc.onload = boot;
-    const { owner, token } = monacoLoadContext || {};
+    const { owner, token, pane = 0 } = monacoLoadContext || {};
     sc.onerror = () => {
-      if (owner !== getRenderedFileOwner()) return;
-      if (token !== getRenderedFileToken()) return;
-      withFileViewTransition(owner, { expectedOwner: owner, expectedToken: token }, () => {
-        fileview.innerHTML = '<div class="fv-loading">편집기(Monaco)를 불러오지 못했습니다(web/vendor/monaco 확인).</div>';
+      if (owner !== getRenderedFileOwner(pane)) return;
+      if (token !== getRenderedFileToken(pane)) return;
+      withFileViewTransition(owner, { expectedOwner: owner, expectedToken: token, pane }, () => {
+        fileRoot(pane).innerHTML = '<div class="fv-loading">편집기(Monaco)를 불러오지 못했습니다(web/vendor/monaco 확인).</div>';
       });
     };
     document.head.appendChild(sc);
   });
   return monacoLibReady;
 }
-// 파일 편집기. 호출자는 부르기 전에 호스트를 파일 뷰에 붙여둔다(renderFileView의 #editor-wrap).
-function ensureMonaco(owner, token) {
-  if (monacoReady) return monacoReady;
-  monacoLoadContext = { owner, token };
-  monacoReady = ensureMonacoLib().then(() => {
-    monacoEditor = monaco.editor.create(monacoHostEl(), {
+// 칸별 호스트 부착 후 편집기 생성
+function ensureMonaco(owner, token, pane) {
+  const slot = editorSlot(pane);
+  if (slot.ready) return slot.ready;
+  monacoLoadContext = { owner, token, pane };
+  slot.ready = ensureMonacoLib().then(() => {
+    const monacoEditor = slot.editor = monaco.editor.create(monacoHostEl(pane), {
       theme: monacoTheme(), automaticLayout: true, fontSize: 12.5,
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim(),
       ...monacoPrefOpts("file"), scrollBeyondLastLine: false, renderWhitespace: "selection",
@@ -230,47 +261,48 @@ function ensureMonaco(owner, token) {
     monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveActiveFile());
     monacoEditor.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyS, () => saveActiveFile());
     bindAgentKeys(monacoEditor);
-    registerEditorHost({ id: "file", editor: monacoEditor, kind: "file", editable: false, markdown: false, barEl: null });
-    monacoEditor.onDidChangeModel(syncFileHost);
-    monacoEditor.onDidFocusEditorText(syncFileHost);
-    bindKeymapAction(monacoEditor, "editor-minimap", () => { if (fileHostEditable()) toggleEditorPref("file", "minimap"); });
-    bindKeymapAction(monacoEditor, "editor-wrap", () => { if (fileHostEditable()) toggleEditorPref("file", "wrap"); });
+    registerEditorHost({ id: fileHostId(pane), editor: monacoEditor, kind: "file", editable: false, markdown: false, barEl: null });
+    monacoEditor.onDidChangeModel(() => syncFileHost(pane));
+    monacoEditor.onDidFocusEditorText(() => syncFileHost(pane));
+    bindKeymapAction(monacoEditor, "editor-minimap", () => { if (fileHostEditable(pane)) toggleEditorPref("file", "minimap"); });
+    bindKeymapAction(monacoEditor, "editor-wrap", () => { if (fileHostEditable(pane)) toggleEditorPref("file", "wrap"); });
     monacoEditor.onDidChangeModelContent(() => {
-      if (writingExternal || !fileHostEditable()) return;   // 코드가 넣은 텍스트이므로 사용자 편집으로 보지 않는다
-      const centerSpace = getCenterSpace();
-      const t2 = getCurrentTabs().find((x) => x.id === getActiveTabId(centerSpace));
+      if (writingExternal || !fileHostEditable(pane)) return;   // 외부 내용 교체 중 draft 기록 제외
+      const t2 = slot.tab;
       if (!t2 || t2.kind !== "file" || !monacoEditor.getModel()) return;
       t2.draft = monacoEditor.getModel().getValue();
       markFileDirty(t2);
+      callHook("mdpreview.changed", t2);
     });
   });
-  return monacoReady;
+  return slot.ready;
 }
 export function markFileDirty(t) {
   const d = t.draft != null && t.draft !== t.content;
-  // 저장 버튼은 저장할 변경이 있을 때만 존재하므로, 상태를 바꾸는 대신 직접 넣고 뺀다.
-  const bar = fileview.querySelector(".fv-bar");
-  if (bar) {
-    let sv = bar.querySelector('[data-act="save"]');
-    if (d && !sv) {
-      sv = document.createElement("button");
-      sv.dataset.act = "save"; sv.className = "hot"; sv.textContent = "저장";
-      const nm = bar.querySelector(".fv-name");
-      bar.insertBefore(sv, nm || null);
-    } else if (!d && sv) sv.remove();
+  for (const pane of editorSlots.keys()) {
+    if (getRenderedFileOwner(pane) !== t) continue;
+    const root = fileRoot(pane), bar = root.querySelector(".fv-bar");
+    if (bar) {
+      let sv = bar.querySelector('[data-act="save"]');
+      if (d && !sv) {
+        sv = document.createElement("button");
+        sv.dataset.act = "save"; sv.className = "hot"; sv.textContent = "저장";
+        bar.insertBefore(sv, bar.querySelector(".fv-name") || null);
+      } else if (!d && sv) sv.remove();
+    }
+    const nm = root.querySelector(".fv-name"); if (nm) nm.textContent = t.label;
   }
-  const nm = fileview.querySelector(".fv-name"); if (nm) nm.textContent = t.label;
   markTabDirty(t.id, d);
 }
 // 편집 중인 파일은 탭 앞에 점으로 표시한다(VSCode 와 같다). 그러지 않으면 탭이 여럿일 때
 // 어느 것이 저장되지 않았는지 본문을 열어야 알 수 있다.
 export function markTabDirty(tabId, d) {
-  const chip = tabstrip.querySelector(`.ctab[data-tab="${cssEsc(tabId)}"]`);
-  if (!chip) return;
-  chip.classList.toggle("dirty", !!d);
-  let dot = chip.querySelector(".cdirty");
-  if (d && !dot) { dot = document.createElement("span"); dot.className = "cdirty"; dot.title = "저장 안 됨"; chip.insertBefore(dot, chip.querySelector(".ckind")?.nextSibling || chip.firstChild); }
-  else if (!d && dot) dot.remove();
+  for (const chip of document.querySelectorAll(`#center .ctab[data-tab="${cssEsc(tabId)}"]`)) {
+    chip.classList.toggle("dirty", !!d);
+    let dot = chip.querySelector(".cdirty");
+    if (d && !dot) { dot = document.createElement("span"); dot.className = "cdirty"; dot.title = "저장 안 됨"; chip.insertBefore(dot, chip.querySelector(".ckind")?.nextSibling || chip.firstChild); }
+    else if (!d && dot) dot.remove();
+  }
 }
 function modelFor(t) {
   let m = monacoModels.get(t.path);
@@ -283,7 +315,9 @@ function modelFor(t) {
 function disposeFileModel(filePath) {
   const m = monacoModels.get(filePath);
   if (m && !m.isDisposed()) { try { m.dispose(); } catch (e) {} }
-  monacoModels.delete(filePath); monacoViewState.delete(filePath);
+  monacoModels.delete(filePath);
+  for (const key of monacoViewState.keys()) if (key.endsWith(`\0${filePath}`)) monacoViewState.delete(key);
+  callHook("mdpreview.closed", filePath);
 }
 export function disposeClosedFileModel(id) {
   disposeFileModel(String(id).slice(5));
@@ -293,20 +327,28 @@ export function isTextTabDirty(t) {
   return dirty;
 }
 export function renderFileView(t, options) {
-  return withFileViewTransition(t, options || {}, (renderToken) => renderFileViewBody(t, renderToken));
+  if (!options && paneRows().length) { renderTabs(); showActiveTab(); return true; }
+  const pane = options?.pane ?? Math.max(0, paneIndex(getCenterSpace(), t.id));
+  return withFileViewTransition(t, { ...options, pane }, (renderToken) => renderFileViewBody(t, renderToken, pane));
 }
-export function renderFileViewBody(t, renderToken) {
-  fileHostTab = null;
-  syncFileHost();
+export function renderFileViewBody(t, renderToken, pane = focusedPane()) {
+  const slot = editorSlot(pane), fileview = fileRoot(pane);
+  wireFilePane(pane);
+  const previous = slot.editor?.getModel();
+  if (previous?.uri?.fsPath && slot.tab?.path === previous.uri.fsPath) {
+    monacoViewState.set(viewStateKey(pane, previous.uri.fsPath), slot.editor.saveViewState());
+  }
+  slot.tab = null;
+  syncFileHost(pane);
   callHook("viewer.closePopups");
   // 이 탭을 뷰어가 그리면 여기서 끝난다. 앱 셸은 어느 뷰어인지도, 어떤 필드로 판정하는지도 모른다.
-  if (callHook("viewer.renderBody", t)) return;
+  if (callHook("viewer.renderBody", t, pane)) return;
   if (t.content == null) { fileview.innerHTML = `<div class="fv-loading">불러오는 중…</div>`; return; }
   const dirty = t.draft != null && t.draft !== t.content;
   // 저장 버튼은 저장할 변경이 있을 때만 표시한다. 항상 떠 있는 비활성 버튼은 공간만 차지한다.
   const save = dirty ? `<button data-act="save" class="hot">저장</button>` : "";
   // 마크다운의 다른 표시 형태는 그 기능이 그린다. 끄면 버튼도 화면도 없다.
-  const mdToggle = callHook("mdpreview.barHtml", t) || "";
+  const mdToggle = callHook("mdpreview.barHtml", t, pane) || "";
   // 표시 옵션과 서식은 모드 전환(원문·미리보기)과 성격이 달라 막대 오른쪽 영역에 배치한다.
   // 한 줄에 섞으면 현재 보기 모드와 도구를 구별하기 어렵다.
   const prefsBar = '<span class="editor-view-opts">' + [
@@ -327,44 +369,44 @@ export function renderFileViewBody(t, renderToken) {
   // 두면 현재 보기 모드와 도구가 한 줄에 섞인다.
   const floatTools = `<span class="editor-float"><span class="editor-controls" data-editor-tools></span>${prefsBar}</span>`;
   // 뼈대는 매번 새로 그리되 Monaco 호스트는 유지한 채 옮긴다. innerHTML 을 통째로 바꾸면 편집기가 사라진다.
-  fileview.innerHTML = barHtml + (callHook("mdpreview.paneHtml", t) || "")
-    + `<div class="editor-wrap" id="editor-wrap">${floatTools}</div>`;
-  const wrap = $("#editor-wrap");
-  wrap.appendChild(monacoHostEl());
+  fileview.innerHTML = barHtml + (callHook("mdpreview.paneHtml", t, pane) || "")
+    + `<div class="editor-wrap">${floatTools}</div>`;
+  const wrap = fileview.querySelector(".editor-wrap");
+  wrap.appendChild(monacoHostEl(pane));
   // 그 기능이 그렸으면 텍스트 편집기는 띄우지 않는다.
-  if (callHook("mdpreview.render", t, wrap)) return;
+  if (callHook("mdpreview.render", t, wrap, pane)) return;
   wrap.classList.remove("hidden");
-  ensureMonaco(t, renderToken).then(() => {
-    if (t !== getRenderedFileOwner() || renderToken !== getRenderedFileToken()
-      || t.id !== getActiveTabId(getCenterSpace()) || callHook("mdpreview.presents", t)) return;
-    fileHostTab = t; fileHostToken = renderToken;
+  ensureMonaco(t, renderToken, pane).then(() => {
+    const monacoEditor = slot.editor;
+    if (t !== getRenderedFileOwner(pane) || renderToken !== getRenderedFileToken(pane)
+      || !isTabVisible(getCenterSpace(), t.id) || callHook("mdpreview.presents", t, pane)) return;
+    slot.tab = t; slot.token = renderToken;
     const prev = monacoEditor.getModel();
     if (prev && prev.uri && prev.uri.fsPath !== t.path) {
-      monacoViewState.set(prev.uri.fsPath, monacoEditor.saveViewState());
+      monacoViewState.set(viewStateKey(pane, prev.uri.fsPath), monacoEditor.saveViewState());
     }
     const m = modelFor(t);
     if (prev !== m) {
       monacoEditor.setModel(m);
-      const vs = monacoViewState.get(t.path); if (vs) monacoEditor.restoreViewState(vs);
+      const vs = monacoViewState.get(viewStateKey(pane, t.path)); if (vs) monacoEditor.restoreViewState(vs);
     }
     // 디스크에서 다시 읽어온 내용이 모델과 다르면(외부 변경·저장 반영) 맞춘다. 편집 중이면 손대지 않는다.
     if (t.draft == null && m.getValue() !== t.content) withoutDraft(() => m.setValue(t.content));
     monaco.editor.setTheme(monacoTheme());
     const controls = fileview.querySelector("[data-editor-tools]");
     if (!controls.querySelector("[data-mdformat-bar]")) controls.insertAdjacentHTML("beforeend",
-      callHook("mdformat.barHtml", { editable: fileHostEditable(), markdown: fileHostMarkdown() }) || "");
-    syncFileHost();
-    monacoEditor.focus();
+      callHook("mdformat.barHtml", { editable: fileHostEditable(pane), markdown: fileHostMarkdown(pane) }) || "");
+    syncFileHost(pane); syncFileTips(pane); syncFilePrefs(pane);
+    if (pane === focusedPane() && t.id === getActiveTabId(getCenterSpace())) monacoEditor.focus();
   });
 }
-function fileviewClickHandler(e) {
-  const centerSpace = getCenterSpace();
-  const t = getCurrentTabs().find((x) => x.id === getActiveTabId(centerSpace)); if (!t) return;
-  syncFileHost();
-  if (callHook("mdformat.click", e.target, "file")) return;
+function fileviewClickHandler(e, pane = focusedPane()) {
+  const t = getRenderedFileOwner(pane); if (!t) return;
+  syncFileHost(pane);
+  if (callHook("mdformat.click", e.target, fileHostId(pane))) return;
   const pref = e.target.closest("[data-editor-pref]");
   if (pref) { toggleEditorPref("file", pref.dataset.editorPref); return; }
-  if (callHook("mdpreview.click", e.target, t)) { renderFileView(t); return; }
+  if (callHook("mdpreview.click", e.target, t, pane)) { renderFileView(t, { pane }); return; }
   const act = e.target.closest("[data-act]"); if (!act) return;
   if (act.dataset.act === "save") saveActiveFile();
 }

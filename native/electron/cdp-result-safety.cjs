@@ -21,8 +21,8 @@
 
 const filledSecrets = new Map();
 
-function rememberSecret(wcId, secret) {
-  if (!secret || String(secret).length < 3) return;
+function rememberSecret(wcId, secret, { allowShort = false } = {}) {
+  if (!secret || (!allowShort && String(secret).length < 3)) return;
   let s = filledSecrets.get(wcId); if (!s) { s = new Set(); filledSecrets.set(wcId, s); }
   s.add(String(secret));
 }

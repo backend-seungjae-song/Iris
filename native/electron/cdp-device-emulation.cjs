@@ -73,6 +73,15 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
   // 원래 UA. 해제할 때 되돌린다(CDP엔 UA 덮어쓰기를 지우는 명령이 없어 원래 값으로 되돌리는 것이 유일한 방법).
   const baseUserAgents = new Map();
   const webContentsById = new Map();
+  const viewportStates = new Map();
+  const viewportRevisions = new Map();
+  const viewportFor = (wcId) => viewportStates.get(Number(wcId)) || null;
+  const viewportRevision = (wcId) => viewportRevisions.get(Number(wcId)) || 0;
+  const setViewportState = (wcId, state) => {
+    const id = Number(wcId);
+    if (state) viewportStates.set(id, { ...state }); else viewportStates.delete(id);
+    viewportRevisions.set(id, viewportRevision(id) + 1);
+  };
 
   function rememberDeviceEntry(wc) { try { deviceEntry.set(wc.id, { from: wc.getURL(), to: null }); } catch {} }
 
@@ -111,6 +120,8 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
     deviceEntry.delete(id);
     baseUserAgents.delete(id);
     webContentsById.delete(id);
+    viewportStates.delete(id);
+    viewportRevisions.delete(id);
   }
 
   // 마우스→터치 변환 켜고 끄기. 창 전체에 걸리는 명령이라 "지금 그 화면 위에 포인터가 있는가"에
@@ -139,6 +150,7 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
     };
     if (args.clear || String(args.size || "").toLowerCase() === "clear") {
       await send("Emulation.clearDeviceMetricsOverride");
+      setViewportState(wc.id, null);
       await send("Emulation.setTouchEmulationEnabled", { enabled: false }).catch(() => {});
       await send("Emulation.setEmitTouchEventsForMouse", { enabled: false }).catch(() => {});
       if (baseUserAgents.has(wc.id)) { await restoreUa(); baseUserAgents.delete(wc.id); }
@@ -164,6 +176,7 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
     // false면 레이아웃 폭이 정확히 지정한 폭이라 미디어 쿼리가 그대로 적용된다.
     // 기기 성격(UA·터치·클라이언트 힌트)은 아래에서 폭에 따라 따로 맞춘다.
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: dpr, mobile: false });
+    setViewportState(wc.id, { width, height, dpr });
     // 터치: 요즘 반응형은 폭보다 (pointer:coarse)·maxTouchPoints를 먼저 본다.
     // 끌 때는 enabled만 보낸다. maxTouchPoints:0을 같이 주면 명령이 통째로 거부돼 터치가 켜진 채
     // 남는다(확인 결과: 폰에서 데스크톱 크기로 옮겨도 maxTouchPoints 5, pointer:coarse 그대로였다).
@@ -207,7 +220,7 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
       touch: cls !== "desktop" && touchOk, dragScroll: cls !== "desktop" && dragOk };
   }
 
-  return { apply, setTouchDrag, overrideFor, hasExplicitDevice, forget };
+  return { apply, setTouchDrag, overrideFor, hasExplicitDevice, forget, viewportFor, viewportRevision, setViewportState };
 }
 
 module.exports = { createDeviceEmulation, deviceClassFor, deviceProfile, uaBrands };

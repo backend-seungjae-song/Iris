@@ -151,6 +151,15 @@ try {
   }
   mainSource = mainSource.replace(runtimeCopy,
     'require("../../../server/copy-tree.cjs").copyTreeSync(bundledPackageDir, stagingDir, { recursive: true });');
+  // 포커스 없는 창에는 프레임을 덜 보냄(frame-pace.cjs)
+  const frameStreamId = "      const streamId = (0, import_node_crypto2.randomUUID)();\n      const stream = new MjpegFrameStream(";
+  const frameSend = '            if (!owner.isDestroyed()) {\n              owner.send("emulator:frameStreamFrame", {';
+  if (mainSource.split(frameStreamId).length !== 2 || mainSource.split(frameSend).length !== 2) {
+    throw new Error("Orca 의 화면 프레임 전달 코드가 변경되었습니다");
+  }
+  mainSource = mainSource.replace(frameStreamId,
+    '      const allowFrame = require("./frame-pace.cjs").createFramePacer(ownerWindow);\n' + frameStreamId);
+  mainSource = mainSource.replace(frameSend, frameSend.replace("!owner.isDestroyed()", "!owner.isDestroyed() && allowFrame()"));
   writeFileSync(OUT_MAIN, mainSource);
   console.log(`  ${path.relative(ROOT, OUT_MAIN)} ← orca@${commit.slice(0, 9)}`);
 

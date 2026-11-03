@@ -1,63 +1,60 @@
 import { connectAgent } from "../agent-endpoint.mjs";
 
-import { questionHookOutput } from "./protocol.mjs";
-
 const MAX_INPUT = 16 * 1024;
-const MAX_LINE = 64 * 1024;
-const CONNECT_TIMEOUT = 2_000;
-const PROCESS_TIMEOUT = 595_000;
+const CONNECT_TIMEOUT = 250;
+const PROCESS_TIMEOUT = 300;
 const socketPath = process.argv[2];
 let raw = "";
 
-function finish(socket, output) {
+function finish(socket) {
   if (finish.done) return;
   finish.done = true;
-  if (output) process.stdout.write(`${JSON.stringify(output)}\n`);
   socket?.destroy();
   process.exitCode = 0;
 }
 
+// 승인 화면이 무엇에 대한 것인지(도구 이름과 대상)를 도구 입력 필드에서 뽑는다. 화면 문구는 읽지 않는다.
+function targetOf(tool, input) {
+  const value = input?.command ?? input?.file_path ?? input?.notebook_path ?? input?.path ?? input?.url ?? input?.query ?? input?.pattern;
+  return typeof value === "string" ? value.trim().replace(/\s*\n\s*/g, " ").slice(0, 300) : "";
+}
+
 function run(input) {
-  if (input?.hook_event_name !== "PreToolUse" || input?.tool_name !== "AskUserQuestion"
-    || !Array.isArray(input.tool_input?.questions) || !socketPath) return finish(null, null);
-  const questions = input.tool_input.questions;
+  if (!socketPath) return finish(null);
+  const permission = input?.hook_event_name === "PermissionRequest" && typeof input.tool_name === "string"
+    && input.tool_name.length > 0 && input.tool_name.length <= 128;
+  const question = input?.hook_event_name === "PreToolUse" && input?.tool_name === "AskUserQuestion"
+    && Array.isArray(input.tool_input?.questions);
+  if (!permission && !question) return finish(null);
+  const message = permission
+    ? { type: "hint", tool: input.tool_name, target: targetOf(input.tool_name, input.tool_input) }
+    : { type: "question", questions: input.tool_input.questions };
   const paneId = process.env.HERDR_PANE_ID || "";
   const cliSession = process.env.CLAUDE_CODE_SESSION_ID || input.session_id || "unknown";
-  if (!paneId) return finish(null, null);
+  if (!paneId) return finish(null);
   const { socket, auth } = connectAgent(socketPath);
   socket.setEncoding("utf8");
-  let buffer = "";
-  const connectTimer = setTimeout(() => finish(socket, null), CONNECT_TIMEOUT);
-  const processTimer = setTimeout(() => finish(socket, null), PROCESS_TIMEOUT);
+  const connectTimer = setTimeout(() => finish(socket), CONNECT_TIMEOUT);
+  const processTimer = setTimeout(() => finish(socket), PROCESS_TIMEOUT);
   connectTimer.unref?.(); processTimer.unref?.();
   socket.on("connect", () => {
     clearTimeout(connectTimer);
     socket.write(`${JSON.stringify({ role: "question-hook", v: 1, paneId, cliSession, ...auth })}\n`);
-    socket.write(`${JSON.stringify({ type: "question", questions })}\n`);
+    socket.end(`${JSON.stringify(message)}\n`, () => finish(socket));
   });
-  socket.on("data", (chunk) => {
-    buffer += chunk;
-    if (buffer.length > MAX_LINE) return finish(socket, null);
-    let newline;
-    while ((newline = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
-      let value;
-      try { value = JSON.parse(line); } catch { continue; }
-      if (value?.type === "question.none") return finish(socket, null);
-      if (value?.type !== "question.answer") continue;
-      return finish(socket, questionHookOutput(questions, value.answers));
-    }
-  });
-  socket.on("error", () => finish(socket, null));
-  socket.on("close", () => finish(socket, null));
+  socket.on("error", () => finish(socket));
+  socket.on("close", () => finish(socket));
 }
+
+const deadline = setTimeout(() => { finish(null); process.exit(0); }, PROCESS_TIMEOUT);
+deadline.unref?.();
 
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   raw += chunk;
-  if (Buffer.byteLength(raw) > MAX_INPUT) finish(null, null);
+  if (Buffer.byteLength(raw) > MAX_INPUT) finish(null);
 });
 process.stdin.on("end", () => {
   if (finish.done || Buffer.byteLength(raw) > MAX_INPUT) return;
-  try { run(JSON.parse(raw)); } catch { finish(null, null); }
+  try { run(JSON.parse(raw)); } catch { finish(null); }
 });

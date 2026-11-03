@@ -36,7 +36,7 @@ check("로더는 지연 주입(xterm AMD 충돌 방지)", () =>
   && web.includes('<script src="/vendor/xterm.js">'));
 // 호스트를 DOM 에서 찾으면 파일 탭이 없을 때 null 에 붙이려다 실패한다(확인 결과: parentNode 오류).
 check("편집기 호스트는 우리가 소유", () =>
-  /function monacoHostEl\(\)/.test(textEditor) && /monaco\.editor\.create\(monacoHostEl\(\)/.test(textEditor)
+  /function monacoHostEl\(pane = focusedPane\(\)\)/.test(textEditor) && /monaco\.editor\.create\(monacoHostEl\(pane\)/.test(textEditor)
   && !/const host = \$\("#editor-host"\)/.test(textEditor));
 check("파일마다 모델·뷰상태(실행취소·커서 보존)", () =>
   /const monacoModels = new Map\(\)/.test(textEditor) && /const monacoViewState = new Map\(\)/.test(textEditor)

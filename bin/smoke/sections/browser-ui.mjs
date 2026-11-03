@@ -353,7 +353,7 @@ check("새 탭 기본 페이지가 구글 원본", () =>
   /const DEFAULT_URL = "https:\/\/www\.google\.com\/"/.test(web) && !existsSync(path.join(ROOT, "web/newtab.html")));
 check("새 탭에선 주소창이 비어 보임(크롬처럼)", () => {
   const n = (allWebJs.match(/isNewTab\(/g) || []).length;
-  return /const isNewTab = \(u, rec\)/.test(web) && n === 4; // did-navigate·in-page·탭전환 2곳
+  return /const isNewTab = \(u, rec\)/.test(web) && n === 5; // did-navigate·in-page·탭전환 2곳·잠든 활성 탭
 });
 // 방금 연 탭만 주소창이 비어 있다. 사용자가 직접 google.com에 가면 주소가 보여야 하므로 첫 이동인지로 구분한다.
 check("직접 방문한 구글은 주소가 보임", () =>

@@ -91,9 +91,18 @@ function acceleratorFor(binding) {
 // 다른 곳에서 받아 오면 개발 환경이 설치 앱의 파일을 쓰게 되어 계정·탭이 지워질 수 있다.
 const { stateHome: canonicalStateHome } = require("../../server/state-home.cjs");
 
+// 다른 앱이 앞일 때 app.focus 만으로는 macOS 가 활성화를 거절하는 경우가 있음(Slack 앞에서 키는 받았는데 안 올라옴).
+// System Events 로 이 프로세스를 맨 앞 앱으로 지정. 다른 앱을 올리는 switcher-jxa 와 같은 권한
+function activateProcess(pid) {
+  if (process.platform !== "darwin" || !Number.isInteger(pid) || pid <= 0) return;
+  require("node:child_process").execFile("osascript",
+    ["-e", `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`],
+    { timeout: 3000 }, () => {});
+}
+
 function createSwitcherHost({
   core, catalog, iconRunner, mediaRunner, fs, path, stateHome = canonicalStateHome, globalShortcut, defaultRelay, killProbe,
-  raiseOwnWindow, ownPid, irisKey,
+  raiseOwnWindow, ownFocusedWindow, ownPid, irisKey, activateSelf = activateProcess,
   isTrustedSender, isTrustedMediaSender, expectedAppUrl, broadcast, shell,
   setTimeout, clearTimeout, setInterval, clearInterval,
   now = () => Date.now(),
@@ -123,6 +132,8 @@ function createSwitcherHost({
   let restartOpen = true;
   let restartBase = null;
   let restartWindows = [];
+  // 재시작 재결합에서 못 찾아 남긴 선택의 이전 실행 pid. 이 pid 가 죽은 것은 창이 사라졌다는 뜻이 아님
+  let previousRunKeys = new Set();
   let currentWindows = [];
   let rows = [];
   let lastGoodText = null;
@@ -307,7 +318,10 @@ function createSwitcherHost({
   // Iris 가 앞이면 기존 토글, 다른 앱이 앞이면 Iris 를 앞으로 가져온다(irisKey 가 판정).
   function onHotkey(dir) {
     if (status.pickedMode) { void requestStep(dir === "next" ? 1 : -1); return; }
-    if (dir === "next" && typeof irisKey === "function") { try { irisKey(); } catch {} }
+    if (dir === "next" && typeof irisKey === "function") {
+      try { irisKey(); } catch {}
+      try { activateSelf(ownPid); } catch {}
+    }
   }
 
   function syncRegistration({ reload = false, force = false } = {}) {
@@ -565,7 +579,8 @@ function createSwitcherHost({
     if (restartOpen || state.picked.length === 0) return 0;
     const alive = {};
     for (const item of state.picked) {
-      alive[String(item.pid) + "|" + String(item.pidStart)] = probeAlive(item);
+      const key = String(item.pid) + "|" + String(item.pidStart);
+      alive[key] = previousRunKeys.has(key) || probeAlive(item);
     }
     const pruned = core.pruneDeadProcesses({ state, alive });
     if (pruned.removed) {
@@ -732,7 +747,11 @@ function createSwitcherHost({
       const reconciled = core.reconcile({ state: restartBase, windows: restartWindows, phase: "restart" });
       restartOpen = false;
       status.droppedOnRestart = reconciled.dropped;
+      const seen = new Set(restartWindows.map((item) => String(item.pid) + "|" + String(item.pidStart)));
+      previousRunKeys = new Set(reconciled.state.picked.map((item) => String(item.pid) + "|" + String(item.pidStart))
+        .filter((key) => !seen.has(key)));
       setState(reconciled.state, { updateRestartBase: false });
+      rebindPreviousRun(0);
     } else if (result.ok && !restartOpen) {
       const reconciled = core.reconcile({ state, windows: currentWindows, phase: "session" });
       setState(reconciled.state, { updateRestartBase: false });
@@ -815,12 +834,47 @@ function createSwitcherHost({
     return now() - lastSelfHealAt >= SELF_HEAL_MIN_MS;
   }
 
+  // 고른 창이 모두 이 앱의 창이면 osascript 없이 앱이 직접 올린다
+  // osascript 경로는 System Events 로 창 목록을 읽느라 한 번에 약 600ms. 이 경로는 창 목록이 필요 없음
+  // 차례 고르기는 같은 core 규칙. 못 찾은 창이 있으면 null 을 돌려 osascript 경로로 넘김
+  function stepOwnWindowsDirectly(dir) {
+    if (typeof raiseOwnWindow !== "function" || typeof ownFocusedWindow !== "function" || ownPid == null) return null;
+    if (!state.picked.every((item) => item.pid === ownPid)) return null;
+    const { targets } = targetInput();
+    const plan = core.planStops(targets.map((item) => ({ id: item.id, group: item.group })));
+    let focused = null;
+    try { focused = ownFocusedWindow(); } catch {}
+    // 포커스 창도 창 번호로 먼저 찾는다. 같은 제목의 창이 여럿이면 제목으로는 가릴 수 없다
+    const frontTarget = !focused ? null
+      : targets.find((item) => Number.isInteger(focused.id) && (item.cgId === focused.id || item.id === focused.id))
+        || (targets.filter((item) => item.matchTitle === focused.title).length === 1
+          ? targets.find((item) => item.matchTitle === focused.title) : null);
+    // 이 앱 창에 포커스가 없으면 다른 앱이 앞이므로 목록 밖으로 판정(osascript 경로와 같은 R9)
+    const front = frontTarget ? core.stopIdOf(plan, frontTarget.id) : "outside";
+    const stopId = core.selectTarget({
+      ordered: plan.ordered, resolved: plan.ordered, front, cursor: core.stopIdOf(plan, state.cursor), dir,
+    }).id;
+    const stop = plan.stops.find((item) => item.id === stopId);
+    if (!stop) return null;
+    const byId = (id) => targets.find((item) => item.id === id);
+    // 나머지 창을 먼저 올리고 맨 앞 창을 마지막에 올려 포커스를 그 창에 둔다
+    const also = stop.members.slice(1).filter((id) => raiseOwnWindow(byId(id)));
+    if (!raiseOwnWindow(byId(stop.id))) return null;
+    const left = stop.members.slice(1).filter((id) => !also.includes(id)).map(() => "raise-did-not-land");
+    setState({ ...state, cursor: stop.id });
+    noteStep({ dir, target: stop.id, how: "own-window-direct", front: frontTarget ? frontTarget.id : null,
+      ...(stop.members.length > 1 ? { also: also.length, left } : {}) });
+    return { raised: stop.id, status: publicStatus() };
+  }
+
   async function executeStep(dir, epoch) {
     pruneDead();
     if (!state.picked.length || epoch !== executionEpoch) {
       noteStep({ dir, how: "시작 못 함", failed: state.picked.length ? "다른 전환이 끼어들었다" : "고른 창이 없다" });
       return { raised: null, status: publicStatus() };
     }
+    const direct = stepOwnWindowsDirectly(dir);
+    if (direct) return direct;
     let result = await catalog.step({ ...targetInput(), dir, ownPid });
     if (epoch !== executionEpoch || !state.picked.length) return { raised: null, status: publicStatus() };
     if (nothingMatched(result) && maySelfHeal()) {
@@ -838,7 +892,7 @@ function createSwitcherHost({
         state.picked.find((item) => item.cgId === result.own || item.id === result.own) || { id: result.own })) {
         setState({ ...state, cursor: result.own });
         clearSwitchBlockedRows(result.own);
-        noteStep({ dir, target: result.own, how: "own-window", front: result.front });
+        noteStep({ dir, target: result.own, how: "own-window", front: result.front, ...groupNote(result) });
         return { raised: result.own, status: publicStatus() };
       }
       if (result.own != null) {
@@ -846,7 +900,8 @@ function createSwitcherHost({
         return { raised: null, status: publicStatus() };
       }
       noteStep({ dir, target: result.raised, how: "osascript", front: result.front,
-        failed: result.raised == null ? ((result.missing || []).map((m) => (m && m.reason) || m).join(",") || "없음") : undefined });
+        failed: result.raised == null ? ((result.missing || []).map((m) => (m && m.reason) || m).join(",") || "없음") : undefined,
+        ...groupNote(result) });
       if (result.raised != null) setState({ ...state, cursor: result.raised });
       markMissingRows(result.missing);
       markSwitchBlockedRows(result.missing);
@@ -858,14 +913,28 @@ function createSwitcherHost({
     return { raised: null, status: publicStatus() };
   }
 
+  // 묶음 차례에서 같이 올린 창 수와 못 올린 창의 이유. 묶음이 아니면 빈 객체
+  function groupNote(result) {
+    const also = Array.isArray(result.also) ? result.also : [];
+    const left = Array.isArray(result.left) ? result.left : [];
+    if (!also.length && !left.length) return {};
+    return { also: also.length, left: left.map((item) => (item && item.reason) || "raise-did-not-land") };
+  }
+
   function pumpSteps() {
     if (stepRunning || !stepQueue.length) return;
     const item = stepQueue.shift();
     stepRunning = true;
     const epoch = executionEpoch;
+    const startedAt = now();
     Promise.resolve(executeStep(item.dir, epoch))
       .then(item.resolve, () => item.resolve({ raised: null, status: publicStatus() }))
       .finally(() => {
+        // 단축키 한 번의 처리 시간. 지연 원인을 진단 파일에서 바로 보기 위한 값
+        if (status.lastStep) {
+          status.lastStep.ms = now() - startedAt;
+          writeDiag();
+        }
         stepRunning = false;
         if (status.pickedMode) pumpSteps();
         else clearQueuedSteps();
@@ -889,6 +958,14 @@ function createSwitcherHost({
       picked: state.picked.map((item) => ({ ...item })),
       status: publicStatus(),
     };
+  }
+
+  function applyOrder(next) {
+    if (next !== state && setState(next)) {
+      status.listRevision += 1;
+      broadcastIfChanged();
+    }
+    return response();
   }
 
   async function handle(event, payload) {
@@ -923,13 +1000,16 @@ function createSwitcherHost({
     }
     if (arg.op === "move") {
       if (arg.dir !== 1 && arg.dir !== -1) return { error: "bad-dir" };
-      const next = core.movePicked({ state, id: arg.id, pickKey: arg.key, dir: arg.dir });
-      if (next !== state && setState(next)) {
-        status.listRevision += 1;
-        broadcastIfChanged();
-      }
-      return response();
+      if (arg.unit !== undefined && arg.unit !== "stop") return { error: "bad-unit" };
+      return applyOrder(core.movePicked({ state, id: arg.id, pickKey: arg.key, dir: arg.dir, unit: arg.unit }));
     }
+    if (arg.op === "group" || arg.op === "leave") {
+      const keys = Array.isArray(arg.keys) ? arg.keys : null;
+      if (!keys || keys.length > 200 || !keys.every((key) => typeof key === "string")) return { error: "bad-keys" };
+      const apply = arg.op === "group" ? core.groupPicked : core.leavePicked;
+      return applyOrder(apply({ state, pickKeys: keys }));
+    }
+    if (arg.op === "ungroup") return applyOrder(core.ungroup({ state, id: arg.id, pickKey: arg.key }));
     if (arg.op === "list") {
       pruneDead();
       if (arg.refresh) await enumerate();
@@ -952,6 +1032,13 @@ function createSwitcherHost({
       return response();
     }
     return { error: "bad-op" };
+  }
+
+  // 재시작 때 못 찾은 선택은 설정 화면을 열기 전에도 다시 읽어 지금 창에 붙임(제목·순번으로 맞춤)
+  function rebindPreviousRun(attempt) {
+    if (stopped || attempt >= 6) return;
+    if (!state.picked.some((item) => previousRunKeys.has(String(item.pid) + "|" + String(item.pidStart)))) return;
+    schedule(async () => { await enumerate(); rebindPreviousRun(attempt + 1); }, 10000);
   }
 
   function schedule(fn, ms) {
