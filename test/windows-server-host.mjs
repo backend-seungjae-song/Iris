@@ -28,6 +28,8 @@ function fixture(platform, { openFails = false } = {}) {
     child[name].pipe = () => {};
     child[name].setEncoding = () => {};
   }
+  child.stdio = [null, child.stdout, child.stderr, new EventEmitter()];
+  child.stdio[3].end = () => {};
   const mocks = {
     "node:child_process": { spawn: () => child },
     "node:fs": {
@@ -162,6 +164,7 @@ for (const transport of ["IPC", "disconnect"]) {
       import fs from 'node:fs';
       import path from 'node:path';
       import { stateHome } from ${JSON.stringify(new URL("../server/state-home.cjs", import.meta.url).href)};
+      const startMemoryDiagnostics = () => {};
       Object.defineProperty(process, 'platform', { value: 'win32' });
       const IRIS_HOME = stateHome();
       const LOCK_PATH = path.join(IRIS_HOME, 'server.lock');
@@ -193,7 +196,20 @@ for (const transport of ["IPC", "disconnect"]) {
       if (child.exitCode === null && child.signalCode === null) { child.kill(); await exit; }
       fs.rmSync(directory, { recursive: true });
     });
-    await once(child, "message");
+    const ready = await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        child.off("message", onMessage);
+        child.off("exit", onExit);
+        child.off("error", onError);
+      };
+      const onMessage = (message) => { cleanup(); resolve(message); };
+      const onExit = (code, signal) => { cleanup(); reject(new Error(`실제 서버가 ready 전에 종료됨: code=${code}, signal=${signal || "-"}\n${stderr}`)); };
+      const onError = (error) => { cleanup(); reject(error); };
+      child.once("message", onMessage);
+      child.once("exit", onExit);
+      child.once("error", onError);
+    });
+    assert.deepEqual(ready, { ready: true });
     assert.equal(fs.readFileSync(path.join(directory, "server.lock"), "utf8"), String(child.pid));
     const f = appFixture();
     f.host.child = child;

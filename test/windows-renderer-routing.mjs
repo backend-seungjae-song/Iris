@@ -21,6 +21,8 @@ function harness(map, platform, { browser = false, terminal = false, focusedKind
     cycleRail: (n) => calls.push(`rail:${n}`), cycleAgent: (n) => calls.push(`agent:${n}`), cycleSpace: (n) => calls.push(`space:${n}`), cycleCenterTab: (n) => calls.push(`tab:${n}`),
     runSwitcherKey: (n) => { calls.push(`switch:${n}`); return "step"; }, gotoMainScreen() {}, gotoSpaceBrowser() {}, toggleDevTools() {},
     curTabs: () => [{ id: "b", kind: focusedKind }], getCenterSpace: () => "s", getActiveTabId: () => "b", shouldTakeFindKey: () => false,
+    activeBrowserId: () => browser || focusedKind === "browser" ? "b" : null,
+    reloadActiveTab: (hard = false) => calls.push(hard ? "page-hard" : "page"),
     activeWv: () => ({ el: { reload: () => calls.push("page"), reloadIgnoringCache: () => calls.push("page-hard") } }),
     closeCurrentHerdrPane: () => calls.push("pane"), closeActiveTab: () => calls.push("close-page"), closeTabs: () => calls.push("close-page"),
     saveActiveFile: () => calls.push("save"), startInlineRename: () => calls.push("rename"), callHook() {},
