@@ -367,7 +367,7 @@ test("묶기·반복·입력 중간의 경계: 방향이 다른 밀기, 값만 �
 });
 
 test("설명 전문 보존, 다른 케이스의 무효 판정과 무관, 원문 기준 text 검사, 덮어쓰기 요청별 결과, 실패한 증거 사진 표시", async (t) => {
-  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "qa-edge-"));
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "qa-edge-B-"));
   const previous = process.env.IRIS_STATE_DIR;
   process.env.IRIS_STATE_DIR = root;
   t.after(() => { if (previous === undefined) delete process.env.IRIS_STATE_DIR; else process.env.IRIS_STATE_DIR = previous; fs.rmSync(root, { recursive: true, force: true }); });
@@ -415,7 +415,7 @@ test("설명 전문 보존, 다른 케이스의 무효 판정과 무관, 원문 
   assert.match(card("w2"), /확인자가 뺀 장면 1장/);
   assert.deepEqual(report.sceneEdits.hidden, [sha(auto)]);
   // 원문에 없는 from 은 원문 규칙이 바꾼 뒤 화면에 나갈 글에서 찾음. 원문에 있으면 겹쳐도 통과
-  assert.deepEqual((await build([{ id: "G1", text: [{ from: "가나다 원문", to: "B" }, { from: "B", to: "C" }] }])).textEdits.map((x) => [x.how, x.count]), [["원문", 1], ["보이는 글", 1]]);
+  assert.deepEqual((await build([{ id: "G1", text: [{ from: "가나다 원문", to: "변경된 표시 조건" }, { from: "변경된 표시 조건", to: "최종 표시 조건" }] }])).textEdits.map((x) => [x.how, x.count]), [["원문", 1], ["보이는 글", 1]]);
   await build([{ id: "G1", text: [{ from: "가나다 원문", to: "X" }, { from: "원문", to: "Y" }] }]);
 });
 
