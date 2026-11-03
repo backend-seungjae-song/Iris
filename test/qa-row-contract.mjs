@@ -19,11 +19,16 @@ test("상태 모듈에서 분리한 목록 추출 결과를 보존", () => {
     source: "test/qa-rows.test.mjs",
     pick: "test\\(\\\"([^\\\"]+)",
   });
-  assert.equal(result.items.length, 14);
+  assert.equal(result.items.length, 15);
   assert.deepEqual(result.items[0], {
     id: "선언 조건과 중복 id를 거부하고 근거를 보존",
     text: "test(\"선언 조건과 중복 id를 거부하고 근거를 보존\", async () => {",
     at: "test/qa-rows.test.mjs:25",
+  });
+  assert.deepEqual(result.items.at(-1), {
+    id: "막힘으로 자동으로 닫힌 경로를 다시 열면 앞서 통과한 판정이 close 근거로 남고, 사람이 닫은 뒤 다시 열면 새로 센다",
+    text: 'test("막힘으로 자동으로 닫힌 경로를 다시 열면 앞서 통과한 판정이 close 근거로 남고, 사람이 닫은 뒤 다시 열면 새로 센다", async () => {',
+    at: "test/qa-rows.test.mjs:232",
   });
   assert.deepEqual(listFromSource({ source: "test/qa-rows.test.mjs", pick: "NO_MATCH" }), {
     error: "그 규칙이 test/qa-rows.test.mjs에서 아무것도 못 찾았습니다: NO_MATCH\n"

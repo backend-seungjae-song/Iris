@@ -25,7 +25,7 @@
 //   힙 스냅샷·프로파일 요청은 heap-request.json 의 pids. 요청 파일은 한 번 쓰고 삭제.
 //
 // 영향 범위
-//   공급자는 main.cjs 의 Electron app·webContents·BrowserWindow·screen·stateHome() 폴더.
+//   공급자는 main.cjs 의 Electron app·webContents·BrowserWindow·screen·server/state-home.cjs의 상태 폴더
 //   소비자는 메모리 진단 작업의 분석 스크립트.
 
 const path = require("node:path");

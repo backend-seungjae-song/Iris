@@ -93,7 +93,9 @@ if (!existsSync(homeTools)) {
     && /not_run\.append/.test(derive));
   check("판정은 assertion에서만 나온다", () =>
     /`ok`는 명령이 실행됐다는 뜻이지 QA 판정이 아니다/.test(derive)
-    && /verdict = "PASS" if last\.get\("pass"\) else "FAIL"/.test(derive));
+    && (/verdict = "PASS" if last\.get\("pass"\) else "FAIL"/.test(derive)
+      || (/"PASS" if last\.get\("pass"\) is True/.test(derive)
+        && /"FAIL" if last\.get\("pass"\) is False else "BLOCKED"/.test(derive))));
   check("한 단계의 여러 시도는 마지막을 판정으로 삼는다", () =>
     // 합치면 매크로가 빗나간 뒤 재실행해 성공한 단계가 FAIL로 남는다.
     /attempts = len\(asserts\)/.test(derive) && /버려진 시도/.test(derive));

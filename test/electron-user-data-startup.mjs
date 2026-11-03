@@ -46,6 +46,7 @@ test("개발 시작은 userData를 고정한 뒤 개발 스테이징만 재생�
     const setPaths = [];
     const sessionUserData = [];
     const electron = {
+      crashReporter: { start() {} },
       app: {
         requestSingleInstanceLock() { return true; },
         getPath(name) { if (name !== "userData") throw new Error("unexpected path: " + name); return userData; },
@@ -100,7 +101,7 @@ test("중복 실행은 세션 접근과 스테이징 모듈 로드 전에 종료
     const Module = require("node:module");
     const mainPath = process.argv[1];
     const effects = [];
-    const electron = { app: {
+    const electron = { crashReporter: { start() {} }, app: {
       getPath: () => "/tmp/iris-test-user-data",
       requestSingleInstanceLock() { effects.push("lock-denied"); return false; },
       quit() { effects.push("quit"); },

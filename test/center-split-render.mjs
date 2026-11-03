@@ -22,7 +22,7 @@ function harness() {
   const shared = { hidden: true, dataset: {} };
   const values = {
     BROWSER_MODE: false, callHook() {}, cancelPendingReveal() {}, getCenterSpace, curTabs: getCurrentTabs, paneActives, paneLayout,
-    filePane: index => files[index], paneNotices: () => notices, preserveRemainingPane() {},
+    filePane: index => files[index], paneNotices: () => notices, preserveRemainingPane() {}, keepAwakeMark: () => "",
     fileview, browserview, centerEmpty, paintCenterEmptyTitle() {}, tabViews: () => [{ panelId: "shared" }], tabViewOf: kind => kind === "diff" ? { panelId: "shared", render: t => calls.push(`diff:${t.id}`) } : null,
     ensureTabViewPane: () => shared, isFileLikeKind: kind => kind === "file", tabNeedsContent: () => false,
     withFileViewTransition: (tab, options, draw) => { calls.push(tab?.id || null); draw(1); },
@@ -84,7 +84,7 @@ test("칸별 탭 줄은 자기 종류·활성 탭만 그림", () => {
     BROWSER_MODE: false, callHook() {}, getCenterSpace, getBrowserState: () => ({ docked: true }),
     curTabs: getCurrentTabs, paneLayout, paneActives, paneTabs, paneSync() {}, paneRows: () => rows, syncPaneView() {},
     preserveRemainingPane() {}, lastByKind: new Map(), tabGroup: t => t.kind === 'browser' ? 'browser' : 'file', renderKindBar() {},
-    isTabDirty: () => false, esc: x => x, aiBusyLabels: () => [], TAB_KIND: {}, TAB_CLOSE: '',
+    isTabDirty: () => false, esc: x => x, aiBusyLabels: () => [], keepAwakeMark: () => "", TAB_KIND: {}, TAB_CLOSE: '',
     revealActiveTab() {}, syncAiGlow() {}, updateCenterVisibility() {},
   });
   render();
@@ -100,7 +100,7 @@ test("탭 메뉴의 다른 탭 모두 닫기와 모두 닫기는 해당 칸에 �
   let menu, closed;
   const closeEvents = [];
   const wire = vm.runInNewContext(chunk + '\nwireTabStrip;', {
-    BROWSER_MODE: false, getCenterSpace, getCurrentTabs, getTabs, paneTabs, paneLayout,
+    BROWSER_MODE: false, getCenterSpace, getCurrentTabs, getTabs, getBrowserState: () => ({ tabsBySpace: {} }), paneTabs, paneLayout,
     paneIndex: (space, id) => paneLayout(space).panes.findIndex(p => p.ids.has(id)),
     isTabDirty: tab => tab.id === "b", isFileLikeKind: () => false, callHook: () => [],
     showToast: message => closeEvents.push(message),

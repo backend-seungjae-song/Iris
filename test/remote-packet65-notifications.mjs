@@ -8,10 +8,12 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 test('packet65 Android 새 고중요도 채널·무내용 문구·무음 갱신·0건 제거', () => {
   const source = read(`${android}KeepAliveService.kt`);
   assert.match(source, /REQUEST_CHANNEL = "iris\.remote\.requests\.v2"/);
+  assert.match(source, /CONNECTION_CHANNEL = "iris\.remote\.connection\.min"/);
   assert.match(source, /deleteNotificationChannel\("iris\.remote\.requests"\)/);
   assert.match(source, /NotificationManager\.IMPORTANCE_HIGH/);
   assert.match(source, /"응답 요청 \$\{count\}건"/);
-  assert.match(source, /"연결이 끊겼습니다"/);
+  assert.match(source, /private fun stopConnection\(\)[\s\S]*?cancel\(REQUEST_NOTIFICATION\)[\s\S]*?stopForeground\(STOP_FOREGROUND_REMOVE\)/);
+  assert.doesNotMatch(source, /EXTRA_DISCONNECTED|연결이 끊겼습니다/);
   assert.match(source, /count <= 0[\s\S]*?cancel\(REQUEST_NOTIFICATION\)/);
   assert.match(source, /onlyAlertOnce = !alert/);
   assert.match(source, /REQUEST_QUIET_CHANNEL = "iris\.remote\.requests\.quiet"/);

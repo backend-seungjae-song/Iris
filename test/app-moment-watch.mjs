@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
+import { WebSocketServer } from "ws";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -45,7 +47,27 @@ fs.chmodSync(fake, 0o755);
 process.env.IRIS_IDB = fake;
 process.env.IRIS_STATE_DIR = path.join(dir, "state");
 
-test("조작 뒤 잠깐 떴다 사라진 알림만 다음 앱 도구 결과에 얹는다", async () => {
+test("조작 뒤 잠깐 떴다 사라진 알림만 다음 앱 도구 결과에 얹는다", async (t) => {
+  const priorTmp = process.env.TMPDIR;
+  process.env.TMPDIR = dir;
+  const helper = createServer((_req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ width: 402, height: 874 }));
+  });
+  const ws = new WebSocketServer({ server: helper });
+  const inputs = [];
+  ws.on("connection", socket => socket.on("message", data => inputs.push(data)));
+  await new Promise(resolve => helper.listen(0, "127.0.0.1", resolve));
+  fs.mkdirSync(path.join(dir, "serve-sim"));
+  fs.writeFileSync(path.join(dir, "serve-sim", `server-${UDID}.json`), JSON.stringify({
+    pid: process.pid, wsUrl: `ws://127.0.0.1:${helper.address().port}/ws`,
+  }));
+  t.after(async () => {
+    for (const client of ws.clients) client.terminate();
+    await new Promise(resolve => ws.close(resolve));
+    await new Promise(resolve => helper.close(resolve));
+    if (priorTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = priorTmp;
+  });
   const { createAppSurface } = await import("../bin/mcp/app.mjs");
   const surface = createAppSurface({
     currentSession: async () => "s",
@@ -56,7 +78,8 @@ test("조작 뒤 잠깐 떴다 사라진 알림만 다음 앱 도구 결과에 �
   });
   const tool = (n) => surface.tools.find((t) => t.name === n);
   const tapped = await tool("app_tap").run({ x: 10, y: 10 });
-  assert.equal(tapped.ok, true);
+  assert.equal(tapped.ok, true, tapped.error);
+  assert.equal(inputs.length, 2);
   // 감시가 준비한 화면을 다 읽을 때까지 기다린다(가짜 idb 는 곧바로 답한다).
   for (let i = 0; i < 200 && Number(fs.readFileSync(path.join(dir, "n"), "utf8")) < scenes.length + 1; i++) {
     await new Promise((r) => setTimeout(r, 20));
