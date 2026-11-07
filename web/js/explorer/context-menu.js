@@ -32,7 +32,7 @@ import {
 } from "../center/tab-close.js";
 import { getTabs, getTabSpaces } from "../center/tab-store.js";
 import {
-  getFileTree, getSpaceList, invalidateDir, renderFileTree, renderSpaces, requestDir,
+  getFileTree, getSpaceList, refreshDir, renderFileTree, renderSpaces,
 } from "./tree.js";
 import { getLastAgents } from "../herdr/state.js";
 
@@ -236,7 +236,7 @@ export function openFileCtx(x, y, absPath, isDir, extra) {
     const res = await window.acHost?.trashItem(absPath);
     if (!res || !res.ok) { showToast("삭제 실패", { level: "err", detail: String(res && res.error || "알 수 없음") }); return; }
     removeTabsNow(freshAffectedTabs);
-    const parent = pathDirname(absPath); invalidateDir(parent); requestDir(parent); renderFileTree(); showToast("휴지통으로 이동됨", { level: "ok" });
+    const parent = pathDirname(absPath); refreshDir(parent); renderFileTree(); showToast("휴지통으로 이동됨", { level: "ok" });
   } });
   if (Array.isArray(extra)) items.push(...extra);
   showCtx(x, y, items);

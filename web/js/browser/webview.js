@@ -27,6 +27,7 @@ import {
 } from "./ai-state.js";
 import { bmActiveId, bmTabs, followsSharedSpace, getBrowserState } from "./state.js";
 import { callHook } from "../core/hooks.js";
+import { setHtml } from "../core/set-html.js";
 import { activeIdFor } from "./active-tab.js";
 import {
   ensureWebviewStatus, getDiscardedWebview, getWebview, getWebviewEntries, getWebviewIds,
@@ -405,11 +406,13 @@ export function renderTabDialog() {
     : '<button data-ans="cancel">아니오</button><button class="hot" data-ans="ok">네</button>';
   el.hidden = false;
   el.dataset.tab = id;
-  el.innerHTML = '<div class="wd-card" role="dialog" aria-modal="true">'
+  // 같은 질문이면 다시 그리지 않음. 방송·탭 전환마다 그리면 입력 중이던 글자가 기본값으로 돌아가고 글자가 다시 선택됨
+  const drew = setHtml(el, '<div class="wd-card" role="dialog" aria-modal="true" data-wc="' + esc(String(d.wc)) + '">'
     + '<div class="wd-host">' + esc(host || "이 페이지") + '</div>'
     + '<div class="wd-msg">' + esc(d.message) + "</div>"
     + (d.kind === "prompt" ? '<input class="wd-in" id="wd-in" value="' + esc(d.def || "") + '" />' : "")
-    + '<div class="wd-btns">' + btns + "</div></div>";
+    + '<div class="wd-btns">' + btns + "</div></div>");
+  if (!drew) return;
   const inp = el.querySelector("#wd-in");
   const ok = el.querySelector('[data-ans="ok"]');
   if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") ok.click(); });

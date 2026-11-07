@@ -223,17 +223,24 @@ function relayout() {
 
 function clearSplits() { for (const el of splitEls) el.remove(); splitEls = []; }
 
+// 다시 계산할 때마다 막대를 지우고 새로 만들면 마우스를 올린 막대의 강조가 꺼졌다 켜진다
+// - 개수가 같으면 같은 요소의 위치만 바꾼다
 function drawSplits() {
-  clearSplits();
-  for (const s of last.splits) {
-    const el = document.createElement("div");
+  const splits = last.splits;
+  while (splitEls.length > splits.length) splitEls.pop().remove();
+  splits.forEach((s, i) => {
+    let el = splitEls[i];
+    if (!el) {
+      el = document.createElement("div");
+      el.title = "드래그해서 크기 조절";
+      el.addEventListener("mousedown", (e) => startResize(e, el._split));
+      app.appendChild(el);
+      splitEls.push(el);
+    }
+    el._split = s;
     el.className = "lay-split " + (s.dir === "row" ? "lay-split-col" : "lay-split-row");
     Object.assign(el.style, { left: s.rect.x + "px", top: s.rect.y + "px", width: s.rect.w + "px", height: s.rect.h + "px" });
-    el.title = "드래그해서 크기 조절";
-    el.addEventListener("mousedown", (e) => startResize(e, s));
-    app.appendChild(el);
-    splitEls.push(el);
-  }
+  });
 }
 
 function startResize(e, s) {

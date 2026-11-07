@@ -67,7 +67,7 @@ import {
 } from "./explorer/context-menu.js";
 import {
   extOf, focusCreatedAfterList, handlePendingRevealFs, getSpaceList, initTree, mergeGitStatus,
-  renderFileTree, renderSpaces, requestDir, setPendingCreateFocus,
+  refreshDir, renderFileTree, renderSpaces, requestDir, setPendingCreateFocus,
 } from "./explorer/tree.js";
 import {
   agentByPane, agentKey, agentsOfSpace, getLastAgents, getSpaces, getTabsForSpace, nameOf,
@@ -173,7 +173,7 @@ function wsSend(o) {
     pending.catch(() => {});
     return pending;
   }
-  if (o && o.type === "pick-mode" && o.op === "toggle") o = { ...o, hasSheetContext: !!callHook("pick.sheetContext"), hasDocxContext: !!callHook("pick.docxContext"), hasEmulatorContext: !!callHook("emulator.hasPickContext") };
+  if (o && o.type === "pick-mode" && o.op === "toggle") o = { ...o, hasSheetContext: !!callHook("pick.sheetContext"), hasDocxContext: !!callHook("pick.docxContext"), hasEmulatorContext: !!callHook("emulator.hasPickContext"), hasChatContext: !!callHook("agentchat.hasPickContext") };
   return transportWsSend(o);
 }
 
@@ -1072,7 +1072,7 @@ function handleFsOpMessage(m) {
           setPendingCreateFocus({ path: m.newPath, parent: m.parent, isDir: m.op === "create-dir" });
           collapsed.dirs.delete(m.parent); saveCollapsed();
         }
-        if (Array.isArray(m.refresh)) { for (const d of m.refresh) { dirCache.delete(d); requestDir(d); } renderFileTree(); }
+        if (Array.isArray(m.refresh)) { for (const d of m.refresh) refreshDir(d); renderFileTree(); }
         if (m.op === "create-file" && m.newPath) { openFile(m.newPath); showToast("파일을 만들었습니다", { level: "ok" }); }
         else if (m.op === "create-dir" && m.newPath) showToast("폴더를 만들었습니다", { level: "ok" });
         else if (m.op === "create-sheet" && m.newPath) { openFile(m.newPath); showToast("새 스프레드시트를 만들었습니다", { level: "ok" }); }
@@ -1097,7 +1097,7 @@ function handleBrowserDialogMessage(m) {
 
 function handleDirChangedMessage(m) {
       // 트리에 보이는 폴더면 목록을 다시 받는다(생성·삭제·이름변경이 그대로 보이게).
-      if (dirCache.has(m.dir)) { dirCache.delete(m.dir); requestDir(m.dir); renderFileTree(); }
+      if (dirCache.has(m.dir)) refreshDir(m.dir);
       // 터미널·외부 편집기에서 바뀐 것도 깃 화면에 보이게. 저장 경로(requestReload 쪽)만 부르면 앱 밖 변경이 빠짐
       callHook("git.refreshFor", m.dir);
       // 그 폴더에 열어둔 파일이 있으면 내용을 다시 읽는다. 이름 정보가 없으면 그 폴더의 열린 파일 전부.

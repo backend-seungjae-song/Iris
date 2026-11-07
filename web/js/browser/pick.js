@@ -116,6 +116,7 @@ export function togglePickMode() { wsSend({ type: "pick-mode", op: "toggle" }); 
 export function applyPickMode(on) {
   pickMode = !!on;
   callHook("emulator.pickMode", pickMode);
+  callHook("agentchat.pickMode", pickMode);
   const r = activeWv();
   // 두 창(메인/분리)이 같은 문서를 쓰지만 레이아웃에 따라 없는 요소가 있을 수 있어, 없어도 오류가 나지 않게 한다.
   $("#wv-pick")?.classList.toggle("on", pickMode);
@@ -161,7 +162,10 @@ function wirePickCursor() {
       const overCell = callHook("viewer.sheetCellAt", under) || null;   // Sheet 칸
       const overSheet = pickSheetElementAt(under); // Sheet 메뉴바·도구모음·수식입력줄도 같은 좌표 기반 호버
       const overEmulator = callHook("emulator.pickTarget", under) || null;
+      // 대화 화면(iframe) 안의 대화. 좌표는 이 창 기준
+      const overChat = callHook("agentchat.pickTarget", under, { x: pt.x - window.screenX, y: pt.y - window.screenY }) || null;
       const want = overEmulator ? overEmulator.el
+        : overChat ? overChat.el
         : overTab && overTab.dataset.tab && getWebview(overTab.dataset.tab) ? overTab
         : (overGroup && overGroup.dataset.group ? overGroup
         : (overBmk && overBmk.dataset.url ? overBmk
@@ -363,6 +367,8 @@ export function deliverPickLocal(p) {
   try { wsSend({ type: "ai-pick", pane: curTarget, tabId: pickedTab || null, pick: p }); } catch (e) {}
   if (needsGrant) {
     bNote.textContent = "요소 지목 등록 준비 중…";
+  } else if (callHook("agentchat.paste", pickBlock(p))) {
+    bNote.textContent = "요소를 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요.";
   } else {
     wsSend({ type: "pty.input", data: "\x1b[200~" + pickBlock(p) + "\x1b[201~" });
     bNote.textContent = "요소 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
@@ -381,8 +387,9 @@ export function completePendingPick(message) {
     return true;
   }
   const block = pickBlock(pending.pick, message.delimiter);
-  wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = "채팅 입력에 요소 지목을 추가했습니다. 보내면 이 세션 권한에 등록됩니다.";
+  if (callHook("agentchat.paste", block)) return true;
+  wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   const xterm = getXterm();
   if (xterm) setTimeout(() => xterm.focus(), 0);
   return true;

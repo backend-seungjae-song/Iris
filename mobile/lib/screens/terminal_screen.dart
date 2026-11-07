@@ -2113,10 +2113,14 @@ class _TerminalKeyEditorSheetState extends State<TerminalKeyEditorSheet> {
         ),
       ),
       const SizedBox(height: 14),
-      IrisButton(
-        label: _hasSent ? '추가' : '키를 고르세요',
-        tone: IrisButtonTone.primary,
-        onPressed: _ready ? _finish : null,
+      SizedBox(
+        width: double.infinity,
+        child: IrisButton(
+          label: _hasSent ? '추가' : '키를 고르세요',
+          tone: IrisButtonTone.primary,
+          expand: false,
+          onPressed: _ready ? _finish : null,
+        ),
       ),
     ],
   );

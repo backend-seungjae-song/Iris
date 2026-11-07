@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { edgesOf, entryPoints } from "../bin/graph.mjs";
+import { edgesOf, entryPoints, tsImporters } from "../bin/graph.mjs";
 
 // 간선을 못 읽으면 그 파일이 부르는 것들이 "아무도 안 부름"으로 잡힌다. 그래서 이 파서의
 // 구멍은 정상 모듈을 고아로 잘못 판정한다. 확인 결과: 큰따옴표만 보던
-// 규칙 아래서 web/memolab/app.js 의 간선이 0개였고 store.js·terms.js 가 고아로 잡혔다.
+// 규칙 아래서 작은따옴표로 import 하는 화면의 간선이 0개였고 그 모듈들이 고아로 잡혔다.
 const KNOWN = new Set(["web/x/app.js", "web/x/store.js", "web/x/terms.js", "web/x/words.js", "web/x/preload.cjs"]);
 const edges = (source) => edgesOf("web/x/app.js", KNOWN, source);
 
@@ -60,4 +60,13 @@ test("부수 효과 import와 주석 처리한 import 구분", () => {
 test("Electron 패키지 main은 실행 래퍼와 무관하게 진입점이다", () => {
   assert.equal(entryPoints(new Set(["native/electron/main.cjs"])).get("native/electron/main.cjs"), "package.json main");
   assert.equal(entryPoints(new Set()).has("native/electron/main.cjs"), false);
+});
+
+// .tsx 만 부르는 .js export 가 "아무도 안 부름"으로 잡히던 것(server/paseo-ui/entry)
+test("TypeScript 파일이 부르는 .js 도 소비자로 센다", () => {
+  const known = new Set(["server/p/entry/tokens.js", "server/p/entry/other.js"]);
+  const src = { "server/p/entry/chat.tsx": `import { dropContext } from "./tokens";\nimport x from './other.js';` };
+  const map = tsImporters(Object.keys(src), known, (f) => src[f]);
+  assert.deepEqual(map.get("server/p/entry/tokens.js"), ["server/p/entry/chat.tsx"]);
+  assert.deepEqual(map.get("server/p/entry/other.js"), ["server/p/entry/chat.tsx"]);
 });

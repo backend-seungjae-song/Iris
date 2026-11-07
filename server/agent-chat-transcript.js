@@ -17,7 +17,7 @@
 //   않는다. 도구 입력·결과는 여기서 잘라 보낸다(한 줄이 수 MB 인 도구 결과가 있다).
 //   Codex 는 같은 말을 response_item.message 와 event_msg(user_message·agent_message) 두 곳에
 //   적는 판(0.13x)이 있고 뒤 판(0.155)은 response_item 만 적는다(실제 rollout 로 확인). 그래서
-//   response_item 만 읽고 event_msg 는 turn_aborted 만 쓴다.
+//   response_item 과 event_msg 의 turn_aborted·item_completed(도구 항목)를 읽는다.
 //
 // 영향 범위
 //   server/agent-chat.js 와 test/agent-chat.mjs. 현재 목록 확인: node bin/importers.mjs server/agent-chat-transcript.js
@@ -58,7 +58,7 @@ export function isNoiseMessage(msg) {
   if (!msg || (msg.role !== "user" && msg.role !== "system")) return false;
   if (msg.blocks.some((b) => b.type === "tool-call" || b.type === "tool-result")) return false;
   const head = messageText(msg).slice(0, 256).toLowerCase();
-  if (!head) return true;
+  if (!head) return !msg.blocks.some((b) => b.type === "image");
   const tag = /^<([a-z][a-z0-9_-]*)(?:[\s>]|$)/.exec(head)?.[1];
   if (tag && HARNESS_TAGS.has(tag)) return true;
   return HARNESS_PREFIXES.some((p) => head.startsWith(p));
@@ -73,6 +73,14 @@ function boundInput(value, depth = 0) {
   if (Array.isArray(value)) return value.slice(0, 50).map((v) => boundInput(v, depth + 1));
   const out = {};
   for (const [k, v] of Object.entries(value).slice(0, 50)) out[k] = boundInput(v, depth + 1);
+  return out;
+}
+
+// 도구 결과 안 이미지의 위치(content 배열 칸 번호). 데이터는 싣지 않고 창이 /agentchat-image 로 따로 받음
+function resultImages(content) {
+  if (!Array.isArray(content)) return [];
+  const out = [];
+  content.forEach((c, j) => { if (c && (c.type === "image" || c.type === "input_image") && out.length < 20) out.push(j); });
   return out;
 }
 
@@ -109,13 +117,25 @@ function parse(line) {
 // ── Claude Code ─────────────────────────────────────────────────────────────
 // 한 줄 = assistant 블록 하나 또는 user 턴 하나. thinking 은 흐린 줄로 따로 떼고, tool_result 만
 // 담긴 user 줄은 도구 결과 메시지(role tool)가 된다.
+
+// Claude Code 가 붙여넣은 글을 기록 파일에 <pasted_content id="…">…</pasted_content id="…"> 로 감싸 저장
+// - 터미널 화면은 태그를 숨기고 원문만 보임. 대화 화면도 태그를 빼고 원문만
+// - 붙인 글 안에 원래 있던 같은 태그는 <\pasted_content·<\/pasted_content 로 바꿔 저장되므로 되돌림
+// - 감쌀 때 앞뒤에 붙는 줄바꿈("\n\n<pasted_content…>…</pasted_content…>\n")도 뺌. 남으면 대화 화면이 보낸 글과 짝짓지 못해 같은 말이 두 번 보임
+const PASTED_TAG = /\n?<\/pasted_content id="[^"\n]*">|<pasted_content id="[^"\n]*">\n?/g;
+export function unwrapPasted(text) {
+  if (!text.includes("pasted_content")) return text;
+  const out = text.replace(PASTED_TAG, "");
+  return (out === text ? out : out.replace(/^\n+|\n+$/g, "")).replace(/<\\(\/?)pasted_content/g, "<$1pasted_content");
+}
+
 // 에이전트 작업 중 사람이 보낸 입력. user 줄 대신 queued_command 첨부로만 기록됨(다른 세션·작업 알림은 제외)
 function decodeQueuedPrompt(rec, fallbackId) {
   const a = rec.attachment;
   if (!a || a.type !== "queued_command" || a.commandMode !== "prompt" || a.origin?.kind !== "human") return [];
-  const blocks = typeof a.prompt === "string" ? (a.prompt ? [{ type: "text", text: clip(a.prompt, LIMITS.text) }] : [])
-    : Array.isArray(a.prompt) ? a.prompt.flatMap((c) => c?.type === "text" && typeof c.text === "string" && c.text
-      ? [{ type: "text", text: clip(c.text, LIMITS.text) }] : c?.type === "image" ? [{ type: "image" }] : []) : [];
+  const blocks = typeof a.prompt === "string" ? (a.prompt ? [{ type: "text", text: clip(unwrapPasted(a.prompt), LIMITS.text) }] : [])
+    : Array.isArray(a.prompt) ? a.prompt.flatMap((c, i) => c?.type === "text" && typeof c.text === "string" && c.text
+      ? [{ type: "text", text: clip(unwrapPasted(c.text), LIMITS.text) }] : c?.type === "image" ? [{ type: "image", i }] : []) : [];
   if (!blocks.length) return [];
   const id = typeof rec.uuid === "string" ? rec.uuid : fallbackId;
   return [{ id, role: "user", blocks, ts: ts(a.timestamp || rec.timestamp) }];
@@ -129,24 +149,55 @@ function isNarration(signature) {
   try { return Buffer.from(signature.slice(0, 96), "base64").subarray(0, 64).includes(NARRATION_MARK); } catch { return false; }
 }
 
+// Claude Code `!명령`(셸 모드): 입력 줄 <bash-input> 과 다음 줄 <bash-stdout>·<bash-stderr>(parentUuid 가 입력 줄)
+// - Bash 도구 호출·결과로 바꿔 대화 화면이 명령과 출력을 도구 카드로 그리게 함. id 는 "bash-"+입력 줄 uuid
+const SHELL_INPUT = /^<bash-input>([\s\S]*)<\/bash-input>\s*$/;
+const SHELL_OUTPUT = /^<bash-stdout>([\s\S]*?)<\/bash-stdout>\s*(?:<bash-stderr>([\s\S]*?)<\/bash-stderr>)?\s*$/;
+function decodeShell(content, id, parentUuid, time) {
+  const input = SHELL_INPUT.exec(content);
+  if (input) return [{ id, role: "assistant", blocks: [{ type: "tool-call", id: `bash-${id}`, name: "Bash", input: { command: clip(input[1], LIMITS.inputString) } }], ts: time }];
+  const output = SHELL_OUTPUT.exec(content);
+  if (!output || typeof parentUuid !== "string") return null;
+  const stdout = output[1] || "", stderr = output[2] || "";
+  return [{ id, role: "tool", blocks: [{ type: "tool-result", id: `bash-${parentUuid}`, output: clip([stdout, stderr].filter(Boolean).join("\n"), LIMITS.toolResult), isError: !!stderr.trim() && !stdout.trim() }], ts: time }];
+}
+
+// 백그라운드 셸 끝남·Monitor 알림·서브에이전트 끝남(<task-notification> 사용자 줄)
+// - 터미널에 보이는 알림이라 대화 화면에도 보냄. 카드 모양은 대화 화면이 Paseo 변환 함수로 정함
+const TASK_NOTICE = "<task-notification>";
+function taskNotice(content) {
+  const text = typeof content === "string" ? content
+    : Array.isArray(content) ? content.map((c) => (c?.type === "text" && typeof c.text === "string" ? c.text : "")).join("") : "";
+  return text.trimStart().startsWith(TASK_NOTICE) ? text : null;
+}
+
+// 사용자 글의 부모 줄. 중단으로 입력줄에 되돌린 글은 기록에 남고, 다음 글이 같은 부모를 가리킴(대화 화면이 그 글을 뺌)
+const parentOf = (rec) => (typeof rec.parentUuid === "string" ? { parent: rec.parentUuid } : {});
+
 function decodeClaude(rec, fallbackId) {
   if (rec.type === "attachment") return decodeQueuedPrompt(rec, fallbackId);
   if (rec.type !== "user" && rec.type !== "assistant") return [];
   const id = typeof rec.uuid === "string" ? rec.uuid : fallbackId;
   const time = ts(rec.timestamp);
   const content = rec.message?.content;
+  const notice = rec.type === "user" ? taskNotice(content) : null;
+  if (notice) return [{ id, role: "tool", blocks: [{ type: "task-notification", text: clip(notice, LIMITS.toolResult) }], ts: time }];
   const machine = !!(rec.isMeta || rec.isSynthetic || rec.isCompactSummary);
   if (typeof content === "string") {
+    const shell = rec.type === "user" && !machine ? decodeShell(content, id, rec.parentUuid, time) : null;
+    if (shell) return shell;
     if (machine || rec.type !== "user") return rec.type === "assistant" && content ? [{ id, role: "assistant", blocks: [{ type: "text", text: clip(content, LIMITS.text) }], ts: time }] : [];
-    return [{ id, role: "user", blocks: [{ type: "text", text: clip(content, LIMITS.text) }], ts: time }];
+    return [{ id, role: "user", blocks: [{ type: "text", text: clip(unwrapPasted(content), LIMITS.text) }], ts: time, ...parentOf(rec) }];
   }
   if (!Array.isArray(content)) return [];
   const out = [];
   const main = [];
   const results = [];
-  for (const c of content) {
+  for (const [i, c] of content.entries()) {
     if (!c || typeof c !== "object") continue;
-    if (c.type === "text" && typeof c.text === "string" && c.text) { if (!machine) main.push({ type: "text", text: clip(c.text, LIMITS.text) }); }
+    if (c.type === "text" && typeof c.text === "string" && c.text) {
+      if (!machine) main.push({ type: "text", text: clip(rec.type === "user" ? unwrapPasted(c.text) : c.text, LIMITS.text) });
+    }
     else if (c.type === "thinking" && typeof c.thinking === "string" && c.thinking.trim() && isNarration(c.signature)) {
       if (!machine) main.push({ type: "text", text: clip(c.thinking, LIMITS.text) });
     } else if (c.type === "thinking" && typeof c.thinking === "string" && c.thinking.trim()) {
@@ -154,10 +205,11 @@ function decodeClaude(rec, fallbackId) {
     } else if (c.type === "tool_use") {
       main.push({ type: "tool-call", id: typeof c.id === "string" ? c.id : null, name: String(c.name || "tool"), input: boundInput(c.input) });
     } else if (c.type === "tool_result") {
-      results.push({ type: "tool-result", id: typeof c.tool_use_id === "string" ? c.tool_use_id : null, output: clip(resultText(c.content), LIMITS.toolResult), isError: c.is_error === true });
-    } else if (c.type === "image" && !machine) main.push({ type: "image" });
+      const images = resultImages(c.content).map((j) => ({ i, j }));
+      results.push({ type: "tool-result", id: typeof c.tool_use_id === "string" ? c.tool_use_id : null, output: clip(resultText(c.content), LIMITS.toolResult), isError: c.is_error === true, ...(images.length ? { images } : {}) });
+    } else if (c.type === "image" && !machine) main.push({ type: "image", i });
   }
-  if (main.length) out.push({ id, role: rec.type === "assistant" ? "assistant" : "user", blocks: main, ts: time });
+  if (main.length) out.push({ id, role: rec.type === "assistant" ? "assistant" : "user", blocks: main, ts: time, ...(rec.type === "user" ? parentOf(rec) : {}) });
   if (results.length) out.push({ id: `${id}:t`, role: "tool", blocks: results, ts: time });
   return out;
 }
@@ -167,10 +219,10 @@ function codexContentBlocks(content) {
   if (typeof content === "string") return content ? [{ type: "text", text: clip(content, LIMITS.text) }] : [];
   if (!Array.isArray(content)) return [];
   const blocks = [];
-  for (const c of content) {
+  for (const [i, c] of content.entries()) {
     if (!c || typeof c !== "object") continue;
     if (typeof c.text === "string" && c.text && /text$/.test(String(c.type || "text"))) blocks.push({ type: "text", text: clip(c.text, LIMITS.text) });
-    else if (c.type === "input_image" || c.type === "image") blocks.push({ type: "image" });
+    else if (c.type === "input_image" || c.type === "image") blocks.push({ type: "image", i });
   }
   return blocks;
 }
@@ -184,12 +236,46 @@ function codexArgs(payload) {
   return boundInput(raw);
 }
 
+// Codex 기록의 끝난 항목(item_completed) → Paseo 가 Codex app-server 에서 받는 thread item 모양
+// - Paseo mapCodexToolCallFromThreadItem 이 그대로 카드로 그림. 기록은 Rust 쪽 이름(snake_case·대문자 type)
+// - 도구 카드가 아닌 항목(말·생각·서브에이전트 등)은 null. 그 항목은 response_item 으로 읽음
+const fileUrlPath = (v) => (typeof v === "string" && v ? v.replace(/^file:\/\//, "") : undefined);
+export function codexToolItem(item) {
+  if (!item || typeof item !== "object" || typeof item.id !== "string" || !item.id) return null;
+  const status = typeof item.status === "string" ? item.status : "completed";
+  if (item.type === "CommandExecution") {
+    const cwd = fileUrlPath(item.cwd);
+    return {
+      type: "commandExecution", id: item.id, status, command: boundInput(item.command), ...(cwd ? { cwd } : {}),
+      aggregatedOutput: typeof item.aggregated_output === "string" ? clip(item.aggregated_output, LIMITS.toolResult) : null,
+      exitCode: typeof item.exit_code === "number" ? item.exit_code : null,
+    };
+  }
+  if (item.type === "FileChange") return { type: "fileChange", id: item.id, status, changes: boundInput(item.changes) };
+  if (item.type === "McpToolCall" && typeof item.tool === "string") {
+    return {
+      type: "mcpToolCall", id: item.id, status, tool: item.tool,
+      ...(typeof item.server === "string" ? { server: item.server } : {}),
+      arguments: boundInput(item.arguments), result: boundInput(item.result),
+      ...(item.error != null ? { error: boundInput(item.error) } : {}),
+    };
+  }
+  if (item.type === "Extension" && item.kind === "web.search") {
+    return { type: "webSearch", id: item.id, status, ...(typeof item.query === "string" ? { query: item.query } : {}), action: boundInput(item.action) };
+  }
+  return null;
+}
+
 function decodeCodex(rec, fallbackId) {
   const p = rec.payload;
   if (!p || typeof p !== "object") return [];
   const id = typeof p.id === "string" ? p.id : fallbackId;
   const time = ts(rec.timestamp);
   if (rec.type === "event_msg") {
+    if (p.type === "item_completed") {
+      const item = codexToolItem(p.item);
+      return item ? [{ id: `item:${item.id}`, role: "assistant", blocks: [{ type: "tool-item", item }], ts: time }] : [];
+    }
     return p.type === "turn_aborted" ? [{ id, role: "system", blocks: [{ type: "text", text: "중단됨" }], ts: time }] : [];
   }
   if (rec.type !== "response_item") return [];
@@ -208,12 +294,16 @@ function decodeCodex(rec, fallbackId) {
   }
   if (p.type === "function_call" || p.type === "custom_tool_call" || p.type === "local_shell_call") {
     const name = String(p.name || (p.type === "local_shell_call" ? "shell" : "tool"));
-    return [{ id, role: "assistant", blocks: [{ type: "tool-call", id: typeof p.call_id === "string" ? p.call_id : null, name, input: codexArgs(p) }], ts: time }];
+    // exec: 명령을 부르는 코드 묶음. 안의 명령·수정은 끝나면 item_completed 카드로 보이므로 결과가 오면 화면에서 뺌
+    const wrapper = p.type === "custom_tool_call" && name === "exec";
+    return [{ id, role: "assistant", blocks: [{ type: "tool-call", id: typeof p.call_id === "string" ? p.call_id : null, name, input: codexArgs(p), ...(wrapper ? { wrapper: true } : {}) }], ts: time }];
   }
   if (p.type === "function_call_output" || p.type === "custom_tool_call_output" || p.type === "local_shell_call_output") {
     const o = p.output;
     const isError = !!(o && typeof o === "object" && !Array.isArray(o) && (o.success === false || o.is_error === true));
-    return [{ id, role: "tool", blocks: [{ type: "tool-result", id: typeof p.call_id === "string" ? p.call_id : null, output: clip(resultText(o), LIMITS.toolResult), isError }], ts: time }];
+    // Codex 도구 결과 이미지는 payload.output 배열 칸. i 는 쓰지 않음(0)
+    const images = resultImages(o).map((j) => ({ i: 0, j }));
+    return [{ id, role: "tool", blocks: [{ type: "tool-result", id: typeof p.call_id === "string" ? p.call_id : null, output: clip(resultText(o), LIMITS.toolResult), isError, ...(images.length ? { images } : {}) }], ts: time }];
   }
   return [];
 }
@@ -237,6 +327,8 @@ function decodeRange(kind, buf, base) {
     const end = nl < 0 ? buf.length : nl;
     const off = base + at;
     const msgs = decodeLine(kind, buf.subarray(at, end).toString("utf8"), `L${off}`);
+    // 이미지 데이터는 보내지 않고 줄 위치만 붙임. 창이 이 위치로 이미지를 따로 요청
+    for (const m of msgs) for (const b of m.blocks) if (b.type === "image" || b.images) b.off = off;
     if (msgs.length) entries.push({ off, msgs });
     at = end + 1;
   }

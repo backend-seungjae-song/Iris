@@ -135,6 +135,18 @@ export function isHostMessage(message) {
     return exact(message, ["type", "connId"])
       && HEX_128.test(message.connId);
   }
+  if (message.type === "paseo.grant") {
+    return exact(message, ["type", "connId", "ticket", "nodeId", "port"])
+      && HEX_128.test(message.connId) && /^[0-9a-f]{64}$/.test(message.ticket)
+      && shortString(message.nodeId, 256) && port(message.port);
+  }
+  if (message.type === "paseo.pane") {
+    return exact(message, ["type", "connId", "token", "paneId"])
+      && HEX_128.test(message.connId) && /^[0-9a-f]{32}$/.test(message.token) && shortString(message.paneId, 100);
+  }
+  if (message.type === "paseo.revoke") {
+    return exact(message, ["type", "connId"]) && HEX_128.test(message.connId);
+  }
   if (message.type === "ip.block") {
     return exact(message, ["type", "peerIp", "blockedUntil"])
       && isIP(message.peerIp) === 4 && Number.isSafeInteger(message.blockedUntil) && message.blockedUntil >= 0;

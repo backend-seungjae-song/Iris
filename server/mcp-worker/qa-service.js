@@ -15,7 +15,7 @@ const requireOk = result => {
 };
 
 // QA 채널이 보내는 일반 명령 이름 · 일반 MCP 와 같은 worker 처리기를 QA 표시(iris-qa)로 실행
-export const QA_GENERIC_NAMES = Object.freeze(["goto", "url", "snapshot", "diff", "wait", "back", "forward", "reload"]);
+export const QA_GENERIC_NAMES = Object.freeze(["goto", "url", "snapshot", "text", "diff", "wait", "back", "forward", "reload"]);
 
 // QA 명령 실행 · 이름이 QA 표나 일반 이름 목록에 있고 worker 경로이며 메인이 그 명령의 기능을 알릴 때만 worker 처리기, 아니면 옛 봉투
 // reactionClock: 시험용 시계(now · sleep)

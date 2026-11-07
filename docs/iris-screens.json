@@ -168,15 +168,6 @@
       ]
     },
     {
-      "name": "메모랩",
-      "kind": "rail",
-      "entry": "memolab",
-      "rootIds": [
-        "ml-panel"
-      ],
-      "surfaceIds": []
-    },
-    {
       "name": "사용량",
       "kind": "rail",
       "entry": "usage",

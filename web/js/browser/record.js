@@ -420,6 +420,7 @@ function recDeliver(text) {
 export function recDeliverLocal(text) {
   const curTarget = getCurTarget();
   if (!curTarget) { recNote("먼저 왼쪽에서 에이전트(세션)를 선택하세요."); return; }
+  if (callHook("agentchat.paste", text)) return;
   wsSend({ type: "pty.input", data: "\x1b[200~" + text + "\x1b[201~" });
   const xterm = getXterm();
   if (xterm) setTimeout(() => xterm.focus(), 0);

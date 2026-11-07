@@ -27,6 +27,7 @@ import { askText, showCtx } from "../explorer/context-menu.js";
 let $, wsSend, showToast, getIsLocal, getSelectedSpaceId, onLayoutChange;
 let strip = null;
 let lastHeight = -1;
+let lastMarkup = "", lastFocused = null;
 
 const META_KEY = "ac.htab.meta";
 const COLORS = [
@@ -104,7 +105,7 @@ export function renderHerdrTabs() {
   if (!strip) return;
   const space = currentSpace();
   const tabs = space ? orderedTabs(space) : [];
-  if (!tabs.length) { strip.hidden = true; strip.innerHTML = ""; syncLayout(); return; }
+  if (!tabs.length) { strip.hidden = true; strip.innerHTML = ""; lastMarkup = ""; syncLayout(); return; }
   strip.hidden = false;
   const meta = readMeta();
   const items = tabs.map((t, i) => {
@@ -128,9 +129,18 @@ export function renderHerdrTabs() {
   const add = getIsLocal()
     ? `<button class="htab-add" data-add="1" title="새 탭: 눌러서 무엇을 띄울지 고릅니다">${icon("plus", 12)}</button>`
     : "";
-  strip.innerHTML = `<div class="htab-scroll">${items}</div>${add}`;
-  // 지금 보고 있는 탭이 밀려 나가 있으면 끌어온다. 보이지 않는 탭이 활성이면 위치를 알 수 없다.
-  strip.querySelector(".htab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const markup = `<div class="htab-scroll">${items}</div>${add}`;
+  // 상태 방송마다 불림. 같으면 그대로 두고, 바뀌어도 사람이 넘긴 가로 위치는 유지
+  // - 다시 그릴 때마다 선택 탭으로 되돌아가던 결함(2026-11-07)
+  if (markup === lastMarkup && strip.querySelector(".htab-scroll")) { syncLayout(); return; }
+  const left = strip.querySelector(".htab-scroll")?.scrollLeft || 0;
+  strip.innerHTML = markup; lastMarkup = markup;
+  const box = strip.querySelector(".htab-scroll");
+  if (box) box.scrollLeft = left;
+  // 지금 보고 있는 탭이 바뀌었을 때만 밀려 나간 그 탭을 끌어옴. 보이지 않는 탭이 활성이면 위치를 알 수 없음
+  const focused = tabs.find((t) => t.focused)?.tabId || null;
+  if (focused !== lastFocused) strip.querySelector(".htab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  lastFocused = focused;
   strip.querySelector(".htab-scroll")?.addEventListener("scroll", markOverflow, { passive: true });
   markOverflow();
   syncLayout();

@@ -372,11 +372,14 @@ check("web/js 의 모든 모듈이 main.js 에서 import 로 닿는다", () => {
 // 소유 검사는 전부 통과한다. 파일은 있지만 기능은 동작하지 않는다.
 check("server 의 모든 모듈이 index.js 에서 import 로 닿는다", () => {
   const files = sourceFiles("server").filter((rel) => rel.endsWith(".js"));
-  const known = new Set(files);
+  // Paseo 화면 빌드 진입 파일(.ts·.tsx)도 따라감. index.js 가 new URL 로 가리키고 그 안에서 .js 를 import 함
+  const known = new Set([...files, ...filesUnder("server/paseo-ui/entry", (rel) => /\.tsx?$/.test(rel))]);
   // 진입점은 index.js 하나가 아니다. package.json 이 직접 실행하는 스크립트도 진입점이다
   // (server/selftest.js 는 `pnpm selftest` 로만 실행된다). 직접 나열하면 스크립트가 늘 때 틀려진다.
   const scripts = Object.values(JSON.parse(read("package.json")).scripts || {}).join(" ");
   const entries = ["server/index.js", ...files.filter((rel) => scripts.includes(rel))];
+  // Paseo 화면 빌드의 Metro 설정이 path.join(__dirname, "x.js") 로 연결하는 진입 폴더 파일(빌드 때 불림)
+  for (const m of read("server/paseo-ui/entry/metro.config.cjs").matchAll(/path\.join\(\s*__dirname\s*,\s*"([^"/]+\.js)"\s*\)/g)) entries.push(`server/paseo-ui/entry/${m[1]}`);
   const seen = new Set();
   const stack = [...entries];
   while (stack.length) {
@@ -390,7 +393,9 @@ check("server 의 모든 모듈이 index.js 에서 import 로 닿는다", () => 
     // 남는다. 그래서 인식할 연결 형태를 늘린다.
     for (const m of read(cur).matchAll(/from\s+"(\.[^"]+)"|\bimport\(\s*"(\.[^"]+)"\s*\)|new URL\(\s*"(\.[^"]+)"\s*,\s*import\.meta\.url\s*\)/g)) {
       const target = path.posix.normalize(`${dir}/${m[1] || m[2] || m[3]}`);
-      if (known.has(target)) stack.push(target);
+      // 진입 파일은 Metro 관례대로 확장자 없이 import 함
+      const hit = [target, `${target}.js`, `${target}.ts`, `${target}.tsx`].find((t) => known.has(t));
+      if (hit) stack.push(hit);
     }
   }
   const orphans = files.filter((rel) => !seen.has(rel));

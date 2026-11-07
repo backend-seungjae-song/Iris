@@ -98,7 +98,10 @@ test("이전 요청의 타이머는 새 요청을 끝내지 않는다", () => {
 });
 
 test("시간 초과로 끝난 요청의 늦은 응답은 다음 요청의 응답으로 세지 않는다", () => {
-  mock.timers.tick(3000);              // 주기 조회의 실패 응답으로 실패 화면에 돌린다
+  mock.timers.tick(3000);              // 주기 조회가 한 번 실패해도 마지막 표는 유지
+  onStatus(FAIL);
+  assert.equal(err.hidden, true);
+  mock.timers.tick(3000);              // 연속 두 번째 실패로 실패 화면에 돌린다
   onStatus(FAIL);
   assert.equal(err.hidden, false);
   mock.timers.tick(3000);              // 주기 조회 A

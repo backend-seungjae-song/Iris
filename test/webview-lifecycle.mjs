@@ -251,7 +251,8 @@ function accountFixture(switchUrls) {
   const sent = [];
   const f = fixture({ linkAccountFor: (_wc, url) => switchUrls.includes(url) });
   f.wc.hostWebContents.send = (channel, payload) => sent.push([channel, payload]);
-  const event = () => { const ev = { prevented: false, preventDefault() { ev.prevented = true; } }; return ev; };
+  // initiator: 이동을 시작한 프레임. Iris 가 연 이동(loadURL)은 없음(Electron 43.8.6 실측)
+  const event = (initiator = { routingId: 1 }) => { const ev = { prevented: false, initiator, preventDefault() { ev.prevented = true; } }; return ev; };
   return { ...f, sent, event };
 }
 
@@ -281,5 +282,13 @@ test("규칙에 안 걸리는 이동은 막지 않음", () => {
   f.emit("will-redirect", red, "https://example.com/b", false, true);
   assert.equal(nav.prevented, false);
   assert.equal(red.prevented, false);
+  assert.deepEqual(f.sent, []);
+});
+
+test("Iris 가 연 이동(주소창·북마크·계정 전환 뒤 다시 열기)의 리디렉트는 막지 않음", () => {
+  const f = accountFixture(["https://www.figma.com/design/A"]);
+  const ev = f.event(null);
+  f.emit("will-redirect", ev, "https://www.figma.com/design/A", false, true);
+  assert.equal(ev.prevented, false);
   assert.deepEqual(f.sent, []);
 });

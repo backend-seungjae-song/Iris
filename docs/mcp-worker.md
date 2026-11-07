@@ -623,7 +623,7 @@ worker 경로 쪽은 실제 worker 서비스 · host 확인 창 게이트 · 명
 
 대상 9개(`QA_COMMAND_NAMES`, `server/mcp-worker/qa-route.js`): `qa-input` `qa-select-resolve` `qa-locate` `qa-focused` `qa-login-info` `qa-login-input`
 `qa-viewport` `qa-viewport-state` `qa-mode`. `COMMAND_ROUTES` 에 따로 등록하고 `worker-qa-input-commands` 를 알리는 메인에서만 worker 경로를 쓴다.
-호출 자리는 `qa-service.js` 의 `createQaExecutor`(`execute`·`modeOff`)이고, QA 표의 이름과 일반 이름 8개(`QA_GENERIC_NAMES`: `goto` `url` `snapshot` `diff` `wait` `back` `forward` `reload`)가 처리기를 쓴다. 일반 이름은 일반 MCP 와 같은 처리기를 QA 표시(`iris-qa`)로 실행하고, 메인이 그 명령의 기능을 알리지 않으면 옛 봉투로 보낸다(`test/mcp-worker-qa-generic-route.test.mjs`).
+호출 자리는 `qa-service.js` 의 `createQaExecutor`(`execute`·`modeOff`)이고, QA 표의 이름과 일반 이름 9개(`QA_GENERIC_NAMES`: `goto` `url` `snapshot` `text` `diff` `wait` `back` `forward` `reload`)가 처리기를 쓴다. 일반 이름은 일반 MCP 와 같은 처리기를 QA 표시(`iris-qa`)로 실행하고, 메인이 그 명령의 기능을 알리지 않으면 옛 봉투로 보낸다(`test/mcp-worker-qa-generic-route.test.mjs`). `test/mcp-worker-no-legacy-route.test.mjs` 는 `bin/iris-mcp.mjs` 와 `server/qa-channel.js` 소스에서 명령 이름을 읽어, 메인 옛 처리기로 가는 이름이 하나라도 있으면 실패한다. 새 명령을 메인에만 추가하거나 `COMMAND_ROUTES` 를 `legacy` 로 되돌리면 이 검사가 실패한다.
 
 QA 채널의 순서는 그대로다: `qa-mode` 켜기 단위 → 명령 단위. 두 단위는 다른 `commandId`(`<요청>/unit/<uuid>`)로 보낸다. 같은 commandId 로 이으면 앞 단위가
 닫힌 뒤의 자원 반환(`releaseCommand`)이 뒤 단위가 얻은 표식까지 거두기 때문이다. 회차 종료의 `qa-mode` 해제는 단위 이름 `qa-mode-off` 로 보내며 host 확인 창 게이트가
@@ -741,7 +741,7 @@ host 작업 위임의 `screenshot`(journal)은 위 「host 작업 위임」처�
 | `cdp-hidden-viewport.cjs` `cdp-device-emulation.cjs` `cdp-attach-policy.cjs` `cdp-session.cjs` `cdp-transport.cjs` `cdp-result-safety.cjs` `cdp-upload.cjs` `cdp-native-ax.cjs` | 남김 | 기본 명령(`viewport.*` `cdp.attach` `cdp.gate` `result.redact` `upload.arm` `native.*` 등) | 동기 판정과 사람 쪽 상태(설계 H절): 부착·세션·debugger-pin, 비밀 가리기, 기기 에뮬레이션, 업로드·확인 창 자동 응답, 네이티브 접근성 |
 | `cdp-control.cjs` | 남김(조립 · CDP 중계) | 경로 표 + 단위 실행 | 옛 봉투 분기가 남음: worker 메타가 없는 봉투와 경로 `legacy` 명령 |
 
-QA 채널이 보내는 일반 이름 `goto` `url` `snapshot` `diff` `wait` `back` `forward` `reload` 는 `QA_GENERIC_NAMES` 로 worker 처리기에 연결했다. 처리기 결과는 일반 MCP 경로의 golden 이 옛 처리기와 대조하고,
+QA 채널이 보내는 일반 이름 `goto` `url` `snapshot` `text` `diff` `wait` `back` `forward` `reload` 는 `QA_GENERIC_NAMES` 로 worker 처리기에 연결했다. 처리기 결과는 일반 MCP 경로의 golden 이 옛 처리기와 대조하고,
 QA 채널 경로 선택은 `test/mcp-worker-qa-generic-route.test.mjs` 가 정한다. 실제 앱에서 `goto` `snapshot` `back` `forward` `reload` `diff` 를 QA 회차로 실행해 확인했다. `qa-dialog-state` `qa-dialog-answer` 는 host 확인 창 연산이다.
 
 ### 명령별 처리 경로 (⑦ 진행)
@@ -942,8 +942,9 @@ capture hold는 세대별·탭별 획득 횟수를 기록한다. 명시적 해�
 <!-- 삭제·이름 변경 파일 판정에 쓰는 설치 당시 실행 주체 -->
 <!-- 이번 설치가 만드는 기록부터 필수이며 이전 형식은 허용하지 않음 -->
 `bundle.executionOwners`는 전체 설치 당시 실행 그래프에서 파일마다 확인한 실행 주체를 보존한다.
-다음 설치 판정에서 사라진 파일은 이 기록으로 분류한다. worker 전용 파일의 삭제·이름 변경은 worker
-교체로 처리하고 공유 파일이나 다른 실행 주체의 파일 삭제는 전체 설치로 처리한다.
+다음 설치 판정에서 사라진 파일은 이 기록으로 분류한다. worker와 MCP 진입 프로세스만 쓰는 파일의
+삭제·이름 변경은 worker 교체로 처리하고, 그 밖의 실행 주체가 쓰는 파일 삭제는 전체 설치로 처리한다.
+MCP 진입 프로세스는 저장소에서 직접 실행되므로 그 파일이 바뀌면 설치 앱을 바꾸지 않고 `/mcp reconnect`를 요구한다.
 
 `bundle` 값이 현재 설치 번들과 모두 같을 때만 번들의 `node_modules`를 링크한다. lockfile, ABI,
 플랫폼·아키텍처, override 또는 patch가 다르면 worker 배포로 활성화하지 않고 전체 설치를 요구한다.

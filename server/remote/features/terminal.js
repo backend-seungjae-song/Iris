@@ -1,6 +1,7 @@
 import { createKeyRowStore } from "../key-row.js";
 import { redactPrivateText } from "../public-text.js";
 import { createHash } from "node:crypto";
+import { cellWidth } from "../../cell-width.js";
 
 const MAX_SCREEN_BYTES = 48 * 1024;
 const MAX_SCREEN_CELLS = 262144;
@@ -18,21 +19,6 @@ export function terminalMouseMode(raw, truncated = false) {
 }
 
 const graphemes = new Intl.Segmenter("ko", { granularity: "grapheme" });
-function cellWidth(text) {
-  let result = 0;
-  for (const { segment } of graphemes.segment(text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ""))) {
-    const point = segment.codePointAt(0);
-    if (point < 32 || point >= 0x300 && point <= 0x36f || point >= 0xfe00 && point <= 0xfe0f) continue;
-    result += point >= 0x1100 && point <= 0x115f || point === 0x2329 || point === 0x232a
-      || point >= 0x2e80 && point <= 0xa4cf && point !== 0x303f
-      || point >= 0xac00 && point <= 0xd7a3 || point >= 0xf900 && point <= 0xfaff
-      || point >= 0xfe10 && point <= 0xfe19 || point >= 0xfe30 && point <= 0xfe6f
-      || point >= 0xff00 && point <= 0xff60 || point >= 0xffe0 && point <= 0xffe6
-      || point >= 0x1f1e6 && point <= 0x1faff || point >= 0x20000 && point <= 0x3fffd
-      || segment.includes("\ufe0f") || segment.includes("\u20e3") ? 2 : 1;
-  }
-  return result;
-}
 function screenText(value, identifiers) {
   const safe = String(value).replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
     .replace(/\x1bP[\s\S]*?\x1b\\/g, "");

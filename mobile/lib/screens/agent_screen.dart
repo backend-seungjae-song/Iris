@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:iris_remote/design/buttons.dart';
 import 'package:iris_remote/design/chat_tools.dart';
 import 'package:iris_remote/design/composer.dart';
@@ -16,6 +17,7 @@ import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
 import 'package:iris_remote/screens/browser_screen.dart';
 import 'package:iris_remote/screens/conversation_request_card.dart';
+import 'package:iris_remote/screens/paseo_screen.dart';
 import 'package:iris_remote/screens/response_host.dart';
 import 'package:iris_remote/screens/source_control_screen.dart';
 import 'package:iris_remote/screens/terminal_question_screen.dart';
@@ -313,6 +315,16 @@ class _AgentScreenState extends State<AgentScreen> {
             onBrowser: widget.state.supports('browser.tabs')
                 ? _openBrowser
                 : null,
+            onPaseo: widget.state.supports('chat.open')
+                ? () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => PaseoChatScreen(
+                        session: widget.state.session,
+                        agent: agent,
+                      ),
+                    ),
+                  )
+                : null,
             onGitHub:
                 widget.state.supports('git.changes') ||
                     widget.state.supports('github.pr')
@@ -351,6 +363,7 @@ class AgentSessionView extends StatefulWidget {
     this.onStop,
     this.onTerminal,
     this.onBrowser,
+    this.onPaseo,
     this.onGitHub,
     this.loading = false,
     this.loadingEarlier = false,
@@ -386,6 +399,7 @@ class AgentSessionView extends StatefulWidget {
   final Future<void> Function()? onStop;
   final VoidCallback? onTerminal;
   final VoidCallback? onBrowser;
+  final VoidCallback? onPaseo;
   final VoidCallback? onGitHub;
   final bool canMessage;
   final bool loading;
@@ -417,6 +431,10 @@ class _AgentSessionViewState extends State<AgentSessionView> {
   int _lastTranscriptCount = 0;
   // 위로 올라가 있는 동안 새로 들어온 항목 수
   int _unseen = 0;
+  // 사용자가 맨 아래를 보고 있었는가. 목록이 비었다 채워지는 리로드에서는 현재 위치로 판정할 수 없어 사용자 스크롤로만 갱신
+  bool _pinnedToBottom = true;
+  // 옛 대화를 불러와 스크롤 위치를 되돌릴 때까지 true. 그동안 다시 불러오거나 맨 아래로 가지 않음
+  bool _earlierPending = false;
 
   int get _itemCount =>
       widget.transcript.length +
@@ -443,6 +461,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       _lastTranscriptCount = 0;
       _showScrollToBottom = false;
       _unseen = 0;
+      _pinnedToBottom = true;
     }
     if (_messageController.text != widget.composerText) {
       _messageController.value = TextEditingValue(
@@ -451,14 +470,12 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       );
     }
     final count = _itemCount;
-    final nearBottom =
-        !_scrollController.hasClients ||
-        _scrollController.position.maxScrollExtent - _scrollController.offset <
-            80;
     if (!_initialScrollDone && !widget.loading) {
       _initialScrollDone = true;
       _scrollToBottom();
-    } else if (count > _lastTranscriptCount && nearBottom) {
+    } else if (_earlierPending) {
+      // 앞쪽에 붙은 옛 항목이라 새 항목 알림도 맨 아래 이동도 하지 않음
+    } else if (count > _lastTranscriptCount && _pinnedToBottom) {
       _scrollToBottom();
     } else {
       if (count > _lastTranscriptCount && _lastTranscriptCount > 0) {
@@ -483,6 +500,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
 
   // 줄 높이가 제각각이면 한 번에 끝까지 못 가므로 맨 아래에 닿을 때까지 몇 프레임 반복
   void _scrollToBottom([int pass = 0]) {
+    _pinnedToBottom = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
@@ -499,6 +517,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
 
   Future<void> _animateToBottom() async {
     if (!_scrollController.hasClients) return;
+    _pinnedToBottom = true;
     await _scrollController.animateTo(
       _scrollController.position.maxScrollExtent,
       duration: const Duration(milliseconds: 260),
@@ -527,7 +546,12 @@ class _AgentSessionViewState extends State<AgentSessionView> {
 
   void _onScroll() {
     _scheduleScrollVisibilityUpdate();
-    if (_scrollController.offset > 48 ||
+    final position = _scrollController.position;
+    if (position.userScrollDirection != ScrollDirection.idle) {
+      _pinnedToBottom = position.extentAfter < 80;
+    }
+    if (_earlierPending ||
+        _scrollController.offset > 48 ||
         !widget.hasEarlier ||
         widget.loadingEarlier ||
         widget.onLoadEarlier == null) {
@@ -535,11 +559,17 @@ class _AgentSessionViewState extends State<AgentSessionView> {
     }
     final oldExtent = _scrollController.position.maxScrollExtent;
     final oldOffset = _scrollController.offset;
-    widget.onLoadEarlier!().then((_) {
+    // 불러오는 동안 모든 줄을 배치해 두어야 늘어난 높이가 추정값이 아닌 실제 값이 됨
+    setState(() => _earlierPending = true);
+    widget.onLoadEarlier!().whenComplete(() {
+      // 새 항목이 배치된 다음 프레임에서 늘어난 높이만큼 내려 보던 위치를 유지
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
-        final added = _scrollController.position.maxScrollExtent - oldExtent;
-        _scrollController.jumpTo(oldOffset + added);
+        if (!mounted) return;
+        if (_scrollController.hasClients) {
+          final added = _scrollController.position.maxScrollExtent - oldExtent;
+          if (added > 0) _scrollController.jumpTo(oldOffset + added);
+        }
+        setState(() => _earlierPending = false);
       });
     });
   }
@@ -658,11 +688,6 @@ class _AgentSessionViewState extends State<AgentSessionView> {
         _QuestionFallbackCard(onTerminal: widget.onTerminal!),
     ];
     final body = <Widget>[
-      if (widget.loadingEarlier)
-        const Padding(
-          padding: EdgeInsets.all(12),
-          child: Center(child: CircularProgressIndicator()),
-        ),
       if (widget.loading)
         const Padding(
           padding: EdgeInsets.all(32),
@@ -710,6 +735,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
               onSelectAgent: widget.onSelectAgent,
               onTerminal: widget.onTerminal,
               onBrowser: widget.onBrowser,
+              onPaseo: widget.onPaseo,
               onGitHub: widget.onGitHub,
               githubFailed: widget.githubFailed,
             ),
@@ -725,11 +751,26 @@ class _AgentSessionViewState extends State<AgentSessionView> {
                       child: ListView(
                         key: const Key('session-chat'),
                         controller: _scrollController,
+                        cacheExtent: _earlierPending ? 200000 : null,
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         children: body,
                       ),
                     ),
                   ),
+                  // 목록 안에 넣으면 대화가 아래로 밀렸다 올라와 위치가 튄다
+                  if (widget.loadingEarlier)
+                    const Positioned(
+                      top: 8,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    ),
                   if (_showScrollToBottom)
                     Positioned(
                       right: 16,
@@ -824,6 +865,7 @@ class _SessionHeader extends StatelessWidget {
     required this.onSelectAgent,
     this.onTerminal,
     this.onBrowser,
+    this.onPaseo,
     this.onGitHub,
     this.githubFailed = false,
   });
@@ -835,6 +877,7 @@ class _SessionHeader extends StatelessWidget {
   final ValueChanged<RemoteAgent> onSelectAgent;
   final VoidCallback? onTerminal;
   final VoidCallback? onBrowser;
+  final VoidCallback? onPaseo;
   final VoidCallback? onGitHub;
   final bool githubFailed;
 
@@ -861,6 +904,7 @@ class _SessionHeader extends StatelessWidget {
       onChat: () {},
       onTerminal: onTerminal,
       onBrowser: onBrowser,
+      onPaseo: onPaseo,
       onGitHub: onGitHub,
       githubFailed: githubFailed,
     );

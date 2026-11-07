@@ -177,6 +177,13 @@ test("execution rejects an accepted request without a completion record", () => 
   reject("execution", events => insertBeforeClose(events, { kind: "accepted", cmd: "click", ...lane }));
   reject("execution", events => { event(events, "action").pass = false; });
 });
+test("판정 없이 막힌 조작은 조작 seq 를 무효로 하면 green 경로의 실패 조작에서 빠진다", () => {
+  const events = complete();
+  event(events, "action").pass = false;
+  assert.throws(() => checkQaReport(events), error => error.message.startsWith("[execution]"));
+  insertBeforeClose(events, { kind: "row", action: "void", rowData: { receipt: "8", why: "조작이 앱에 전달되지 않음" } });
+  assert.doesNotThrow(() => checkQaReport(events));
+});
 test("A2 rejects green if all valid assertions precede the last action", () => {
   reject("A2", events => {
     const [assertion] = events.splice(10, 1);

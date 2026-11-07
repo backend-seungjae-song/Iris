@@ -575,8 +575,10 @@ await checkAsync("설정 배선이 붙잡는 이름이 그림에 다 있다", as
     linkRules: { rules: [{ pattern: "github.com", profile: "p" }], accounts: [{ id: "", name: "기본" }, { id: "p", name: "Work" }],
       draft: "github.com/acme", draftAccount: "p", undo: { pattern: "x.com", profile: "" } },
     conflicts: [], changed: 1,
+    // 켜진 기능이 채우는 분류(agentchat.settingsSection 등)
+    featureSections: [{ id: "feature", label: "기능", rows: [{ key: "k", label: "줄", value: "a", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] }] }],
   };
-  const all = mod.SETTINGS_SECTIONS.map((s) => mod.settingsMarkup({ ...model, section: s.id })).join("\n");
+  const all = [...mod.SETTINGS_SECTIONS, ...model.featureSections].map((s) => mod.settingsMarkup({ ...model, section: s.id })).join("\n");
   const missing = hooks.filter((h) => !all.includes(h + "="));
   if (missing.length) throw new Error("그림에 없는 이름: " + missing.join(", "));
   return true;
@@ -721,8 +723,7 @@ await checkAsync("표의 각 줄이 실물과 이어져 있다", async () => {
      밝힌 경로가 실제로 라우팅되고 그 처리기가 이 기능의 서버 파일에서 나오는가
      그 페이지가 실제로 그 경로를 호출하는가(아무도 호출하지 않는 경로는 죽은 경로다)
    같은 경로를 둘이 적는 것도 막는다. 나중에 등록된 쪽이 조용히 이긴다. */
-/* 앱 CSS와 인라인 스타일은 공통 방향 A의 역할 이름만 쓴다. 메모랩은 자기 팔레트를 가진
-   독립 지면이라 sourceFiles("web") 대상에 들어오지 않는다. */
+/* 앱 CSS와 인라인 스타일은 공통 방향 A의 역할 이름만 쓴다. */
 check("옛 역할 토큰을 남기지 않는다", () => {
   const legacy = [
     "bg", "card", "sidebar", "muted-fg", "faint-fg", "primary", "primary-fg", "on-accent",
@@ -2695,7 +2696,7 @@ check("끌기 배선을 기능이 들고 온다", () => {
 });
 
 // ── 크기 조절 손잡이: 도구 화면 위에서 끌어도 끊기지 않는다 ──────────────────────────
-// 메모랩은 <iframe>, 서버는 <webview> 로 화면을 채운다. 둘 다 마우스 이벤트를 자기가 받으므로,
+// 대화 설정은 <iframe>, 서버는 <webview> 로 화면을 채운다. 둘 다 마우스 이벤트를 자기가 받으므로,
 // 덮개 없이 document 로 끌면 포인터가 그 위에 들어서는 순간 끌기가 멈추고 그 안에서 버튼을 놓으면
 // mouseup 도 오지 않는다. 그 뒤로는 누르지 않은 크기 조절이 포인터를 따라다닌다. 덮개가 그 두
 // 창을 가려 좌표를 이 문서 안에 유지한다.

@@ -104,6 +104,7 @@ const RESET_BLOCKED = {
 const TICK_MS = 30000;        // 남은 시간 표시를 갱신하는 간격
 const RESET_WAIT_MS = 20000;  // 초기화권 응답을 기다리는 상한. 서버가 10초에 끊는다
 const STALE_ASK_MS = 60000;   // 화면을 열 때 값이 이보다 오래됐으면 한 번 물어본다
+const ASK_DIM_MS = 20000;     // 사람이 요청한 확인에만 띠를 흐리게 하는 시간 상한
 
 let $ = null;
 let wsSend = () => {};
@@ -111,6 +112,8 @@ let mounted = null;      // { bar, trigger, panel }
 let providers = [];
 let updatedAt = 0;
 let fetching = false;
+let askedAt = 0;         // 사람이 확인을 요청한 시각. 자동 확인 때는 띠를 흐리지 않는다
+let panelKey = "";       // 마지막으로 그린 상세 화면의 마크업·자료. 같으면 다시 만들지 않는다
 let prefs = { display: "used", mode: "verbose" };
 let panelOpen = false;
 let tick = null;
@@ -259,8 +262,13 @@ function refreshIcon() {
   button.setAttribute("aria-label", "사용량 다시 확인");
   button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">'
     + '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>';
-  button.addEventListener("click", (event) => { event.stopPropagation(); wsSend({ type: "usage.refresh" }); });
+  button.addEventListener("click", (event) => { event.stopPropagation(); askRefresh(); });
   return button;
+}
+
+function askRefresh() {
+  askedAt = Date.now();
+  wsSend({ type: "usage.refresh" });
 }
 
 function segmented(options, current, onPick) {
@@ -281,6 +289,8 @@ function drawTrigger() {
   trigger.textContent = "";
   trigger.classList.toggle("on", panelOpen);
   const shown = withData();
+  // 서버가 30초마다 하는 자동 확인에도 fetching 이 오므로, 사람이 요청한 확인일 때만 흐리게 한다
+  const dim = fetching && Date.now() - askedAt < ASK_DIM_MS;
 
   if (!shown.length) {
     // 값이 하나도 없어도 영역은 남긴다. 이 영역이 사라지면 상태바 세그먼트도 함께 사라진다.
@@ -288,7 +298,7 @@ function drawTrigger() {
     return;
   }
   for (const provider of shown) {
-    const seg = el("span", `usg-seg${fetching ? " loading" : ""}${provider.stale ? " stale" : ""}`);
+    const seg = el("span", `usg-seg${dim ? " loading" : ""}${provider.stale ? " stale" : ""}`);
     // 오래된 값은 흐리게 표시하고 그 이유를 툴팁으로 붙인다. 지우지는 않는다.
     if (provider.stale) {
       seg.title = `${NAMES[provider.provider] || provider.provider}: ${REASONS[provider.failureKind] || "확인 불가"}`
@@ -478,40 +488,51 @@ function setPref(patch) {
 function drawPanel() {
   const panel = mounted.panel;
   panel.hidden = !panelOpen;
-  if (!panelOpen) return;
-  panel.textContent = "";
+  if (!panelOpen) { panelKey = ""; return; }
+  // 새로 만들어 마크업이 지난번과 같으면 그대로 둔다(초점·마우스 올림·돌던 새로고침 아이콘 유지)
+  const box = document.createElement("div");
 
   const head = el("div", "usg-head");
   head.appendChild(el("span", "usg-title", "사용량"));
   const since = updatedAt ? remainSince(updatedAt) : null;
   const meta = el("span", "usg-meta", since === null ? "확인 전" : since === "방금" ? "방금 확인" : `${since} 전`);
   head.appendChild(meta);
-  const spin = refreshIcon();
-  if (fetching) spin.classList.add("spin");
-  head.appendChild(spin);
-  panel.appendChild(head);
+  head.appendChild(refreshIcon());
+  box.appendChild(head);
 
-  panel.appendChild(segmented(
+  box.appendChild(segmented(
     [{ value: "verbose", label: "상세" }, { value: "compact", label: "간결" }],
     prefs.mode, (mode) => setPref({ mode }),
   ));
-  panel.appendChild(el("div", "usg-sep"));
+  box.appendChild(el("div", "usg-sep"));
 
-  for (const provider of sortedProviders()) panel.appendChild(row(provider));
+  for (const provider of sortedProviders()) box.appendChild(row(provider));
 
-  panel.appendChild(el("div", "usg-sep"));
+  box.appendChild(el("div", "usg-sep"));
   const foot = el("div", "usg-foot");
   foot.appendChild(el("span", "usg-lbl", "% 표시"));
   foot.appendChild(segmented(
     [{ value: "used", label: "쓴 양" }, { value: "remaining", label: "남은 양" }],
     prefs.display, (display) => setPref({ display }),
   ));
-  panel.appendChild(foot);
+  box.appendChild(foot);
 
   // 여기까지가 "지금 얼마나 남았나" 다. 누적 사용량과 계정 상태는 화면 모듈이 갖는다.
-  panel.appendChild(el("div", "usg-sep"));
-  panel.appendChild(link("사용량 상세·이력", "overview"));
-  panel.appendChild(link("계정 상태·쿠키", "accounts"));
+  box.appendChild(el("div", "usg-sep"));
+  box.appendChild(link("사용량 상세·이력", "overview"));
+  box.appendChild(link("계정 상태·쿠키", "accounts"));
+
+  // 단추 핸들러가 잡아 둔 초기화권 id 가 바뀌면 마크업이 같아도 새로 만든다
+  const key = box.innerHTML + "\n" + JSON.stringify(providers.map((one) => one.resetGrantId || ""));
+  if (key !== panelKey) {
+    const buttons = [...panel.querySelectorAll("button")];
+    const focused = buttons.indexOf(document.activeElement);
+    panelKey = key;
+    panel.replaceChildren(...box.childNodes);
+    if (focused >= 0) panel.querySelectorAll("button")[focused]?.focus();
+  }
+  // 도는 표시는 요소를 다시 만들지 않고 클래스만 바꾼다. 다시 만들면 애니메이션이 처음부터 돈다
+  panel.querySelector(".usg-refresh")?.classList.toggle("spin", fetching);
 }
 
 // 화면을 여는 줄. 기능을 껐다면 rail 버튼이 없으므로 아무 일도 하지 않고, 그때는 줄도 그리지 않는다.
@@ -548,7 +569,7 @@ function setOpen(next) {
   }
   // 열 때 값이 묵었으면 한 번 물어본다. 열 때마다 부르면 제공자가 429 로 막고, 그러면
   // 그 뒤로 한동안 아무 값도 받지 못한다. 화면을 여는 행동 자체가 값을 지우는 셈이 된다.
-  if (panelOpen && Date.now() - updatedAt > STALE_ASK_MS) wsSend({ type: "usage.refresh" });
+  if (panelOpen && Date.now() - updatedAt > STALE_ASK_MS) askRefresh();
   draw();
 }
 

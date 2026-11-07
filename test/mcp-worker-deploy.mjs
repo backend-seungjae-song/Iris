@@ -169,6 +169,27 @@ test("두 실행 단위가 공유하는 파일 변경은 전체 설치로 분류
   assert.match(result.reasons[0].why, /공유/);
 });
 
+// MCP 진입 프로세스는 저장소에서 직접 실행 · 설치 앱 없이 /mcp reconnect 로 반영됨
+test("worker 와 MCP 진입 프로세스만 쓰는 파일은 worker 교체와 reconnect 로 분류한다", (t) => {
+  const sourceRoot = fakeTree(t);
+  write(sourceRoot, "bin/iris-qa.mjs", 'import "../server/qa-rows.js"; import "../server/qa-protocol.js";\n');
+  write(sourceRoot, "server/qa-rows.js", "export const rows = true;\n");
+  write(sourceRoot, "server/qa-protocol.js", "export const protocol = true;\n");
+  write(sourceRoot, "server/mcp-worker/index.js", 'import "../shared.js"; import "./only.js"; import "./launcher.js"; import "../qa-rows.js";\n');
+  const shared = classifyChanges({ root: sourceRoot, units: units(), changedFiles: ["server/qa-rows.js"],
+    sourceBundle: bundle(), installedBundle: bundle() });
+  assert.equal(shared.action, "worker-replace");
+  assert.equal(shared.reconnectRequired, true);
+  assert.deepEqual(shared.reasons[0].units, ["mcp", "worker"]);
+  const mcpOnly = classifyChanges({ root: sourceRoot, units: units(), changedFiles: ["server/qa-protocol.js"],
+    sourceBundle: bundle(), installedBundle: bundle() });
+  assert.equal(mcpOnly.action, "worker-replace");
+  assert.equal(mcpOnly.reconnectRequired, true);
+  const withServer = classifyChanges({ root: sourceRoot, units: units(), changedFiles: ["server/qa-rows.js", "server/shared.js"],
+    sourceBundle: bundle(), installedBundle: bundle() });
+  assert.equal(withServer.action, "full-install");
+});
+
 test("bundle 세대가 다르면 worker 파일만 바뀌어도 전체 설치로 분류한다", (t) => {
   const sourceRoot = fakeTree(t);
   const result = classifyChanges({

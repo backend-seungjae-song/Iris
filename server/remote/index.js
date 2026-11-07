@@ -22,10 +22,14 @@ import { createRequestStore } from "./requests.js";
 import { createRegistry } from "./registry.js";
 import { createRemoteRpcHost } from "./rpc-host.js";
 import { createSessionPolicyStore } from "./session-policy.js";
+import { handleAgentChat } from "../agent-chat.js";
+import { paseoUiStatus } from "../paseo-ui/index.js";
 
 const { portWithLegacy } = envModule;
 const copy = (value) => structuredClone(value);
 const QUESTION_HOOK_PATH = fileURLToPath(new URL("./hooks/ask-question.mjs", import.meta.url));
+// 폰 대화 화면은 로컬 대화 보기(agentchat)와 Paseo UI 빌드 상태를 그대로 쓴다
+const chatBackend = { handle: handleAgentChat, uiStatus: paseoUiStatus };
 const messageFor = (code) => messageText(code, "원격 제어를 사용할 수 없습니다.");
 
 export function remoteConnectionCloseLog(event) {
@@ -245,6 +249,8 @@ export function createRemoteLifecycle(options) {
     onPhoneSessionsChanged: () => agentSocket.refreshAvailability?.(),
     messageBridge,
     broadcast: ctx.broadcast,
+    chatBackend: options.chatBackend || chatBackend,
+    getServerPort,
     ...(options.rpcOptions || {}),
     onAudit(event) {
       configuredAudit?.(event);
@@ -255,6 +261,8 @@ export function createRemoteLifecycle(options) {
     // 폰이 보낸 자기 기기 삭제: 응답을 보낼 수 있게 요청한 연결만 남겼다가 잠시 뒤 닫는다
     async onDeviceUnregister(deviceId, connId) {
       const result = await requestRegistryChange({ type: "remove-device", deviceId }, "device-unregistered", connId);
+      // 응답용 연결은 1초 남지만 Paseo 화면 접근은 등록 해제와 함께 끊음
+      rpcHost?.revokePaseo?.(connId);
       setTimeout(() => rpcHost?.closeConnection?.(connId, "device-unregistered"), 1000).unref?.();
       return result;
     },

@@ -24,11 +24,11 @@ async function until(fn) {
   throw new Error("서버 관측 시간 초과");
 }
 
-for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sourcecontrol"], ["archive"], ["localdev"]]) {
+for (const hidden of [["usage"], [], ["usage", "run", "memo"], ["sourcecontrol"], ["archive"], ["localdev"]]) {
   test(`T1 실제 서버: hidden=${JSON.stringify(hidden)}`, { timeout: 15000 }, async (t) => {
     const home = fs.mkdtempSync(path.join(base, "feature-server-"));
     const on = !hidden.includes("usage");
-    const runOn = !hidden.includes("run"), memolabOn = !hidden.includes("memolab");
+    const runOn = !hidden.includes("run");
     fs.writeFileSync(path.join(home, "features.json"), JSON.stringify({ version: 1, revision: 7, hidden }));
     fs.writeFileSync(path.join(home, "preserve.txt"), "기존 사용자 자료");
     const priorUsage = JSON.stringify({ prefs: { display: "remaining" }, snapshot: { providers: [], updatedAt: 123 } });
@@ -106,10 +106,10 @@ for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sour
     }
     const run = await fetch(url + "/run-cmd", { method: "POST", body: JSON.stringify({ cmd: "status", path: home }) });
     assert.equal(run.status, runOn ? 200 : 404);
-    for (const route of ["/memolab-state", "/memolab-ui", "/memolab/", "/memolab/index.html", "/memolab%2findex.html"]) {
-      assert.equal((await fetch(url + route)).status, memolabOn ? 200 : 404, route);
+    // 제거한 메모랩 주소는 기능 설정과 관계없이 없음
+    for (const route of ["/memolab-state", "/memolab-ui", "/memolab/", "/memolab/index.html", "/memolab%2findex.html", "/MeMoLaB/index.html"]) {
+      assert.equal((await fetch(url + route)).status, 404, route);
     }
-    assert.equal((await fetch(url + "/MeMoLaB/index.html")).status, memolabOn && fs.existsSync(path.join(root, "web/MeMoLaB/index.html")) ? 200 : 404, "파일시스템 대소문자 별칭");
     const feature = await (await fetch(url + "/features")).json();
     assert.deepEqual(feature, { exists: true, revision: 7, hidden, shown: [], local: true });
     const update = await fetch(url + "/features", { method: "PUT", body: JSON.stringify({ baseRevision: 7, hidden: ["archive"] }) });
@@ -120,7 +120,7 @@ for (const hidden of [["usage"], [], ["usage", "run", "memolab", "memo"], ["sour
     assert.equal((await fetch(url + "/run-cmd", { method: "POST", body: "{}" })).status, runOn ? 200 : 404, "저장은 실행 중 조립을 바꾸지 않는다");
     assert.equal(fs.readFileSync(path.join(home, "preserve.txt"), "utf8"), "기존 사용자 자료");
     if (!on) assert.equal(fs.readFileSync(path.join(home, "usage.json"), "utf8"), priorUsage, "꺼진 사용량 데이터 보존");
-    t.diagnostic(`timer/keychain/broadcast ${on ? "관측" : "0"}; HTTP run ${runOn ? 200 : 404}/memolab ${memolabOn ? 200 : 404}; memo 연결 정상; ${home}/server.log`);
+    t.diagnostic(`timer/keychain/broadcast ${on ? "관측" : "0"}; HTTP run ${runOn ? 200 : 404}; memo 연결 정상; ${home}/server.log`);
   });
 }
 

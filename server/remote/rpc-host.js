@@ -234,6 +234,10 @@ export function createRemoteRpcHost(options) {
     broadcast: options.broadcast,
     execFile: options.execFile,
     macName: options.macName,
+    chatBackend: options.chatBackend,
+    getServerPort: options.getServerPort,
+    paseoGrant: (grant) => sendControl({ type: "paseo.grant", ...grant }, grant.connId),
+    paseoPane: (pane) => sendControl({ type: "paseo.pane", ...pane }, pane.connId),
   });
   const authenticatedRequests = operations.table;
 
@@ -603,6 +607,7 @@ export function createRemoteRpcHost(options) {
     start,
     stop,
     closeConnection,
+    revokePaseo: (connId) => sendControl({ type: "paseo.revoke", connId }, connId),
     authenticatedCount: () => [...connections.values()].filter((entry) => entry.authenticated).length,
     status: () => ({ active, generation, listening: listening && { ...listening }, connections: connections.size,
       restartScheduled: !!restartTimer, failures: failures.length, queue: queue?.status() || null, child: !!child }),

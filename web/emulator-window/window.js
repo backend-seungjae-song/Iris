@@ -79,8 +79,8 @@ if (!host || !params.get("space")) {
       event.preventDefault(); event.stopImmediatePropagation();
     }, true);
   }
-  pane.setVisible(document.visibilityState === "visible");
-  document.addEventListener("visibilitychange", () => pane.setVisible(document.visibilityState === "visible"));
+  // 창 가림은 pane 이 직접 보고 지연(WINDOW_HIDE_PARK_GRACE_MS) 뒤에 멈춘다
+  // - 여기서 setVisible 로 바로 알리면 잠깐 최소화·스페이스 전환에도 스트림이 다시 시작됨
   window.addEventListener("pagehide", () => pane.dispose());
   // 켜짐 여부 보고. 본 창이 자리 기록에 저장(앱 재시작 때 켜져 있던 기기만 다시 켜기)
   // 복원으로 켜는 중(connect=1)에는 붙거나 실패할 때까지 보고 보류(켜는 중에 "꺼짐"이 저장되지 않게)

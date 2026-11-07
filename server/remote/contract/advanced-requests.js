@@ -36,9 +36,14 @@ export const ADVANCED_REQUEST_TYPES = Object.freeze([
   "browser.sketch.send", "browser.draft.remove", "browser.profiles", "browser.profile.set", "browser.desktop",
   "browser.translate", "browser.bookmarks", "browser.bookmark.set", "browser.direct",
   "git.changes", "git.diff", "git.diff.draft", "github.pr", "github.check.log", "github.check.draft",
+  "paseo.open", "chat.open", "chat.older", "chat.close",
 ]);
 
 const validators = new Map([
+  ["paseo.open", (v) => hasExactKeys(v, ["type", "rid"]) && RID(v.rid)],
+  ["chat.open", (v) => hasExactKeys(v, ["type", "rid", "agent"]) && RID(v.rid) && REF(v.agent)],
+  ["chat.older", (v) => hasExactKeys(v, ["type", "rid", "key"]) && RID(v.rid) && REF(v.key)],
+  ["chat.close", (v) => hasExactKeys(v, ["type", "rid", "key"]) && RID(v.rid) && REF(v.key)],
   ["terminal.watch", (v) => hasExactKeys(v, ["type", "rid", "agent"]) && RID(v.rid) && REF(v.agent)],
   ["terminal.input", (v) => hasExactKeys(v, ["type", "rid", "agent", "text"])
     && RID(v.rid) && REF(v.agent) && safeText(v.text, 1, 4000)],

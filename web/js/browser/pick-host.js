@@ -80,6 +80,7 @@ export function deliverAgentPick(a) {
     // 빈 입력창의 흐린 안내 문구를 쓰다 만 글로 읽지 않게, 입력창을 판정한 뒤 보내는 명령을 준다.
     `보내기: iris-pane-send ${a.paneId} "<명령>"`,
   ]);
+  if (callHook("agentchat.paste", block)) { bNote.textContent = "세션을 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요."; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = "세션 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
@@ -98,6 +99,7 @@ function deliverFilePick(f) {
   const kind = f.dir ? "폴더" : "파일";
   // 공백이 든 경로는 따옴표로 감싸야 멘션이 공백에서 끊기지 않는다. 뒤 공백은 이어 고른 것과 붙지 않게 한다.
   const mention = "@" + (/\s/.test(f.path) ? JSON.stringify(f.path) : f.path) + " ";
+  if (callHook("agentchat.paste", mention, { inline: true })) { bNote.textContent = `${kind}를 채팅 입력창에 넣었습니다.`; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + mention + "\x1b[201~" });
   bNote.textContent = `${kind} 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.`;
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
@@ -156,7 +158,18 @@ export const ORCA_INJECT = `(() => {
       LB.style.top = top + 'px';
       LB.style.left = Math.max(0, Math.min(r.left, window.innerWidth - 40)) + 'px';
     };
-    var onMove = function (ev) { paint(ev.target); };
+    // 마지막 커서 위치(이 문서 좌표). 스크롤은 mousemove 를 만들지 않고 앱도 같은 좌표는 다시 보내지 않음
+    var pt = null, scrollRaf = 0;
+    var onMove = function (ev) { pt = { x: ev.clientX, y: ev.clientY }; paint(ev.target); };
+    // 스크롤로 내용이 움직이면 그 위치의 요소로 다시 칠함: 안 하면 상자가 옛 자리에 남아 스크롤한 만큼 어긋남
+    var onScroll = function () {
+      if (scrollRaf || !pt) return;
+      scrollRaf = requestAnimationFrame(function () {
+        scrollRaf = 0;
+        if (!window.__orcaActive || !pt) return;
+        try { paint(document.elementFromPoint(pt.x, pt.y)); } catch (e) {}
+      });
+    };
     // 좌표 기반 호버. 포커스가 다른 창에 있으면 이 창에는 mousemove가 오지 않는다(확인 결과: 5초 호버에 1건).
     // 그래서 호스트가 OS 커서 좌표를 넣어주면 elementFromPoint로 직접 해석한다.
     // 값이 비어 오면 이 창이 맨 위가 아니라는 뜻이므로 상자를 감춘다. 그대로 두면 움직이지 않을 뿐
@@ -164,7 +177,8 @@ export const ORCA_INJECT = `(() => {
     var hideHL = function () { if (HL) { HL.style.width = '0px'; HL.style.height = '0px'; } if (LB) LB.style.display = 'none'; last = null; };
     window.addEventListener('message', function (ev) {
       var d = ev.data; if (!d || !('__orcaHover' in d) || !window.__orcaActive) return;
-      if (!d.__orcaHover) return hideHL();
+      if (!d.__orcaHover) { pt = null; return hideHL(); }
+      pt = { x: d.__orcaHover.x, y: d.__orcaHover.y };
       // 남의 앱에 가려져 있다가 방금 올라왔다면, 다음 클릭 한 번은 이 창을 앞으로 부르는 클릭이다.
       if (d.__orcaHover.entered) armed = false;
       try { paint(document.elementFromPoint(d.__orcaHover.x, d.__orcaHover.y)); } catch (e) {}
@@ -300,6 +314,7 @@ export const ORCA_INJECT = `(() => {
           document.documentElement.appendChild(LB);
           document.addEventListener('mousemove', onMove, true);
           document.addEventListener('pointerdown', onDown, true);
+          document.addEventListener('scroll', onScroll, { capture: true, passive: true });
           SUPPRESS.forEach(function (t) { document.addEventListener(t, swallow, true); });
           FZ.forEach(function (t) { document.addEventListener(t, suppress, true); });
         } else if (!on && window.__orcaActive) {
@@ -308,6 +323,8 @@ export const ORCA_INJECT = `(() => {
           if (LB) { LB.remove(); LB = null; }
           document.removeEventListener('mousemove', onMove, true);
           document.removeEventListener('pointerdown', onDown, true);
+          document.removeEventListener('scroll', onScroll, true);
+          pt = null;
           SUPPRESS.forEach(function (t) { document.removeEventListener(t, swallow, true); });
           FZ.forEach(function (t) { document.removeEventListener(t, suppress, true); });
         }
@@ -494,6 +511,7 @@ function deliverDocTabPick(t) {
     `종류: ${(fileKindById(t.kind) || {}).docLabel || "문서"}`,
     `경로: ${t.path}`,
   ]);
+  if (callHook("agentchat.paste", block)) { bNote.textContent = "문서 탭을 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요."; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = `문서 탭 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.`;
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
@@ -521,6 +539,7 @@ export function deliverSitePickLocal(bm) {
     `[사이트 지목 · 이 주소를 기억하고 활용하세요]`,
     `${bm.title ? bm.title + "  " : ""}${bm.url}`,
   ].join("\n");
+  if (callHook("agentchat.paste", block)) { bNote.textContent = `사이트 "${bm.title || bm.url}" 지목됨.`; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
   bNote.textContent = `사이트 "${bm.title || bm.url}" 지목됨.`;
@@ -558,6 +577,7 @@ function deliverCellPickLocal(pick) {
     `값: ${JSON.stringify(pick.text)}`,
     `경로: ${pick.path}`,
   ]);
+  if (callHook("agentchat.paste", block)) { bNote.textContent = `표 셀 ${pick.addr}을 채팅 입력창에 붙였습니다.`; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = `표 셀 ${pick.addr} 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.`;
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);

@@ -511,8 +511,18 @@ function accountsPane() {
   return pane;
 }
 
+let drawnTab = "";   // 마지막으로 그린 탭
+
 function draw() {
   if (!root) return;
+  // 같은 탭을 다시 그릴 때만 읽던 스크롤 위치와 입력 중인 칸(값·포커스·커서) 이어받기
+  const prev = root.querySelector(".ust-scroll");
+  const at = prev && drawnTab === tab ? [prev.scrollTop, prev.scrollLeft] : null;
+  const typed = drawnTab === tab ? [...root.querySelectorAll(".ust-input")].map((i) => ({
+    label: i.getAttribute("aria-label"), value: i.value, focus: i === document.activeElement,
+    from: i.selectionStart, to: i.selectionEnd,
+  })) : [];
+  drawnTab = tab;
   root.textContent = "";
 
   const head = el("div", "ust-head");
@@ -537,6 +547,13 @@ function draw() {
     : overviewPane(),
   );
   root.appendChild(scroll);
+  if (at) [scroll.scrollTop, scroll.scrollLeft] = at;
+  for (const t of typed) {
+    const input = [...root.querySelectorAll(".ust-input")].find((i) => i.getAttribute("aria-label") === t.label);
+    if (!input) continue;
+    input.value = t.value;
+    if (t.focus) { input.focus({ preventScroll: true }); try { input.setSelectionRange(t.from, t.to); } catch {} }
+  }
 }
 
 // 상태바가 넘겨 주는 것들
@@ -547,7 +564,8 @@ export function setHistory(msg) {
     progress: msg.progress || null,
     error: msg.error || null,
   };
-  if (entered) draw();
+  // 계정 탭에는 스캔 정보가 없어 다시 그릴 이유가 없음(입력 중인 칸 보호)
+  if (entered && tab !== "accounts") draw();
 }
 
 export function setProviders(list, updatedAt) {

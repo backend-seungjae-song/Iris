@@ -4,6 +4,7 @@
 // 유지 조건: 본문은 HTML을 이스케이프하는 Markdown 처리기로 표시하고 로그는 이스케이프한다.
 // 영향 범위: githubprview 가운데 탭과 40-github-pr.css.
 import { mdToHtml } from "../core/markdown.js";
+import { setHtml } from "../core/set-html.js";
 
 export const esc = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -75,7 +76,7 @@ export function renderGithubPrView(tab, { host, onRefresh, onLog, onDraft, onOpe
     return;
   }
   const selected = ["conversation", "checks", "files"].includes(tab.section) ? tab.section : "conversation";
-  host.innerHTML = `<div class="gpr-page"><header class="gpr-head"><div class="gpr-eyebrow">${esc(pr.root.split("/").pop())} / PR #${pr.number}</div>
+  setHtml(host, `<div class="gpr-page"><header class="gpr-head"><div class="gpr-eyebrow">${esc(pr.root.split("/").pop())} / PR #${pr.number}</div>
     <h2>${esc(pr.title)}</h2><div class="gpr-meta"><span class="gpr-state" data-state="${prState(pr).key}">${prState(pr).label}</span>
     <span class="gpr-branches">${esc(pr.head)} → ${esc(pr.base)}</span><span>${esc(pr.author)}</span>
     <button type="button" class="cc-btn cc-btn-txt" data-gpr-open>GitHub에서 열기</button>
@@ -85,12 +86,13 @@ export function renderGithubPrView(tab, { host, onRefresh, onLog, onDraft, onOpe
       ["checks", "검사", pr.checks.length], ["files", "변경 파일", pr.files.length],
     ].map(([id, title, n]) => `<button type="button" role="tab" aria-selected="${selected === id}" class="gpr-tab${selected === id ? " on" : ""}" data-gpr-section="${id}">${title} <span>${n}</span></button>`).join("")}</nav>
     <div class="gpr-body">${selected === "conversation" ? conversation(pr) : selected === "checks" ? checks(pr, tab.logs || new Map()) : files(pr)}</div>
-    ${tab.notice ? `<p class="gpr-notice" role="status">${esc(tab.notice)}</p>` : ""}</div>`;
+    ${tab.notice ? `<p class="gpr-notice" role="status">${esc(tab.notice)}</p>` : ""}</div>`, { keep: ".gpr-page" });
   host.querySelector("[data-gpr-refresh]").onclick = onRefresh;
   host.querySelector("[data-gpr-open]").onclick = onOpenUrl;
   host.querySelectorAll("[data-gpr-section]").forEach((button) => button.onclick = () => {
     tab.section = button.dataset.gprSection;
     renderGithubPrView(tab, { host, onRefresh, onLog, onDraft, onOpenUrl, onFile });
+    const page = host.querySelector(".gpr-page"); if (page) page.scrollTop = 0;
     host.querySelector(`[data-gpr-section="${tab.section}"]`)?.focus();
   });
   host.querySelectorAll("[data-gpr-file]").forEach((button) => button.onclick = () => onFile?.(button.dataset.gprFile));

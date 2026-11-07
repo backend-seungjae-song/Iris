@@ -25,6 +25,7 @@
 import { provide } from "../core/hooks.js";
 import { bsMutate as mutateBrowserState } from "../browser/state.js";
 import { getCenterSpace } from "../center/tab-store.js";
+import { setHtml } from "../core/set-html.js";
 
 const runByPath = {}; // cwd → { scripts, pkgmgr, running, script, url, tail:[], autoOpened }
 let dom = null;
@@ -94,9 +95,13 @@ function renderRun() {
       : `<div class="run-out run-out-empty">${r.running ? "출력을 기다리는 중…" : "스크립트를 실행하면 출력이 여기에 나옵니다."}</div>`;
     html = `<div class="run-grid"><div class="run-scripts">${items}</div><div class="run-side">${url}${out}</div></div>`;
   }
-  body.innerHTML = html;
+  // 출력 중 200ms마다 불림. 맨 아래를 보던 사람만 새 출력으로 따라 내림
+  // - 위로 올려 읽던 위치를 매번 맨 아래로 끌어내리던 결함(2026-11-07)
+  const prev = dom("#run-out");
+  const follow = !prev || prev.scrollHeight - prev.scrollTop - prev.clientHeight < 4;
+  setHtml(body, html, { keep: "#run-out" });
   body.dataset.path = p; // 이 패널이 어느 프로젝트로 렌더됐는지: 클릭 시 현재 스페이스와 대조(M3)
-  const out = dom("#run-out"); if (out) out.scrollTop = out.scrollHeight;
+  const out = dom("#run-out"); if (out && follow) out.scrollTop = out.scrollHeight;
   // 접힌 머리 줄에도 지금 도는 스크립트와 패키지 관리자를 함께 보인다.
   const mt = dom("#run-meta");
   if (mt) mt.innerHTML = (r.running ? `<span class="run-meta-on">▶ ${escapeHtml(r.script || "")}</span>` : "")

@@ -115,6 +115,10 @@ Mac 화면은 연결 순서의 PIN 단계 안에서 숫자 6–32자리와 확�
 | `github.pr` | 현재 브랜치 PR과 검사 상태 | `github.pr.result` |
 | `github.check.log` | 선택한 실패 검사 로그 | `github.check.log.result` |
 | `github.check.draft` | 실패 로그를 입력창에 넣기 | `remote.action.result` |
+| `paseo.open` | 대화 화면 웹뷰 티켓 | `paseo.open.result` |
+| `chat.open` | Paseo 대화 열기 | `chat.open.result` |
+| `chat.older` | 이전 대화 요청 | `remote.action.result` |
+| `chat.close` | 대화 닫기 | `remote.action.result` |
 
 Git 요청은 읽기 전용이다. stage, commit, push 요청은 없다. `git.diff.draft`와 `github.check.draft`는 내용을 제출하지 않고 에이전트 입력창에 넣는다. 에이전트가 작업 중이면 `busy`다.
 
@@ -283,6 +287,34 @@ GitHub capability는 `gh` 실행 파일 설치 여부로 결정한다. 로그인
 - `github.check.log`: `{type,rid,agent,run}`. `run`은 숫자 1–18자리이며 현재 PR의 검사여야 한다.
 - 결과: `{type:"github.check.log.result",rid,run,log,truncated}`. `log`는 UTF-8 40,000바이트 이하다. 서버가 자르면 `truncated:true`다.
 - `github.check.draft`: `{type,rid,agent,run,text?}`. `text` 1–2,000자. 서버가 실패 로그와 글을 에이전트 입력창에 넣는다.
+
+## 6-1. Paseo 대화 화면
+
+`caps.get` 의 `requests` 에 `chat.open` 이 있으면 폰이 에이전트의 Paseo 대화 화면을 열 수 있다. 화면은 Mac 의 Iris 서버가 빌드한 Paseo UI(`/paseo-ui/`)이고, 대화 데이터는 이 연결로 받아 웹뷰에 넣는다. Paseo 데몬은 쓰지 않는다.
+
+| 요청 | 모양 | 응답 |
+|---|---|---|
+| `paseo.open` | `{type,rid}` | `{type:"paseo.open.result",rid,ticket}` 30초 안에 한 번만 쓰는 64자리 hex 티켓 |
+| `chat.open` | `{type,rid,agent}` agent 는 Agent.ref | `{type:"chat.open.result",rid,key}` key 는 32자리 hex. 연결마다 4개까지 |
+| `chat.older` | `{type,rid,key}` | `remote.action.result` 이전 대화를 `chat.older` 로 보냄 |
+| `chat.close` | `{type,rid,key}` | `remote.action.result` |
+
+서버가 보내는 푸시는 아래와 같다. 모든 프레임은 64 KiB 안이며 큰 메시지는 잘려서 온다.
+
+- `{type:"chat.ui",phase,message,version?,url?}`: 화면 빌드 상태. `phase` 는 `none|building|ready|error`. `ready` 일 때 `url` 은 `/paseo-ui/?v=<버전>`. `chat.open` 직후와 상태가 바뀔 때 온다. 빌드는 첫 `chat.open` 이 시작한다.
+- `{type:"chat.frame",key,kind,messages,hasOlder?}`: `kind` 는 `snapshot|replacement|append`. 한 묶음이 상한을 넘으면 첫 묶음만 원래 `kind` 와 `hasOlder` 를 갖고 나머지는 `append` 다.
+- `{type:"chat.frame",key,kind,reason}`: `kind` 는 `missing|error`.
+- `{type:"chat.older",key,messages,hasOlder}`: 앞쪽에 붙일 메시지. 여러 묶음이면 가장 뒤쪽 묶음부터 온다.
+- 메시지는 `{id,role,ts,blocks}`. `chat.frame` 은 `chat.open.result` 보다 먼저 올 수 있어 폰은 응답 전에 온 프레임을 모아 둔다. 이미지 블록은 `{type:"image",off,i}` 이고 데이터가 없다. 폰은 `key` 를 pane 값으로 써서 `/agentchat-image?pane=<key>&agent=&off=&i=` 를 부른다.
+
+웹뷰 접속은 `remote/1` 과 같은 주소·포트·인증서 고정을 쓴다.
+
+- 웹뷰는 `GET /.iris-paseo/enter?t=<ticket>` 을 연다. 서버는 `Host` 가 `<Tailscale 주소>:<포트>` 이고 요청한 소켓의 Tailscale 노드가 티켓을 받은 연결의 노드와 같을 때만 받는다. 성공하면 `303 Location: /paseo-ui/` 와 `__Host-iris-paseo` 쿠키(`Secure; HttpOnly; SameSite=Strict; Path=/`)를 준다.
+- 쿠키가 있는 `GET` 만 전달한다. 전달하는 경로는 `/paseo-ui/**` 와 `/agentchat-image` 뿐이고 나머지와 WebSocket 업그레이드는 받지 않는다. 쿠키가 없거나 `Origin` 이 있는데 `https://<Host>` 가 아니면 받지 않는다.
+- `/agentchat-image` 의 `pane` 은 `chat.open` 이 준 `key` 만 받고 서버가 진짜 pane 으로 바꾼다. 모르는 값과 `agent` 쿼리가 있는 요청은 거절한다.
+- `/agentchat-file`(답변 속 로컬 이미지 파일)은 전달하지 않는다. 폰이 경로를 정해 Mac 의 파일을 읽는 통로가 되기 때문이다. 그래서 답변 마크다운이 가리키는 로컬 이미지 파일은 폰에서 표시되지 않는다.
+- 메시지의 문자열에서 Mac 절대 경로와 세션 식별자는 `[Mac 경로]`·`[내부 식별자]` 로 가려 보낸다. `role` 은 서버가 해석한 값(`user`, `assistant`, `reasoning`, `tool`, `system` 등)이고 `ts` 는 해석하지 못하면 `null` 이다.
+- 쿠키·pane 값은 티켓을 발급한 `remote/1` 연결에 묶인다. 그 연결이 닫히면(PIN 기한 만료, 기기 해제, 원격 끄기, 단절 포함) 쿠키와 열린 전달 소켓이 즉시 끊긴다. 폰에서 자기 기기를 해제하면 응답용 연결이 잠시 남지만 쿠키는 해제와 함께 끊긴다. 폰은 다시 인증한 뒤 `paseo.open` 으로 새 티켓을 받아 웹뷰를 다시 연다.
 
 ## 7. 오류
 

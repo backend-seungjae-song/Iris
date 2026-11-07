@@ -103,6 +103,11 @@ export function mountDevicePanel(container, opts) {
   let androidBusy = false;
   let busyLabel = "";
   let setupError = "";
+  // 새로 고침이 실패해도 지난 값을 그대로 보여 주고 실패만 알림 칸에 적음
+  let refreshError = "";
+  // 입력이 같으면 목록·도구 칸을 다시 만들지 않음(마우스 올린 줄 강조·열린 드롭다운 유지)
+  let groupsKey = "";
+  let toolsKey = "";
   let settings = { mobileEmulatorDefaultDeviceUdid: null, androidSdkPath: null };
   let deviceBusy = false;
   const rowDropdowns = [];
@@ -165,7 +170,8 @@ export function mountDevicePanel(container, opts) {
   function renderHead(a) {
     const devices = (a && a.devices) || [];
     headCount.textContent = a ? "기기 " + devices.length + "개" : "";
-    if (refreshing || !a) { setPill(headPill, "확인 중…"); headPill.classList.add("emu-pill-loading"); }
+    // 이미 아는 값이 있으면 새로 고치는 동안에도 그 상태를 유지(처음 확인할 때만 "확인 중…")
+    if (!a) { setPill(headPill, "확인 중…"); headPill.classList.add("emu-pill-loading"); }
     else if (a.available) setPill(headPill, "준비됨", "ok");
     else setPill(headPill, "설정 필요", "warn");
     refreshBtn.disabled = refreshing;
@@ -173,10 +179,10 @@ export function mountDevicePanel(container, opts) {
 
   // RPC 자체가 실패했을 때만 따로 알린다. 도구가 없는 경우는 아래 필요한 도구 칸이 설명한다.
   function renderNote(a) {
-    const failed = a && a.rpcFailed;
+    const failed = (a && a.rpcFailed ? a.message : "") || refreshError;
     note.hidden = !failed && !setupError && !busyLabel;
     note.classList.toggle("busy", Boolean(busyLabel));
-    note.textContent = busyLabel || setupError || (failed ? a.message : "");
+    note.textContent = busyLabel || setupError || failed;
     note.setAttribute("role", busyLabel ? "status" : "alert");
   }
 
@@ -485,25 +491,25 @@ export function mountDevicePanel(container, opts) {
     const androidActions = [];
     if (androidHelp) {
       const primary = button("emu-btn", androidHelp.label);
-      primary.disabled = androidBusy || refreshing;
+      primary.disabled = androidBusy || refreshing; primary.dataset.idleOnly = "1";
       primary.addEventListener("click", () => void handleAndroidAction(androidHelp.action));
       androidActions.push(primary);
     }
     if (androidHelp?.secondaryAction === "locate" || !androidHelp) {
       const locate = button("emu-btn emu-btn-ghost", "SDK 폴더 지정", ICON.folder);
-      locate.disabled = androidBusy || refreshing;
+      locate.disabled = androidBusy || refreshing; locate.dataset.idleOnly = "1";
       locate.addEventListener("click", () => void handleLocateSdk());
       androidActions.push(locate);
     }
     if (settings.androidSdkPath) {
       const clear = button("emu-btn emu-btn-ghost", "지정 해제");
-      clear.disabled = androidBusy || refreshing;
+      clear.disabled = androidBusy || refreshing; clear.dataset.idleOnly = "1";
       clear.addEventListener("click", () => void handleClearSdk());
       androidActions.push(clear);
     }
     if (androidHelp) {
       const retry = button("emu-btn emu-btn-ghost", "다시 확인");
-      retry.disabled = androidBusy || refreshing;
+      retry.disabled = androidBusy || refreshing; retry.dataset.idleOnly = "1";
       retry.addEventListener("click", () => void refresh());
       androidActions.push(retry);
     }
@@ -537,8 +543,7 @@ export function mountDevicePanel(container, opts) {
     }
     const missing = total - ok;
     tools.classList.toggle("need", missing > 0);
-    if (refreshing) { const loading = pill("확인 중…"); loading.classList.add("emu-pill-loading"); head.append(loading); }
-    else head.append(missing > 0 ? pill(missing + "개 설정 필요", "warn") : el("span", "emu-dp-n", ok + "/" + total));
+    head.append(missing > 0 ? pill(missing + "개 설정 필요", "warn") : el("span", "emu-dp-n", ok + "/" + total));
     tools.append(...rows);
   }
 
@@ -547,8 +552,14 @@ export function mountDevicePanel(container, opts) {
     renderHead(availability);
     renderNote(availability);
     renderDefaultDevice(availability);
-    renderGroups(availability);
-    renderTools(availability);
+    const selectedUdid = currentUdid ? currentUdid() : null;
+    const nextGroupsKey = JSON.stringify([availability, deviceBusy, selectedUdid,
+      ((availability && availability.devices) || []).map((d) => deviceLocation?.(d.udid) || null)]);
+    if (nextGroupsKey !== groupsKey) { groupsKey = nextGroupsKey; renderGroups(availability); }
+    const nextToolsKey = JSON.stringify([availability, androidBusy, xcodeBusy]);
+    if (nextToolsKey !== toolsKey) { toolsKey = nextToolsKey; renderTools(availability); }
+    // 새로 고치는 동안만 잠기는 단추는 칸을 다시 만들지 않고 잠금만 바꿈
+    for (const b of tools.querySelectorAll("[data-idle-only]")) b.disabled = androidBusy || refreshing;
   }
 
   function failedAvailability(message) {
@@ -565,11 +576,17 @@ export function mountDevicePanel(container, opts) {
       const s = await host.getSettings();
       if (s && s.ok) settings = s.settings;
     } catch {}
+    // 확인이 한 번 실패했다고 아는 기기 목록을 비우지 않음. 지난 값을 두고 실패만 알림
+    const keep = (message) => {
+      if (availability && !availability.rpcFailed) { refreshError = message || "에뮬레이터 사용 가능 여부를 확인하지 못했습니다."; return; }
+      availability = failedAvailability(message);
+    };
     try {
       const res = await host.rpc("emulator.availability", {});
-      availability = res && res.ok ? res.result : failedAvailability(res && res.error && res.error.message);
+      if (res && res.ok) { availability = res.result; refreshError = ""; }
+      else keep(res && res.error && res.error.message);
     } catch (e) {
-      availability = failedAvailability(e && e.message);
+      keep(e && e.message);
     }
     refreshing = false;
     render();

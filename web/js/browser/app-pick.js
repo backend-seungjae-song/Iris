@@ -21,6 +21,7 @@
 //   server/app-pick.js·server/index.js의 ai-app-pick payload와 bin/iris-mcp.mjs의 app_picks 결과 계약.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/app-pick.js
 
+import { callHook } from "../core/hooks.js";
 import { getXterm } from "../panel/terminal.js";
 import { injectAllFrames, setOrca } from "../panel/touch-drag.js";
 import { noticeBlock } from "../panel/xterm-wiring.js";
@@ -117,6 +118,7 @@ export function deliverAppPickLocal(p) {
   // 녹화는 브라우저 조작의 타임라인이다. 앱 선택을 그 줄에 끼우면 재생할 수 없는 항목이 섞이므로
   // 여기서는 모으지 않고 곧바로 보낸다.
   try { wsSend({ type: "ai-app-pick", pane: curTarget, pick: p }); } catch (e) {}
+  if (callHook("agentchat.paste", appPickBlock(p))) { bNote.textContent = "앱 요소를 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요."; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + appPickBlock(p) + "\x1b[201~" });
   bNote.textContent = "앱 요소 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);

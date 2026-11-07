@@ -32,6 +32,7 @@ import {
   advanceMemoRevision, getMemoShownSpace, hasMemoDraft, markDirty, memoSpace, memoTextOf,
   registerMemoStoreView, rememberMemoCreate, setMemoShownSpace, updateMemoText,
 } from "./memo-store.js";
+import { setHtml } from "../core/set-html.js";
 
 let $, blog, wsSend, showToast, memoReqId, orderedSpaces, bindAgentKeys, acHost;
 let AUX_MODE = false;
@@ -205,7 +206,7 @@ export function renderMemoPreview() {
     const slot = $(slotId), pv = $(pvId); if (!slot || !pv) continue;
     pv.hidden = !preview;
     slot.style.display = preview ? "none" : "block";
-    if (preview) pv.innerHTML = mdToHtml(text || "");
+    if (preview) setHtml(pv, mdToHtml(text || ""));
   }
   if (!preview && memoVisible()) { ensureMemoEditor(); placeMemoEditor(); }
   syncMemoControls();

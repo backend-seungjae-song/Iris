@@ -14,8 +14,10 @@ const element = () => ({ innerHTML: "", hidden: false, addEventListener(type, fn
   querySelector: () => null, querySelectorAll: () => [], classList: { contains: () => false }, after() {}, nextElementSibling: null,
   getBoundingClientRect: () => ({ top: 0, bottom: 400 }) });
 const spaceList = element();
+// 목록 바로 뒤 줄(wt-current)을 실제 DOM 처럼 붙이고 찾게 함
+spaceList.after = (node) => { spaceList.nextElementSibling = node; node.remove = () => { if (spaceList.nextElementSibling === node) spaceList.nextElementSibling = null; }; };
 globalThis.document = { getElementById: (id) => (id === "space-list" ? spaceList : null), querySelector: () => null, querySelectorAll: () => [],
-  addEventListener() {}, createElement: () => ({ setAttribute() {}, classList: { contains: () => false }, remove() {} }) };
+  addEventListener() {}, createElement: () => { const node = { className: "", innerHTML: "", setAttribute() {}, remove() {} }; node.classList = { contains: (c) => node.className.split(" ").includes(c) }; return node; } };
 
 const { initTree, renderSpaces } = await import("../web/js/explorer/tree.js");
 const { initAgents, revealAgentRow } = await import("../web/js/herdr/agents.js");
@@ -39,8 +41,9 @@ replaceHerdrState({ workspaces: spaces, agents: [{ paneId: "plain", workspaceId:
 renderSpaces();
 const featureOffHtml = spaceList.innerHTML;
 
+let selectedSpace = "s1";
 const { ws } = initCapability({ esc, wsSend: (message) => sent.push(message), showToast() {}, orderedSpaces: () => spaces,
-  getSelectedSpaceId: () => "s1", getIsLocal: () => true, selectSession: (pane) => { selectedPane = pane; },
+  getSelectedSpaceId: () => selectedSpace, getIsLocal: () => true, selectSession: (pane) => { selectedPane = pane; },
   focusSpace: (id) => focused.push(id) });
 
 const primary = (repo = REPO) => ({ path: repo, branch: "main", primary: true, managed: false });
@@ -89,6 +92,7 @@ function setup(entries, agents = [], extra = {}, tabs = []) {
   return {html, spaceId, repo};
 }
 let fixtureSequence = 0;
+const LIST_TTL = 30000;
 // 안 쓰는 worktree 묶음을 펼친 목록
 function showIdle(spaceId) {
   clickAction({ worktreeAction: "idle-toggle", wtSpace: spaceId });
@@ -259,4 +263,31 @@ test("여러 worktree 에 작업 기록으로만 이어진 세션은 기본 묶�
   assert.match(html,/안 쓰는 worktree 2</);
   const shown=showIdle(spaceId);
   for(const name of ['qa-a','qa-b']) assert.ok(groupOf(shown,`${WT}/${name}`));
+});
+
+// 다시 받는 동안 보이던 내용이 빠졌다 돌아오면 목록이 깜빡임(2026-11-07 사용자 보고)
+function later(ms, fn) { const real = Date.now; Date.now = () => real() + ms; try { return fn(); } finally { Date.now = real; } }
+const currentLine = () => spaceList.nextElementSibling?.innerHTML || "";
+
+test("Git 저장소가 아닌 스페이스는 목록을 다시 받는 동안에도 그 안내 줄이 그대로", () => {
+  const spaceId = `space-${++fixtureSequence}`, repo = `/fixture/${fixtureSequence}`;
+  spaces = [{ id: spaceId, folder: repo, label: "작업" }]; selectedSpace = spaceId;
+  replaceHerdrState({ workspaces: spaces, agents: [], tabs: { [spaceId]: [] } });
+  flush(() => ({ error: "REPO" }));
+  assert.match(currentLine(), /Git 저장소가 아닙니다/);
+  later(LIST_TTL + 1000, () => renderSpaces());
+  assert.ok(sent.some((m) => m.type === "worktrees.list" && m.repo === repo), "다시 요청");
+  assert.match(currentLine(), /Git 저장소가 아닙니다/, "응답 전에도 줄 유지");
+  sent.splice(0); selectedSpace = "s1";
+});
+
+test("목록을 다시 받다 한 번 실패해도 보이던 워크트리 묶음을 유지", () => {
+  const { html, repo } = setup([primary(`/fixture/${fixtureSequence + 1}`), wt("keep")], [{ paneId: "k", cwd: `${WT}/keep` }]);
+  assert.ok(groupOf(html, `${WT}/keep`), "처음 묶음");
+  later(LIST_TTL + 1000, () => renderSpaces());
+  const request = sent.splice(0).find((m) => m.type === "worktrees.list" && m.repo === repo);
+  assert.ok(request, "다시 요청");
+  ws["worktrees.result"]({ type: "worktrees.result", requestId: request.requestId, op: "list", ok: false, code: "BUSY", message: "잠시 실패" });
+  renderSpaces();
+  assert.ok(groupOf(spaceList.innerHTML, `${WT}/keep`), "실패 뒤에도 묶음 유지");
 });

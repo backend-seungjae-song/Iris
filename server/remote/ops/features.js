@@ -118,4 +118,19 @@ export function installFeatureOperations(table, features) {
       log: result.log.text, truncated: result.log.truncated }) : failed(result, message.rid); });
   table.set("github.check.draft", async (_entry, message) => { const result = await source.checkDraft(message);
     return result.ok ? action(message.rid, "sent") : failed(result, message.rid); });
+  const paseo = features.paseo;
+  table.set("paseo.open", async (entry, message) => {
+    const result = await paseo.open(entry);
+    return result.ok ? projectFeature({ type: "paseo.open.result", rid: message.rid, ticket: result.ticket }) : failed(result, message.rid);
+  });
+  table.set("chat.open", async (entry, message) => {
+    const result = paseo.chatOpen(entry, message);
+    return result.ok ? projectFeature({ type: "chat.open.result", rid: message.rid, key: result.key }) : failed(result, message.rid);
+  });
+  for (const [name, method] of [["chat.older", "chatOlder"], ["chat.close", "chatClose"]]) {
+    table.set(name, async (entry, message) => {
+      const result = paseo[method](entry, message);
+      return result.ok ? action(message.rid, "sent") : failed(result, message.rid);
+    });
+  }
 }

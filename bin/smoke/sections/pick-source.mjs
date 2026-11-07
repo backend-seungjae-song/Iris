@@ -193,7 +193,7 @@ check("만드는 자리가 아닌 파일은 뒤로 간다", () =>
   && sideline("tests/board.py") === "검사"
   && sideline("web/js/app.test.js") === "검사"
   && sideline("docs/pane-send.md") === "글"
-  && sideline("web/memolab/app.js") === null
+  && sideline("web/js/main.js") === null
   && sideline("server/pick-source.js") === null
   && /const byRank = \(a, b\) => \(a\.pen \|\| 0\) - \(b\.pen \|\| 0\)/.test(pickSource)
   && /h\.side = sideline\(h\.file\); h\.pen = h\.side \? 1 : 0;/.test(pickSource));
@@ -236,7 +236,7 @@ check("사본은 자기가 어디서 왔는지 말한다", () => {
     const mark = (v) => fs.writeFileSync(path.join(copy, ".source-root"), v);
     mark(real + "\n");
     const found = sourceRootOf(copy) === real;
-    mark("web/memolab");                       // 상대 경로는 어디 기준인지 알 수 없다
+    mark("web/js");                           // 상대 경로는 어디 기준인지 알 수 없다
     const notRel = sourceRootOf(copy) === null;
     mark(path.join(box, "없는-폴더"));           // 없는 데를 가리키면 따라가지 않는다
     const notGone = sourceRootOf(copy) === null;

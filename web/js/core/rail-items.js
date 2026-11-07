@@ -90,13 +90,6 @@ export const RAIL_ITEMS = [
     canDisable: true, disabledReason: "",
   },
   {
-    id: "memolab", label: "메모랩",
-    title: "메모랩: 판·조각으로 적고 나누기",
-    icon: "<rect x=\"3\" y=\"3\" width=\"7.5\" height=\"7.5\"/><rect x=\"13.5\" y=\"3\" width=\"7.5\" height=\"7.5\"/><rect x=\"3\" y=\"13.5\" width=\"7.5\" height=\"7.5\"/><path d=\"M14 17.5h7\"/><path d=\"M17.5 14v7\"/>",
-    body: "ml-active", panel: "ml-panel", layout: "full",
-    canDisable: true, disabledReason: "",
-  },
-  {
     id: "usage", label: "사용량",
     title: "사용량 상세·이력: 여태 쓴 토큰과 계정 상태",
     icon: "<path d=\"M4 20V10\"/><path d=\"M10 20V4\"/><path d=\"M16 20v-7\"/><path d=\"M22 20H2\"/>",

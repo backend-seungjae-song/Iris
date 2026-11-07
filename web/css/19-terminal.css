@@ -166,6 +166,7 @@ body.right-collapsed #right-restore { display:block; }
 .iris-notice { position:relative; padding:10px 10px 11px; background:var(--raised); color:var(--fg);
   border:1px solid var(--line-strong); border-radius:var(--r); box-shadow:var(--menu-shadow); overflow:hidden;
   animation:notice-in var(--t) var(--ease); --notice-color:var(--accent); }
+.iris-notice.seen { animation:none; }
 .iris-notice-ok { --notice-color:var(--ok); }
 .iris-notice-warn, .iris-notice-ask, .iris-notice-approve, .iris-notice-waiting { --notice-color:var(--st-question); }
 .iris-notice-err { --notice-color:var(--pal-danger); }

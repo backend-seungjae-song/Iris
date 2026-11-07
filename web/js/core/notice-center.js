@@ -105,6 +105,9 @@ function card(item) {
   const wait = item.kind === "ask" || item.kind === "approve" || item.kind === "waiting";
   const card = el("article", `iris-notice iris-notice-${item.kind}`);
   card.dataset.id = item.id;
+  // 알림 하나가 바뀔 때마다 모든 카드를 다시 만듦. 이미 보인 카드는 등장 애니메이션을 다시 하지 않음(2026-11-07)
+  if (item.shown) card.classList.add("seen");
+  item.shown = true;
   card.setAttribute("role", wait || item.kind === "err" || item.kind === "warn" ? "alert" : "status");
   card.tabIndex = wait ? 0 : -1;
   const head = el("div", "iris-notice-head");
@@ -121,7 +124,8 @@ function card(item) {
   if (item.detail) {
     const detail = el("div", "iris-notice-detail");
     detail.append(el("pre", "iris-notice-detail-text", item.detail));
-    detail.addEventListener("click", (event) => { if (!event.target.closest("button")) detail.classList.toggle("expanded"); });
+    if (item.detailOpen) detail.classList.add("expanded");
+    detail.addEventListener("click", (event) => { if (!event.target.closest("button")) item.detailOpen = detail.classList.toggle("expanded"); });
     addButton(detail, "복사", () => navigator.clipboard?.writeText(item.detail));
     card.append(detail);
   }
@@ -186,11 +190,18 @@ function render() {
   const items = [...active.values()];
   const waits = items.filter((item) => ["ask", "approve", "waiting"].includes(item.kind));
   const rest = items.filter((item) => !["ask", "approve", "waiting"].includes(item.kind)).reverse();
+  // 다시 만든 뒤 같은 카드의 같은 단추로 포커스를 돌려줌
+  const focus = document.activeElement?.closest?.(".iris-notice");
+  const focusAt = focus ? [focus, ...focus.querySelectorAll("button")].indexOf(document.activeElement) : -1;
   noticeList.replaceChildren();
   if (waits.length) noticeList.append(el("div", "iris-notice-section", `답을 기다리는 것 · ${waits.length}`));
   for (const item of waits) noticeList.append(card(item));
   if (rest.length && waits.length) noticeList.append(el("div", "iris-notice-section", "최근"));
   for (const item of (expanded ? rest : rest.slice(0, 1))) noticeList.append(card(item));
+  if (focus && noticeList.contains(document.activeElement) === false) {
+    const again = noticeList.querySelector(`.iris-notice[data-id="${CSS.escape(focus.dataset.id)}"]`);
+    if (again) [again, ...again.querySelectorAll("button")][focusAt]?.focus({ preventScroll: true });
+  }
   more.hidden = rest.length < 2;
   more.textContent = expanded ? "알림 접기" : `외 ${rest.length - 1}건 · 알림 펼치기`;
 }

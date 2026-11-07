@@ -10,6 +10,7 @@
 //
 // 영향 범위
 //   러너(bin/smoke.mjs)가 default run 을 부른다. 현재 목록 확인: node bin/importers.mjs bin/smoke/sections/agent-chat.mjs
+import { execFileSync } from "node:child_process";
 import { check, checkAsync, read, ROOT } from "../core.mjs";
 
 const url = (rel) => new URL(`file://${ROOT}/${rel}`).href;
@@ -49,6 +50,9 @@ export default async function run() {
       "agentchat.openSubagent": ["web/js/herdr/agents.js"],
       "agentchat.closeSubagent": ["web/js/herdr/agents.js"], // 부모 줄을 누르면 서브에이전트 보기를 닫는다
       "agentchat.toggle": ["web/js/browser/dock.js"],   // 웹뷰에 포커스가 있을 때 main 이 중계한 ⌘⇧J
+      // 요소 선택 블록. 대화 보기가 열려 있으면 터미널 대신 채팅 입력창 칩으로
+      "agentchat.paste": ["web/js/browser/pick.js", "web/js/browser/app-pick.js", "web/js/browser/record.js", "web/js/browser/sketch.js",
+        "web/js/browser/pick-boot.js", "web/js/browser/pick-host.js", "web/js/emulator/boot.js"],
     };
     if (!/"agent-chat": \{ mod: true, shift: true, key: "j" \}/.test(read("native/electron/main-window.cjs"))) throw new Error("main 중계표에 agent-chat 이 없다 — 웹뷰 포커스에서 ⌘⇧J 가 안 된다");
     const boot = read("web/js/agentchat/boot.js");
@@ -59,13 +63,36 @@ export default async function run() {
     return true;
   });
 
-  // 창이 보낸 값 중 서버가 읽는 칸은 네 개뿐이어야 한다. 경로·파일 칸을 읽기 시작하면 이 메시지가
+  // 터미널 입력줄에 블록을 붙이는 곳은 모두 먼저 채팅 보기에 넘겨 봐야 한다. 대화 보기가 열린 pane 에서
+  // 터미널에 붙이면 채팅 입력창이 보낼 때 입력줄을 비워 블록이 지워진다
+  check("터미널에 붙이는 요소 선택 블록은 모두 agentchat.paste 를 먼저 부른다", () => {
+    const files = execFileSync("git", ["ls-files", "web/js"], { cwd: ROOT, encoding: "utf8" }).split("\n").filter((f) => f.endsWith(".js"));
+    const bad = [];
+    let sites = 0;
+    for (const f of files) {
+      const src = read(f);
+      const pastes = (src.match(/type: "pty\.input", data: "\\x1b\[200~"/g) || []).length;
+      const hooks = (src.match(/callHook\("agentchat\.paste"/g) || []).length;
+      sites += pastes;
+      if (pastes !== hooks) bad.push(`${f} (붙이기 ${pastes}, hook ${hooks})`);
+    }
+    if (!sites) throw new Error("붙이는 곳을 하나도 세지 못했다");
+    if (bad.length) throw new Error(bad.join(", "));
+    return true;
+  });
+
+  // 창이 보낸 값 중 서버가 읽는 칸은 아래 목록뿐이어야 한다. 경로·파일 칸을 읽기 시작하면 이 메시지가
   // 임의 파일 읽기 통로가 된다.
+  // - text: 구독한 pane 에 넣을 글. id: 응답 짝. build: 지금 빌드 이름과 같을 때만 쓰는 이름. reason: 로그 문구
+  // - query: 파일 후보 검색어(검색 범위는 서버가 아는 pane 의 cwd)
+  // - promptId·row: 권한 질문 답(서버가 읽은 화면과 같을 때만 그 줄로 옮겨 Enter). modeId: 권한 모드 이름(정해진 목록만)
+  // - taskId·from: 백그라운드 작업 출력 읽기. taskId 는 그 구독의 기록에서 찾은 작업 id 만, from 은 바이트 위치
+  // - answers·dismiss: AskUserQuestion 답. 질문은 서버가 기록에서 읽은 것이고, 답 글은 문자열만 터미널 입력으로 씀
   check("채팅 서버는 기록 파일 경로를 창에서 받지 않는다", () => {
     const src = read("server/agent-chat.js");
     const fields = new Set([...src.matchAll(/\bmsg\.(\w+)/g)].map((m) => m[1]));
     if (!fields.size) throw new Error("msg 칸을 하나도 세지 못했다");
-    const extra = [...fields].filter((f) => !["type", "key", "paneId", "agentId"].includes(f));
+    const extra = [...fields].filter((f) => !["type", "key", "paneId", "agentId", "text", "id", "build", "reason", "query", "promptId", "row", "modeId", "taskId", "from", "answers", "dismiss"].includes(f));
     if (extra.length) throw new Error(`창에서 받는 칸: ${extra.join(", ")}`);
     return true;
   });

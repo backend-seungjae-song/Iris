@@ -85,13 +85,21 @@ function requestStatus(force) {
   return id;
 }
 
+let failStreak = 0;          // 연속으로 실패한 상태 조회 수
+const FAIL_STREAK_MAX = 2;   // 이 횟수만큼 연속 실패해야 오류 화면으로 바꿈
+
 const retrying = () => !!retryId && waiting === retryId;
 
 function onStatus(m) {
   if (!waiting || m.id !== waiting) return;
   waiting = "";
   clearTimeout(askTimer); askTimer = null;
-  if (!m.ok) { failed = m.reason || "unreachable"; lastData = null; lastSig = ""; render(); return; }
+  if (!m.ok) {
+    // 잘 받던 표가 있고 일시 실패(연속 1회)면 마지막 표 유지. 설치 안 됨은 확정이라 바로 오류 화면
+    if (lastData && m.reason !== "missing" && ++failStreak < FAIL_STREAK_MAX) return;
+    failed = m.reason || "unreachable"; lastData = null; lastSig = ""; render(); return;
+  }
+  failStreak = 0;
   failed = null;
   lastData = m.data;
   render();

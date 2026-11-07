@@ -278,7 +278,7 @@ export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, 
   }
   let rel = pathname === "/" ? "/index.html" : pathname;
   // 폴더로 끝나는 주소는 그 안의 index.html 이다. 없으면 readFile 이 폴더를 읽다 404 가 되어
-  // /memolab/ 같은 단일 페이지가 주소로 열리지 않는다.
+  // /emulator-window/ 같은 단일 페이지가 주소로 열리지 않는다.
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.join(WEB, path.normalize(rel));
   if (!file.startsWith(WEB)) {

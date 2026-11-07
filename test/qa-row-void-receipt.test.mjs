@@ -34,6 +34,30 @@ test("실패 장면 seq 로 무효 처리해도 같은 조작의 반응 판정�
   assert.equal(voidOf(f.events).receipt, String(f.reaction.seq));
 });
 
+test("앱에 전달되지 않아 판정이 없는 조작은 조작 seq 로 무효 처리한다", async () => {
+  const events = [{ seq: 1, event: { kind: "run_begin", plan: qaPlan() } }];
+  const ledger = { verify: async () => ({ events: structuredClone(events) }),
+    append: async (_run, event) => { const rec = { seq: events.length + 1, event: structuredClone(event) }; events.push(rec); return rec; } };
+  const call = args => applyQaRow({ ledger, runId: "test", args });
+  const lane = { rowId: "R1", path: "정상" };
+  await call({ action: "declare", ...qaRowContract(), id: "R1", what: "상태 표시", given: "로그인한 사용자", basis: "spec", paths: ["정상"] });
+  await call({ action: "open", row: "R1", path: "정상" });
+  const accepted = await ledger.append("test", { kind: "accepted", cmd: "app_tap", ...lane });
+  const action = await ledger.append("test", { kind: "action", cmd: "app_tap", ...lane, acceptedSeq: accepted.seq, pass: false, reason: "모바일 조작 대상이 바뀌었거나 가려졌습니다." });
+  const reaction = await ledger.append("test", { kind: "reaction", cmd: "app_tap", ...lane, acceptedSeq: accepted.seq, pass: null });
+  await assert.rejects(call({ action: "void", receipt: String(reaction.seq), why: "판정 아님" }), /판정과 연결되지 않습니다/);
+  await call({ action: "void", receipt: String(action.seq), why: "조작이 앱에 전달되지 않음" });
+  assert.equal(voidOf(events).receipt, String(action.seq));
+  assert.equal(voidOf(events).pass, false);
+});
+
+test("통과한 조작은 판정이 없어도 무효 대상이 아니다", async () => {
+  const f = await failedTap();
+  const accepted = await f.ledger.append("test", { kind: "accepted", cmd: "app_tap", rowId: "R1", path: "정상" });
+  const passed = await f.ledger.append("test", { kind: "action", cmd: "app_tap", rowId: "R1", path: "정상", acceptedSeq: accepted.seq, pass: true });
+  await assert.rejects(f.call({ action: "void", receipt: String(passed.seq), why: "잘못된 대상" }), /판정과 연결되지 않습니다/);
+});
+
 test("판정과 연결되지 않은 번호는 여전히 거부한다", async () => {
   const f = await failedTap();
   await assert.rejects(f.call({ action: "void", receipt: "1", why: "잘못된 대상" }), /seq 1\(run_begin\)은 판정과 연결되지 않습니다/);

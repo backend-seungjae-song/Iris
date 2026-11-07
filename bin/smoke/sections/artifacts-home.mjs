@@ -66,7 +66,6 @@ export default async function run() {
       if (KIND_NAMES.includes(name)) throw new Error(`${name} 이 정리 대상에 들어갔다`);
     }
     if (!/artifactDir\("agent-run"\)/.test(read("bin/agent-run.mjs"))) throw new Error("실행 기록이 정본을 안 거친다");
-    if (/artifacts-home/.test(read("server/memolab-store.js"))) throw new Error("이전본이 부산물로 갔다");
     if (/artifacts-home/.test(read("server/agent-lineage.js"))) throw new Error("계보 영수증이 부산물로 갔다");
     return true;
   });

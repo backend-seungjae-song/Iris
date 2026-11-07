@@ -105,9 +105,9 @@ class _SourceControlSheetState extends State<SourceControlSheet> {
         children: [
           const IrisSheetGrabber(barKey: Key('source-control-grabber')),
           const SizedBox(height: 14),
-          SizedBox(
+          ConstrainedBox(
             key: const Key('source-control-header'),
-            height: 35,
+            constraints: const BoxConstraints(minHeight: 35),
             child: Row(
               children: [
                 SizedBox(

@@ -1,5 +1,5 @@
 /* 여러 도구 화면이 함께 쓰는 셸 조각. 앱 셸이 소유한다 */
-/* 이 이름을 쓰는 곳: index.html(scr-bar · scr-bar-title) · 04-archive.css·22-handoff.css(scr-spin 애니메이션) */
+/* 이 이름을 쓰는 곳: index.html(scr-bar · scr-bar-title) · 04-archive.css·22-handoff.css·35-agent-chat.css(scr-spin 애니메이션) */
 
 /* 좁은 패널의 머리. 제목 한 줄. 지금은 설정 패널만 쓰고, 그 화면은 자기 머리를 따로 그려 이 줄을 숨긴다(20-keymap.css). */
 .scr-bar { display:flex; align-items:center; gap:6px; padding:12px 12px 8px; }

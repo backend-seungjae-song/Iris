@@ -173,3 +173,22 @@ test("retire 해제 실패는 소유 표식을 유지해 다음 호출에서 다
   assert.deepEqual(result, { focus: true, viewport: true });
   assert.deepEqual(retried, ["Emulation.setFocusEmulationEnabled", "Emulation.clearDeviceMetricsOverride"]);
 });
+
+// 유휴 분리(detachIdle)로 debugger 가 떨어진 탭 · worker 교체가 이 자원 하나로 계속 거부됐음 (leftovers hidden-viewport:46)
+test("debugger 가 떨어진 탭의 대체 viewport 반환은 실패로 세지 않고 기록을 지운다", async () => {
+  const { viewport, send } = rig({ size: [0, 0] });
+  viewport.pin(7, send);
+  await settle();
+  const detached = () => Promise.reject(new Error("Debugger is not attached to the target"));
+  assert.deepEqual(await viewport.release(7, detached), { focus: false, viewport: true });
+  const sent = [];
+  assert.deepEqual(await viewport.release(7, (method) => { sent.push(method); return Promise.resolve({}); }), { focus: false, viewport: false });
+  assert.equal(sent.length, 0, "지운 기록은 다시 반환하지 않음");
+});
+
+test("세션이 살아 있는데 반환이 실패하면 그대로 실패로 알린다", async () => {
+  const { viewport, send } = rig({ size: [0, 0] });
+  viewport.pin(7, send);
+  await settle();
+  await assert.rejects(viewport.release(7, () => Promise.reject(new Error("Internal error"))), AggregateError);
+});

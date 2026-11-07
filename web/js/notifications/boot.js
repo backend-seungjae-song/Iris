@@ -18,6 +18,7 @@
 
 import { provide } from "../core/hooks.js";
 import { clearHistory, markAllRead, pendingCount, reconcileNotifications, unreadCount } from "./model.js";
+import { setHtml } from "../core/set-html.js";
 
 const BELL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9Z"/><path d="M10 21h4"/></svg>';
 const STORE_KEY = "iris.notifications.v1";
@@ -120,8 +121,8 @@ function render() {
   const spaces = new Map(ctx.orderedSpaces().map((space) => [space.id, space.label || space.id]));
   const records = state.records.filter((record) => filter === "all" || record.pending);
   const list = panel.querySelector(".notifications-list");
-  list.innerHTML = records.length ? records.map((record) => `<button type="button" class="notifications-item${record.read ? "" : " unread"}" data-id="${ctx.esc(record.id)}"><span class="dot ${dotFor(record)}"></span><span class="notifications-item-main"><strong>${titleFor(record)}</strong><small>${ctx.esc(spaces.get(record.workspaceId) || record.workspaceId)} · ${ctx.esc(record.agentName)} · <em>${record.pending ? "입력 대기" : "지난 알림"}</em></small></span><time>${timeLabel(record.at)}</time></button>`).join("")
-    : `<div class="notifications-empty">${filter === "pending" ? "입력을 기다리는 에이전트가 없습니다" : "알림이 없습니다"}</div>`;
+  setHtml(list, records.length ? records.map((record) => `<button type="button" class="notifications-item${record.read ? "" : " unread"}" data-id="${ctx.esc(record.id)}"><span class="dot ${dotFor(record)}"></span><span class="notifications-item-main"><strong>${titleFor(record)}</strong><small>${ctx.esc(spaces.get(record.workspaceId) || record.workspaceId)} · ${ctx.esc(record.agentName)} · <em>${record.pending ? "입력 대기" : "지난 알림"}</em></small></span><time>${timeLabel(record.at)}</time></button>`).join("")
+    : `<div class="notifications-empty">${filter === "pending" ? "입력을 기다리는 에이전트가 없습니다" : "알림이 없습니다"}</div>`);
 }
 
 function closePanel() {

@@ -58,12 +58,21 @@ let editing = null;        // 이름을 바꾸는 줄의 rowKey
 let fresh = null;          // 방금 바꾼 줄(잠깐 강조)
 let freshTimer = 0;
 let undo = null;           // { row, timer }
-let dropdowns = [];
+let dropdowns = [];       // 일괄 바꾸기 줄의 드롭다운
+let rowDropdowns = [];    // 목록 줄마다의 계정 드롭다운
 let rowsByKey = new Map();
+let listKey = "";         // 마지막으로 그린 목록의 내용 열쇠. 같으면 줄·드롭다운을 다시 만들지 않음
+// 이름 바꾸기 직후 서버 방송이 오기 전까지 보일 새 이름
+// - 옛 이름으로 그렸다가 방송에 새 이름으로 다시 그리면 줄 강조가 두 번 재생됨
+const pendingTitle = new Map();   // rowKey → { title, timer }
 
 function model() {
   const st = getBrowserState();
   const sections = collectBookmarks({ common: st.bookmarksCommon, bySpace: st.bookmarksBySpace, spaces: orderedSpaces() });
+  for (const s of sections) for (const r of s.rows) {
+    const k = rowKey(r), p = pendingTitle.get(k); if (!p) continue;
+    if (p.title === r.title) { clearTimeout(p.timer); pendingTitle.delete(k); } else r.title = p.title;
+  }
   return { all: sections, shown: filterSections(sections, query, mode) };
 }
 
@@ -105,8 +114,8 @@ function render() {
   if (!visible) return;
   const list = $("#bkm-list"); if (!list) return;
   lastSig = drawnSignature();
-  for (const d of dropdowns) { try { d.destroy(); } catch {} }
-  dropdowns = [];
+  const destroyAll = (arr) => { for (const d of arr) { try { d.destroy(); } catch {} } };
+  destroyAll(dropdowns); dropdowns = [];
   const { all, shown } = model();
   rowsByKey = new Map(all.flatMap((s) => s.rows).map((r) => [rowKey(r), r]));
   for (const k of [...selected]) if (!rowsByKey.has(k)) selected.delete(k);
@@ -114,12 +123,21 @@ function render() {
   $("#bkm-sum").innerHTML = sum.total ? `<b>${sum.total}</b>개 · 계정 지정 <b>${sum.set}</b>` : "";
   for (const b of document.querySelectorAll("[data-bkm-mode]")) b.setAttribute("aria-checked", String(b.dataset.bkmMode === mode));
   if (!sum.total) {
+    destroyAll(rowDropdowns); rowDropdowns = []; listKey = "";
     list.innerHTML = `<div class="bkm-empty"><b>북마크가 없습니다.</b><span>브라우저 주소창 오른쪽의 별을 눌러 추가하면 여기서 계정을 정할 수 있습니다.</span></div>`;
   } else if (!shown.length) {
+    destroyAll(rowDropdowns); rowDropdowns = []; listKey = "";
     const what = query ? `‘${esc(query)}’와 맞는 북마크가 없습니다.` : mode === "set" ? "계정을 정한 북마크가 없습니다." : "자동으로 여는 북마크가 없습니다.";
     list.innerHTML = `<div class="bkm-empty"><b>${what}</b><button class="bkm-btn ghost" data-bkm-reset>거르기 풀기</button></div>`;
   } else {
-    list.innerHTML = sectionsMarkup(shown, { selected, editing, fresh });
+    const html = sectionsMarkup(shown, { selected, editing, fresh });
+    // 드롭다운은 마크업에 안 보이므로 값에 영향을 주는 것도 열쇠에 넣음
+    const key = html + "\u0000" + JSON.stringify([getProfiles().map((p) => [p.id, p.name]), getSpaceDefaults(),
+      getBrowserState().linkProfileRules || [], shown.flatMap((s) => s.rows.map((r) => r.profile))]);
+    if (key === listKey && list.querySelector("[data-bkm-acct]")) { renderBulk(); renderUndo(); return; }
+    listKey = key;
+    destroyAll(rowDropdowns); rowDropdowns = [];
+    list.innerHTML = html;
     for (const slot of list.querySelectorAll("[data-bkm-acct]")) {
       const row = rowsByKey.get(slot.dataset.bkmAcct); if (!row) continue;
       const dd = createDropdown({
@@ -127,7 +145,7 @@ function render() {
         ariaLabel: `${row.title} 를 열 계정`, className: "bkm-dd", showSub: row.profile === undefined,
         onChange: (v) => setAccount(row, v),
       });
-      slot.appendChild(dd.el); dropdowns.push(dd);
+      slot.appendChild(dd.el); rowDropdowns.push(dd);
     }
     if (editing) { const inp = list.querySelector("[data-bkm-rename]"); if (inp) { inp.focus(); inp.select(); } }
   }
@@ -187,7 +205,12 @@ function undoRemove() {
 function commitRename(key, value) {
   const row = rowsByKey.get(key); editing = null;
   const title = String(value || "").trim();
-  if (row && title && title !== row.title) { send(editMutation(row, { title })); markFresh(key); }
+  if (row && title && title !== row.title) {
+    send(editMutation(row, { title })); markFresh(key);
+    const old = pendingTitle.get(key); if (old) clearTimeout(old.timer);
+    // 방송이 안 와도(서버가 거절) 3초 뒤에는 서버 값으로 돌아감
+    pendingTitle.set(key, { title, timer: setTimeout(() => { pendingTitle.delete(key); render(); }, 3000) });
+  }
   render();
 }
 

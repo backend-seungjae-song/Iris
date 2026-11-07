@@ -186,18 +186,18 @@ export function classifyChanges({ root, changedFiles, units, graph, sourceBundle
       .map(unit => ({ unit, entrypoint: "설치 bundle 기록", chain: [] }));
     const unitNames = records.map((record) => record.unit).sort();
     if (unitNames.includes("mcp")) reconnectRequired = true;
+    // MCP 진입 프로세스는 저장소의 bin/iris-*.mjs 를 직접 실행 · 설치 앱을 바꾸지 않고 /mcp reconnect 로 반영
+    // 그래서 worker 와 mcp 만 쓰는 파일은 worker 교체로 분류
+    const installUnits = new Set(unitNames.filter(unit => unit !== "mcp"));
     let why;
     if (records.length === 0) {
       action = "full-install";
       why = "어느 실행 주체 그래프에도 속하지 않아 전체 설치로 보수 분류";
-    } else if (records.length > 1) {
+    } else if ([...installUnits].some(unit => unit !== "worker")) {
       action = "full-install";
-      why = `공유 파일: ${records.map(chainText).join(" | ")}`;
-    } else if (records[0].unit !== "worker") {
-      action = "full-install";
-      why = chainText(records[0]);
+      why = records.length > 1 ? `공유 파일: ${records.map(chainText).join(" | ")}` : chainText(records[0]);
     } else {
-      why = chainText(records[0]);
+      why = records.length > 1 ? `worker·MCP 진입 공유 파일: ${records.map(chainText).join(" | ")}` : chainText(records[0]);
     }
     return { file, units: unitNames, why };
   });

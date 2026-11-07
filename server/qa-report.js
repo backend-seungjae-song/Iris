@@ -66,12 +66,15 @@ function inspectQaReport(events) {
   for (const { event: e } of events) if (e.kind === "row" && e.action === "void") {
     const d = e.rowData;
     // void 가 받는 판정과 같은 기준. 준비 단계 판정은 판정으로 세지 않지만 그 무효 기록이 원본 없는 무효는 아님(qa-2ab6e345 seq 163)
-    const named = r => r.event.kind === "assertion" || r.event.kind === "reaction" && typeof r.event.pass === "boolean";
+    // 앱에 전달되지 않아 반응 판정이 없는 실패 조작도 원본
+    const undelivered = r => r.event.kind === "action" && r.event.pass === false
+      && !events.some(v => v.event.kind === "reaction" && typeof v.event.pass === "boolean" && v.event.acceptedSeq === r.event.acceptedSeq);
+    const named = r => r.event.kind === "assertion" || r.event.kind === "reaction" && typeof r.event.pass === "boolean" || undelivered(r);
     if (!d?.why?.trim() || !events.some(r => String(r.seq) === String(d.receipt) && named(r))) reject("D1", "무효 판정의 원본과 사유가 필요합니다.");
     voids.add(String(d.receipt));
   }
-  // 판정(reaction)을 무효 처리한 조작은 그 조작도 판정 대상에서 뺌
-  const voidedAction = r => events.some(v => voids.has(String(v.seq)) && v.event.kind === "reaction" && v.event.acceptedSeq === r.event.acceptedSeq);
+  // 판정(reaction)을 무효 처리한 조작은 그 조작도 판정 대상에서 뺌. 판정 없이 막힌 조작은 조작 seq 자체가 무효 대상
+  const voidedAction = r => voids.has(String(r.seq)) || events.some(v => voids.has(String(v.seq)) && v.event.kind === "reaction" && v.event.acceptedSeq === r.event.acceptedSeq);
   const looked = new Set();
   for (let i = 0; i < events.length; i++) {
     const { seq } = events[i], e = withFailureEvidence(events, events[i]);

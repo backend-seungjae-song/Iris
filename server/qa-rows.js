@@ -251,8 +251,10 @@ export async function applyQaRow({ ledger, runId, args }) {
     const playFailed = played ? verified.events.findLast(r => r.seq < named.seq && r.seq >= playStart && verdict(r) && r.event.pass === false && r.event.rowId === named.event.rowId && r.event.path === named.event.path) : null;
     if (played && !playFailed) throw new Error(named.event.kind === "play_result" ? `qa_play 실행 결과 ${given}에는 실패 판정이 없습니다.`
       : `qa_play 실패 ${given}은 입력 전에 멈춰(${named.event.reason || "판정 없음"}) 무효로 할 판정이 없습니다. 대상을 고쳐 다시 실행하면 됩니다.`);
-    const hit = playFailed || (named && verdict(named) ? named : action && verdict(action) ? action
-      : action?.event.kind === "action" ? verified.events.find(r => verdict(r) && r.event.kind === "reaction" && r.event.acceptedSeq === action.event.acceptedSeq) : null);
+    const reacted = action?.event.kind === "action" ? verified.events.find(r => verdict(r) && r.event.kind === "reaction" && r.event.acceptedSeq === action.event.acceptedSeq) : null;
+    // 앱에 전달되지 않은 조작(막힘)은 반응 판정이 없어 조작 자체를 무효로 함. 종료 검사가 실패 조작으로 세는데 무효로 할 판정이 없어 회차를 끝내지 못한 사례(qa-1dbbda16 조작 198)
+    const undelivered = action?.event.kind === "action" && action.event.pass === false && !reacted ? action : null;
+    const hit = playFailed || (named && verdict(named) ? named : action && verdict(action) ? action : reacted || undelivered);
     if (!hit) throw new Error(`${named ? `seq ${given}(${named.event.kind})은 판정과 연결되지 않습니다` : "이 회차에 없는 판정입니다"}. receipt에는 조작 결과의 receipt(action seq), 실패 기록·실패 장면 seq, qa_play 실패(play_failure)·실행 결과(play_result) seq, 판정(reaction·assertion) seq 중 하나를 넣습니다.${choices()}`);
     const receipt = receiptOf(hit);
     // 넣은 seq 가 조작·실패 기록이면 그 판정 seq 로 바뀜. 두 번호를 함께 남겨 어떤 판정이 무효가 됐는지 알 수 있게 함
