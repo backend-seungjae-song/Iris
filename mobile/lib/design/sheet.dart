@@ -119,6 +119,8 @@ Future<T?> showIrisSheet<T>({
   required WidgetBuilder builder,
   Color? barrierColor,
   double horizontalPadding = 16,
+  // 내용에 Expanded 가 있으면 false. 높이가 정해져 있어야 하는 내용은 스스로 스크롤
+  bool scrollable = true,
 }) {
   return showModalBottomSheet<T>(
     context: context,
@@ -148,7 +150,10 @@ Future<T?> showIrisSheet<T>({
           child: IrisSheetFrame(
             horizontalPadding: horizontalPadding,
             bottomPadding: 28 + media.padding.bottom,
-            child: builder(context),
+            // 키보드로 남은 높이보다 내용이 길면 넘치지 않고 스크롤
+            child: scrollable
+                ? SingleChildScrollView(child: builder(context))
+                : builder(context),
           ),
         ),
       );

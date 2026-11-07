@@ -5,9 +5,9 @@ import { handleArchive, initArchiveHandlers } from "./archive-handlers.js";
 import { handleUsage, initUsageHandlers, usageOnConnect } from "./usage-handlers.js";
 import { handleUsageHistory, initUsageHistory, stopUsageHistory, usageHistoryOnConnect } from "./usage-history-handlers.js";
 import { initMemoService, handleMemoMessage, memosWire, memoNotesWire, archivesOut } from "./memo-service.js";
-import { handleMemolabState, handleMemolabUI } from "./memolab-store.js";
 import { handleLocaldev } from "./localdev-bridge.js";
-import { agentChatOnConnect, handleAgentChat, initAgentChat } from "./agent-chat.js";
+import { agentChatOnConnect, handleAgentChat, handleAgentChatFile, handleAgentChatImage, handleAgentChatUpload, initAgentChat } from "./agent-chat.js";
+import { handlePaseoUiStatic } from "./paseo-ui/index.js";
 import { isPathAllowed as fsPathAllowed } from "./runtime-state.js";
 import { isLoopbackRequest } from "./http-handler.js";
 import { createAgentDraftWriter } from "./agent-draft.js";
@@ -92,6 +92,12 @@ export const capabilities = [
   {
     id: "agentchat", wsPrefixes: ["agentchat."],
     init(ctx) { initAgentChat(ctx); },
+    http: [
+      { method: "GET", path: "/paseo-ui/", prefix: true, handler: handlePaseoUiStatic },
+      { method: "GET", path: "/agentchat-image", handler: handleAgentChatImage },
+      { method: "GET", path: "/agentchat-file", handler: handleAgentChatFile },
+      { method: "POST", path: "/agentchat-upload", handler: handleAgentChatUpload },
+    ],
     onConnect: agentChatOnConnect,
     handle: handleAgentChat,
   },
@@ -107,16 +113,6 @@ export const capabilities = [
     id: "remote", wsPrefixes: ["remote."],
     init(ctx) { remoteLifecycle = createRemoteLifecycle({ ctx, onFeatureStateSaved }); },
     handle(ws, msg) { return remoteLifecycle.handle(ws, msg); },
-  },
-  {
-    id: "memolab", wsPrefixes: [],
-    http: [
-      { method: "GET", path: "/memolab-state", handler: handleMemolabState },
-      { method: "PUT", path: "/memolab-state", handler: handleMemolabState },
-      { method: "GET", path: "/memolab-ui", handler: handleMemolabUI },
-      { method: "PUT", path: "/memolab-ui", handler: handleMemolabUI },
-      { method: "GET", path: "/memolab/", prefix: true, handler: () => false },
-    ],
   },
   {
     // 메모 창과 스페이스 열쇠 이관이 함께 쓰므로 본 창에서 꺼도 저장소는 유지한다.

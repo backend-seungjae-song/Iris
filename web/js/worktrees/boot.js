@@ -38,7 +38,7 @@ function request(op, data) {
     const pending = requests.get(requestId);
     if (!pending) return;
     requests.delete(requestId);
-    if (op === "list") byFolder.set(data.repo, { error: "서버 응답이 없습니다", fetchedAt: Date.now() });
+    if (op === "list") byFolder.set(data.repo, keepShown(byFolder.get(data.repo)) || { error: "서버 응답이 없습니다", fetchedAt: Date.now() });
     else if (op === "launched") return;
     else {
       // 서버가 이미 Git 작업을 마쳤을 수 있어 같은 쓰기를 다시 보내지 않는다.
@@ -57,6 +57,9 @@ function progressFor(requestId, title) {
   const pending = requests.get(requestId);
   if (pending) pending.toastId = app.showToast(title, { level: "progress", ttl: Date.now() + REQUEST_TIMEOUT_MS + 10000 });
 }
+// 다시 받다 실패하면 보이던 목록을 그대로 둠. 실패를 보여 주려고 비우면 묶음이 풀렸다 돌아오며 깜빡임
+// - 다음 갱신 주기(LIST_TTL_MS)에 다시 시도
+function keepShown(data) { return data?.ok ? { ...data, loading: false, refreshing: false, fetchedAt: Date.now() } : null; }
 function samePath(a, b) { return a && b && (isHostWindows() ? sameHostPath(a, b) : a.replace(/\/$/, "") === b.replace(/\/$/, "")); }
 function esc(s) { return app.esc(String(s ?? "")); }
 // Claude Code 가 하위 에이전트마다 만드는 임시 worktree 다. 열린 스페이스가 아니면 목록에 세지 않는다.
@@ -175,7 +178,7 @@ function renderCurrent(spaces) {
     html = `${ICON.worktree}<span class="wt-current-name" title="${esc(branch)}">${esc(branch)}</span>`;
   } else if (space && app.getIsLocal() && data?.missing) {
     html = `<span class="wt-current-none">폴더 없음</span>`;
-  } else if (space && app.getIsLocal() && data && !data.ok && !data.loading && !data.refreshing && !data.error) {
+  } else if (space && app.getIsLocal() && data && !data.ok && !data.loading && !data.error) {
     html = `<span class="wt-current-none">Git 저장소가 아닙니다</span>`;
   }
   if (!html) { line?.remove(); return; }
@@ -205,7 +208,7 @@ function renderGrouped(spaces, renderSpace) {
     const cached = byFolder.get(space.folder);
     const tabsKey = JSON.stringify(getTabsForSpace(space.id).map((tab) => tab.tabId));
     if (cached?.loading || cached?.refreshing || (cached && cached.tabsKey === tabsKey && Date.now() - cached.fetchedAt < LIST_TTL_MS)) continue;
-    byFolder.set(space.folder, { ...cached, tabsKey, loading: !cached?.ok, refreshing: !!cached?.ok });
+    byFolder.set(space.folder, { ...cached, tabsKey, loading: !cached, refreshing: !!cached });
     request("list", { spaceId: space.id, repo: space.folder });
   }
   const html = spaces.map((space) => {
@@ -542,7 +545,10 @@ function handleResult(message) {
   }
   if (!message.ok) {
     if (pending.op === "list" && message.code === "FOLDER") byFolder.set(pending.repo, { missing: true, tabsKey: byFolder.get(pending.repo)?.tabsKey, fetchedAt: Date.now() });
-    else if (pending.op === "list") byFolder.set(pending.repo, { error: ["GIT", "REPO", "SPACE"].includes(message.code) ? null : message.message, tabsKey: byFolder.get(pending.repo)?.tabsKey, fetchedAt: Date.now() });
+    else if (pending.op === "list") {
+      const notRepo = ["GIT", "REPO", "SPACE"].includes(message.code);
+      byFolder.set(pending.repo, (!notRepo && keepShown(byFolder.get(pending.repo))) || { error: notRepo ? null : message.message, tabsKey: byFolder.get(pending.repo)?.tabsKey, fetchedAt: Date.now() });
+    }
     else {
       app.showToast(message.message || "worktree 작업이 실패했습니다", { level: "err", id: pending.toastId });
       if (message.createdPath || message.createdPaths?.length) refreshRepo(pending.spaceId);
@@ -719,6 +725,7 @@ export function initCapability(ctx) {
   provide("worktrees.emptyItems", () => activeRepoData() ? [{ label: "새 worktree", disabled: !app.getIsLocal(), act: () => createDialog(app.getSelectedSpaceId()) }] : []);
   attachEvents();
   renderSpaces();
-  provide("worktrees.spaceCreated", (message) => byFolder.delete(message.cwd));
+  // 지우면 응답 전까지 기존 스페이스의 묶음이 풀림. 오래된 것으로 표시만 해서 이전 목록을 둔 채 다시 받음
+  provide("worktrees.spaceCreated", (message) => { const data = byFolder.get(message.cwd); if (data) byFolder.set(message.cwd, { ...data, fetchedAt: 0 }); });
   return { ws: { "worktrees.result": handleResult } };
 }

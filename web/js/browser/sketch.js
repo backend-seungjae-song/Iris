@@ -45,6 +45,7 @@ export function initCapability(ctx) {
   // 콘솔 쪽 도착지. 분리 창에서 온 것도 여기로 들어온다.
   const deliverLocal = (s) => {
     if (!getCurTarget()) { showToast("먼저 왼쪽에서 에이전트(세션)를 선택하세요.", { level: "warn" }); return; }
+    if (callHook("agentchat.paste", sketchBlock(s))) { showToast("스케치를 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요.", { level: "ok" }); return; }
     wsSend({ type: "pty.input", data: "\x1b[200~" + sketchBlock(s) + "\x1b[201~" });
     showToast("스케치 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.", { level: "ok" });
     const xterm = getXterm();

@@ -266,9 +266,12 @@ function createWebviewLifecycle({
         ev.preventDefault();
         return true;
       };
+      // 리디렉트는 페이지가 시작한 이동의 것만. Iris 가 연 이동(주소창·북마크·계정 전환 뒤 다시 열기)은
+      // initiator 가 없고 계정은 화면 쪽이 정함. 안 거르면 사람이 고른 계정이 규칙 계정으로 되돌아감(2026-11-04)
       wc.on("will-redirect", (ev, url, _isInPlace, isMainFrame) => {
         try {
           if (isMainFrame === false || (ev && ev.isMainFrame === false)) return;
+          if (!ev || !ev.initiator) return;
           switchAccount(ev, String(url || (ev && ev.url) || ""));
         } catch {}
       });

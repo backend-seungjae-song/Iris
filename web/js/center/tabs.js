@@ -49,6 +49,7 @@ import {
   getTabSpaces, setActiveTab, setCenterSpace, isTabVisible,
 } from "./tab-store.js";
 import { applyExternalTextToModel, getMonacoModels, transferFilePane, renderFileViewBody } from "./text-editor.js";
+import { setHtml } from "../core/set-html.js";
 
 let $, esc, wsSend, showToast, BROWSER_MODE, isFileLikeKind, acHost;
 let tabstrip, centerEmpty, fileview, browserview;
@@ -274,7 +275,7 @@ export function renderTabs() {
     renderKindBar(row.kinds, docked, tabs, group);
     const tabstrip = row.strip;
     callHook("split.stripReady", tabstrip, index);
-    tabstrip.innerHTML = tabs.filter((t) => !group || tabGroup(t) === group).map((t) => {
+    setHtml(tabstrip, tabs.filter((t) => !group || tabGroup(t) === group).map((t) => {
       const d = isTabDirty(t); // 텍스트·표 어느 쪽이든 안 저장된 편집은 탭에서 바로 보여야 한다
       const label = (t.kind === "browser" && bmName(t.id)) || t.label;
       // 지금 조작 중인 탭만 빛나고 ●가 붙는다. 조작이 끝나면 둘 다 사라진다.
@@ -282,7 +283,7 @@ export function renderTabs() {
       const ai = busy.length ? `<span class="cai" title="${esc(busy.join(", "))} 세션이 지금 이 탭을 조작 중">●${busy.length > 1 ? busy.length : ""}</span>` : "";
       const lead = t.kind === "browser" ? TAB_KIND.browser : TAB_KIND.file;
       return `<div class="ctab${t.id === act ? " active" : ""}${d ? " dirty" : ""}${busy.length ? " ai-held" : ""}" data-tab="${esc(t.id)}">${lead}${d ? '<span class="cdirty" title="저장 안 됨"></span>' : ""}${ai}<span class="cname">${esc(label)}</span>${t.kind === "browser" ? keepAwakeMark(bmKeepAwake(t.id)) : ""}<button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기">${TAB_CLOSE}</button></div>`;
-    }).join("");
+    }).join(""));
     revealActiveTab(tabstrip);
   }
   syncAiGlow();

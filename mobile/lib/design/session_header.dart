@@ -23,6 +23,7 @@ class IrisSessionHeader extends StatelessWidget {
     this.onChat,
     this.onTerminal,
     this.onBrowser,
+    this.onPaseo,
     this.onGitHub,
     this.githubFailed = false,
     this.status = 'idle',
@@ -42,6 +43,7 @@ class IrisSessionHeader extends StatelessWidget {
   final VoidCallback? onChat;
   final VoidCallback? onTerminal;
   final VoidCallback? onBrowser;
+  final VoidCallback? onPaseo;
   final VoidCallback? onGitHub;
   final bool githubFailed;
   // 대화 머리에서만 쓰는 상태 모양과 종류 이름
@@ -62,6 +64,7 @@ class IrisSessionHeader extends StatelessWidget {
         canBrowser: canBrowser,
         onTerminal: onTerminal,
         onBrowser: onBrowser,
+        onPaseo: onPaseo,
         onGitHub: onGitHub,
         githubFailed: githubFailed,
       );

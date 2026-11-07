@@ -41,6 +41,7 @@ import { callHook } from "../core/hooks.js";
 import { mayWriteSharedActive } from "./active-tab.js";
 import { keepAwakeItem, keepAwakeMark } from "./keep-awake.js";
 import { askConfirm } from "../explorer/context-menu.js";
+import { setHtml } from "../core/set-html.js";
 
 let $, esc, cssEsc, showToast, showCtx, renderTabs, startTabRename, newBrowserTab;
 let BROWSER_MODE;
@@ -118,14 +119,19 @@ export function shownBmTabs() {
 const revealedActive = new WeakMap();
 export function revealActiveTab(strip, hold = false) {
   const el = strip.querySelector(".ctab.active");
-  // 앞쪽 탭이 늘거나 이름이 바뀌어 활성 탭 위치가 밀린 경우도 다시 보여 줌. 사람이 휠로 넘긴 스크롤은 위치를 안 바꿔 유지
-  const key = el ? `${el.dataset.tab}:${el.offsetLeft}:${el.offsetWidth}` : null;
-  if (revealedActive.get(strip) === key) return;
+  // 앞쪽 탭이 늘거나 이름이 바뀌어 활성 탭 위치가 밀린 경우도 다시 보여 줌
+  const id = el ? el.dataset.tab : null;
+  const key = el ? `${id}:${el.offsetLeft}:${el.offsetWidth}` : null;
+  const last = revealedActive.get(strip);
+  if (last && last.key === key) return;
   // 화면에 그려지기 전(부팅 중 숨김)에는 스크롤이 안 되므로 기록하지 않고 다음 그리기에서 다시 시도
   if (!strip.clientWidth) return;
-  revealedActive.set(strip, key);
-  if (hold) return; // 위치만 기록하고 스크롤은 그대로
-  if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // 같은 탭의 위치·폭만 바뀐 경우, 마지막으로 맞춘 뒤 사람이 띠를 넘겼으면 그 위치 유지
+  // - 제목·● 표시로 폭이 바뀔 때마다 앞쪽 활성 탭으로 되돌아가던 결함(2026-11-06 사용자 보고)
+  // - 넘긴 기록은 다른 탭을 고를 때까지 유지
+  const user = !!(last && last.id === id && (last.user || strip.scrollLeft !== last.left));
+  if (!hold && !user && el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  revealedActive.set(strip, { id, key, left: strip.scrollLeft, user });
 }
 export function renderBmTabs() {
   // 이 함수는 분리 브라우저 창 전용이다. 콘솔 창은 같은 #tabstrip에 파일·브라우저 탭을 renderTabs로
@@ -159,7 +165,7 @@ export function renderBmTabs() {
   // 붙고, 창을 닫으면 그 창의 탭이 원래 위치로 돌아간다.
   html += `<div class="ctab-add" data-add="1" title="새 탭(구글)">+</div>`;
   if (!ownTabs && savedGroups().length) html += `<div class="ctab-add" data-saved="1" title="저장된 그룹 열기">📁</div>`;
-  tabstrip.innerHTML = html;
+  setHtml(tabstrip, html);
   // 펼치거나 접은 그룹 칩은 누른 자리에 그대로, 탭은 칩 뒤로 펼쳐짐. 활성 탭으로 스크롤하지 않음
   const anchored = groupAnchor && groups.find((g) => g.id === groupAnchor.id);
   let unfold = null;

@@ -21,7 +21,7 @@ import { isHostWindows, isAbsolutePath, normalizePath, pathWithin, pathDirname, 
 //
 // 영향 범위
 //   main 의 초기화·Space 포커스·파일 탭 reveal·fs/fs-op WebSocket 배선과 watch 디렉터리 수집,
-//   explorer/context-menu 의 DOM·캐시 무효화·재요청·렌더 import 계약, center/text-editor 의 extOf.
+//   explorer/context-menu 의 DOM·목록 다시 받기·렌더 import 계약, center/text-editor 의 extOf.
 //   현재 목록 확인: node bin/importers.mjs web/js/explorer/tree.js
 
 import { spaceRootFor } from "../center/file-palette.js";
@@ -29,6 +29,7 @@ import { openFile } from "../center/file-routing.js";
 import { getActiveTabId, getCenterSpace, getTabs } from "../center/tab-store.js";
 import { STATE_LABEL, spaceState } from "../core/agent-state.js";
 import { callHook } from "../core/hooks.js";
+import { setHtml } from "../core/set-html.js";
 import { getLastAgents } from "../herdr/state.js";
 
 let $, esc, wsSend, orderedSpaces, getIsLocal, getSelectedSpaceId;
@@ -65,7 +66,6 @@ export function initTree(deps) {
 
 export function getSpaceList() { return spaceList; }
 export function getFileTree() { return fileTree; }
-export function invalidateDir(dir) { dirCache.delete(dir); }
 export function setPendingCreateFocus(value) { pendingCreateFocus = value; }
 // fs.list 응답의 git = 그 폴더 아래 전체 상태. 응답에 없는 경로는 커밋·되돌리기로 깨끗해진 파일이라 이전 표시 삭제
 export function mergeGitStatus(status, dir) {
@@ -92,9 +92,9 @@ export function renderFileTree() {
   const s = orderedSpaces().find((x) => x.id === getSelectedSpaceId());
   fileAdd.hidden = !getIsLocal() || !s || !s.folder;
   folderAdd.hidden = !getIsLocal() || !s || !s.folder;
-  if (!s || !s.folder) { fileTree.innerHTML = `<div class="fempty">스페이스를 선택하면 파일 트리가 열립니다.</div>`; explorerSpace.textContent = "스페이스 선택"; return; }
+  if (!s || !s.folder) { setHtml(fileTree, `<div class="fempty">스페이스를 선택하면 파일 트리가 열립니다.</div>`); explorerSpace.textContent = "스페이스 선택"; return; }
   explorerSpace.textContent = s.label;
-  fileTree.innerHTML = renderDir(s.folder, 0);
+  setHtml(fileTree, renderDir(s.folder, 0));
 }
 
 // 스페이스 줄마다 바로 아래에 그 스페이스의 에이전트 줄을 끼운다. 에이전트 줄은 herdr/agents 가
@@ -110,7 +110,7 @@ export function renderSpaces() {
   const list = orderedSpaces();
   // 스페이스 생성은 셸을 만드는 작업이라 로컬에서만 가능하다(AC5). 원격에서는 버튼을 두지 않는다.
   const addBtn = $("#space-add"); if (addBtn) addBtn.hidden = !getIsLocal();
-  if (!list.length) { spaceList.innerHTML = `<div class="fempty">Space 없음</div>`; return; }
+  if (!list.length) { setHtml(spaceList, `<div class="fempty">Space 없음</div>`); return; }
   const renderSpace = (s, afterRow = "") => {
     const sel = s.id === getSelectedSpaceId();
     const st = spaceState(s.status, getLastAgents(), s.id);
@@ -127,10 +127,17 @@ export function renderSpaces() {
       + `<span class="dot ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span></div>`
       + afterRow + ((ag && ag.html) || "");
   };
-  spaceList.innerHTML = callHook("worktrees.renderSpaces", list, renderSpace) ?? list.map((s) => renderSpace(s)).join("");
+  setHtml(spaceList, callHook("worktrees.renderSpaces", list, renderSpace) ?? list.map((s) => renderSpace(s)).join(""));
 }
 
 export function requestDir(p) { if (p && !dirCache.has(p)) { dirCache.set(p, "loading"); wsSend({ type: "fs.list", path: p }); } }
+// 이미 받은 폴더는 이전 목록을 그린 채 다시 받음. 응답이 오면 handleFsMessage 가 바꿈
+// - 지우고 받으면 응답 전까지 그 아래가 "…" 한 줄이 되어 목록이 줄고 스크롤이 끝으로 밀림(2026-11-07 사용자 보고)
+export function refreshDir(p) {
+  if (!p) return;
+  if (Array.isArray(dirCache.get(p))) wsSend({ type: "fs.list", path: p });
+  else { dirCache.delete(p); requestDir(p); }
+}
 function normalizeRevealPath(path) {
   if (typeof path !== "string" || !isAbsolutePath(path)) return null;
   if (isHostWindows()) return normalizePath(path);

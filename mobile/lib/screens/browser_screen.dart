@@ -1527,6 +1527,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   Future<void> _showMore(BrowserTab tab) => showIrisSheet<void>(
     context: context,
+    scrollable: false,
     builder: (sheetContext) => BrowserMoreSheet(
       session: widget.state.session,
       tab: tab,

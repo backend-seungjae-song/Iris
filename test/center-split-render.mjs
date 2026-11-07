@@ -86,6 +86,7 @@ test("칸별 탭 줄은 자기 종류·활성 탭만 그림", () => {
     preserveRemainingPane() {}, lastByKind: new Map(), tabGroup: t => t.kind === 'browser' ? 'browser' : 'file', renderKindBar() {},
     isTabDirty: () => false, esc: x => x, aiBusyLabels: () => [], keepAwakeMark: () => "", TAB_KIND: {}, TAB_CLOSE: '',
     revealActiveTab() {}, syncAiGlow() {}, updateCenterVisibility() {},
+    setHtml: (el, html) => { el.innerHTML = html; return true; },
   });
   render();
   assert.match(rows[0].strip.innerHTML, /data-tab="f"/); assert.doesNotMatch(rows[0].strip.innerHTML, /data-tab="b"/);

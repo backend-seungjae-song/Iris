@@ -1,5 +1,6 @@
 import { answerUserAsk, pendingUserNotices } from "../../browser-commands.js";
 import { createBrowserFeature } from "./browser.js";
+import { createPaseoFeature } from "./paseo.js";
 import { createSourceControlFeature } from "./source-control.js";
 import { createTerminalFeature } from "./terminal.js";
 import { redactPrivateText } from "../public-text.js";
@@ -10,6 +11,7 @@ export function createRemoteFeatures(options) {
   const terminal = options.terminalFeature || createTerminalFeature(options);
   const browser = options.browserFeature || createBrowserFeature(options);
   const source = options.sourceControlFeature || createSourceControlFeature(options);
+  const paseo = options.paseoFeature || createPaseoFeature(options);
   const requests = options.requests;
   const agents = options.agents;
   const now = options.now || Date.now;
@@ -71,6 +73,7 @@ export function createRemoteFeatures(options) {
     terminal,
     browser,
     source,
+    paseo,
     capabilities() {
       return [
         ...(terminal.available() ? terminalNames : []),
@@ -78,14 +81,15 @@ export function createRemoteFeatures(options) {
         ...(browser.interactiveAvailable() ? browserInteractiveNames : []),
         ...(source.gitAvailable() ? gitNames : []),
         ...(source.githubAvailable() ? githubNames : []),
+        ...(paseo.available() ? ["paseo.open", "chat.open", "chat.older", "chat.close"] : []),
       ];
     },
-    closeConnection(connId) { terminal.closeConnection(connId); browser.closeConnection(connId); },
+    closeConnection(connId) { terminal.closeConnection(connId); browser.closeConnection(connId); paseo.closeConnection(connId); },
     close() {
       if (askTimer) clearTimer(askTimer);
       askTimer = null;
       for (const request of asks.values()) requests.cancel(request.ref);
-      asks.clear(); terminal.close(); browser.close();
+      asks.clear(); terminal.close(); browser.close(); paseo.close();
     },
   };
 }

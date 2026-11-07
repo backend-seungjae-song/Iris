@@ -8,16 +8,32 @@ import { mdToHtml, isMarkdownExtension } from "../core/markdown.js";
 import { extOf } from "../explorer/tree.js";
 import { getCenterSpace, getCurrentTabs } from "./tab-store.js";
 import { paneLayout } from "./pane-store.js";
+import { setHtml } from "../core/set-html.js";
 
 const modes = new WeakMap();
 const previews = new Map();
 const pending = new Map();
+// 탭·칸별 미리보기 스크롤 위치. 활성 탭을 다시 누르거나 다른 탭을 닫아도 본문을 새로 그려서 맨 위로 튀던 결함(2026-11-07)
+const tops = new WeakMap();
 const focusedPane = () => paneLayout(getCenterSpace())?.focus || 0;
 const isMd = (t) => isMarkdownExtension(extOf(String(t?.path || "")));
 function mode(t, pane) { return modes.get(t)?.get(pane) ?? t.mdMode ?? "raw"; }
 function draw(entry) {
   if (entry.preview.isConnected === false || mode(entry.tab, entry.pane) !== "preview") return;
-  entry.preview.innerHTML = mdToHtml(entry.tab.draft != null ? entry.tab.draft : entry.tab.content);
+  setHtml(entry.preview, mdToHtml(entry.tab.draft != null ? entry.tab.draft : entry.tab.content));
+}
+
+function keepScroll(t, pane, preview) {
+  if (!tops.has(t)) tops.set(t, new Map());
+  const saved = tops.get(t), want = saved.get(pane) || 0;
+  if (want) {
+    preview.scrollTop = want;
+    // 그림이 높이 0으로 시작하면 위치가 덜 내려감. 그림이 뜨면 다시 맞춤
+    for (const img of preview.querySelectorAll("img")) img.addEventListener("load", () => {
+      if (saved.get(pane) === want && preview.scrollTop < want) preview.scrollTop = want;
+    }, { once: true });
+  }
+  preview.addEventListener("scroll", () => saved.set(pane, preview.scrollTop), { passive: true });
 }
 
 export function initCapability() {
@@ -38,6 +54,7 @@ export function initCapability() {
     preview.hidden = false;
     draw(entry);
     wrap.classList.add("hidden");
+    keepScroll(t, pane, preview);
     return true;
   });
 

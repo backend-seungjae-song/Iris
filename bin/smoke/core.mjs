@@ -99,16 +99,6 @@ export function filesUnder(dir, accept, { includeSymlinks = false } = {}) {
 const WEB_SHUTTLE_EXCLUDES = new Set([
   "web/memo-snapshot-state.js", // 별도 classic script이며 전용 smoke/test가 직접 read()한다.
   "web/scrollback-copy.js",     // 별도 classic script이며 전용 smoke/test가 직접 read()한다.
-  // 메모랩은 앱 셸이 아니라 서버가 그대로 내주는 한 장짜리 화면이다. 렌더러 말뭉치에 섞으면
-  // "이 모양이 어디에도 없어야 한다"는 음성 검사들이 다른 화면까지 검사하게 된다.
-  // 대신 자기 검사를 갖는다. bin/smoke/sections/memolab.mjs 가 그것이다.
-  "web/memolab/index.html",
-  "web/memolab/app.js",
-  "web/memolab/store.js",
-  "web/memolab/style.css",
-  "web/memolab/group.js",
-  "web/memolab/terms.js",
-  "web/memolab/words.js",
   // 에뮬레이터 분리 창도 앱 셸 밖의 한 장짜리 화면이다. 자기 검사는 bin/smoke/sections/emulator.mjs.
   "web/emulator-window/index.html",
   "web/emulator-window/window.js",

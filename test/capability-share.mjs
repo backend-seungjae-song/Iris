@@ -19,7 +19,7 @@ test("실제 렌더러·서버 등록표에서 WS·HTTP·지면 선언을 읽는
   const root = fileURLToPath(new URL("../", import.meta.url));
   assert.ok(capabilityDeclarations(root, "usage").wsPrefixes.includes("usage."));
   assert.deepEqual(capabilityDeclarations(root, "run").httpPaths, ["/run-cmd"]);
-  assert.ok(capabilityDeclarations(root, "memolab").httpPaths.includes("/memolab/*"));
+  assert.ok(capabilityDeclarations(root, "agentchat").httpPaths.includes("/paseo-ui/*"));
   assert.ok(capabilityDeclarations(root, "memo").wsPrefixes.includes("memos"));
 });
 

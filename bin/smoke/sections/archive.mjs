@@ -96,7 +96,7 @@ check("접기 항목을 받아 가는 자리는 둘", () =>
 // 상세에 남는다. 걸린 세션이 다른 세션 사이에 섞이면 검색 결과를 확인할 수 없다.
 check("고른 스페이스의 세션이 상세에 선다", () => /data-ar-pick/.test(archive)
   && /const pick = e\.target\.closest\("\[data-ar-pick\]"\);\s*if \(pick\) \{ arSel = pick\.dataset\.arPick; arRender\(\)/.test(archive)
-  && /detail\.innerHTML = !sel \? "" : sel\.g \? arGroupDetail\(sel\.g, q, m\)/.test(archive));
+  && /setHtml\(detail, !sel \? "" : sel\.g \? arGroupDetail\(sel\.g, q, m\)/.test(archive));
 check("검색 중에는 걸린 세션만 상세에 남는다", () => /const hits = q \? g\.kids\.filter\(\(k\) => m\.get\(k\.id\)\.hit\) : g\.kids;/.test(archive));
 
 

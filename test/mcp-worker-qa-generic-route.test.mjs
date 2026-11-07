@@ -1,4 +1,4 @@
-// QA 채널의 일반 이름(goto·url·snapshot·diff·wait·back·forward·reload)은 메인이 기능을 알리면 worker 처리기, 아니면 옛 봉투
+// QA 채널의 일반 이름(goto·url·snapshot·text·diff·wait·back·forward·reload)은 메인이 기능을 알리면 worker 처리기, 아니면 옛 봉투
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createQaExecutor, QA_GENERIC_NAMES } from "../server/mcp-worker/qa-service.js";
@@ -23,8 +23,8 @@ function fakeHost(features) {
   return { hostApi, relays };
 }
 
-test("일반 이름 목록은 QA 채널이 보내는 여덟 이름", () => {
-  assert.deepEqual([...QA_GENERIC_NAMES].sort(), ["back", "diff", "forward", "goto", "reload", "snapshot", "url", "wait"]);
+test("일반 이름 목록은 QA 채널이 보내는 아홉 이름", () => {
+  assert.deepEqual([...QA_GENERIC_NAMES].sort(), ["back", "diff", "forward", "goto", "reload", "snapshot", "text", "url", "wait"]);
 });
 
 test("메인이 단위 실행을 알리면 url 은 worker 처리기로 wc.info 를 QA 표시로 부름", async () => {

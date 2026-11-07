@@ -62,6 +62,7 @@ let mmOpen = null; // 펼쳐 본 아카이브 날짜
 // 것이 아니다. 어디서 왔는지 기억해 두고 되돌아올 경로를 제공한다.
 let mmView = null, mmHome = null;
 let memoWindowOpenCounts = {};
+let mmDrawn = ""; // 마지막으로 그린 관리 화면 마크업. 같으면 다시 만들지 않는다
 
 export function initMemoAdmin(deps) {
   ({
@@ -88,6 +89,7 @@ export function mmRefresh() {
     body.innerHTML = `<div class="mm-main mm-main-empty"><div class="mm-col mm-col-a">${head}</div>
       <div class="mm-col mm-col-b"><div class="mm-empty"><b>스페이스를 선택하세요</b>
       <p>스페이스를 선택하면 그 스페이스의 메모가 열립니다.</p></div></div></div>`;
+    mmDrawn = "";
     return;
   }
   const away = !!(mmView && mmHome && mmView !== mmHome);
@@ -140,7 +142,7 @@ export function mmRefresh() {
         </div>` : ""}
     </div>`;
   }).join("") : `<div class="mm-hint mm-hint-day">아직 보관한 것이 없습니다.</div>`;
-  body.innerHTML = `
+  const html = `
     <div class="mm-main">
       <div class="mm-col mm-col-a">
         ${head}
@@ -171,9 +173,26 @@ export function mmRefresh() {
         <div class="mm-scroll">${days}</div>
       </div>
     </div>`;
+  mmApply(body, html);
   // 도크와 메모 화면의 편집기는 같은 본문 model을 본다. 같은 메모를 두 벌로 갖지 않는다.
   if (getMemoShownSpace() !== sp) { setMemoShownSpace(sp); setMemoValue(memoTextOf(sp)); }
   renderMemoPreview();
+}
+
+// 메모 방송(저장마다 옴)에 화면 전체를 다시 만들면 편집기가 비었다 다시 뜨고 스크롤·펼침이 풀린다
+// - 마크업이 같으면 그대로 둔다
+// - 다르면 편집기 칸(#mm-slot)은 기존 노드를 옮겨 살리고, 안쪽 스크롤 칸 위치와 삭제된 메모 펼침을 되돌린다
+function mmApply(body, html) {
+  const live = body.querySelector("#mm-slot");
+  if (live && html === mmDrawn) return;
+  const scrolls = [...body.querySelectorAll(".mm-scroll")].map((n) => [n.scrollTop, n.scrollLeft]);
+  const deletedOpen = Boolean(body.querySelector(".mm-deleted[open]"));
+  body.innerHTML = html;
+  mmDrawn = html;
+  body.querySelectorAll(".mm-scroll").forEach((n, i) => { if (scrolls[i]) [n.scrollTop, n.scrollLeft] = scrolls[i]; });
+  if (deletedOpen) body.querySelector(".mm-deleted")?.setAttribute("open", "");
+  const fresh = body.querySelector("#mm-slot");
+  if (live && fresh) { live.style.cssText = fresh.style.cssText; fresh.replaceWith(live); }
 }
 
 // 단축키 코드가 이 모듈을 import 하면 메모를 끈 사용자에게도 로드된다. 이름만 등록한다.

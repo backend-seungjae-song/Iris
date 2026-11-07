@@ -44,6 +44,8 @@ const filesByRoot = new Map();
 const treeCache = new Map();
 const inflight = new Map();
 let waiting = new Set();
+// 오래된 목록을 보여 주는 채로 다시 받는 폴더. waiting 과 달리 "불러오는 중" 표시를 하지 않음
+let refreshing = new Set();
 let treeError = new Map();
 let truncatedRoots = new Set();
 
@@ -54,7 +56,9 @@ function sendTree(root, attempt = 0) {
   const timer = setTimeout(() => {
     if (!inflight.has(root)) return;
     if (attempt === 0 && searchOpen && ctx.wsIsOpen()) { sendTree(root, 1); return; }
-    inflight.delete(root); waiting.delete(root);
+    inflight.delete(root);
+    if (refreshing.delete(root)) return;
+    waiting.delete(root);
     treeError.set(root, "시간 초과"); render();
   }, 8000);
   inflight.set(root, { timer, attempt });
@@ -67,17 +71,17 @@ function roots() {
 function requestTrees() {
   if (!input.value.trim() || !["전체", "파일"].includes(category)) return;
   const want = roots();
-  waiting = new Set(); treeError = new Map(); truncatedRoots = new Set();
+  waiting = new Set(); refreshing = new Set(); treeError = new Map(); truncatedRoots = new Set();
   for (const root of want) {
     const cached = treeCache.get(root);
-    if (cached && Date.now() - cached.at < CACHE_MS) {
+    if (cached) {
       filesByRoot.set(root, cached.files);
       if (cached.truncated) truncatedRoots.add(root);
-      continue;
-    }
-    filesByRoot.delete(root);
-    if (!ctx.wsIsOpen()) { treeError.set(root, "연결되지 않음"); continue; }
-    waiting.add(root);
+      if (Date.now() - cached.at < CACHE_MS) continue;
+    } else filesByRoot.delete(root);
+    // 오래된 목록이 있으면 그 결과를 둔 채 다시 받음. 지우면 응답 전까지 파일 결과가 "불러오는 중"으로 바뀜(2026-11-07)
+    if (!ctx.wsIsOpen()) { if (!cached) treeError.set(root, "연결되지 않음"); continue; }
+    (cached ? refreshing : waiting).add(root);
     if (!inflight.has(root)) sendTree(root);
   }
   render();
@@ -89,12 +93,13 @@ function onTree(message) {
   if (request) clearTimeout(request.timer);
   inflight.delete(message.root);
   if (!message.error) treeCache.set(message.root, { at: Date.now(), files: message.files || [], truncated: !!message.truncated });
-  if (!searchOpen || !roots().includes(message.root) || !waiting.has(message.root)) return;
+  const stale = refreshing.delete(message.root);
+  if (!searchOpen || !roots().includes(message.root) || !(waiting.has(message.root) || stale)) return;
   waiting.delete(message.root);
-  if (message.error) { treeError.set(message.root, message.error); filesByRoot.delete(message.root); }
+  if (message.error) { if (!stale) { treeError.set(message.root, message.error); filesByRoot.delete(message.root); } }
   else {
     filesByRoot.set(message.root, Array.isArray(message.files) ? message.files : []);
-    if (message.truncated) truncatedRoots.add(message.root);
+    truncatedRoots.delete(message.root); if (message.truncated) truncatedRoots.add(message.root);
   }
   render();
 }
@@ -231,7 +236,7 @@ function choose(row) {
 function close() {
   if (!searchOpen) return;
   searchOpen = false;
-  backdrop.hidden = true; waiting.clear();
+  backdrop.hidden = true; waiting.clear(); refreshing.clear();
   if (previousFocus?.isConnected) previousFocus.focus(); else trigger.focus();
 }
 

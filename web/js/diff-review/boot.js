@@ -29,6 +29,11 @@ function paint(next = frame) {
   if (!next?.view?.isConnected) return;
   frame = next;
   const { view, toolbar, lines, tab, rows, spaceId } = frame;
+  // 다시 그리기 전에 열린 상태와 입력 위치를 저장 → 그린 뒤 되돌림(해결·삭제를 눌러도 접히거나 커서가 사라지지 않게)
+  const staleWasOpen = !!view.querySelector("details.dr-stale[open]");
+  const at = document.activeElement;
+  const typing = at instanceof HTMLTextAreaElement && at.closest("[data-editor]") && view.contains(at)
+    ? { editor: at.closest("[data-editor]").dataset.editor, start: at.selectionStart, end: at.selectionEnd, top: at.scrollTop } : null;
   clean(view);
   if (featureHidden().has("diffreview") || typeof tab.patch !== "string") return;
   const key = reviewKey(tab, spaceId);
@@ -45,6 +50,7 @@ function paint(next = frame) {
   if (stale.length) {
     const box = document.createElement("details"); box.className = "dr-stale"; box.dataset.diffreview = "";
     const title = document.createElement("summary"); title.textContent = `diff가 바뀌기 전에 단 의견 ${stale.length}개. 줄 위치를 확인하세요`; box.append(title);
+    box.open = staleWasOpen;
     for (const note of stale) box.append(noteCard(note, key));
     toolbar?.after(box);
   }
@@ -64,6 +70,11 @@ function paint(next = frame) {
     for (const note of notes.filter((n) => n.side === side && n.line === number)) line.after(noteCard(note, key));
     if (edits.get(key + ":" + index)?.patch === tab.patch) editLine(frame, row, line, index, false);
   });
+  if (typing) {
+    const form = [...view.querySelectorAll("[data-editor]")].find((f) => f.dataset.editor === typing.editor);
+    const input = form?.querySelector("textarea");
+    if (input) { input.focus({ preventScroll: true }); input.setSelectionRange(typing.start, typing.end); input.scrollTop = typing.top; }
+  }
 }
 function noteCard(note, key) {
   const card = document.createElement("span"); card.className = "dr-note"; card.dataset.diffreview = "";

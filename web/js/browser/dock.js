@@ -67,6 +67,8 @@ import { isFileKindId } from "../core/file-kinds.js";
 import { syncTouchDrag, toggleDevTools } from "../panel/touch-drag.js";
 import { updateSizeBtn, viewportByTab, viewportLayout } from "../panel/viewport.js";
 
+// 주소창 값을 마지막으로 채운 탭, 사람이 그 뒤 글자를 고치는 중인지
+let urlInputTab = null, urlEditing = false;
 let $, acHost, BROWSER_MODE, BOUND_SPACE, MEMO_MODE;
 let bNote, browserview, fileview, urlInput;
 let isFileLikeKind, isNewTab, newBrowserTab;
@@ -81,6 +83,10 @@ export function initDock(deps) {
     bNote, browserview, fileview, urlInput,
     isFileLikeKind, isNewTab, newBrowserTab,
   } = deps);
+  // Enter 로 이동한 뒤에도 포커스가 남으므로 포커스가 아니라 고친 여부로 판정
+  urlInput?.addEventListener("input", () => { urlEditing = true; });
+  urlInput?.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === "NumpadEnter" || e.key === "Escape") urlEditing = false; });
+  urlInput?.addEventListener("blur", () => { urlEditing = false; });
 
   // 분리창 탭바는 browser/tabs.js 가 소유한다. 기존 `if (BROWSER_MODE) { … }` 가 있던 위치다.
   if (BROWSER_MODE) {
@@ -226,9 +232,13 @@ export function reconcileBrowserMode() {
     markWebviewUsed(act);
     // 여는 중·실패한 주소 포함. active.url 만 쓰면 실패한 이동 뒤 주소줄이 빔
     const { url: shownUrl } = navigationDisplay(active);
-    urlInput.value = isNewTab(shownUrl, active) ? "" : shownUrl;
+    // 상태 방송마다 불림. 같은 탭의 주소창을 고치는 중이면 덮어쓰지 않음(입력하던 글이 지워지던 결함, 2026-11-07)
+    if (!(urlEditing && document.activeElement === urlInput && urlInputTab === act)) urlInput.value = isNewTab(shownUrl, active) ? "" : shownUrl;
+    if (urlInputTab !== act) urlEditing = false;
+    urlInputTab = act;
     syncBookmarkStar();
   } else if (act && document.activeElement !== urlInput) {
+    urlInputTab = act;
     // 잠든 활성 탭(공유 탭을 따라온 창 등)도 주소는 보임. 비워 두면 이전 탭 주소가 남음
     const sleptUrl = (getDiscardedWebview(act) || {}).url || (bmTabs().find((t) => t.id === act) || {}).url || "";
     urlInput.value = isNewTab(sleptUrl, null) ? "" : sleptUrl;

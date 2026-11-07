@@ -19,7 +19,7 @@ Iris 소스를 처음 받은 사용자를 위한 기능 관리·추가·공유 �
 - `IRIS_STATE_DIR`를 지정한 실행: 지정 폴더 아래. 개발 스크립트는 `$HOME/.iris-dev`를 쓴다.
 
 ```json
-{"version":1,"revision":3,"hidden":["memolab","viewer"]}
+{"version":1,"revision":3,"hidden":["usage","viewer"]}
 ```
 
 `hidden`은 꺼진 기능 id 목록이다. 서버는 임시 파일에 쓴 뒤 이름을 변경하므로 불완전한 파일이

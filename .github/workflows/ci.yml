@@ -9,7 +9,7 @@ jobs:
   test:
     # macOS 전용 프로젝트다. sqlite3·osascript 같은 시스템 도구에 기대는 검사가 있어
     # 리눅스 러너에서는 의미 있는 결과가 나오지 않는다.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       # pnpm 판은 package.json 의 packageManager 가 정한다 — 여기서 따로 적으면 둘이 갈린다.

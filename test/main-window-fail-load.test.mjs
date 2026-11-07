@@ -43,7 +43,7 @@ function harness() {
 
 test("앱 화면 안 iframe 이 실패하면 앱 화면을 다시 불러오지 않음", () => {
   const { reloadsAfter } = harness();
-  assert.equal(reloadsAfter(-102, "ERR_CONNECTION_REFUSED", "http://127.0.0.1:4271/memolab/", false), 0);
+  assert.equal(reloadsAfter(-102, "ERR_CONNECTION_REFUSED", "http://127.0.0.1:4271/paseo-ui/?panel=chat-settings", false), 0);
 });
 
 test("앱 화면 자체를 못 불러왔으면 다시 시도함", () => {

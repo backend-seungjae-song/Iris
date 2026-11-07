@@ -254,9 +254,6 @@ await runDevEnv();
 const { default: runViewerAndMenu } = await import("./smoke/sections/70-viewer-and-menu.mjs");
 await runViewerAndMenu();
 
-const { default: runMemolab } = await import("./smoke/sections/memolab.mjs");
-await runMemolab();
-
 const { default: runEmulator } = await import("./smoke/sections/emulator.mjs");
 await runEmulator();
 

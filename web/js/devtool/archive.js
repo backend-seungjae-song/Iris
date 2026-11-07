@@ -26,6 +26,7 @@ import { pathBasename } from "../core/host-path.js";
 //   받아 가는 explorer/context-menu.js · herdr/agents.js.
 
 import { provide } from "../core/hooks.js";
+import { setHtml } from "../core/set-html.js";
 
 // 이 기능의 영역. index.html 이 이 마크업을 항상 그리면 기능을 꺼도
 // 셸이 파싱되므로 여기서 만든다. 셸(aside 의 id·class)은 rail 표가 정본이고 여기는 안쪽만 담는다.
@@ -238,7 +239,13 @@ function arRender() {
   const list = dom("#ar-list"), detail = dom("#ar-detail"); if (!list || !detail) return;
   const q = arQuery.trim().toLowerCase();
   const busy = dom("#ar-busy");
-  if (busy) busy.innerHTML = arBusy ? `<div class="ar-busy">
+  const busyText = arBusy ? `되살리는 중 ${arBusy.done + 1}/${arBusy.total} — ${arBusy.name || ""}` : "";
+  const busyWidth = arBusy ? `${Math.round((arBusy.done / arBusy.total) * 100)}%` : "";
+  // 진행 중이면 글자·막대만 갱신: 통째로 다시 만들면 돌던 스피너가 처음부터 다시 돎
+  if (busy && arBusy && busy.querySelector(".ar-busy")) {
+    busy.querySelector(".ar-busy-t").textContent = busyText;
+    busy.querySelector(".ar-busy-bar i").style.width = busyWidth;
+  } else if (busy) busy.innerHTML = arBusy ? `<div class="ar-busy">
       <span class="ar-spin"></span>
       <span class="ar-busy-t">되살리는 중 ${arBusy.done + 1}/${arBusy.total} — ${escapeHtml(arBusy.name || "")}</span>
       <span class="ar-busy-bar"><i style="width:${Math.round((arBusy.done / arBusy.total) * 100)}%"></i></span>
@@ -278,7 +285,7 @@ function arRender() {
   ];
   if (!rows.some((r) => r.key === arSel)) arSel = rows[0]?.key ?? null;
 
-  list.innerHTML = rows.length ? rows.map((r) => {
+  setHtml(list, rows.length ? rows.map((r) => {
     const on = r.key === arSel;
     const head = `<button type="button" class="ar-group${on ? " on" : ""}" data-ar-pick="${escapeHtml(r.key)}" aria-pressed="${on}">`;
     if (r.g) {
@@ -294,10 +301,10 @@ function arRender() {
         <span class="ar-l1"><span class="ar-kind">${escapeHtml(e.agent || "세션")}</span><span class="ar-name">${escapeHtml(e.name || e.agent || "(이름 없음)")}</span><span class="ar-when">${escapeHtml(arWhen(e.at))}</span></span>
         <span class="ar-l2"><span>스페이스를 알 수 없는 세션</span></span>
       </button>`;
-  }).join("") : `<div class="ar-none">"${escapeHtml(arQuery)}"에 걸리는 항목이 없습니다.</div>`;
+  }).join("") : `<div class="ar-none">"${escapeHtml(arQuery)}"에 걸리는 항목이 없습니다.</div>`);
 
   const sel = rows.find((r) => r.key === arSel);
-  detail.innerHTML = !sel ? "" : sel.g ? arGroupDetail(sel.g, q, m) : arLooseDetail(sel.e, q, m);
+  setHtml(detail, !sel ? "" : sel.g ? arGroupDetail(sel.g, q, m) : arLooseDetail(sel.e, q, m));
   if (cnt) cnt.textContent = q ? `${archives.filter((e) => m.get(e.id).hit).length} / ${archives.length}` : String(archives.length);
 }
 

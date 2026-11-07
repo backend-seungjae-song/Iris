@@ -172,31 +172,47 @@ class _IrisComposerState extends State<IrisComposer> {
                                     left: 4,
                                     bottom: 4,
                                   ),
-                                  child: Wrap(
-                                    key: const Key('composer-pasted-contexts'),
-                                    spacing: 7,
-                                    runSpacing: 7,
-                                    children: [
-                                      for (final draft in widget.drafts)
-                                        PastedContextChip(
-                                          key: Key(
-                                            'composer-draft-${draft.ref}',
-                                          ),
-                                          kind: pastedContextKind(draft.kind),
-                                          summary: draft.summary,
-                                          onPressed: () => showPastedContext(
-                                            context: context,
-                                            kind: pastedContextKind(draft.kind),
-                                            summary: draft.summary,
-                                            content: draft.content,
-                                          ),
-                                          onRemove: widget.onRemoveDraft == null
-                                              ? null
-                                              : () => widget.onRemoveDraft!(
-                                                  draft.ref,
-                                                ),
+                                  // 첨부가 많아도 입력창이 화면을 채우지 않게 두 줄 반 높이에서 멈추고 안에서 스크롤
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxHeight: 92,
+                                    ),
+                                    child: SingleChildScrollView(
+                                      child: Wrap(
+                                        key: const Key(
+                                          'composer-pasted-contexts',
                                         ),
-                                    ],
+                                        spacing: 7,
+                                        runSpacing: 7,
+                                        children: [
+                                          for (final draft in widget.drafts)
+                                            PastedContextChip(
+                                              key: Key(
+                                                'composer-draft-${draft.ref}',
+                                              ),
+                                              kind: pastedContextKind(
+                                                draft.kind,
+                                              ),
+                                              summary: draft.summary,
+                                              onPressed: () =>
+                                                  showPastedContext(
+                                                    context: context,
+                                                    kind: pastedContextKind(
+                                                      draft.kind,
+                                                    ),
+                                                    summary: draft.summary,
+                                                    content: draft.content,
+                                                  ),
+                                              onRemove:
+                                                  widget.onRemoveDraft == null
+                                                  ? null
+                                                  : () => widget.onRemoveDraft!(
+                                                      draft.ref,
+                                                    ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ),
                               TextField(

@@ -26,6 +26,7 @@ import { featureHidden } from "../core/features.js";
 import { getProfileChromeSource } from "./profiles.js";
 import { getBrowserState } from "./state.js";
 import { provide } from "../core/hooks.js";
+import { setHtml } from "../core/set-html.js";
 import { askConfirm } from "../explorer/context-menu.js";
 
 // 이 기능의 마크업 위치. index.html 에 두면 기능을 꺼도 바깥 요소가 파싱되므로 여기서 만든다.
@@ -158,7 +159,8 @@ export async function afRefresh(reload) {
             data-o="${esc(x.origin)}" data-u="${esc(x.username || "")}" data-on="${x.allowed ? 1 : 0}"><i></i></button>
         </div>`).join("")}
       </div>` : `<p class="af-none">조건에 맞는 사이트가 없습니다.</p>`;
-  body.innerHTML = `
+  // 같은 내용이면 건너뜀. 다시 그릴 때는 목록·상세의 스크롤 위치를 되돌림(클릭마다 맨 위로 튀던 문제)
+  const drew = setHtml(body, `
     <div class="af-split">
     <nav class="af-nav">
       <div class="af-navtools">
@@ -186,7 +188,8 @@ export async function afRefresh(reload) {
         ${on ? `<button class="af-btn af-btn-danger" data-lockall="1">${AF_ICON.lock}허용한 계정 전체 잠금 (${on})</button>` : ""}
       </div>
     </section>
-    </div>`;
+    </div>`, { keep: ".af-list, .af-detail" });
+  if (!drew) return;   // 이전 DOM 과 입력칸 연결이 그대로 있음
   const qbox = $("#af-q");
   if (qbox) {
     qbox.addEventListener("input", () => { afQuery = qbox.value; afRefresh(false); queueMicrotask(() => { const n = $("#af-q"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }); });

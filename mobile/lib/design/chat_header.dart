@@ -17,6 +17,7 @@ class IrisChatHeader extends StatelessWidget {
     required this.onTerminal,
     required this.onBrowser,
     required this.onGitHub,
+    this.onPaseo,
     required this.githubFailed,
     super.key,
   });
@@ -32,6 +33,7 @@ class IrisChatHeader extends StatelessWidget {
   final VoidCallback? onTerminal;
   final VoidCallback? onBrowser;
   final VoidCallback? onGitHub;
+  final VoidCallback? onPaseo;
   final bool githubFailed;
 
   static String statusLabel(String status) => switch (status) {
@@ -118,6 +120,13 @@ class IrisChatHeader extends StatelessWidget {
                     icon: 'globe',
                     tooltip: '브라우저로 이동',
                     onPressed: onBrowser,
+                  ),
+                if (onPaseo != null)
+                  _HeaderButton(
+                    key: const Key('session-paseo'),
+                    icon: 'chat-circle-text',
+                    tooltip: 'Paseo 대화',
+                    onPressed: onPaseo,
                   ),
                 if (onGitHub != null)
                   _HeaderButton(

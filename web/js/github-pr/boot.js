@@ -78,7 +78,8 @@ function readPr(root, branch, force = false, tab = null) {
     return;
   }
   const id = requestId();
-  cache.set(key, { ...prior, loading: true, error: null, at: Date.now() });
+  // 이전 결과가 있으면 그대로 보여 준 채 다시 확인. 지우면 30초마다 카드가 "PR 확인 중…"으로 바뀜(2026-11-07)
+  cache.set(key, prior && !prior.loading ? { ...prior, at: Date.now() } : { loading: true, at: Date.now() });
   latestStatus.set(key, id);
   track(id, { kind: "status", key, root, branch, tab });
   paintBranch();
@@ -123,7 +124,8 @@ function renderTab(tab) {
     onLog: (runId) => {
       if (!ctx.wsIsOpen?.()) { tab.notice = "서버에 연결되지 않았습니다."; redraw(tab); return; }
       const id = requestId();
-      tab.logs.set(runId, { loading: true });
+      // 보이던 로그는 둔 채 다시 받음. 응답이 오면 바뀜
+      tab.logs.set(runId, { ...tab.logs.get(runId), loading: true, error: null });
       track(id, { kind: "log", tab, runId });
       try { ctx.wsSend({ type: "githubpr.log", requestId: id, path: tab.root, expectRoot: tab.root, branch: tab.branch, runId }); }
       catch { receive({ requestId: id, ok: false, error: { message: "서버에 연결되지 않았습니다." } }); }

@@ -111,8 +111,7 @@ function htmlFiles() {
 // 실행이다. 그것을 안 세면 run-tests 가 띄우는 위생 검사와 install-app.sh 가 부르는
 // check-shipped 가 전부 고아로 잡힌다(확인 결과).
 // 따옴표는 두 종류다. 큰따옴표만 보면 이 저장소의 11개 파일이 간선 없이 지나가고,
-// web/memolab/app.js 가 세 모듈을 부르는데도 그 셋이 "아무도 안 부름"으로 잡힌다(확인 결과
-//). 여는 따옴표와 닫는 따옴표를 각각 문자 하나로 받는다. 짝이 맞지 않는 형태는
+// 작은따옴표로 import 하는 모듈이 "아무도 안 부름"으로 잡힌다(확인 결과). 여는 따옴표와 닫는 따옴표를 각각 문자 하나로 받는다. 짝이 맞지 않는 형태는
 // 애초에 파싱되지 않는 코드라 여기서 가려낼 것이 없다.
 const IMPORT_PATTERNS = [
   /\bimport\s+["'](\.[^"']+)["']/g,                         // ESM 부수 효과
@@ -388,14 +387,35 @@ function memberNamesUsed(g) {
   return out;
 }
 
+// TypeScript 파일은 그래프 노드가 아니지만 .js export 를 부름
+// - server/paseo-ui/entry 의 .tsx 만 부르는 export 가 "아무도 안 부름"으로 잡혔음(dropContext, PENDING_SEND_CSS)
+// - 고아 판정에는 안 넣고 소비자로만 셈
+const TS_EXT = /\.tsx?$/;
+export function tsImporters(tsFiles, known, readSrc = read) {
+  const out = new Map();
+  for (const ts of tsFiles) {
+    for (const to of edgesOf(ts, known, readSrc(ts))) {
+      if (!out.has(to)) out.set(to, []);
+      out.get(to).push(ts);
+    }
+  }
+  return out;
+}
+function tsFiles() {
+  const out = [];
+  for (const r of CODE_ROOTS) walk(r, out, TS_EXT);
+  return out.filter((f) => !f.endsWith(".d.ts")).sort();
+}
+
 export function deadExports(g) {
   const out = [];
   const members = memberNamesUsed(g);
+  const tsUsers = tsImporters(tsFiles(), new Set(g.files));
   for (const rel of g.files) {
     if (rel.endsWith(".sh") || !rel.includes(".")) continue;
     const names = exportsOf(rel);
     if (!names.length) continue;
-    const users = g.reverse.get(rel) || [];
+    const users = [...(g.reverse.get(rel) || []), ...(tsUsers.get(rel) || [])];
     // 소비자 본문을 한 번만 읽어 둔다.
     const bodies = users.map((u) => stripComments(read(u), false));
     const dyn = DYNAMIC_CONSUMED.find((d) => d.when(rel));

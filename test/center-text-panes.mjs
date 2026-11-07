@@ -25,7 +25,7 @@ function root() {
       const bar = { save: null, querySelector(selector) { return selector === '.fv-name' ? name : this.save; }, insertBefore(button) { this.save = button; } };
       const wrap = { ...element(), parentElement: this, appendChild(child) { this.host = child; } };
       this.nodes = { '.editor-wrap': wrap, '[data-editor-tools]': controls, '.fv-bar': bar, '.fv-name': name };
-      if (value.includes('data-md-preview')) this.nodes['[data-md-preview]'] = { hidden: true, isConnected: true, innerHTML: "" };
+      if (value.includes('data-md-preview')) this.nodes['[data-md-preview]'] = { hidden: true, isConnected: true, innerHTML: "", scrollTop: 0, addEventListener() {}, querySelectorAll: () => [] };
     }, get innerHTML() { return this.html; } };
   return el;
 }
@@ -84,6 +84,7 @@ function harness({ preview = false, main = false } = {}) {
     getRenderedFileOwner: pane => owners[pane], getRenderedFileToken: pane => tokens[pane], openWebLink() {} });
   if (preview) vm.runInNewContext(code(previewSource) + '\ninitCapability();', {
     provide: (name, fn) => hooks.set(name, fn), mdToHtml: text => { draws++; return `<p>${text}</p>`; },
+    setHtml: (el, html) => { el.innerHTML = html; return true; },
     isMarkdownExtension: ext => ext === 'md', extOf: path => path.split('.').at(-1), getCenterSpace: () => 'space', paneLayout: () => layout, getCurrentTabs: () => tabs,
     setTimeout: fn => { const id = ++timerId; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id),
   });

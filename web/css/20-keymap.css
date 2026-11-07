@@ -148,6 +148,10 @@ button.km-keys:active { transform:scale(.97); }
 .km-td { display:block; font-size:var(--fs-s); color:var(--muted); line-height:1.45; margin-top:2px; }
 .km-sw-s { width:52px; font-size:var(--fs-xs); color:var(--faint); text-align:right; flex:none; }
 .km-sw-space { width:28px; flex:none; }
+/* 기능이 그리는 설정 화면(같은 출처 iframe). 높이는 그 화면이 알려 준 내용 높이 */
+.km-frame-row { padding:8px 8px 4px; border-bottom:1px solid var(--line); color:var(--fg-2); }
+.km-frame-row:last-child { border-bottom:0; }
+.km-frame { display:block; width:100%; margin-top:8px; border:0; background:transparent; }
 
 /* 창 전환 */
 .km-switcher .km-sh { padding-left:0; }

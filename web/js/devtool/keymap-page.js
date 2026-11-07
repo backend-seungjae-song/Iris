@@ -28,6 +28,7 @@ import {
 import { artifactsClick, artifactsModel, enterArtifacts, initArtifacts } from "./artifacts-page.js";
 import { linkAddState, linkHintMarkup, optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
 import { createDropdown } from "../core/dropdown.js";
+import { setHtml } from "../core/set-html.js";
 import { parseLinkPattern } from "../browser/link-rules.js";
 import { CAPABILITIES } from "../core/capabilities.js";
 import { callHook } from "../core/hooks.js";
@@ -49,6 +50,8 @@ let links = null;                         // 링크 열기 분류의 조회 결�
 let lkDraft = "";
 let lkDraftAccount = null;   // null: 아직 안 고름(첫 비기본 계정)
 let lkUndo = null;           // { rule, timer } 방금 지운 규칙
+let drawnView = "";          // 마지막으로 그린 분류·검색어
+let lkFreshTimer = null;
 let lkFresh = null;          // 방금 추가·변경한 규칙 주소(줄 강조)
 let lkSeen = "";             // 마지막으로 그린 규칙·계정 서명
 const lkDropdowns = [];
@@ -97,6 +100,13 @@ export function initKeymapPage(deps) {
     if (e.target.closest("#km-reset-all")) {
       wsSend({ type: "keymap-reset" });
       showToast && showToast("단축키를 전부 기본값으로 되돌렸습니다", { level: "info" });
+      return;
+    }
+    const fs = e.target.closest("[data-fs-key]");
+    if (fs) {
+      const f = featureSections().find((x) => x.id === fs.dataset.fsSec);
+      if (f && typeof f.set === "function") f.set(fs.dataset.fsKey, fs.dataset.fsValue);
+      renderKeymapPage();
       return;
     }
     const sec = e.target.closest("[data-km-sec]");
@@ -295,6 +305,9 @@ function updateLinkHint() {
 function commitLinkRules(rules, fresh) {
   if (!setLinkRules) return;
   lkFresh = fresh || null;
+  // 강조 애니메이션(900ms)이 끝날 때까지 유지: 도중에 다시 그려도 강조가 끊기지 않음
+  clearTimeout(lkFreshTimer);
+  if (lkFresh) lkFreshTimer = setTimeout(() => { lkFresh = null; }, 900);
   setLinkRules(rules);
   renderKeymapPage();   // 서버 방송 전에도 바로 보이게. 방송이 오면 같은 값으로 다시 그림
 }
@@ -485,7 +498,9 @@ export function renderKeymapPage() {
   // 화면은 settings-view 가 그린다. 앱을 켜지 않는 사본과 검사가 같은 함수를 부를 수 있어야
   // 배치를 두 벌로 적지 않는다.
   const lkFocus = !!(document.activeElement && document.activeElement.id === "lk-pattern");
-  body.innerHTML = settingsMarkup({
+  // 같은 내용이면 건드리지 않음(기능 분류의 iframe 이 다시 불려 비는 것 방지). 다시 그려도 안쪽 스크롤 위치 유지
+  const sameView = drawnView === section + "\n" + query;   // 분류·검색어가 바뀌면 목록은 맨 위부터
+  const drew = setHtml(body, settingsMarkup({
     section, query, items, recording,
     changed: all.filter((x) => x.changed).length,
     conflicts: findConflicts(all).filter((c) => c.overlaps),
@@ -497,15 +512,22 @@ export function renderKeymapPage() {
     artifacts: artifactsModel(),
     links,
     linkRules: section === "links" ? lkModel() : null,
-  });
+    featureSections: featureSections(),
+  }), { keep: sameView ? ".km-nav-list, .km-scroll" : ".km-nav-list" });
+  drawnView = section + "\n" + query;
   if (section === "links") {
     lkSeen = lkSignature();
-    lkFresh = null;   // 강조는 한 번만
-    mountLinkDropdowns(body);
-    if (lkFocus) { const lk = body.querySelector("#lk-pattern"); if (lk) { lk.focus(); lk.setSelectionRange(lk.value.length, lk.value.length); } }
+    if (drew) mountLinkDropdowns(body);
+    if (lkFocus) { const lk = body.querySelector("#lk-pattern"); if (lk) { lk.focus({ preventScroll: true }); lk.setSelectionRange(lk.value.length, lk.value.length); } }
   }
   const inp = body.querySelector("#km-search");
   if (inp && query) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+}
+
+// 켜진 기능이 설정 화면에 채우는 분류. 꺼진 기능은 훅이 없어 빠짐
+function featureSections() {
+  const agentchat = callHook("agentchat.settingsSection");
+  return agentchat && typeof agentchat === "object" ? [agentchat] : [];
 }
 
 // 고른 창 목록에서 빠진 창은 선택에서도 지운다

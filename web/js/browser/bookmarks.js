@@ -29,6 +29,7 @@ import { bsMutate, curBmSpace, getBrowserState } from "./state.js";
 import { activeBrowserId, activeWv } from "./webview.js";
 import { wireReorder } from "../core/reorder.js";
 import { callHook } from "../core/hooks.js";
+import { setHtml } from "../core/set-html.js";
 
 let $, esc, urlInput, openBrowser, navigate;
 
@@ -186,7 +187,9 @@ export function renderBookmarks() {
   sections = currentSections();
   bookmarks = sections.flatMap((s) => leaves(s.items));
   const bar = $("#bookmark-bar");
-  bar.innerHTML = sections.map((s) => sectionHtml(s, sections.length > 1)).join("");
+  // 칩 이름 편집 중에는 방송이 와도 칩을 다시 만들지 않음(입력 중이던 글자·포커스 보존). 끝나면 finish 가 그림
+  if (bar.querySelector(".bmk-in")) { refreshMenu(); return; }
+  setHtml(bar, sections.map((s) => sectionHtml(s, sections.length > 1)).join(""));
   wireReorder(bar, ".bmk, .bmk-end", (el) => el.dataset.key, moveByKeys);
   if (pendingFolderEdit && folderIn(pendingFolderEdit.scope, pendingFolderEdit.id)) {
     const { scope, id } = pendingFolderEdit; pendingFolderEdit = null; editFolder(scope, id);
@@ -216,7 +219,8 @@ function editChip(chip, fields, save) {
   const ins = [...chip.querySelectorAll(".bmk-in")];
   let done = false;
   // 성공하면 브로드캐스트가 다시 그린다(멱등). 거절(중복 URL 등)돼도 편집기를 내려 칩이 입력칸으로 남지 않게 한다.
-  const finish = (ok) => { if (done) return; done = true; if (ok) save(ins.map((i) => i.value.trim())); renderBookmarks(); };
+  // 입력칸을 먼저 떼어야 renderBookmarks 의 편집 중 건너뛰기에 걸리지 않음
+  const finish = (ok) => { if (done) return; done = true; if (ok) save(ins.map((i) => i.value.trim())); for (const i of ins) i.remove(); renderBookmarks(); };
   chip.querySelector(".bmk-ok").addEventListener("mousedown", (ev) => { ev.preventDefault(); finish(true); });
   for (const el of ins) {
     el.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); finish(true); } else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finish(false); } });
@@ -288,8 +292,9 @@ function refreshMenu() {
   if (!menu) return;
   const html = menuHtml(menu); if (html == null) { closeMenu(false); return; }
   const focusedIdx = menuButtons().indexOf(document.activeElement);
-  menu.el.innerHTML = html; placeMenu();
-  if (!menu) return;
+  // 같은 내용이면 메뉴 DOM 을 건드리지 않음(방송마다 다시 그려 강조·포커스가 깜빡이던 문제)
+  const redrawn = setHtml(menu.el, html); placeMenu();
+  if (!menu || !redrawn) return;
   if (focusedIdx >= 0) (menuButtons()[focusedIdx] || menuButtons().at(-1) || menu.el).focus();
 }
 function openMenu(m, byKeyboard) {
@@ -297,7 +302,7 @@ function openMenu(m, byKeyboard) {
   const html = menuHtml(m); if (html == null) return;
   const el = document.createElement("div");
   el.className = "bmf-menu"; el.id = "bmk-menu"; el.setAttribute("role", "menu"); el.tabIndex = -1;
-  el.innerHTML = html;
+  setHtml(el, html);   // 첫 내용도 기록해 두어야 refreshMenu 의 같은 내용 건너뛰기가 첫 방송부터 동작
   document.body.appendChild(el);
   menu = { ...m, el };
   placeMenu();

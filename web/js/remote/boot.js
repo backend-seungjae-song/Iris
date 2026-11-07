@@ -365,14 +365,22 @@ function renderQuestion(card, request) {
   }));
 }
 
+// 요청 하나의 내용 → 그 카드. 상태 방송마다 불리므로 내용이 같은 요청은 카드를 그대로 씀
+// - 다시 만들면 고르던 답과 직접 입력한 글이 지워지던 결함(2026-11-07)
+let requestCards = new Map();
 function renderRequests() {
   const section = byId("remote-requests");
   const list = byId("remote-request-list");
   if (!section || !list || typeof document.createElement !== "function") return;
   const requests = Array.isArray(current?.requests) ? current.requests : [];
   section.hidden = requests.length === 0;
+  const kept = new Map();
   const nodes = requests.map((request) => {
+    const key = JSON.stringify(request);
+    const old = requestCards.get(key);
+    if (old) { kept.set(key, old); return old; }
     const card = document.createElement("article");
+    kept.set(key, card);
     card.className = "remote-request";
     const title = document.createElement("h4");
     title.textContent = `${agentName(request.agent)} · ${request.kind === "claude-permission" ? "허용 요청" : "질문"}`;
@@ -381,7 +389,8 @@ function renderRequests() {
     else renderQuestion(card, request);
     return card;
   });
-  list.replaceChildren(...nodes);
+  requestCards = kept;
+  if (nodes.length !== list.children.length || nodes.some((node, i) => list.children[i] !== node)) list.replaceChildren(...nodes);
 }
 
 function renderHook() {
@@ -518,18 +527,26 @@ function guideSteps() {
   ];
 }
 
+// 마지막으로 그린 안내 단계. Tailscale 확인(3~15초)과 상태 방송마다 불리므로 같으면 다시 만들지 않음
+// - 다시 만들면 PIN 입력칸을 뺐다 넣어 입력하던 포커스가 풀리던 결함(2026-11-07)
+let guideDrawn = "";
 function renderGuide() {
   const guide = byId("remote-guide");
   const list = byId("remote-steps");
   if (!guide || !list || typeof document.createElement !== "function") return;
   const pinCard = byId("remote-pin-card");
   const pinForm = byId("remote-pin-form");
-  if (pinCard && pinForm) (byId("remote-pin-slot") || pinCard).append(pinForm);
   const steps = guideSteps();
   guide.hidden = !setupNeeded(current);
   const progress = byId("remote-progress");
   if (progress) progress.textContent = `${steps.filter((step) => step.done).length}/${steps.length}`;
   const currentIndex = steps.findIndex((step) => !step.done);
+  const drawn = JSON.stringify([currentIndex, steps.map((step) => [step.done, step.title, step.detail, step.tone, step.pinForm, step.qr, step.action?.kind, step.action?.label, !!step.action?.disabled])]);
+  if (drawn === guideDrawn && list.childElementCount) return;
+  guideDrawn = drawn;
+  const typing = pinForm && pinForm.contains?.(document.activeElement) ? document.activeElement : null;
+  const caret = typing && "selectionStart" in typing ? [typing.selectionStart, typing.selectionEnd] : null;
+  if (pinCard && pinForm) (byId("remote-pin-slot") || pinCard).append(pinForm);
   // 끝난 단계는 보여 주지 않는다. 남은 단계만 원래 번호로 나열하고 첫 단계에만 설명과 버튼을 둔다
   const nodes = steps.map((step, index) => {
     if (step.done) return null;
@@ -573,6 +590,7 @@ function renderGuide() {
     return item;
   }).filter(Boolean);
   list.replaceChildren(...nodes);
+  if (typing?.isConnected) { typing.focus({ preventScroll: true }); if (caret) typing.setSelectionRange(...caret); }
   const qr = steps[currentIndex]?.qr;
   if (qr) drawQr(qr, "remote-guide-qr");
 }

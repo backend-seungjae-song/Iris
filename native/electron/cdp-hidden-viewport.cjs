@@ -182,6 +182,11 @@ function createHiddenViewport({
     vpChecked.delete(Number(wcId));
   }
 
+  // 떨어진 debugger 세션의 오류 · 그 세션이 건 emulation 은 세션과 함께 사라져 반환할 것이 없음
+  // detachIdle 은 autoViewport 기록을 남기므로 여기서 실패로 세면 worker 교체가 영구히 막힘(hidden-viewport leftover)
+  const SESSION_GONE = /target closed|detached from target|not attached|session closed|no session with given id|session .*(?:not found|does not exist)/i;
+  const gone = (cause) => SESSION_GONE.test(String(cause?.message || cause));
+
   async function release(wcId, send) {
     const id = Number(wcId);
     const prefix = id + ":";
@@ -194,14 +199,20 @@ function createHiddenViewport({
       try {
         await send("Emulation.setFocusEmulationEnabled", { enabled: false });
         for (const key of focusKeys) focusEmulated.delete(key);
-      } catch (cause) { failures.push(cause); }
+      } catch (cause) {
+        if (gone(cause)) for (const key of focusKeys) focusEmulated.delete(key);
+        else failures.push(cause);
+      }
     }
     if (hadViewport) {
       bump(id);
       try {
         await send("Emulation.clearDeviceMetricsOverride");
         autoViewport.delete(id);
-      } catch (cause) { failures.push(cause); }
+      } catch (cause) {
+        if (gone(cause)) autoViewport.delete(id);
+        else failures.push(cause);
+      }
     }
     if (failures.length) throw new AggregateError(failures, "hidden viewport 자원을 반환하지 못했습니다");
     return { focus: hadFocus, viewport: hadViewport };

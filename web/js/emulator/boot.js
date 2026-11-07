@@ -1080,7 +1080,7 @@ function finishDeviceDesignation(message) {
     message.platform ? `플랫폼: ${message.platform}` : null,
     "이 메시지를 보내면 이 세션의 앱 기본 대상으로 등록됩니다.",
   ]);
-  ctx.wsSend?.({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
+  if (!callHook("agentchat.paste", block)) ctx.wsSend?.({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   const text = `채팅 입력에 기기 추가: ${name}. 보내면 이 세션 대상으로 등록됩니다.`;
   ctx.showToast?.(text, { level: "ok" });
   pending.resolve(text);

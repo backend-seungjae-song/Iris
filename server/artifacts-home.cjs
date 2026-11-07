@@ -5,7 +5,7 @@
 // 무엇을 지워도 되는지 화면에서 구분할 수 없다. 그래서 부산물만 `artifacts/` 아래로 모은다.
 //
 // 부산물이 아닌 것: 앱이 다시 읽어 판정에 쓰는 영수증(agent-context·agent-lineage)과
-// 되돌리기용 이전본(memolab-history)은 상태 폴더 루트에 그대로 둔다. 지우면 복원할 수 없거나
+// 제거한 메모랩이 남긴 이전본(memolab-history)은 상태 폴더 루트에 그대로 둔다. 지우면 복원할 수 없거나
 // 진행 중인 작업이 깨진다. 정리 화면에도 표시하지 않는다.
 //
 // .cjs 인 이유는 state-home.cjs 와 같다. server/*.js·bin/*.mjs 는 ESM, native/electron/*.cjs 는

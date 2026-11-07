@@ -310,7 +310,8 @@ export function scSync() {
 }
 // 전체 새로고침: 캐시를 비우고 처음부터 다시 묻는다(막혔던 폴더·새로 git init한 폴더 포함).
 export function scRefresh() {
-  scAsked.clear(); scDead.clear(); scScanned.clear(); scNested.clear(); scWorktrees.clear();
+  // scNested·scWorktrees 는 비우지 않음: git.repos 응답이 같은 키를 덮어쓰므로, 비우면 응답 전까지 중첩 레포·워크트리가 사라졌다 돌아옴
+  scAsked.clear(); scDead.clear(); scScanned.clear();
   const cands = scCandidates();
   for (const c of cands) { scAsked.add(c.dir); wsSend({ type: "git.status", path: c.dir }); }
   renderSc(); // 응답 전에도 현재 아는 것은 그대로 표시한다(깜빡임 방지)

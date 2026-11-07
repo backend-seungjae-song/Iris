@@ -70,7 +70,8 @@ export function openDiff(file, opts) {
   let t = getTabs(sp).find((x) => x.id === id);
   const suffix = mode ? " ◦" + (DIFF_TAG[mode] || "Base") : (opts.staged ? " ◦스테이지" : "");
   if (!t) { t = addTab(sp, { id, kind: "diff", label: pathBasename(file) + suffix, path: file, root, rel: opts.rel || "", staged: !!opts.staged, untracked: !!opts.untracked, mode, base, oldRel: opts.oldRel || "", patch: null }); }
-  else { t.patch = null; t.root = root || t.root; if (opts.rel) t.rel = opts.rel; t.oldRel = opts.oldRel || ""; }
+  // 다시 받는 동안 보이던 patch 유지(비우면 "불러오는 중…" 이 번쩍임)
+  else { t.root = root || t.root; if (opts.rel) t.rel = opts.rel; t.oldRel = opts.oldRel || ""; }
   setCenterSpace(sp); setActiveTab(sp, id); renderTabs(); showActiveTab();
   send(mode
     ? { type: "git.diff", path: root || file, file, mode, base, untracked: !!opts.untracked, oldRel: opts.oldRel || "" }
@@ -130,8 +131,12 @@ export function colorizeDiff(patch) {
       + `<span class="dt">${escapeHtml(r.text) || "​"}</span></span>`;
   }).join("");
 }
-export function renderDiffView(t) {
+export function renderDiffView(t, ready) {
   const dv = dom("#diffview");
+  // 같은 탭을 다시 그릴 때만 읽던 위치·옛 색 유지
+  const old = dv.dataset.tab === t.id ? dv.querySelector(".dv-body") : null;
+  const at = old ? [old.scrollTop, old.scrollLeft] : null;
+  dv.dataset.tab = t.id;
   const tag = t.mode === "pullrequest" ? `PR #${t.prNumber} · ${t.base} 대비` : t.mode ? `${t.base || "Base"} 대비${t.mode === "worktree" ? " · 커밋 전 포함" : ""}`
     : (t.untracked ? "새 파일" : (t.staged ? "스테이지됨" : "변경"));
   // 어느 레포의 어느 경로인지를 머리글에 적는다. 레포가 여럿이면 파일 이름만으로는 구분되지 않는다.
@@ -149,6 +154,12 @@ export function renderDiffView(t) {
     + `<span class="dv-crumb" title="${escapeHtml(t.root ? (isHostWindows() ? joinPath(t.root, rel) : t.root + "/" + rel) : t.label)}">${crumb}</span>` + meta + `</div>`;
   if (t.error) { dv.innerHTML = bar + `<div class="dv-empty" role="alert">${escapeHtml(t.error)}</div>`; return; }
   if (t.patch == null) { dv.innerHTML = bar + `<div class="dv-empty">불러오는 중…</div>`; return; }
+  // 새 patch 의 색이 아직 없으면 옛 화면(색 입힌 상태)을 두고 색이 준비된 뒤 한 번에 교체
+  if (!ready && old && old.classList.contains("hl") && !(t.hl && t.hl.patch === t.patch)) {
+    const mine = t.patch;
+    hlLines(t, diffRows(mine)).then(() => { if (t.patch === mine && dv.dataset.tab === t.id) renderDiffView(t, true); });
+    return;
+  }
   const fold = hasHunk && !t.showMeta ? " fold-meta" : "";
   dv.innerHTML = bar + (t.patch.trim() ? `<pre class="dv-body${fold}">${colorizeDiff(t.patch)}</pre>` : `<div class="dv-empty">표시할 diff가 없습니다.</div>`);
   const btn = dv.querySelector(".dv-meta");
@@ -159,6 +170,8 @@ export function renderDiffView(t) {
     btn.title = t.showMeta ? "파일 머리 줄 접기" : "파일 머리 줄 보기";
   };
   if (t.patch.trim()) highlightDiff(dv.querySelector(".dv-body"), t);
+  const pre = dv.querySelector(".dv-body");
+  if (pre && at) [pre.scrollTop, pre.scrollLeft] = at;
   callHook("diffreview.render", { view: dv, toolbar: dv.querySelector(".dv-bar"),
     lines: [...dv.querySelectorAll(".dv-body > .dl")], tab: t, rows: diffRows(t.patch), spaceId: getCenterSpace() });
 }
@@ -191,28 +204,33 @@ export function diffSides(rows) {
   }
   return { oldLines, newLines, at };
 }
+// 줄별 색 입힌 HTML. patch 가 같으면 t.hl 에 쌓아 둔 것을 그대로 돌려줌. 칠할 수 없으면 null
+async function hlLines(t, rows) {
+  const patch = t.patch;
+  if (!ensureMonacoLib || rows.length > HL_MAX_LINES) return null;
+  if (t.hl && t.hl.patch === patch) return t.hl.lines;
+  try { await ensureMonacoLib(); } catch { return null; }
+  const monaco = window.monaco; if (!monaco) return null;
+  // 토큰 색 규칙은 테마가 정한다. 파일 편집기를 한 번도 안 연 상태면 앱 테마가 아직 적용되지 않았다.
+  if (monacoTheme) monaco.editor.setTheme(monacoTheme());
+  const lang = langFor(monaco, t.path);
+  if (lang === "plaintext") return null;
+  const { oldLines, newLines, at } = diffSides(rows);
+  const [oh, nh] = await Promise.all([
+    monaco.editor.colorize(oldLines.join("\n"), lang, { tabSize: 2 }),
+    monaco.editor.colorize(newLines.join("\n"), lang, { tabSize: 2 }),
+  ]);
+  const o = splitColorized(oh), n = splitColorized(nh);
+  const lines = at.map((a) => (a ? (a.side === "o" ? o[a.i] : n[a.i]) : null));
+  t.hl = { patch, lines };
+  return lines;
+}
 async function highlightDiff(pre, t) {
-  if (!pre || !ensureMonacoLib) return;
+  if (!pre) return;
   const patch = t.patch;
   const rows = diffRows(patch);
-  if (rows.length > HL_MAX_LINES) return;
-  let lines = t.hl && t.hl.patch === patch ? t.hl.lines : null;
-  if (!lines) {
-    try { await ensureMonacoLib(); } catch { return; }
-    const monaco = window.monaco; if (!monaco) return;
-    // 토큰 색 규칙은 테마가 정한다. 파일 편집기를 한 번도 안 연 상태면 앱 테마가 아직 적용되지 않았다.
-    if (monacoTheme) monaco.editor.setTheme(monacoTheme());
-    const lang = langFor(monaco, t.path);
-    if (lang === "plaintext") return;
-    const { oldLines, newLines, at } = diffSides(rows);
-    const [oh, nh] = await Promise.all([
-      monaco.editor.colorize(oldLines.join("\n"), lang, { tabSize: 2 }),
-      monaco.editor.colorize(newLines.join("\n"), lang, { tabSize: 2 }),
-    ]);
-    const o = splitColorized(oh), n = splitColorized(nh);
-    lines = at.map((a) => (a ? (a.side === "o" ? o[a.i] : n[a.i]) : null));
-    t.hl = { patch, lines };
-  }
+  const lines = await hlLines(t, rows);
+  if (!lines) return;
   // 기다리는 동안 다른 탭으로 바뀌었거나 새 patch 가 왔으면 지금 화면은 이 결과의 것이 아니다.
   if (t.patch !== patch || !pre.isConnected) return;
   const cells = pre.querySelectorAll(".dl > .dt");

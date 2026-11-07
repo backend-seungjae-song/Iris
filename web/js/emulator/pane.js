@@ -461,7 +461,8 @@ function buildPane(container, opts, vendor) {
       return next;
     } catch (e) {
       state.deviceRefreshError = e;
-      if (!disposed) { state.devices = []; state.error = emulatorPaneErrorMessage(e, "에뮬레이터 기기 목록을 가져오지 못했습니다."); render(); }
+      // 지난 목록은 유지(비우면 런타임 이름·연결 단추·음량 대상이 한꺼번에 풀림)
+      if (!disposed) { state.error = emulatorPaneErrorMessage(e, "에뮬레이터 기기 목록을 가져오지 못했습니다."); render(); }
       return [];
     }
   }
@@ -476,18 +477,24 @@ function buildPane(container, opts, vendor) {
     if (attached === undefined) attached = true;
     if (disposed) return;
     const target = info && (info.deviceUdid || info.device);
+    const wasAttached = Boolean(state.session && state.session.attached);
+    const prevInfo = state.session && state.session.rawInfo;
+    const prevTarget = state.liveTarget;
     const rows = attached ? markSimulatorDeviceBooted(state.devices, target) : state.devices;
     if (attached && target && target !== state.liveTarget) resetVisualOrientation();
     const row = rows.find((d) => d.udid === target || d.name === target);
     const displayName = (row && row.name) || deviceLabel(info);
     const enriched = Object.assign({}, info, { displayName, state: attached ? "Booted" : info && info.state });
     state.devices = rows;
-    state.session = { attached, info: enriched };
+    state.session = { attached, info: enriched, rawInfo: info };
     state.liveTarget = attached ? target || null : null;
     state.loading = false;
     if (attached) state.suppressAutoAttach = stopRequested;
     state.error = null;
-    if (attached && simulatorPreviewStreamUrl(enriched)) state.streamKey = String(Date.now());
+    // 이미 붙어 있던 같은 세션을 다시 알리면 스트림을 다시 열지 않음(화면이 비었다 다시 뜨는 깜빡임)
+    const sameSession = attached && wasAttached && prevInfo && state.streamKey
+      && JSON.stringify(prevInfo) === JSON.stringify(info) && prevTarget === target;
+    if (attached && simulatorPreviewStreamUrl(enriched) && !sameSession) state.streamKey = String(Date.now());
     if (info && (info.deviceUdid || info.device)) {
       const udid = info.deviceUdid || info.device;
       if (udid !== state.selectedUdid) { state.selectedUdid = udid; onDeviceChange && onDeviceChange(udid); }
@@ -1110,6 +1117,14 @@ function buildPane(container, opts, vendor) {
       }
       if (mediaEl.src !== frameStreamState.frameUrl) mediaEl.src = frameStreamState.frameUrl;
       applyMediaStyle(mediaEl, rotation, aspect);
+      screenStatus.hidden = true;
+      return;
+    }
+    // 같은 기기 스트림을 다시 열거나 창이 가려져 멈춘 동안에는 마지막 프레임을 남김(첫 새 프레임까지 빈 화면 방지)
+    // - 오류가 났거나 기기가 달라졌으면 지움
+    if (!androidDeviceId && view.isLive && previewUrl && mediaEl instanceof HTMLImageElement
+      && (mediaEl.dataset.streamKey || "").startsWith(previewUrl + "::")
+      && !streamError && !frameStreamState.error && !videoStreamState.error && !state.loading) {
       screenStatus.hidden = true;
       return;
     }

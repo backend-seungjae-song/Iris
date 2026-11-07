@@ -815,14 +815,20 @@ export function createQaChannel({ runKeys = false, autoResume = false, ledger,
       const rows = deriveQaRows(verified.events);
       const state = {id:runId,session,plan:begin.plan,tab:verified.events.findLast(r=>tabs.includes(r.event.tab))?.event.tab || null,tabs:new Set(tabs),row:rows.open.at(-1)?.id || null,lanes:rows.open,approvals:new Set(),bulk:new Map(),devices:new Set(),ended,goneTabs};
       state.mobile = mobileFactory(runId,device=>state.devices.add(device));
+      const usedDevices = [...new Set(verified.events.filter(r=>r.event.cmd?.startsWith("app_") && r.event.surface).map(r=>r.event.surface))];
       if(!ended) {
-        const devices = [...new Set(verified.events.filter(r=>r.event.cmd?.startsWith("app_") && r.event.surface).map(r=>r.event.surface))];
+        const devices = usedDevices;
         // 세션이 qa_app_target clear 로 놓은 기기는 확인하지 않고 뺌. 확인이 기기 할당을 요구해 그 회차를 닫을 수 없던 사례
         const held = devices.length ? requireOk(await state.mobile.execute(session,"targets",{})) : {};
         // select 의 할당 조건과 같게 등록 기기와 이 세션 소유 탭만. 사용자 스페이스 탭(mine)은 할당 아님
         const usable = new Set([...(held.registered || []),...(held.devices || []).filter(device=>device.owner===session).map(device=>device.targetId)]);
         state.releasedDevices = devices.filter(device=>!usable.has(device));
+        // 놓은 기기의 QA 소유도 풀어 줌 · 남겨 두면 run_end 도 이 기기를 몰라 다른 회차가 계속 거부됨(qa-1dbbda16 → qa-23e4d018)
+        for(const device of state.releasedDevices) await releaseDevice("device:"+device,runId);
         for(const device of devices.filter(device=>usable.has(device))) requireOk(await state.mobile.execute(session,"snapshot",{device}));
+      } else {
+        // 끝난 회차가 아직 쥔 기기 · 앞의 결함으로 run_end 가 풀지 못한 소유를 이어받기 때 정리
+        for(const device of usedDevices) await releaseDevice("device:"+device,runId);
       }
       state.runSeq=verified.events.find(r=>r.event.kind==="catalog_begin")?.event.detail.runSeq || 1;
       state.catalog=await catalogForRun(state.plan.build.repo,runId,state.runSeq);
@@ -1130,7 +1136,7 @@ export function createQaChannel({ runKeys = false, autoResume = false, ledger,
       if(reportProblems.length) result.reportProblems = reportProblems.slice(0,40);
       for(const tab of st.tabs) await release(tab, runId);
       for(const tab of st.tabs) releaseObservation(st, tab);
-      for (const device of st.devices) await releaseDevice("device:"+device,runId);
+      for (const device of new Set([...st.devices,...(st.releasedDevices || [])])) await releaseDevice("device:"+device,runId);
       return result;
     }
     if (cmd === "route_list") return routes.list({});

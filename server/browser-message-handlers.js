@@ -251,7 +251,7 @@ export function handleBrowserMessage(ws, msg) {
     if (!ws._local) return;
     const want = msg.op === "toggle" ? !getPickMode() : !!msg.on;
     // 고를 대상이 없으면 켜지 않는다. 창별로 하던 안내를 이 한 곳으로 모았다.
-    if (want && tabCount() === 0 && !msg.hasSheetContext && !msg.hasDocxContext && !msg.hasEmulatorContext) { ws.send(JSON.stringify({ type: "control-error", message: "브라우저 탭을 먼저 열어주세요." })); return; }
+    if (want && tabCount() === 0 && !msg.hasSheetContext && !msg.hasDocxContext && !msg.hasEmulatorContext && !msg.hasChatContext) { ws.send(JSON.stringify({ type: "control-error", message: "브라우저 탭을 먼저 열어주세요." })); return; }
     setPickModeState(want);
   }
   else if (msg.type === "cdp-executor-register") {

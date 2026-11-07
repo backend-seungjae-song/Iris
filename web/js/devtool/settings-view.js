@@ -53,10 +53,16 @@ export function escapeHtml(s) {
 //   screens: [{ id, label, on, lock }]. 편의 기능(rail 도구 화면). 목록은 rail 버튼에서 읽어 온다.
 //   switcher: { windows, picked, status, media }. 창 전환 분류의 창·선택·직접 읽은 아이콘과 권한
 //   artifacts: { kinds, total, open, entries, canTrash }. 부산물 분류. 렌더는 artifacts-view 가 담당한다.
+//   featureSections: [{ id, label, rows: [{ key, label, desc, value, options: [{ value, label }] } | { key, label, desc, frame, height }] }].
+//     켜진 기능이 채우는 분류. 기능을 끄면 빠짐. frame 줄은 그 기능이 그리는 같은 출처 화면(iframe)
 export function settingsMarkup(model) {
   const m = model || {};
   const esc = escapeHtml;
-  const section = SETTINGS_SECTIONS.some((s) => s.id === m.section) ? m.section : "keys";
+  const featureSections = (Array.isArray(m.featureSections) ? m.featureSections : [])
+    .filter((f) => f && f.id && !SETTINGS_SECTIONS.some((s) => s.id === f.id));
+  const sections = [...SETTINGS_SECTIONS, ...featureSections];
+  const section = sections.some((s) => s.id === m.section) ? m.section : "keys";
+  const featureSection = featureSections.find((f) => f.id === section);
   const items = m.items || [];
   const toggles = m.toggles || [];
   const screens = m.screens || [];
@@ -69,7 +75,7 @@ export function settingsMarkup(model) {
     security: toggles.length,
   };
 
-  const nav = SETTINGS_SECTIONS.map((s) => {
+  const nav = sections.map((s) => {
     const n = counts[s.id];
     const count = n === undefined ? "" : `<span class="km-nav-c">${esc(n)}</span>`;
     return `<button class="km-nav${s.id === section ? " on" : ""}" data-km-sec="${esc(s.id)}">${esc(s.label)}${count}</button>`;
@@ -81,6 +87,7 @@ export function settingsMarkup(model) {
     : section === "links" ? linksPane(m.links) + linkRulesPane(m.linkRules)
     : section === "artifacts" ? artifactsPane(m.artifacts)
     : section === "security" ? securityPane(toggles)
+    : featureSection ? featureSectionPane(featureSection)
     : "";
   return `<div class="km-split">
     <nav class="km-nav-col"><div class="km-nav-top"><span class="km-h2">설정</span></div><div class="km-nav-list">${nav}</div></nav>
@@ -184,6 +191,27 @@ function presetRow(presets, view) {
   return `<div class="km-seg" role="group" aria-label="보기">`
     + presets.map((p) => `<button data-set-preset="${esc(p.id)}" aria-pressed="${p.id === view ? "true" : "false"}"`
       + ` title="${esc(p.label)} 그룹의 기능만 보기">${esc(p.label)}</button>`).join("")
+    + `</div>`;
+}
+
+// 기능이 채운 분류. 줄마다 고르는 값 하나(km-seg), 또는 기능이 그리는 화면(frame)
+function featureSectionPane(f) {
+  const esc = escapeHtml;
+  const rows = Array.isArray(f.rows) ? f.rows : [];
+  const frameRow = (r) => `<div class="km-frame-row">
+      <div class="km-tx"><div class="km-tn">${esc(r.label)}</div>${r.desc ? `<div class="km-td">${esc(r.desc)}</div>` : ""}</div>
+      <iframe class="km-frame" data-fs-frame="${esc(f.id)}:${esc(r.key)}" src="${esc(r.frame)}" title="${esc(r.label)}"
+        style="height:${Number(r.height) > 0 ? Math.round(Number(r.height)) : 240}px"></iframe>
+    </div>`;
+  return `<div class="km-phead"><span class="km-h2">${esc(f.label)}</span></div><div>`
+    + rows.map((r) => r.frame ? frameRow(r) : `<div class="km-toggle">
+      <div class="km-tx">
+        <div class="km-tn">${esc(r.label)}</div>
+        ${r.desc ? `<div class="km-td">${esc(r.desc)}</div>` : ""}
+      </div>
+      <div class="km-seg" role="group" aria-label="${esc(r.label)}">${(r.options || []).map((o) =>
+        `<button data-fs-sec="${esc(f.id)}" data-fs-key="${esc(r.key)}" data-fs-value="${esc(o.value)}" aria-pressed="${o.value === r.value ? "true" : "false"}">${esc(o.label)}</button>`).join("")}</div>
+    </div>`).join("")
     + `</div>`;
 }
 

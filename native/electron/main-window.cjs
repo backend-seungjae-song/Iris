@@ -217,7 +217,7 @@ function createMainWindow({
     catch { scheduleLoadRetry(); }
   }
   // did-fail-load 도 재시도(초기 커넥션 거부)
-  // - 앱 화면 자체의 실패만. 안의 iframe(메모랩 등) 실패로 앱 화면 전체를 다시 불러오면 화면이 번쩍임
+  // - 앱 화면 자체의 실패만. 안의 iframe(대화 설정 등) 실패로 앱 화면 전체를 다시 불러오면 화면이 번쩍임
   app.on("web-contents-created", (_e, contents) => {
     contents.on("did-fail-load", (_ev, code, _desc, _url, isMainFrame) => {
       if (contents === win?.webContents && isMainFrame && code !== -3) scheduleLoadRetry();

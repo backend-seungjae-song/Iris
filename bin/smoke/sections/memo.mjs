@@ -43,7 +43,7 @@ check("메모 편집기는 펼쳤을 때 만든다", () => /function memoVisible
 // 앱이 마우스 모드가 아니면 우리가 보내는 휠 바이트는 스크롤이 아니라 입력이 된다.
 check("메모에 원문/미리보기", () => /data-memo-md="raw"/.test(web) && /data-memo-md="preview"/.test(web)
   && /function renderMemoPreview\(\)/.test(memoPanel));
-check("메모 미리보기는 파일과 같은 처리기", () => /pv\.innerHTML = mdToHtml\(text \|\| ""\)/.test(memoPanel));
+check("메모 미리보기는 파일과 같은 처리기", () => /setHtml\(pv, mdToHtml\(text \|\| ""\)\)/.test(memoPanel));
 check("도크와 메모 페이지가 같이 바뀐다", () => /\["#memo-slot", "#memo-preview"\], \["#mm-slot", "#mm-preview"\]/.test(memoPanel));
 // 원문도 파일 쪽과 같은 편집기(Monaco·markdown)를 쓴다. ## 같은 표기에 색이 붙어야 한다.
 check("메모 원문은 markdown 편집기", () => /createModel\([\s\S]{0,120}?"markdown"\)/.test(memoPanel) && /function ensureMemoEditor/.test(memoPanel));

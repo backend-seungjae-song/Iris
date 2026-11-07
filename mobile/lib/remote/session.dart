@@ -47,6 +47,7 @@ class ActiveRemoteSession {
     this.transcriptTimeout = const Duration(seconds: 30),
     this.browserActionTimeout = const Duration(seconds: 120),
     this.browserFrameTimeout = const Duration(seconds: 75),
+    this.endpoint,
   }) : _connection = connection {
     unawaited(_readLoop(connection));
     _pingTimer = Timer.periodic(pingInterval, (_) => unawaited(_ping()));
@@ -82,6 +83,8 @@ class ActiveRemoteSession {
 
   final String macName;
   final List<String> capabilities;
+  // 웹뷰가 같은 주소·인증서 해시로 Mac 에 접속하기 위한 값. 연결 시험용 attach 에서는 null
+  final PairingSettings? endpoint;
   RemoteConnection? _connection;
   String? _resumeToken;
   final Future<ResumedRemoteConnection> Function(String token)? _resume;
@@ -103,6 +106,8 @@ class ActiveRemoteSession {
       StreamController<TranscriptAppend>.broadcast();
   final StreamController<TerminalFrame> _terminalFrames =
       StreamController<TerminalFrame>.broadcast();
+  final StreamController<ServerMessage> _chatEvents =
+      StreamController<ServerMessage>.broadcast();
   final StreamController<BrowserFrame> _browserFrames =
       StreamController<BrowserFrame>.broadcast();
   final StreamController<RemoteConnectionStatus> _connectionStates =
@@ -139,6 +144,9 @@ class ActiveRemoteSession {
   Stream<TranscriptAppend> get transcriptAppends => _transcriptAppends.stream;
 
   Stream<TerminalFrame> get terminalFrames => _terminalFrames.stream;
+
+  // 대화 화면 푸시. ChatUi · ChatFrame · ChatOlder
+  Stream<ServerMessage> get chatEvents => _chatEvents.stream;
 
   final StreamController<BrowserFrameStatus> _browserFrameStatuses =
       StreamController.broadcast();
@@ -697,6 +705,24 @@ class ActiveRemoteSession {
     ),
   );
 
+  // 웹뷰가 대화 화면을 열 때 쓰는 일회용 티켓
+  Future<PaseoOpenResult> openPaseo() =>
+      _request<PaseoOpenResult>((rid) => paseoOpenRequest(rid: rid));
+
+  Future<ChatOpenResult> openChat(String agent) => _request<ChatOpenResult>(
+    (rid) => chatOpenRequest(rid: rid, agent: agent),
+  );
+
+  Future<RemoteActionResult> chatOlder(String key) =>
+      _request<RemoteActionResult>(
+        (rid) => chatOlderRequest(rid: rid, key: key),
+      );
+
+  Future<RemoteActionResult> chatClose(String key) =>
+      _request<RemoteActionResult>(
+        (rid) => chatCloseRequest(rid: rid, key: key),
+      );
+
   Future<GitHubPrResult> githubPr(String agent) => _request<GitHubPrResult>(
     (rid) => githubPrRequest(rid: rid, agent: agent),
   );
@@ -1057,6 +1083,16 @@ class ActiveRemoteSession {
         _complete(message.rid, message);
       case GitHubPrResult():
         _complete(message.rid, message);
+      case PaseoOpenResult():
+        _complete(message.rid, message);
+      case ChatOpenResult():
+        _complete(message.rid, message);
+      case ChatUi():
+        _chatEvents.add(message);
+      case ChatFrame():
+        _chatEvents.add(message);
+      case ChatOlder():
+        _chatEvents.add(message);
       case GitHubCheckLogResult():
         _complete(message.rid, message);
       default:
@@ -1109,6 +1145,7 @@ class ActiveRemoteSession {
         _transcriptAppends.close(),
         _terminalFrames.close(),
         _browserFrames.close(),
+        _chatEvents.close(),
         _browserFrameStatuses.close(),
         _connectionStates.close(),
       ]);
@@ -1296,6 +1333,7 @@ class RemoteSession {
       resumeToken: authenticated.resumeToken,
       resume: (token) => _openAuthenticated(settings, resumeToken: token),
       onResumeToken: onResumeToken,
+      endpoint: settings,
     );
     _active = session;
     return session;

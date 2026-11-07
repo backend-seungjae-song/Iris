@@ -26,7 +26,7 @@ test("도구 화면이 열리면 사이드바 자리를 대신하고, 도구마�
 });
 
 test("전체형 화면은 가운데가 빠진 자리까지 도구가 늘어난다", () => {
-  const { rects } = computeLayout(defaultTree(), BOX, ctxOf(["emulator", "center"], { toolKey: "tools:ml-panel" }));
+  const { rects } = computeLayout(defaultTree(), BOX, ctxOf(["emulator", "center"], { toolKey: "tools:ar-panel" }));
   assert.deepEqual(rects.tools, { x: 52, y: 30, w: 1600 - 400, h: 900 });
   assert.equal(rects.chat.w, 400);
 });

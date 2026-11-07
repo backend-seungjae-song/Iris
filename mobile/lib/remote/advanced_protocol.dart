@@ -543,6 +543,58 @@ class GitHubPullRequest {
   final List<GitHubCheck> checks;
 }
 
+class ChatOpenResult extends ServerMessage {
+  const ChatOpenResult({required this.rid, required this.key});
+
+  final String rid;
+  final String key;
+}
+
+// 대화 화면 빌드 상태. phase 는 none·building·ready·error
+class ChatUi extends ServerMessage {
+  const ChatUi({required this.phase, required this.message, this.url});
+
+  final String phase;
+  final String message;
+  final String? url;
+}
+
+// 대화 한 묶음. kind 는 snapshot·replacement·append·missing·error
+class ChatFrame extends ServerMessage {
+  const ChatFrame({
+    required this.key,
+    required this.kind,
+    this.messages = const [],
+    this.hasOlder,
+    this.reason = '',
+  });
+
+  final String key;
+  final String kind;
+  final List<Map<String, dynamic>> messages;
+  final bool? hasOlder;
+  final String reason;
+}
+
+class ChatOlder extends ServerMessage {
+  const ChatOlder({
+    required this.key,
+    required this.messages,
+    required this.hasOlder,
+  });
+
+  final String key;
+  final List<Map<String, dynamic>> messages;
+  final bool hasOlder;
+}
+
+class PaseoOpenResult extends ServerMessage {
+  const PaseoOpenResult({required this.rid, required this.ticket});
+
+  final String rid;
+  final String ticket;
+}
+
 class GitHubPrResult extends ServerMessage {
   const GitHubPrResult({required this.rid, required this.pr});
 
@@ -896,6 +948,35 @@ Map<String, Object> browserNavigateRequest({
     'url': url,
   };
 }
+
+Map<String, Object> chatOpenRequest({
+  required String rid,
+  required String agent,
+}) {
+  _checkRef(agent, '세션');
+  return {'type': 'chat.open', 'rid': _checkedRid(rid), 'agent': agent};
+}
+
+Map<String, Object> chatOlderRequest({
+  required String rid,
+  required String key,
+}) {
+  _checkRef(key, '대화');
+  return {'type': 'chat.older', 'rid': _checkedRid(rid), 'key': key};
+}
+
+Map<String, Object> chatCloseRequest({
+  required String rid,
+  required String key,
+}) {
+  _checkRef(key, '대화');
+  return {'type': 'chat.close', 'rid': _checkedRid(rid), 'key': key};
+}
+
+Map<String, Object> paseoOpenRequest({required String rid}) => {
+  'type': 'paseo.open',
+  'rid': _checkedRid(rid),
+};
 
 Map<String, Object> browserNewTabRequest({
   required String rid,
@@ -1280,8 +1361,124 @@ Map<String, Object> githubCheckDraftRequest({
   };
 }
 
+// 서버가 해석한 대화 메시지. 모양과 개수만 확인하고 내용은 그대로 웹뷰에 넘긴다
+List<Map<String, dynamic>>? _chatMessages(Object? value) {
+  if (value is! List || value.length > 400) return null;
+  final result = <Map<String, dynamic>>[];
+  for (final item in value) {
+    if (item is! Map<String, dynamic>) return null;
+    final blocks = item['blocks'];
+    if (item['id'] is! String ||
+        !_validString(item['id'] as String, maximum: 200) ||
+        item['role'] is! String ||
+        !_validString(item['role'] as String, maximum: 20) ||
+        (item['ts'] != null && item['ts'] is! num) ||
+        blocks is! List ||
+        blocks.length > 500 ||
+        !blocks.every(
+          (block) => block is Map<String, dynamic> && block['type'] is String,
+        )) {
+      return null;
+    }
+    result.add(item);
+  }
+  return result;
+}
+
+ServerMessage? _parseChatFrame(Map<String, dynamic> value) {
+  final kind = value['kind'];
+  if (!_validRef(value['key'])) return null;
+  if (const {'missing', 'error'}.contains(kind)) {
+    if (_hasExactKeys(value, {'type', 'key', 'kind', 'reason'}) &&
+        value['reason'] is String &&
+        _validPossiblyEmptyString(value['reason'] as String, maximum: 300)) {
+      return ChatFrame(
+        key: value['key'] as String,
+        kind: kind as String,
+        reason: value['reason'] as String,
+      );
+    }
+    return null;
+  }
+  final plain = Map<String, dynamic>.from(value)..remove('hasOlder');
+  if (const {'snapshot', 'replacement', 'append'}.contains(kind) &&
+      _hasExactKeys(plain, {'type', 'key', 'kind', 'messages'}) &&
+      (!value.containsKey('hasOlder') || value['hasOlder'] is bool)) {
+    final messages = _chatMessages(value['messages']);
+    if (messages != null) {
+      return ChatFrame(
+        key: value['key'] as String,
+        kind: kind as String,
+        messages: messages,
+        hasOlder: value['hasOlder'] as bool?,
+      );
+    }
+  }
+  return null;
+}
+
 ServerMessage? _parseAdvancedServerMessage(Map<String, dynamic> value) {
   switch (value['type']) {
+    case 'chat.open.result':
+      if (_hasExactKeys(value, {'type', 'rid', 'key'}) &&
+          _validRid(value['rid']) &&
+          _validRef(value['key'])) {
+        return ChatOpenResult(
+          rid: value['rid'] as String,
+          key: value['key'] as String,
+        );
+      }
+    case 'chat.ui':
+      final uiValue = Map<String, dynamic>.from(value)
+        ..remove('version')
+        ..remove('url');
+      if (_hasExactKeys(uiValue, {'type', 'phase', 'message'}) &&
+          const {
+            'none',
+            'building',
+            'ready',
+            'error',
+          }.contains(value['phase']) &&
+          value['message'] is String &&
+          _validPossiblyEmptyString(value['message'] as String, maximum: 300) &&
+          (!value.containsKey('version') ||
+              (value['version'] is String &&
+                  _validString(value['version'] as String, maximum: 40))) &&
+          (!value.containsKey('url') ||
+              (value['url'] is String &&
+                  RegExp(r'^/paseo-ui/\?v=[A-Za-z0-9._-]{1,40}$')
+                      .hasMatch(value['url'] as String)))) {
+        return ChatUi(
+          phase: value['phase'] as String,
+          message: value['message'] as String,
+          url: value['url'] as String?,
+        );
+      }
+    case 'chat.frame':
+      return _parseChatFrame(value);
+    case 'chat.older':
+      if (_hasExactKeys(value, {'type', 'key', 'messages', 'hasOlder'}) &&
+          _validRef(value['key']) &&
+          value['hasOlder'] is bool) {
+        final messages = _chatMessages(value['messages']);
+        if (messages != null) {
+          return ChatOlder(
+            key: value['key'] as String,
+            messages: messages,
+            hasOlder: value['hasOlder'] as bool,
+          );
+        }
+      }
+    case 'paseo.open.result':
+      if (_hasExactKeys(value, {'type', 'rid', 'ticket'}) &&
+          _validRid(value['rid']) &&
+          value['ticket'] is String &&
+          RegExp(r'^[0-9a-f]{64}$').hasMatch(value['ticket'] as String)) {
+        return PaseoOpenResult(
+          rid: value['rid'] as String,
+          ticket: value['ticket'] as String,
+        );
+      }
     case 'remote.action.result':
       final actionValue = Map<String, dynamic>.from(value)..remove('tab');
       if (_hasExactKeys(actionValue, {'type', 'rid', 'result'}) &&

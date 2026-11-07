@@ -331,7 +331,7 @@ const LAY_BOX = { x: 52, y: 30, w: 1600, h: 900 };
 const layOf = (tree, hidden, toolKey = null) => layoutTree.computeLayout(tree, LAY_BOX, { visible: (id) => !hidden.includes(id), collapsedPx: () => null, toolKey }).rects;
 check("채팅 폭은 도구를 바꿔도 그대로", () => {
   const tree = layoutTree.defaultTree({ toolW: { "sc-panel": 380 } });
-  const plain = layOf(tree, ["tools"]), git = layOf(tree, [], "tools:sc-panel"), full = layOf(tree, ["center"], "tools:ml-panel");
+  const plain = layOf(tree, ["tools"]), git = layOf(tree, [], "tools:sc-panel"), full = layOf(tree, ["center"], "tools:ar-panel");
   return plain.chat.w === 400 && git.chat.w === 400 && full.chat.w === 400 && git.center.w === plain.center.w - (380 - 272);
 });
 // 끌어 맞춘 폭은 인라인으로 들어간다. 접힘 규칙이 그보다 약하면 접기를 눌러도 폭이 남는다

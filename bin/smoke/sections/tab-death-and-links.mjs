@@ -144,7 +144,9 @@ await checkAsync("로컬 데브 진행 표시는 다시 그려도 남고, 반영
     if (!/켜짐 확인 중/.test(body.innerHTML)) throw new Error("20초 전에 진행 표시가 내려간다");
     advance(1500);
     if (/켜짐 확인 중/.test(body.innerHTML)) throw new Error("20초가 지나도 진행 표시가 내려오지 않는다");
-    // 라우터에 닿지 않으면 표 대신 연결 실패 화면을 보인다.
+    // 라우터에 연속 두 번 닿지 않으면 표 대신 연결 실패 화면을 보인다. 한 번은 마지막 표 유지
+    reply({ ok: false, reason: "unreachable" });
+    if (!els["#ld-err"].hidden || body.hidden) throw new Error("한 번 실패로 표를 지운다");
     reply({ ok: false, reason: "unreachable" });
     if (els["#ld-err"].hidden || !body.hidden || !/라우터에 연결하지 못했습니다/.test(els["#ld-err"].innerHTML) || !/ld-retry/.test(els["#ld-err"].innerHTML)) {
       throw new Error("연결 실패 화면이 뜨지 않는다");

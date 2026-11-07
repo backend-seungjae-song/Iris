@@ -30,7 +30,7 @@
 //   훅 이름을 바꾸면 부르는 쪽 넷도 함께 바꿔야 한다: main.js · panel/touch-drag.js ·
 //   browser/dock.js · browser/webview-factory.js.
 //   ws 소유자를 더하거나 빼면 서버 쪽 같은 이름과 짝이 맞아야 한다.
-import { provide } from "../core/hooks.js";
+import { callHook, provide } from "../core/hooks.js";
 import { getXterm } from "../panel/terminal.js";
 import { activeWv } from "./webview.js";
 import { initAppPick, deliverAppPickLocal } from "./app-pick.js";
@@ -78,6 +78,7 @@ export function initCapability(ctx) {
   // 사람이 앱에서 탭·그룹을 지목해 준 사실을 프롬프트에 붙인다. 제출하지 않고 남겨서 사용자가
   // 이어서 지시한다. 요소 지목과 같은 bracketed paste 경로다.
   const paste = (block) => {
+    if (callHook("agentchat.paste", block)) return;
     wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
     if (getXterm()) setTimeout(() => getXterm().focus(), 0);
   };

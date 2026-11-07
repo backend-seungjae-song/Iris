@@ -142,20 +142,6 @@ export const CAPABILITIES = [
     load: () => import("../panel/memo-boot.js"),
   },
   {
-    // 메모랩(판·조각). 자기 문서·자기 페이지·자기 HTTP 저장소를 가진 한 장짜리 화면이라
-    // Iris 문서에 포함하지 않고 iframe 으로 띄운다. 서버 쪽 구성 요소는 그 저장소다.
-    id: "memolab",
-    files: ["devtool/memolab-screen.js"],
-    css: ["30-memolab.css"],
-    server: ["server/memolab-store.js"],
-    // 이 기능은 자기 페이지를 통째로 갖는다. 앱 셸이 아니라 서버가 그대로 내주는 한 장짜리다.
-    page: "web/memolab",
-    // WebSocket 이 아니라 HTTP 로 동작한다. 이 경로가 서버 쪽 구성 요소에 접근하는 유일한 경로다.
-    routes: ["/memolab-state", "/memolab-ui"],
-    rail: "memolab",
-    load: () => import("../devtool/memolab-screen.js"),
-  },
-  {
     id: "sourcecontrol",
     server: ["server/git-handlers.js"],
     presets: ["dev"],
@@ -395,13 +381,13 @@ export const CAPABILITIES = [
     load: () => import("../chatcopy/boot.js"),
   },
   {
-    // 터미널의 Claude Code·Codex pane 을 대화 기록으로 그린 채팅으로 바꿔 본다. rail 도 전용 영역도
+    // 터미널의 Claude Code·Codex pane 을 대화 기록 기반 채팅으로 바꿔 본다. rail 도 전용 영역도
     // 없이 터미널 머리 단추 하나와 터미널 위의 덮개 판에 붙는다. 서브에이전트 줄을 누르면 그
-    // 서브에이전트의 대화도 같은 판에 연다.
+    // 서브에이전트의 대화도 같은 판에 연다. 대화 목록은 Paseo 대화 화면(UI 코드만 빌드)이 그린다.
     id: "agentchat",
-    files: ["agentchat/boot.js", "agentchat/view.js", "agentchat/fold.js"],
+    files: ["agentchat/boot.js", "agentchat/view-pref.js", "agentchat/chat-pick.js"],
     css: ["35-agent-chat.css"],
-    server: ["server/agent-chat.js"],
+    server: ["server/agent-chat.js", "server/paseo-ui/index.js", "server/remote/features/paseo.js"],
     label: "에이전트 채팅 보기",
     load: () => import("../agentchat/boot.js"),
   },

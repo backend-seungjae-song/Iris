@@ -144,10 +144,10 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
   el.addEventListener("did-start-loading", () => setTabStatus(tabId, { loading: true }));
   el.addEventListener("did-stop-loading", () => setTabStatus(tabId, { loading: false }));
   // 다른 사이트로 가면 이전 파비콘이 남아 잘못된 아이콘이 붙으므로, 이동 시작 때 지운다.
-  // 설정 「링크 열기」 계정 규칙: 열린 탭이 다른 규칙 주소로 가면(주소창·북마크·링크·리디렉트) 같은 탭을 규칙 계정으로 다시 엶.
+  // 설정 「링크 열기」 계정 규칙: 열린 탭이 다른 규칙 주소로 가면(북마크·링크·리디렉트, 주소창 입력은 제외) 같은 탭을 규칙 계정으로 다시 엶.
   // 첫 이동(탭 생성·복원)은 여는 쪽이 계정을 정했으므로 보지 않음. 같은 규칙 안 이동은 계정 유지
   const switchForRule = (url) => {
-    if (rec.keepAccountOnce) { rec.keepAccountOnce = false; return false; }
+    if (rec.keepAccountOnce) return false; // 이동이 끝날 때(did-navigate·실패) 지움. 리디렉트까지 유지
     if (!rec.navs || historyToken || historyRestoring || rec.restoring) return false;
     const want = ruleAccountFor(rec, url);
     if (!want) return false;
@@ -157,6 +157,8 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
     return true;
   };
   el.addEventListener("did-start-navigation", (e) => { if (!e.isMainFrame) return;
+    // 같은 문서 안 이동(pushState·해시)은 새 문서를 여는 것이 아님. 파비콘을 지우고 "여는 중…"을 띄우면 끝나는 이벤트가 없어 그대로 남음
+    if (e.isInPlace) return;
     if ((historyToken || historyRestoring) && e.url === "about:blank") return;
     if (switchForRule(e.url)) return;
     setTabStatus(tabId, { icon: "" });
@@ -222,6 +224,7 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
     if (rec.restoring) { rec.restoring = false; } else if (callHook("record.tracked", tabId)) callHook("record.push", { k: "nav", url: e.url });
     if (callHook("record.tracked", tabId)) callHook("record.inject", el, true); // 페이지가 바뀌면 기록기를 다시 심는다(새 문서엔 주입이 안 남는다)
     rec.navs = (rec.navs || 0) + 1; // 첫 이동 = 새 탭이 기본 페이지를 여는 것
+    rec.keepAccountOnce = false;
     // 주소창을 편집 중이면 건드리지 않는다. 그러지 않으면 붙여넣던 값이 이동 완료 시점에 지워진다.
     if (activeBrowserId() === tabId && document.activeElement !== urlInput) { urlInput.value = isNewTab(e.url, rec) ? "" : (e.url || ""); syncBookmarkStar(); }
     if (activeBrowserId() === tabId) syncNavButtons();
@@ -269,6 +272,7 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
   // (2) 인증서 문제인가. 일반 네트워크 오류와 원인도 대처도 다르다. TLS 오류 코드는 -200 대역이다.
   // (3) 언제 지우는가. 새 이동이 시작되면 이전 실패 문구는 사실이 아니다.
   el.addEventListener("did-fail-load", (e) => {
+    if (e.isMainFrame !== false) rec.keepAccountOnce = false; // 계정 유지는 이 이동 하나만
     if (e.errorCode === -3) {
       if (e.isMainFrame !== false && failNavigation(rec, e.validatedURL, true)) showNavigationFeedback(rec);
       return;
@@ -413,6 +417,7 @@ export function navigateOn(rec, u) {
 }
 
 // opts.profile: 이 이동에 쓸 계정(설정의 북마크 관리에서 계정을 정한 북마크). 링크 규칙보다 먼저
+// opts.typed: 주소창에 직접 입력한 이동. 계정 규칙을 적용하지 않고 지금 계정으로 엶(2026-11-04 사용자)
 export function navigate(u, opts) {
   const rec = activeWv(); if (!rec) { bNote.textContent = "브라우저 탭을 먼저 열어주세요."; return; }
   bNote.textContent = "여는 중… " + u;
@@ -423,6 +428,8 @@ export function navigate(u, opts) {
       return;
     }
     rec.keepAccountOnce = true; // 이미 그 계정이면 이번 이동은 규칙으로 바꾸지 않음
+  } else if (opts && opts.typed) {
+    rec.keepAccountOnce = true;
   } else {
     // 규칙 계정이 다르면 불러오기 전에 바꿈. 불러온 뒤 바꾸면 첫 요청이 원래 계정으로 나감
     const want = ruleAccountFor(rec, u);
@@ -430,7 +437,7 @@ export function navigate(u, opts) {
   }
   navigateOn(rec, u);
 }
-export function goUrl() { navigate(normalizeUrl(urlInput.value)); }
+export function goUrl() { navigate(normalizeUrl(urlInput.value), { typed: true }); }
 
 // 정상 세션을 보존할지는 native의 출처 기록이 판단한다. 화면은 실제 적용 성공 뒤에만 갱신한다.
 const stagedChromeRecoveryNotices = new Set();

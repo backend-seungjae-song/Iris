@@ -136,7 +136,7 @@ check("겹친 표면은 맨 위만 반응한다", () => {
     && /wc\.send\("ac-cursor", on \? /.test(owner)
     && /: null\);/.test(owner)
     && /__orcaHover: pt \? \{ x: pt\.x, y: pt\.y, entered: !!pt\.entered \} : null/.test(wp)
-    && /if \(!d\.__orcaHover\) return hideHL\(\);/.test(pickHost)
+    && /if \(!d\.__orcaHover\) \{ pt = null; return hideHL\(\); \}/.test(pickHost)
     && /if \(!pt\) \{/.test(pick);
 });
 // 픽 모드에서 브라우저 창은 포커스를 안 받고 첫 클릭이 그대로 콘텐츠로 간다(acceptFirstMouse).

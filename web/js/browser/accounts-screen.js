@@ -120,6 +120,9 @@ async function deleteProfile(profileId) {
   showToast(purged ? `프로필 삭제됨: ${name} (로그인 포함)`
     : `프로필 삭제됨: ${name}. 다만 저장소를 비우지 못했습니다(앱 재시작 후 다시 시도)`, { level: purged ? "ok" : "err" });
 }
+// 다시 불러오는 동안 보일 직전 응답
+// - 비우고 그리면 "확인 중…"·합계 0·Chrome 상자 스피너가 잠깐 비쳐 깜빡임
+let acctLast = { creds: {}, chromeHtml: null, chromeN: "" };
 export function acctRefresh() {
   const body = $("#acct-body"); if (!body) return;
   // 공유 브라우저 창도 자기 탭을 가진 하나의 스페이스다(?space=__shared__). herdr 스페이스 목록엔
@@ -131,14 +134,22 @@ export function acctRefresh() {
   // 배치를 두 벌로 유지하지 않는다.
   const model = {
     spaces, profiles, defaults: getSpaceDefaults(), defaultProfileId: PROFILE_DEFAULT_ID,
-    creds: {}, chromeProfiles: null, withPasswords: !!($("#acct-with-pw") || {}).checked,
+    creds: acctLast.creds, chromeProfiles: null, withPasswords: !!($("#acct-with-pw") || {}).checked,
   };
   for (const d of acctDropdowns) d.destroy();
   acctDropdowns = [];
   acctDdBySpace.clear();
+  // 안쪽 스크롤 칸은 새로 만들어지므로 위치를 저장했다 되돌림
+  const mainTop = body.querySelector(".acct-main")?.scrollTop || 0;
   body.innerHTML = accountsMarkup(model);
+  const main = body.querySelector(".acct-main"); if (main && mainTop) main.scrollTop = mainTop;
+  if (acctLast.chromeHtml != null) {
+    const box0 = body.querySelector("#acct-chrome"); if (box0) box0.innerHTML = acctLast.chromeHtml;
+    const n0 = body.querySelector("#acct-chrome-n"); if (n0) n0.textContent = acctLast.chromeN;
+  }
   const sum = $("#acct-sum");
-  if (sum) sum.innerHTML = accountsHeadSum(profiles.length, 0);
+  const lastTotal = profiles.reduce((a, p) => a + ((acctLast.creds[p.id] || {}).count || 0), 0);
+  if (sum) sum.innerHTML = accountsHeadSum(profiles.length, lastTotal);
 
   // 네이티브 select 자리를 드롭다운으로 채운다. 고르면 그 자리에서 change 를 내므로 아래
   // wireAccounts 의 change 처리(data-space-def·value)가 select 때와 같이 받는다.
@@ -161,11 +172,12 @@ export function acctRefresh() {
     const nEl = body.querySelector(`[data-creds-n="${cssEsc(p.id)}"]`);
     try {
       const s = (window.acHost && acHost.credsSummary) ? await acHost.credsSummary(partitionFor(p.id)) : { count: 0, accounts: [] };
+      acctLast.creds[p.id] = s;
       const line = accountsCredsLine(s);
       if (el) { el.textContent = line.text; el.classList.toggle("none", line.none); }
       if (nEl) nEl.textContent = s.count ? String(s.count) : "";
       return s.count || 0;
-    } catch { if (el) el.textContent = ""; return 0; }
+    } catch { if (el) el.textContent = ""; return (acctLast.creds[p.id] || {}).count || 0; }
   })());
   Promise.all(counts).then((ns) => {
     const s2 = $("#acct-sum"); if (s2 && body.isConnected) s2.innerHTML = accountsHeadSum(profiles.length, ns.reduce((a, n) => a + n, 0));
@@ -184,7 +196,9 @@ export function acctRefresh() {
     });
     let blocked = "";
     if (!profs.length) { try { blocked = (window.acHost && acHost.chromeDataBlocked) ? await acHost.chromeDataBlocked() : ""; } catch {} }
-    box.innerHTML = accountsChromeBox(withTarget, blocked);
+    const boxHtml = accountsChromeBox(withTarget, blocked);
+    acctLast.chromeHtml = boxHtml; acctLast.chromeN = String(profs.length);
+    box.innerHTML = boxHtml;
     const n = body.querySelector("#acct-chrome-n"); if (n) n.textContent = String(profs.length);
   })();
 }
