@@ -48,6 +48,8 @@ import { collectAllTabs, useWorkspaceLayoutStore } from "@/stores/workspace-layo
 import { selectAgentTimelineState, useSessionStore } from "@/stores/session-store";
 import { resolveClientSlashCommand } from "@/client-slash-commands";
 import { useDraftStore } from "@/stores/draft-store";
+import { buildWorkspaceAttachmentScopeKey, useWorkspaceAttachmentsStore } from "@/attachments/workspace-attachments-store";
+import { chatHistoryAttachment, forkDrafts, isBranchCommand } from "./iris-fork-model";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { i18n } from "@/i18n/i18next";
 import { useDirectoryDemand } from "@/hooks/use-directory-demand";
@@ -332,7 +334,15 @@ async function uploadPaths(images: { data: string; mimeType: string }[], attachm
     const ext = (img.mimeType.split("/")[1] || "png").replace("jpeg", "jpg").replace(/[^a-z0-9]/gi, "");
     paths.push((await uploadBlob(`image-${Date.now()}-${n + 1}.${ext}`, new Blob([bytes], { type: img.mimeType }))).path);
   }
-  return { images: paths, attachments: (attachments as any[]).map(attachmentText) };
+  // 분기 채팅 기록은 파일로 올려 @경로로 보냄
+  // - 글로 붙이면 기록 속 @경로를 Claude 가 첨부로 읽고, 최대 10만 자가 터미널 붙여넣기로 들어감
+  const texts: string[] = [];
+  for (const a of attachments as any[]) {
+    if (a?.type === "text" && a.contextKind === "chat_history" && typeof a.text === "string") {
+      texts.push(`@${(await uploadBlob(`chat-history-${Date.now()}.txt`, new Blob([a.text], { type: "text/plain" }))).path}`);
+    } else texts.push(attachmentText(a));
+  }
+  return { images: paths, attachments: texts };
 }
 
 const SEND_TIMEOUT_MS = 15_000;
@@ -479,7 +489,7 @@ function clearTextarea(ta: HTMLTextAreaElement) {
 function clientCommandText(): string | null {
   const ta = composerTextarea();
   const text = ta?.value.trim() ?? "";
-  return text && resolveClientSlashCommand({ text, hasAttachments: false }) ? text : null;
+  return text && (resolveClientSlashCommand({ text, hasAttachments: false }) || isBranchCommand(text)) ? text : null;
 }
 // 부모가 붙인 글(@파일 멘션)을 입력창 끝에 넣고 입력창에 포커스
 function focusComposer(insert: string) {
@@ -638,9 +648,34 @@ function runClientCommand(text: string) {
   if (ta) clearTextarea(ta);
   const key = currentKey;
   if (!key) return;
+  if (isBranchCommand(text)) { branchWhole(key); return; }
   void sendText(key, `cmd-${Date.now().toString(36)}`, text).then((r) => {
     if (!r.ok) console.warn("[iris-chat] 명령을 보내지 못함", text, r.reason);
   });
+}
+// 분기: 채팅 기록 첨부를 Iris 창에 넘김. Iris 창이 새 탭에서 같은 에이전트를 실행하고 그 대화 입력창에 첨부를 돌려줌
+// - 응답 아래 분기 단추: Paseo 가 만든 첨부를 새 초안 범위에서 가져감
+// - /branch: 지금까지 전체 대화로 같은 첨부를 만듦(Paseo 진행 중 분기와 같은 범위)
+function requestFork(sourceKey: string, attachment: unknown) {
+  post({ type: "iris-chat.fork", key: sourceKey, attachment });
+}
+function branchWhole(key: string) {
+  try {
+    requestFork(key, shimDaemon.forkContext({ agentId: key }).attachment);
+  } catch (e) {
+    console.warn("[iris-chat] 분기하지 못함", e);
+  }
+}
+useWorkspaceAttachmentsStore.subscribe((s) => {
+  for (const f of forkDrafts(s.attachmentsByScope)) {
+    useWorkspaceAttachmentsStore.getState().clearWorkspaceAttachments({ scopeKey: f.scopeKey });
+    requestFork(f.sourceKey, f.attachment);
+  }
+});
+// 새 탭 대화의 입력창에 채팅 기록 첨부. Paseo 대화 패널이 읽는 워크스페이스 범위에 넣음
+function attachForkHistory(sourceKey: string, attachment: unknown) {
+  const scopeKey = buildWorkspaceAttachmentScopeKey({ serverId: SHIM_SERVER_ID, workspaceId: SHIM_WORKSPACE_ID, cwd: "/" });
+  useWorkspaceAttachmentsStore.getState().addWorkspaceAttachment({ scopeKey, attachment: chatHistoryAttachment(attachment, { serverId: SHIM_SERVER_ID, sourceKey }) as any });
 }
 function installClientCommandBridge() {
   const stop = (e: Event) => { e.preventDefault(); e.stopImmediatePropagation(); };
@@ -699,6 +734,10 @@ function useParentState() {
       const type = e.data?.type;
       if (type === "iris-chat.insert" || type === "iris-chat.focus") {
         if (e.data.key === currentKey) focusComposer(type === "iris-chat.insert" ? String(e.data.text || "") : "");
+        return;
+      }
+      if (type === "iris-chat.fork-attach") {
+        if (e.data.key === currentKey && e.data.attachment && typeof e.data.attachment.text === "string") attachForkHistory(String(e.data.sourceKey || ""), e.data.attachment);
         return;
       }
       if (type !== "iris-chat.state") {
