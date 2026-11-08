@@ -7,6 +7,7 @@
 //   보내기·중단은 부모 창에 postMessage 로 넘김(iris-chat.send·iris-chat.cancel)
 import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
 import { asUint8Array, decodeFileTransferFrame, FileTransferOpcode } from "@getpaseo/protocol/binary-frames/index";
+import { buildAgentForkContextAttachment } from "../server/src/server/agent/activity-curator";
 import { CODEX_ONLY_MESSAGE, agentFields, answerRow, permissionRequest, providerEntries, type IrisAgentMeta, type IrisModelDefinition, type IrisPrompt } from "./iris-agent-meta";
 
 export const SHIM_HOST = "iris-shim.invalid:80";
@@ -480,6 +481,24 @@ class ShimDaemon {
     };
   }
 
+  // 분기용 채팅 기록 첨부. Paseo 데몬과 같은 함수(buildAgentForkContextAttachment)로 만듦
+  // - 기록은 대화 화면에 불러온 범위만. 데몬은 전체 기록에서 만들지만 글자 수 제한 안에서 뒤쪽을 남기므로 대개 같음
+  forkContext(req: any) {
+    const agent = this.agent;
+    if (!agent || String(req.agentId) !== agent.id) throw new Error("이 대화가 지금 열려 있지 않습니다");
+    const rows = this.rows.map((r) => ({
+      item: r.item, timestamp: new Date(r.ts).toISOString(),
+      seqStart: r.seqStart, seqEnd: r.seqEnd, sourceSeqRanges: [{ startSeq: r.seqStart, endSeq: r.seqEnd }], collapsed: [],
+    }));
+    return buildAgentForkContextAttachment({
+      rows: rows as any,
+      cursorBoundary: req.boundaryCursor ? { timelineEpoch: this.epoch, cursor: req.boundaryCursor } : null,
+      boundaryMessageId: typeof req.boundaryMessageId === "string" ? req.boundaryMessageId : null,
+      agentTitle: agent.title ?? null,
+      cwd: agent.cwd,
+    });
+  }
+
 }
 
 export const shimDaemon = new ShimDaemon();
@@ -698,6 +717,16 @@ class ShimSocket extends EventTarget {
         this.reply("fetch_agent_response", { requestId, agent: hit ? agent : null, project: hit ? shimDaemon.project() : null, error: hit ? null : `Agent not found: ${m.agentId}` });
         return;
       }
+      case "agent.fork_context.request": {
+        const base = { requestId, agentId: m.agentId, boundaryCursor: m.boundaryCursor ?? null, boundaryMessageId: m.boundaryMessageId ?? null };
+        try {
+          const ctx = shimDaemon.forkContext(m);
+          this.reply("agent.fork_context.response", { ...base, ...ctx, error: null });
+        } catch (e) {
+          this.reply("agent.fork_context.response", { ...base, attachment: null, itemCount: 0, error: String((e as any)?.message || e) });
+        }
+        return;
+      }
       case "fetch_agent_timeline_request": {
         const body = await shimDaemon.timeline(m);
         this.reply("fetch_agent_timeline_response", { requestId, ...body });
@@ -800,7 +829,8 @@ function serverInfo() {
     status: "server_info", protocolVersion: PROTOCOL_VERSION, serverId: SHIM_SERVER_ID, hostname: "Iris", version: null,
     // canonicalSubmittedPrompts: 보낸 글 말풍선을 기록에 그 글이 나올 때까지 Paseo 가 "보내는 중"으로 둠
     // - 터미널 에이전트는 일하는 중에 받은 글을 대기열에 두었다가 나중에 넣음. 기록 행에 clientMessageId 를 실어 짝지음
-    features: { ownedSubscriptions: true, providersSnapshot: true, providerSubagents: true, canonicalSubmittedPrompts: true },
+    // agentForkContext: 응답 아래 분기 단추. 채팅 기록 첨부는 forkContext, 새 대화는 Iris 가 새 탭으로 만듦
+    features: { ownedSubscriptions: true, providersSnapshot: true, providerSubagents: true, canonicalSubmittedPrompts: true, agentForkContext: true },
     capabilities: {
       voice: {
         dictation: { enabled: false, reason: "Iris 대화 창에서는 받아쓰기를 쓰지 않습니다" },

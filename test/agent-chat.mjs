@@ -14,7 +14,7 @@ import {
 import {
   handleAgentChat, handleAgentChatFile, handleAgentChatImage, handleAgentChatUpload, imageFromRecord, initAgentChat, inputChunks,
   ANSWER_SETTLE_MS, cardChoices, isAnsweredLeftover, subagentRelayText, optionLabel, promptIdOf, readRecords, resolveSubagentFile, uploadName,
-  noFileFrame,
+  noFileFrame, claudeSessionFromProcess,
 } from "../server/agent-chat.js";
 import {
   LEGACY_RECIPE, MAX_TRIES, RETRY_AFTER_MS, buildName, checkDue, latestStableTag, nextBuild, parseBuildName, parseState, promote,
@@ -958,6 +958,18 @@ test("짝을 못 찾은 보내는 중 말풍선 판정", async () => {
   assert.deepEqual(staleSends(s, { ...base, now: 20000 }), ["a", "b"]);
 });
 
+test("pane 의 Claude 세션 id 는 프로세스 기록에서 읽는다(/clear 뒤 herdr 의 이전 id 대신)", () => {
+  const info = { process_info: { foreground_process_group_id: 71712, foreground_processes: [{ pid: 9 }, { pid: 71712, argv0: "claude" }] } };
+  const recs = { 71712: { pid: 71712, sessionId: "f41a9ed0-a0cc-4289-b6b6-f5b791c2e844" } };
+  assert.equal(claudeSessionFromProcess(info, (pid) => recs[pid] || null), "f41a9ed0-a0cc-4289-b6b6-f5b791c2e844");
+  // 그룹 id 에 기록이 없으면 전경 프로세스에서 찾음
+  assert.equal(claudeSessionFromProcess({ foreground_process_group_id: 5, foreground_processes: [{ pid: 71712 }] }, (pid) => recs[pid] || null), "f41a9ed0-a0cc-4289-b6b6-f5b791c2e844");
+  // 기록 없음·잘못된 id·빈 응답 → null(herdr 값을 씀)
+  assert.equal(claudeSessionFromProcess(info, () => null), null);
+  assert.equal(claudeSessionFromProcess(info, () => ({ sessionId: "../x" })), null);
+  assert.equal(claudeSessionFromProcess(null, () => recs[71712]), null);
+});
+
 test("새 대화(기록 파일 전)는 빈 기록으로 한 번 보내고 /clear 면 앞 대화를 지운다", () => {
   const fresh = { fresh: true, kind: "claude", reason: "x" };
   // 처음 연 새 대화 → 빈 기록
@@ -1007,4 +1019,25 @@ test("Claude 내장 명령은 CLI 초기화 응답에서 받고, CLI 목록에 �
   assert.equal(await claudeBuiltins({ run: fail, now: Date.now() + 61_000 }), null);
   assert.equal(runs, 3);
   resetClaudeBuiltinsForTest();
+});
+
+test("대화 분기: Paseo 가 새 초안에 넣은 채팅 기록 첨부를 찾고 /branch 를 알아본다", async () => {
+  const { forkDrafts, isBranchCommand, chatHistoryAttachment } = await import("../server/paseo-ui/entry/iris-fork-model.js");
+  const att = { type: "text", mimeType: "text/plain", contextKind: "chat_history", title: "Chat history", text: "<chat-history-summary>x</chat-history-summary>" };
+  const byScope = {
+    "workspace-attachments:draft=d1": [{ kind: "chat_history", id: "chat_history:d1", attachment: att, source: { serverId: "s", agentId: "pane:w1:p3:abc" } }],
+    "workspace-attachments:server=s:workspace=w": [{ kind: "chat_history", id: "x", attachment: att, source: { serverId: "s", agentId: "pane:w1:p9:" } }],
+    "workspace-attachments:draft=d2": [{ kind: "review", id: "r" }],
+  };
+  assert.deepEqual(forkDrafts(byScope), [{ scopeKey: "workspace-attachments:draft=d1", sourceKey: "pane:w1:p3:abc", attachment: att }]);
+  assert.deepEqual(forkDrafts({}), []);
+  assert.deepEqual(forkDrafts(null), []);
+  assert.equal(isBranchCommand("/branch"), true);
+  assert.equal(isBranchCommand("  /branch 실험 "), true);
+  assert.equal(isBranchCommand("/branches"), false);
+  assert.equal(isBranchCommand("글 /branch"), false);
+  const pill = chatHistoryAttachment(att, { serverId: "s", sourceKey: "pane:a", now: 1 });
+  assert.equal(pill.kind, "chat_history");
+  assert.equal(pill.attachment, att);
+  assert.deepEqual(pill.source, { serverId: "s", agentId: "pane:a" });
 });

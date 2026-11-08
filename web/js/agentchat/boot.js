@@ -309,6 +309,27 @@ function toggleMode() {
   setMode(a.paneId, !isChat(a));
 }
 
+// 대화 분기: 원래 pane 과 같은 herdr 워크스페이스·폴더에 새 탭을 만들고 같은 에이전트를 실행
+// - 그 뒤 처음 고른 새 에이전트 pane 을 대화 화면으로 열고 입력창에 채팅 기록 첨부를 넘김
+// - 2분 안에 새 pane 이 안 보이면 버림
+const FORK_WAIT_MS = 2 * 60 * 1000;
+let pendingFork = null;   // { attachment, sourceKey, known: 분기 때 있던 pane, at }
+let forkAttach = null;    // { key, sourceKey, attachment } 대화 화면에 아직 넘기지 않은 첨부
+function startFork(attachment) {
+  const a = (ctx.getLastAgents() || []).find((x) => x.paneId === view.paneId);
+  if (!a?.workspaceId || !view.kind) { ctx.showToast("분기하지 못했습니다: 이 대화의 herdr 워크스페이스를 찾지 못했습니다", { level: "warn" }); return; }
+  pendingFork = { attachment, sourceKey: view.key, known: new Set((ctx.getLastAgents() || []).map((x) => x.paneId)), at: Date.now() };
+  ctx.wsSend({ type: "tab.create", workspaceId: a.workspaceId, ...(a.cwd ? { cwd: a.cwd } : {}), launch: view.kind });
+}
+function claimForkPane(a, kind) {
+  if (!pendingFork || !a || !kind || pendingFork.known.has(a.paneId)) return;
+  const f = pendingFork;
+  pendingFork = null;
+  if (Date.now() - f.at > FORK_WAIT_MS) return;
+  if (!isChat(a)) { modes.set(a.paneId, "chat"); saveModes(); }
+  forkAttach = { paneId: a.paneId, sourceKey: f.sourceKey, attachment: f.attachment };
+}
+
 function setMode(paneId, chat) {
   if (!paneId) return;
   modes.set(paneId, chat ? "chat" : "term");
@@ -323,6 +344,7 @@ function sync() {
   if (!$root) return;
   const a = currentAgent();
   const kind = agentKind(a);
+  claimForkPane(a, kind);
   $toggle.hidden = !kind;
   const chat = !!kind && isChat(a);
   $toggle.classList.toggle("on", chat);
@@ -513,6 +535,8 @@ function onFrameMessage(e) {
     const a = (ctx.getLastAgents() || []).find((x) => x.paneId === view.paneId);
     const sub = subagentsOf(a).find((s) => s.id === e.data.agentId);
     if (sub) openSubagent({ paneId: view.paneId, agentId: sub.id, parentLabel: a?.tabLabel || (a?.cwd ? String(a.cwd).split("/").pop() : a?.agent) || "", description: sub.description, agentType: sub.agentType });
+  } else if (e.data?.type === "iris-chat.fork" && view && !view.agentId && e.data.key === view.key) {
+    if (e.data.attachment && typeof e.data.attachment.text === "string") startFork(e.data.attachment);
   } else if (e.data?.type === "iris-chat.open-url" && view && e.data.key === view.key) {
     const url = String(e.data.url || "");
     if (/^https?:\/\//i.test(url)) openInSpaceBrowser(url);
@@ -574,7 +598,9 @@ function relayInput(d) {
 // - 편집기·브라우저 탭 전용 조합(⌘B·⌘F 등)은 입력창 동작으로 남김
 // - 터미널과 같게 Iris 명령이 입력창 동작(⌥←→ 단어 이동)보다 먼저
 let onToggleKey = null;
-const isAppKey = (e) => resolvedKeymap().some((x) => (x.where === ANYWHERE || x.where === MAIN_WINDOW) && matchBinding(e, x.binding));
+// - reload-tab(⌘R): 터미널 영역 포커스에선 이름 변경(keynav). 안 넘기면 메뉴 새로고침이 앱 화면을 다시 읽음
+const FRAME_FORWARD_IDS = new Set(["reload-tab"]);
+const isAppKey = (e) => resolvedKeymap().some((x) => (x.where === ANYWHERE || x.where === MAIN_WINDOW || FRAME_FORWARD_IDS.has(x.id)) && matchBinding(e, x.binding));
 function forwardFrameKey(e) {
   if (e.isComposing || !isAppKey(e)) return;
   const copy = new KeyboardEvent("keydown", {
@@ -612,6 +638,10 @@ function postState() {
     theme: document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark",
   };
   $frame.contentWindow?.postMessage({ type: "iris-chat.state", state }, location.origin);
+  if (forkAttach && forkAttach.paneId === view.paneId && !view.agentId) {
+    $frame.contentWindow?.postMessage({ type: "iris-chat.fork-attach", key: view.key, sourceKey: forkAttach.sourceKey, attachment: forkAttach.attachment }, location.origin);
+    forkAttach = null;
+  }
 }
 
 // 사이드바와 같은 목록(server/join.js 의 실행 중 서브에이전트 트리)을 펼친 것

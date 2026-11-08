@@ -142,24 +142,48 @@ export function resolveSubagentFile(rec, agentId, projectsRoot = claudeHome("pro
   return inside(projectsRoot, path.join(sessionDir, "subagents", `agent-${agentId}.jsonl`));
 }
 
+// pane 의 Claude 프로세스 기록(~/.claude/sessions/<pid>.json)에 적힌 지금 세션 id
+// - /clear 로 세션이 바뀌어도 herdr 가 이전 id 를 계속 알릴 때가 있음. 프로세스 기록은 /clear 즉시 바뀜
+export function claudeSessionFromProcess(info, readRec) {
+  const pi = info?.process_info || info || {};
+  const fg = Array.isArray(pi.foreground_processes) ? pi.foreground_processes : [];
+  const pids = [...new Set([pi.foreground_process_group_id, ...fg.map((p) => p?.pid)].filter((n) => Number.isInteger(n) && n > 0))];
+  for (const pid of pids) {
+    const id = readRec(pid)?.sessionId;
+    if (typeof id === "string" && ID_RE.test(id)) return id;
+  }
+  return null;
+}
+
+async function liveClaudeSession(paneId) {
+  if (!herdr?.call) return null;
+  try {
+    const info = await herdr.call("pane.process_info", { pane_id: paneId });
+    return claudeSessionFromProcess(info, (pid) => {
+      try { return JSON.parse(fs.readFileSync(claudeHome("sessions", `${pid}.json`), "utf8")); } catch { return null; }
+    });
+  } catch { return null; }
+}
+
 // 구독 대상 → { file, kind } 또는 { reason }.
 async function resolveTarget(sub) {
   const agent = agentOf(sub.paneId);
   if (!agent) return { reason: "이 pane 을 herdr 목록에서 찾지 못했습니다" };
   const kind = kindOf(agent);
+  const sessionUuid = (kind === "claude" ? await liveClaudeSession(sub.paneId) : null) || agent.sessionUuid || null;
   // 세션 id 가 그대로면 찾은 파일도 그대로다. 색인(모든 프로젝트 폴더 읽기)을 5초마다 다시 만들지 않는다.
-  if (kind === "claude" && sub.file && sub.uuid === agent.sessionUuid) return { file: sub.file, kind };
-  sub.uuid = agent.sessionUuid || null;
+  if (kind === "claude" && sub.file && sub.uuid === sessionUuid) return { file: sub.file, kind };
+  sub.uuid = sessionUuid;
   if (sub.agentId) {
     if (kind !== "claude") return { reason: "서브에이전트 기록은 Claude Code 세션에만 있습니다" };
-    const rec = claudeSessionRec(agent.sessionUuid);
+    const rec = claudeSessionRec(sessionUuid);
     if (!rec) return { reason: "부모 세션의 기록 폴더를 찾지 못했습니다" };
     const file = resolveSubagentFile(rec, sub.agentId);
     return file ? { file, kind: "claude" } : { reason: "서브에이전트 기록 파일이 아직 없습니다" };
   }
   if (kind === "claude") {
-    if (!agent.sessionUuid) return { reason: "herdr 가 이 Claude 세션의 id 를 아직 알려 주지 않았습니다" };
-    const rec = claudeSessionRec(agent.sessionUuid);
+    if (!sessionUuid) return { reason: "herdr 가 이 Claude 세션의 id 를 아직 알려 주지 않았습니다" };
+    const rec = claudeSessionRec(sessionUuid);
     const file = rec?.file ? inside(claudeHome("projects"), rec.file) : null;
     // 새 대화(시작·/clear 직후)는 첫 메시지 전까지 기록 파일이 없음. 볼 수 없는 대화가 아니라 빈 대화
     return file ? { file, kind } : { fresh: true, kind, reason: "세션 기록 파일이 아직 없습니다(첫 메시지를 보내면 생깁니다)" };
