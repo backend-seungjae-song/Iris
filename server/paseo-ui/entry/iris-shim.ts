@@ -54,7 +54,7 @@ export interface ShimHost {
 }
 
 // 보낸 글 하나. 보낸 때 기록에 있던 행 key 와 마지막 행 key 를 함께 저장
-type SentMark = { text: string; id: string; seen: Set<string>; lastKey: string | null };
+type SentMark = { text: string; id: string; seen: Set<string>; lastKey: string | null; at: number };
 
 type Row = { key: string; item: any; ts: number; seqStart: number; seqEnd: number; sig: string };
 
@@ -156,18 +156,18 @@ class ShimDaemon {
   }
 
   // 보내기 요청을 받은 때의 기록 상태. 업로드가 끝난 뒤 rememberSent 에 넘김
-  markSend(): Omit<SentMark, "text" | "id"> {
+  markSend(): Omit<SentMark, "text" | "id" | "at"> {
     return { seen: new Set(this.rows.map((r) => r.key)), lastKey: this.rows[this.rows.length - 1]?.key ?? null };
   }
 
-  rememberSent(text: string, id: string, mark: Omit<SentMark, "text" | "id">) {
-    this.pending.push({ text, id, ...mark });
+  rememberSent(text: string, id: string, mark: Omit<SentMark, "text" | "id" | "at">) {
+    this.pending.push({ text, id, ...mark, at: Date.now() });
     if (this.pending.length > 50) this.pending.shift();
   }
 
   // 아직 기록 행과 짝짓지 못한 보낸 글. 터미널 입력줄로 되돌아왔는지 볼 때
-  sentNotSeen(): { id: string; text: string }[] {
-    return this.pending.map((s) => ({ id: s.id, text: s.text }));
+  sentNotSeen(): { id: string; text: string; at: number }[] {
+    return this.pending.map((s) => ({ id: s.id, text: s.text, at: s.at }));
   }
 
   forgetSent(id: string) {
@@ -711,6 +711,8 @@ class ShimSocket extends EventTarget {
           key: String(m.agentId), id, text: String(m.text ?? ""), images: Array.isArray(m.images) ? m.images : [], attachments: Array.isArray(m.attachments) ? m.attachments : [],
           remember: (text) => shimDaemon.rememberSent(text, id, mark),
         });
+        // 실패한 글은 짝 목록에서 뺌. 남겨 두면 다음에 같은 글을 보낼 때 그 기록 행을 이 글이 가져감
+        if (!res.ok) shimDaemon.forgetSent(id);
         this.reply("send_agent_message_response", { requestId, agentId: m.agentId, accepted: !!res.ok, error: res.ok ? null : (res.reason || "보내지 못했습니다") });
         return;
       }

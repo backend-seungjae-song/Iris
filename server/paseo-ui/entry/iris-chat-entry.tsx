@@ -57,7 +57,7 @@ import { persistAttachmentFromBlob } from "@/attachments/service";
 import { ContextChips, openContextDialog, type IrisContext } from "./iris-contexts";
 import { TaskBar, cleanOutput, type IrisTask, type TaskReader } from "./iris-tasks";
 import { attachmentText, expandText } from "./iris-inline-tokens";
-import { PENDING_SEND_CSS, dropRewound, pinPendingLast, poppedSends, rewoundLastId } from "./iris-pending-sends";
+import { PENDING_SEND_CSS, dropRewound, pinPendingLast, poppedSends, rewoundLastId, staleSends } from "./iris-pending-sends";
 import { StashButton, stashNow, type StashHost } from "./iris-stash";
 import { installInlineChips, syncContexts, writeComposer } from "./iris-inline-chips";
 import type { IrisAgentMeta, IrisModelDefinition, IrisPrompt } from "./iris-agent-meta";
@@ -548,6 +548,34 @@ function dropPoppedSends(key: string, draftText: string) {
     shimDaemon.forgetSent(id);
   }
 }
+// 짝을 못 찾은 채 에이전트가 쉬고 입력줄에도 없는 "보내는 중" 말풍선을 뺌(staleSends)
+// - 차례가 끝나고 대기 글이 다음 차례로 들어가기 전 잠깐 쉬는 것으로 보일 수 있어 같은 판정이 3초 이어질 때만 뺌
+const STALE_MIN_AGE_MS = 5000;
+const STALE_HOLD_MS = 3000;
+const staleSince = new Map<string, number>();
+const lastTerminal = new Map<string, { running: boolean; draft: string }>();
+let staleTimer: ReturnType<typeof setTimeout> | undefined;
+function dropStaleSends(key: string) {
+  clearTimeout(staleTimer);
+  const ids = new Set(pendingSendIds(key));
+  const term = lastTerminal.get(key);
+  if (!ids.size || !term || key !== currentKey) { staleSince.clear(); return; }
+  const now = Date.now();
+  const sends = shimDaemon.sentNotSeen().filter((s) => ids.has(s.id));
+  const found = new Set(staleSends(sends, { running: term.running, draftText: term.draft, now, minAge: STALE_MIN_AGE_MS }));
+  for (const id of [...staleSince.keys()]) if (!found.has(id)) staleSince.delete(id);
+  const store = useSessionStore.getState();
+  for (const id of found) {
+    const since = staleSince.get(id) ?? now;
+    staleSince.set(id, since);
+    if (now - since < STALE_HOLD_MS) continue;
+    store.rejectAgentMessageSubmission(SHIM_SERVER_ID, key, id);
+    shimDaemon.forgetSent(id);
+    staleSince.delete(id);
+  }
+  // 상태가 더 오지 않아도 다시 봄. 아직 보낸 지 얼마 안 된 글도 나이가 차면 다시 봄
+  if (sends.length) staleTimer = setTimeout(() => dropStaleSends(key), 1000);
+}
 // 전달 전 말풍선을 맨 아래에(터미널 대기 글처럼). 전달되면 기록 행이 들어간 자리에 대신 들어옴
 function usePendingSendsLast(agentId: string | undefined) {
   useEffect(() => {
@@ -693,6 +721,7 @@ function useParentState() {
       setState(next);
       // 입력창이 새 상태로 그려진 뒤
       requestAnimationFrame(() => syncTerminalDraft(next.key, next.readOnly ? null : next.draft));
+      if (!next.readOnly) { lastTerminal.set(next.key, { running: !!next.running, draft: next.draft?.text ?? "" }); dropStaleSends(next.key); }
     };
     window.addEventListener("message", onMessage);
     post({ type: "iris-chat.ready" });
