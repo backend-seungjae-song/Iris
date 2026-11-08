@@ -663,16 +663,16 @@ function onToolReply(m) {
   $frame.contentWindow?.postMessage({ ...rest, type: type.replace("agentchat.", "iris-chat.") }, location.origin);
 }
 
-// 서버 전송 결과는 iframe 에 돌려줌. 보낸 뒤 다른 대화로 바뀌었으면 실패만 알림
+// 서버 전송 결과는 iframe 에 돌려줌. 보낸 뒤 다른 대화로 바뀌었어도 돌려줌
+// - iframe 은 요청 id 로 결과를 찾음. 안 돌려주면 전달된 글도 15초 뒤 실패로 처리됨
+// - 다른 대화를 보는 중의 실패는 알림도 띄움
 function onSent(m) {
   const done = m.id != null ? pendingContexts.get(m.id) : null;
   if (done) {
     pendingContexts.delete(m.id);
     if (m.ok !== false) { removeContexts(done.owner, done.ids); postState(); }
   }
-  if (view && m.key === view.key && m.id != null) {
-    $frame.contentWindow?.postMessage({ type: "iris-chat.sent", id: m.id, ok: m.ok !== false, reason: m.reason || "" }, location.origin);
-    return;
-  }
-  if (m.ok === false) ctx.showToast(`보내지 못했습니다: ${m.reason || "알 수 없는 오류"}`, { level: "warn" });
+  const shown = !!view && m.key === view.key;
+  if (m.id != null) $frame.contentWindow?.postMessage({ type: "iris-chat.sent", id: m.id, ok: m.ok !== false, reason: m.reason || "" }, location.origin);
+  if (m.ok === false && !(shown && m.id != null)) ctx.showToast(`보내지 못했습니다: ${m.reason || "알 수 없는 오류"}`, { level: "warn" });
 }

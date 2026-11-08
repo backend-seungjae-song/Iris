@@ -34,7 +34,7 @@ import { resolveCodexSession } from "./codex-session.js";
 import { snapshot } from "./runtime-state.js";
 import { LIMITS, completeEnd, readForward, readTailWindow } from "./agent-chat-transcript.js";
 import { isLoopbackRequest } from "./http-handler.js";
-import { listCommands, suggestFiles } from "./agent-chat-tools.js";
+import { claudeBuiltins, listCommands, suggestFiles } from "./agent-chat-tools.js";
 import { TASK_ID_RE, claudeTmpRoot, emptyTaskIndex, readTaskOutput, scanTaskFile, taskList, taskOutputSize, taskTail, tasksDirFor } from "./agent-chat-tasks.js";
 import { claudeFooter, claudeMeta, codexConfiguredModel, codexMeta, codexModelsFromCache } from "./agent-chat-meta.js";
 import { clearKeys, terminalDraft } from "./agent-chat-draft.js";
@@ -96,7 +96,8 @@ export function handleAgentChat(ws, msg) {
   if (!ws._local) { send(ws, { type: "agentchat.frame", key: String(msg.key || ""), kind: "error", reason: "원격 연결에서는 대화 기록을 열 수 없습니다" }); return true; }
   const key = typeof msg.key === "string" ? msg.key.slice(0, 200) : "";
   if (!key) return true;
-  if (msg.type === "agentchat.open") { requestPaseoUi(); open(ws, key, msg); }
+  // 내장 명령 목록은 열 때 미리 받음. 첫 / 입력 때 claude 실행(약 5초)을 기다리지 않게
+  if (msg.type === "agentchat.open") { requestPaseoUi(); open(ws, key, msg); if (kindOf(agentOf(String(msg.paneId || ""))) === "claude") claudeBuiltins(); }
   else if (msg.type === "agentchat.close") drop(ws, key);
   else if (msg.type === "agentchat.older") older(ws, key);
   else if (msg.type === "agentchat.send") sendToPane(ws, key, msg);
@@ -160,7 +161,8 @@ async function resolveTarget(sub) {
     if (!agent.sessionUuid) return { reason: "herdr 가 이 Claude 세션의 id 를 아직 알려 주지 않았습니다" };
     const rec = claudeSessionRec(agent.sessionUuid);
     const file = rec?.file ? inside(claudeHome("projects"), rec.file) : null;
-    return file ? { file, kind } : { reason: "세션 기록 파일이 아직 없습니다(첫 메시지를 보내면 생깁니다)" };
+    // 새 대화(시작·/clear 직후)는 첫 메시지 전까지 기록 파일이 없음. 볼 수 없는 대화가 아니라 빈 대화
+    return file ? { file, kind } : { fresh: true, kind, reason: "세션 기록 파일이 아직 없습니다(첫 메시지를 보내면 생깁니다)" };
   }
   if (kind === "codex") {
     let file = agent.sessionFile || null;
@@ -254,6 +256,15 @@ function snapshotFrame(sub, kind) {
   });
 }
 
+// 기록 파일이 없을 때 보낼 프레임. 새 대화는 빈 기록으로 한 번(세션마다), 그 밖은 missing 을 처음 한 번
+export function noFileFrame(sub, hit) {
+  if (hit.fresh) {
+    if (!sub.file && sub.freshUuid === sub.uuid) return null;
+    return { kind: "snapshot", messages: [], hasOlder: false, source: hit.kind, file: null, gen: null };
+  }
+  return sub.file || sub.missing === 0 ? { kind: "missing", reason: hit.reason } : null;
+}
+
 async function tick(sub) {
   if (sub.closed || sub.busy) return;
   sub.busy = true;
@@ -264,7 +275,9 @@ async function tick(sub) {
       const hit = await resolveTarget(sub);
       if (sub.closed) return;
       if (!hit.file) {
-        if (sub.file || sub.missing === 0) send(sub.ws, { type: "agentchat.frame", key: sub.key, kind: "missing", reason: hit.reason });
+        const frame = noFileFrame(sub, hit);
+        if (frame) send(sub.ws, { type: "agentchat.frame", key: sub.key, ...frame });
+        if (hit.fresh) { sub.freshUuid = sub.uuid; sub.meta = null; sub.metaEnd = 0; sub.metaAt = 0; }
         sub.file = null;
         sub.missing++;
         schedule(sub, MISSING_BACKOFF[Math.min(sub.missing - 1, MISSING_BACKOFF.length - 1)]);
@@ -456,8 +469,10 @@ function inputTools(ws, key, msg) {
   const cwd = typeof agent?.cwd === "string" ? agent.cwd : "";
   if (!sub) { send(ws, { type: msg.type, key, id, error: "대상이 없습니다" }); return; }
   if (msg.type === "agentchat.commands") {
-    const commands = listCommands(sub.kind || kindOf(agent) || "claude", cwd, { claude: claudeHome(), codex: codexHome() });
-    send(ws, { type: msg.type, key, id, commands });
+    const kind = sub.kind || kindOf(agent) || "claude";
+    const homes = { claude: claudeHome(), codex: codexHome() };
+    (kind === "claude" ? claudeBuiltins() : Promise.resolve(null))
+      .then((cli) => send(ws, { type: msg.type, key, id, commands: listCommands(kind, cwd, homes, cli) }));
     return;
   }
   const query = typeof msg.query === "string" ? msg.query.slice(0, 200) : "";

@@ -4,21 +4,24 @@
 //   명령 파일·스킬 폴더·작업 폴더를 읽어 후보를 만드는 일. 터미널 입력은 하지 않음(server/agent-chat.js)
 //
 // 제공 API
-//   listCommands(kind, cwd, homes) · suggestFiles(cwd, query, limit) · parseFrontmatter(text) · rankPaths(paths, query, limit)
+//   listCommands(kind, cwd, homes, cliBuiltins) · claudeBuiltins() · cliBuiltinCommands(commands) · suggestFiles(cwd, query, limit) · parseFrontmatter(text) · rankPaths(paths, query, limit)
 //
 // 유지 조건
-//   Claude Code·Codex 가 터미널에서 받는 / 명령과 같은 이름. 내장 명령은 CLI 가 목록을 내놓지 않아 여기서 정함
+//   Claude Code·Codex 가 터미널에서 받는 / 명령과 같은 이름
+//   Claude 내장 명령은 설치된 CLI 의 초기화 응답에서 받음. CLI 목록에 없는 터미널 전용 명령과 Codex 는 여기서 정함
 //   사용자·프로젝트 명령과 스킬은 파일에서 읽음. 개수·크기 제한 안에서만
 //   파일 후보는 git 저장소면 git ls-files(무시 파일 제외), 아니면 깊이 제한 폴더 훑기
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import os from "node:os";
 import { projectClaudeDir } from "./agent-homes.js";
 
 const MAX_COMMAND_FILES = 500;
 const MAX_WALK = 20000;
 
 // 내장 명령(터미널 입력창에서 쓰는 것만). 설명은 화면 표시용
+// Claude 는 CLI 목록을 못 받았을 때와 CLI 목록에 없는 터미널 전용 명령(resume·exit 등)에만 씀
 const CLAUDE_BUILTINS = [
   ["add-dir", "작업 폴더 추가"], ["agents", "서브에이전트 관리"], ["clear", "대화 지우기"], ["compact", "대화 압축", "[지시]"],
   ["config", "설정"], ["context", "컨텍스트 사용량"], ["cost", "사용량·비용"], ["doctor", "설치 점검"], ["exit", "끝내기"],
@@ -31,6 +34,70 @@ const CODEX_BUILTINS = [
   ["mention", "파일 언급"], ["model", "모델·추론 수준"], ["new", "새 대화"], ["quit", "끝내기"], ["review", "변경 검토"],
   ["status", "세션 상태"],
 ];
+
+// Claude CLI 초기화 응답의 commands → 내장 명령. 이름이 __ 로 시작하는 것은 서버 실행 세션 전용
+export function cliBuiltinCommands(commands) {
+  if (!Array.isArray(commands)) return null;
+  const out = [];
+  for (const c of commands) {
+    if (!c || c.builtin !== true || typeof c.name !== "string" || !c.name || c.name.startsWith("__")) continue;
+    out.push({ name: c.name, description: typeof c.description === "string" ? c.description : "", argumentHint: typeof c.argumentHint === "string" ? c.argumentHint : "", kind: "builtin" });
+  }
+  return out.length ? out : null;
+}
+
+const CLI_LIST_TTL_MS = 6 * 60 * 60 * 1000;   // Claude Code 업데이트를 따라가는 주기
+const CLI_RETRY_MS = 60 * 1000;
+const CLI_TIMEOUT_MS = 20 * 1000;
+let cliCache = { at: 0, ok: false, promise: null, list: null };
+
+// 설치된 claude 에 초기화 요청만 보내 내장 명령 목록을 받음
+// - --safe-mode: 사용자 훅·스킬·MCP 를 띄우지 않음. 모델 호출·기록 파일 없음
+// - 실패하면 null(호출부가 고정 목록을 씀)
+export function claudeBuiltins({ now = Date.now(), run = runClaudeInitialize } = {}) {
+  const fresh = cliCache.ok ? now - cliCache.at < CLI_LIST_TTL_MS : now - cliCache.at < CLI_RETRY_MS;
+  if (cliCache.promise) return cliCache.promise;
+  if (cliCache.at && fresh) return Promise.resolve(cliCache.list);
+  cliCache.promise = run().then((commands) => cliBuiltinCommands(commands), () => null).then((list) => {
+    cliCache = { at: Date.now(), ok: !!list, promise: null, list: list || cliCache.list };
+    return cliCache.list;
+  });
+  return cliCache.promise;
+}
+
+export function resetClaudeBuiltinsForTest() { cliCache = { at: 0, ok: false, promise: null, list: null }; }
+
+function runClaudeInitialize() {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    for (const k of Object.keys(env)) if (k.startsWith("HERDR_")) delete env[k];
+    const child = spawn("claude", ["-p", "--safe-mode", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"],
+      { cwd: os.homedir(), env, stdio: ["pipe", "pipe", "ignore"] });
+    let buf = "", done = false;
+    const finish = (err, value) => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      try { child.kill(); } catch {}
+      err ? reject(err) : resolve(value);
+    };
+    const timer = setTimeout(() => finish(new Error("claude 초기화 응답 시간 초과")), CLI_TIMEOUT_MS);
+    timer.unref?.();
+    child.on("error", (e) => finish(e));
+    child.on("exit", () => finish(new Error("claude 가 초기화 응답 전에 끝남")));
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        let m; try { m = JSON.parse(line); } catch { continue; }
+        if (m?.type === "control_response" && m.response?.request_id === "iris-commands") finish(null, m.response.response?.commands);
+      }
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.write(JSON.stringify({ type: "control_request", request_id: "iris-commands", request: { subtype: "initialize" } }) + "\n");
+  });
+}
 
 // 앞머리 --- 블록의 한 줄 key: value 만. 값의 따옴표는 벗김
 export function parseFrontmatter(text) {
@@ -83,8 +150,9 @@ function skillDirs(dir) {
 }
 
 // kind: "claude" | "codex". homes: { claude, codex } 설정 폴더
-// → [{ name, description, argumentHint, kind }] 이름 중복은 앞의 것(프로젝트 > 사용자 > 내장)
-export function listCommands(kind, cwd, homes) {
+// cliBuiltins: claudeBuiltins() 결과(없으면 고정 목록만)
+// → [{ name, description, argumentHint, kind }] 이름 중복은 앞의 것(프로젝트 > 사용자 > CLI 내장 > 고정 내장)
+export function listCommands(kind, cwd, homes, cliBuiltins = null) {
   const list = [];
   if (kind === "codex") {
     for (const c of commandFiles(path.join(homes.codex, "prompts"))) list.push({ ...c, name: `prompts:${c.name}`, kind: "custom" });
@@ -96,6 +164,7 @@ export function listCommands(kind, cwd, homes) {
     }
     for (const c of commandFiles(path.join(homes.claude, "commands"))) list.push({ ...c, kind: "custom" });
     for (const c of skillDirs(path.join(homes.claude, "skills"))) list.push({ ...c, kind: "skill" });
+    if (cliBuiltins) list.push(...cliBuiltins);
     for (const [name, description, argumentHint = ""] of CLAUDE_BUILTINS) list.push({ name, description, argumentHint, kind: "builtin" });
   }
   const seen = new Set();

@@ -53,8 +53,8 @@ export interface ShimHost {
   upload?(input: { fileName: string; mimeType: string; bytes: Blob }): Promise<{ path: string; size: number; fileName: string }>;
 }
 
-// 보낸 글 하나. 보낸 때 기록에 있던 행 key 와 마지막 행 key 를 함께 저장
-type SentMark = { text: string; id: string; seen: Set<string>; lastKey: string | null; at: number };
+// 보낸 글 하나. 보낸 대화, 보낸 때 기록에 있던 행 key 와 마지막 행 key 를 함께 저장
+type SentMark = { text: string; id: string; agent: string; seen: Set<string>; lastKey: string | null; at: number };
 
 type Row = { key: string; item: any; ts: number; seqStart: number; seqEnd: number; sig: string };
 
@@ -105,7 +105,6 @@ class ShimDaemon {
       this.epoch = newEpoch();
       this.resetSeq();
       this.turnId = null;
-      this.pending = [];
       this.messageIds.clear();
     }
     if (next.running && !this.turnId) {
@@ -144,7 +143,7 @@ class ShimDaemon {
       if (r.item.type !== "user_message") return r;
       let id = this.messageIds.get(r.key);
       if (!id) {
-        const n = this.pending.findIndex((s) => s.text.trim() === String(r.item.text ?? "").trim() && !s.seen.has(r.key)
+        const n = this.pending.findIndex((s) => s.agent === this.agent?.id && s.text.trim() === String(r.item.text ?? "").trim() && !s.seen.has(r.key)
           && (s.lastKey === null || idx > items.findIndex((x) => x.key === s.lastKey)));
         if (n < 0) return r;
         id = this.pending[n].id;
@@ -155,9 +154,11 @@ class ShimDaemon {
     });
   }
 
-  // 보내기 요청을 받은 때의 기록 상태. 업로드가 끝난 뒤 rememberSent 에 넘김
-  markSend(): Omit<SentMark, "text" | "id" | "at"> {
-    return { seen: new Set(this.rows.map((r) => r.key)), lastKey: this.rows[this.rows.length - 1]?.key ?? null };
+  // 보내기 요청을 받은 때 그 대화의 기록 상태. 업로드가 끝난 뒤 rememberSent 에 넘김
+  // - 보낸 글은 대화마다 따로. 보내는 중에 다른 대화로 갔다 와도 짝을 짓게 대화를 바꿀 때 비우지 않음
+  markSend(agent: string): Omit<SentMark, "text" | "id" | "at"> {
+    if (this.agent?.id !== agent) return { agent, seen: new Set(), lastKey: null };
+    return { agent, seen: new Set(this.rows.map((r) => r.key)), lastKey: this.rows[this.rows.length - 1]?.key ?? null };
   }
 
   rememberSent(text: string, id: string, mark: Omit<SentMark, "text" | "id" | "at">) {
@@ -706,7 +707,7 @@ class ShimSocket extends EventTarget {
         const host = shimDaemon.host;
         const id = String(m.messageId || requestId);
         if (!host) { this.reply("send_agent_message_response", { requestId, agentId: m.agentId, accepted: false, error: "Iris 창과 연결되지 않았습니다" }); return; }
-        const mark = shimDaemon.markSend();
+        const mark = shimDaemon.markSend(String(m.agentId));
         const res = await host.send({
           key: String(m.agentId), id, text: String(m.text ?? ""), images: Array.isArray(m.images) ? m.images : [], attachments: Array.isArray(m.attachments) ? m.attachments : [],
           remember: (text) => shimDaemon.rememberSent(text, id, mark),
