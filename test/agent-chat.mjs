@@ -14,13 +14,14 @@ import {
 import {
   handleAgentChat, handleAgentChatFile, handleAgentChatImage, handleAgentChatUpload, imageFromRecord, initAgentChat, inputChunks,
   ANSWER_SETTLE_MS, cardChoices, isAnsweredLeftover, subagentRelayText, optionLabel, promptIdOf, readRecords, resolveSubagentFile, uploadName,
+  noFileFrame,
 } from "../server/agent-chat.js";
 import {
   LEGACY_RECIPE, MAX_TRIES, RETRY_AFTER_MS, buildName, checkDue, latestStableTag, nextBuild, parseBuildName, parseState, promote,
   recordFailure, rollback, staticTarget,
 } from "../server/paseo-ui/plan.js";
 import { childEnv } from "../server/paseo-ui/index.js";
-import { listCommands, parseFrontmatter, rankPaths, suggestFiles } from "../server/agent-chat-tools.js";
+import { claudeBuiltins, cliBuiltinCommands, listCommands, parseFrontmatter, rankPaths, resetClaudeBuiltinsForTest, suggestFiles } from "../server/agent-chat-tools.js";
 import { parseContext } from "../server/paseo-ui/entry/iris-contexts-model.js";
 import { attachmentTag, attachmentText, contextTag, cutToken, describeAttachment, dropAttachment, dropImage, expandText, findTokens, imageTag, isLongPaste, reglue, removedTokens, shrinkTag, tokenLabel, tokensToDelete } from "../server/paseo-ui/entry/iris-inline-tokens.js";
 import { claudeFooter, claudeMeta, codexConfiguredModel, codexMeta, codexModeId, codexModelsFromCache } from "../server/agent-chat-meta.js";
@@ -955,4 +956,55 @@ test("짝을 못 찾은 보내는 중 말풍선 판정", async () => {
   assert.deepEqual(staleSends(s, { ...base, running: true }), [], "일하는 중이면 터미널 대기열에 있을 수 있음");
   assert.deepEqual(staleSends(s, { ...base, draftText: "앞 글 글 하나" }), [], "입력줄에 있으면(되돌아옴) 그쪽 처리");
   assert.deepEqual(staleSends(s, { ...base, now: 20000 }), ["a", "b"]);
+});
+
+test("새 대화(기록 파일 전)는 빈 기록으로 한 번 보내고 /clear 면 앞 대화를 지운다", () => {
+  const fresh = { fresh: true, kind: "claude", reason: "x" };
+  // 처음 연 새 대화 → 빈 기록
+  assert.deepEqual(noFileFrame({ file: null, uuid: "a", missing: 0 }, fresh), { kind: "snapshot", messages: [], hasOlder: false, source: "claude", file: null, gen: null });
+  // 같은 새 대화는 다시 보내지 않음
+  assert.equal(noFileFrame({ file: null, uuid: "a", freshUuid: "a", missing: 3 }, fresh), null);
+  // 보던 대화에서 /clear → 빈 기록으로 바꿈
+  assert.equal(noFileFrame({ file: "/p/old.jsonl", uuid: "b", freshUuid: "a", missing: 0 }, fresh).kind, "snapshot");
+  // 첫 메시지 전에 또 새 대화
+  assert.equal(noFileFrame({ file: null, uuid: "c", freshUuid: "b", missing: 2 }, fresh).kind, "snapshot");
+  // 세션 id 를 모르는 것 등은 missing 을 처음 한 번
+  const other = { reason: "모름" };
+  assert.deepEqual(noFileFrame({ file: null, uuid: null, missing: 0 }, other), { kind: "missing", reason: "모름" });
+  assert.equal(noFileFrame({ file: null, uuid: null, missing: 1 }, other), null);
+});
+
+test("Claude 내장 명령은 CLI 초기화 응답에서 받고, CLI 목록에 없는 터미널 전용 명령은 고정 목록으로 채운다", async () => {
+  const cli = cliBuiltinCommands([
+    { name: "goal", description: "Set a goal", argumentHint: "", builtin: true },
+    { name: "clear", description: "Start a new session", argumentHint: "[name]", builtin: true },
+    { name: "__remote-workflow", description: "server only", builtin: true },
+    { name: "my-skill", description: "skill", builtin: false },
+  ]);
+  assert.deepEqual(cli.map((c) => c.name), ["goal", "clear"]);
+  assert.equal(cliBuiltinCommands([]), null);
+  assert.equal(cliBuiltinCommands("x"), null);
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "iris-cmd-"));
+  const list = listCommands("claude", empty, { claude: empty, codex: empty }, cli);
+  const names = list.map((c) => c.name);
+  assert.ok(names.includes("goal"));
+  assert.ok(names.includes("resume"));   // CLI 목록에 없는 터미널 전용
+  assert.equal(list.find((c) => c.name === "clear").description, "Start a new session");   // CLI 설명이 앞섬
+  assert.equal(names.filter((n) => n === "clear").length, 1);
+  assert.ok(!listCommands("claude", empty, { claude: empty, codex: empty }).map((c) => c.name).includes("goal"));
+  // 받은 목록은 보관하고, 실패하면 1분 뒤에 다시 시도
+  resetClaudeBuiltinsForTest();
+  let runs = 0;
+  const ok = async () => { runs++; return [{ name: "goal", builtin: true }]; };
+  assert.equal((await claudeBuiltins({ run: ok })).length, 1);
+  assert.equal((await claudeBuiltins({ run: ok })).length, 1);
+  assert.equal(runs, 1);
+  resetClaudeBuiltinsForTest();
+  const fail = async () => { runs++; throw new Error("x"); };
+  assert.equal(await claudeBuiltins({ run: fail }), null);
+  assert.equal(await claudeBuiltins({ run: fail }), null);
+  assert.equal(runs, 2);
+  assert.equal(await claudeBuiltins({ run: fail, now: Date.now() + 61_000 }), null);
+  assert.equal(runs, 3);
+  resetClaudeBuiltinsForTest();
 });
