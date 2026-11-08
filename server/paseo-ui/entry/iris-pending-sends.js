@@ -60,3 +60,12 @@ export function rewoundLastId(messages, draftText, running) {
   const text = norm((last.blocks || []).filter((b) => b?.type === "text").map((b) => b.text).join(" "));
   return text && draft.includes(text) ? last.id : null;
 }
+
+// 짝을 못 찾은 "보내는 중" 말풍선: 에이전트가 쉬고 있고 터미널 입력줄에도 그 글이 없으면 터미널에 기다리는 글이 아님
+// - 기록 글이 보낸 글과 달라(대기 글 합침·첨부 경로 바뀜) 짝이 안 지어지면 그대로 두면 영원히 "보내는 중"
+// - sends: [{ id, text, at }]. 보낸 지 minAge 가 지난 것만
+export function staleSends(sends, { running, draftText, now, minAge }) {
+  if (running) return [];
+  const draft = norm(draftText);
+  return (sends || []).filter((s) => now - (s.at ?? now) >= minAge && !(draft && norm(s.text) && draft.includes(norm(s.text)))).map((s) => s.id);
+}

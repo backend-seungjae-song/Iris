@@ -946,3 +946,13 @@ test("중단 직후 입력줄로 돌아온 마지막 글 판정", async () => {
   assert.equal(rewoundLastId([...msgs, m("a1", "assistant", "1")], "1부터 40까지 세어 줘", false), null, "답이 뒤에 있으면 아님");
   assert.equal(rewoundLastId(msgs, "다른 글", false), null);
 });
+
+test("짝을 못 찾은 보내는 중 말풍선 판정", async () => {
+  const { staleSends } = await import("../server/paseo-ui/entry/iris-pending-sends.js");
+  const s = [{ id: "a", text: "글 하나", at: 0 }, { id: "b", text: "새 글", at: 9000 }];
+  const base = { running: false, draftText: "", now: 10000, minAge: 5000 };
+  assert.deepEqual(staleSends(s, base), ["a"], "쉬고 입력줄에도 없고 5초 지난 것만");
+  assert.deepEqual(staleSends(s, { ...base, running: true }), [], "일하는 중이면 터미널 대기열에 있을 수 있음");
+  assert.deepEqual(staleSends(s, { ...base, draftText: "앞 글 글 하나" }), [], "입력줄에 있으면(되돌아옴) 그쪽 처리");
+  assert.deepEqual(staleSends(s, { ...base, now: 20000 }), ["a", "b"]);
+});
