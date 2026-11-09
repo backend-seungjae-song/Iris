@@ -58,7 +58,7 @@ import { PLUGIN_THEME_NAMES, ICON_STROKE_WIDTH } from "@/styles/theme";
 import { persistAttachmentFromBlob } from "@/attachments/service";
 import { ContextChips, openContextDialog, type IrisContext } from "./iris-contexts";
 import { TaskBar, cleanOutput, type IrisTask, type TaskReader } from "./iris-tasks";
-import { attachmentText, expandText } from "./iris-inline-tokens";
+import { attachmentText, expandText, insertAtCaret } from "./iris-inline-tokens";
 import { PENDING_SEND_CSS, dropRewound, pinPendingLast, poppedSends, rewoundLastId, staleSends } from "./iris-pending-sends";
 import { StashButton, stashNow, type StashHost } from "./iris-stash";
 import { installInlineChips, syncContexts, writeComposer } from "./iris-inline-chips";
@@ -492,17 +492,17 @@ function clientCommandText(): string | null {
   return text && (resolveClientSlashCommand({ text, hasAttachments: false }) || isBranchCommand(text)) ? text : null;
 }
 // 부모가 붙인 글(@파일 멘션)을 입력창 끝에 넣고 입력창에 포커스
+// 부모가 보낸 글(@경로)은 커서 자리에. 글 없이 포커스만이면 커서를 그대로 둠
+// - 요소 칩은 칩 목록 쪽(syncContexts)이 커서 자리에 넣고 포커스 요청이 뒤따름. 끝으로 옮기면 넣은 자리를 잃음
 function focusComposer(insert: string) {
   const ta = composerTextarea();
   if (!ta) return;
-  if (insert) {
-    const before = ta.value;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    setter?.call(ta, before && !/\s$/.test(before) ? `${before} ${insert}` : before + insert);
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-  }
   ta.focus();
-  ta.setSelectionRange(ta.value.length, ta.value.length);
+  if (!insert) return;
+  const next = insertAtCaret(ta.value, ta.selectionStart, ta.selectionEnd, insert);
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(ta, next.text);
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+  ta.setSelectionRange(next.caret, next.caret);
 }
 
 // 터미널 입력줄 글을 입력창에 보임. 입력창이 비었거나 지난번에 옮긴 글 그대로일 때만 바꿈

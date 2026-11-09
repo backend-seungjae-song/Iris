@@ -52,6 +52,17 @@ test("여러 개 고르기: 줄마다 Space, 직접 입력 글, Submit 줄에서
   assert.deepEqual(questionKeys(p, FRUIT, { labels: ["배"], text: "수박" }), { chunks: ["\x1b[B", " ", "\x1b[B\x1b[B", "수박", "\x1b[B", "\r"] });
 });
 
+test("화면보다 긴 질문: 화면에 보이는 끝부분이 기록 질문의 끝이면 같은 질문", () => {
+  // 40줄 질문. 터미널에는 14번 줄부터 보이고 화면 해석은 선택지 위 마지막 8줄만 읽음
+  const long = ["긴질문시작", ...Array.from({ length: 40 }, (_, i) => `${i + 1}번 이것은 긴 질문의 ${i + 1}번째 줄입니다`), "긴질문끝"].join("\n");
+  const LONG = { question: long, header: long, multiSelect: false, options: [1, 2, 3, 4].map((n) => ({ label: `선택지 ${n}`, description: "" })) };
+  const p = extractPrompt({ ...(() => { const text = fs.readFileSync(new URL("./fixtures/ask-question/ask-long.txt", import.meta.url), "utf8"); return { text, hash: crypto.createHash("sha256").update(text).digest("hex") }; })(), columns: 54, rows: 44 });
+  assert.equal(showsQuestion(p, LONG), true);
+  assert.equal(showsQuestion(p, { ...LONG, question: long.replace("40번째", "마흔번째") }), false, "끝부분이 다르면 다른 질문");
+  assert.equal(showsQuestion(p, COLOR), false);
+  assert.deepEqual(questionKeys(p, LONG, { labels: ["선택지 2"], text: null }), { chunks: ["\x1b[B", "\r"] });
+});
+
 test("확인 화면은 Submit answers 에서 Enter, 다른 화면이면 null", () => {
   assert.deepEqual(reviewKeys(frame("ask-review")), ["\r"]);
   assert.equal(reviewKeys(frame("ask-q1")), null);
