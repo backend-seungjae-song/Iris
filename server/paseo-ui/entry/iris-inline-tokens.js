@@ -162,6 +162,18 @@ export function cutToken(text, token) {
   return { text: s.slice(0, start) + s.slice(end), caret: start };
 }
 
+// 선택 구간 [start, end) 를 insert 로 바꾼 글과 그 뒤 커서. 앞이 글자에 붙으면 공백 하나
+// - insert 가 공백으로 끝나면 뒤 글의 앞 공백 하나를 뺌(공백 두 칸 방지)
+export function insertAtCaret(text, start, end, insert) {
+  const s = String(text || "");
+  const a = Math.max(0, Math.min(Number.isInteger(start) ? start : s.length, s.length));
+  const b = Math.max(a, Math.min(Number.isInteger(end) ? end : a, s.length));
+  const before = s.slice(0, a);
+  const head = before + (before && !/\s$/.test(before) ? " " : "") + insert;
+  const after = /\s$/.test(insert) ? s.slice(b).replace(/^ /, "") : s.slice(b);
+  return { text: head + after, caret: head.length };
+}
+
 // type 칩 n 을 뺀 뒤 글: n 의 칩을 지우고 n 보다 큰 번호의 칩을 retag 로 다시 씀
 function dropNumbered(text, type, n, retag) {
   let s = String(text || "");

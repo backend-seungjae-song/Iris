@@ -23,7 +23,7 @@ import {
 import { childEnv } from "../server/paseo-ui/index.js";
 import { claudeBuiltins, cliBuiltinCommands, listCommands, parseFrontmatter, rankPaths, resetClaudeBuiltinsForTest, suggestFiles } from "../server/agent-chat-tools.js";
 import { parseContext } from "../server/paseo-ui/entry/iris-contexts-model.js";
-import { attachmentTag, attachmentText, contextTag, cutToken, describeAttachment, dropAttachment, dropImage, expandText, findTokens, imageTag, isLongPaste, reglue, removedTokens, shrinkTag, tokenLabel, tokensToDelete } from "../server/paseo-ui/entry/iris-inline-tokens.js";
+import { attachmentTag, attachmentText, contextTag, cutToken, describeAttachment, dropAttachment, dropImage, expandText, findTokens, imageTag, insertAtCaret, isLongPaste, reglue, removedTokens, shrinkTag, tokenLabel, tokensToDelete } from "../server/paseo-ui/entry/iris-inline-tokens.js";
 import { claudeFooter, claudeMeta, codexConfiguredModel, codexMeta, codexModeId, codexModelsFromCache } from "../server/agent-chat-meta.js";
 
 const line = (o) => JSON.stringify(o);
@@ -735,6 +735,14 @@ test("글 속 칩: 요소 칩 자리에 내용, 칩 없는 요소는 글 앞, �
   assert.deepEqual(findTokens(contextTag(same), [el]), [], "다른 칩의 글자로는 안 잡힘");
   // 칩 자리 글자는 줄바꿈되지 않음(일반 공백 없음)
   assert.equal(/ /.test(contextTag(el)), false);
+});
+
+test("부모가 넣는 글(@경로)은 커서 자리에, 커서는 넣은 글 바로 뒤", () => {
+  assert.deepEqual(insertAtCaret("앞글 뒤글", 3, 3, "@/a/b "), { text: "앞글 @/a/b 뒤글", caret: 9 });
+  assert.deepEqual(insertAtCaret("앞글뒤글", 2, 2, "@/x "), { text: "앞글 @/x 뒤글", caret: 7 });
+  assert.deepEqual(insertAtCaret("", 0, 0, "@/x "), { text: "@/x ", caret: 4 });
+  assert.deepEqual(insertAtCaret("ab", 1, 2, "Z"), { text: "a Z", caret: 3 }, "선택 구간은 바꿈");
+  assert.deepEqual(insertAtCaret("ab", null, null, "Z"), { text: "ab Z", caret: 4 }, "커서를 모르면 끝");
 });
 
 test("글 속 칩: 지우면 위 미리보기에서도 빼고, 뺀 이미지 뒤 번호는 당김", () => {

@@ -89,8 +89,14 @@ export function questionAnswers(questions, answers) {
 const same = (a, b) => String(a).replace(/\s+/g, " ").trim() === String(b).replace(/\s+/g, " ").trim();
 
 // 지금 화면(extractPrompt 결과)이 이 질문을 보이는가
+// - 화면 해석은 선택지 위 마지막 8줄만 읽고 화면보다 긴 질문은 윗부분이 가려짐 → 화면 글이 질문의 끝부분이면 같은 질문
+// - 끝부분 비교는 공백을 다 뺌. 터미널 줄바꿈이 낱말 중간에 들어가 공백 위치가 기록과 다름
+const squash = (s) => String(s).replace(/\s+/g, "");
 export function showsQuestion(p, q) {
-  return !!p && p.variant !== "review" && same(p.question, q.question);
+  if (!p || p.variant === "review") return false;
+  if (same(p.question, q.question)) return true;
+  const seen = squash(p.question);
+  return !!seen && squash(q.question).endsWith(seen);
 }
 
 // 지금 화면에서 보낼 키 묶음. 묶음 사이에 잠깐 쉼(글과 키를 한 번에 보내면 붙여넣기로 받음)
