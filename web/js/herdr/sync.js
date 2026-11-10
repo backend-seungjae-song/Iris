@@ -25,27 +25,48 @@ import { paintStateDot, stateLabel } from "../core/agent-state.js";
 import { renderAgents, revealAgentRow } from "./agents.js";
 import { agentByPane, nameOf } from "./state.js";
 
-let getCurTarget, setCurTarget, getSelectedSpaceId, switchToSpaceOf;
+let getCurTarget, setCurTarget, getSelectedSpaceId, switchToSpaceOf, focusInput;
 let lastAgentBySpace, tName, tSub, tDot;
 let lastUserSelect = 0, herdrSyncTimer = null, herdrSyncPane = null;
 
 export function initHerdrSync(deps) {
   ({
-    getCurTarget, setCurTarget, getSelectedSpaceId, switchToSpaceOf,
+    getCurTarget, setCurTarget, getSelectedSpaceId, switchToSpaceOf, focusInput,
     lastAgentBySpace, tName, tSub, tDot,
   } = deps);
 }
 
+// 키로 herdr 탭을 옮긴 뒤(⌥←→) 옮긴 곳에 키 입력 포커스. herdr 가 실제로 옮긴 결과가 방송으로 오므로 그때 맞춤
+// - 탭만 고른 요청은 먼저 "포커스 pane 없음"이 방송되고 뒤이어 실제 pane 이 옴 → 한 번 맞추고 끝내지 않고 잠깐 동안 매번 맞춤
+const FOLLOW_MS = 1500;
+let followUntil = 0;
+export function followInputFocus() { followUntil = Date.now() + FOLLOW_MS; }
+function followFocus() { if (Date.now() < followUntil) focusInput?.(); }
+
 export function markHerdrUserSelect() {
   lastUserSelect = Date.now();
+  herdrOnOther = false; // 고른 쪽(selectSession)이 대화 화면을 다시 맞춤
+}
+
+// herdr 가 에이전트 아닌 pane(셸 등)을 보이는 중. 선택(curTarget)은 그대로 두고 대화 화면만 닫음
+// - 선택을 비우면 요소 선택·녹화 전송 대상이 사라짐
+let herdrOnOther = false;
+const OTHER = Symbol("other");
+export function herdrShowsOther() { return herdrOnOther; }
+function setOther(on) {
+  if (herdrOnOther === on) return;
+  herdrOnOther = on;
+  callHook("agentchat.sync");
 }
 
 // 매 방송의 포커스가 최신값. 선택과 같아지면 대기 취소, 다르면 쿨다운 뒤 반영(버리면 헤더와 실제 입력 대상이 어긋남)
+// - paneId 없음 = herdr 포커스가 에이전트 아닌 pane
 export function scheduleHerdrSync(paneId) {
   clearTimeout(herdrSyncTimer);
   herdrSyncTimer = null;
-  herdrSyncPane = paneId && paneId !== getCurTarget() ? paneId : null;
-  if (!herdrSyncPane) return;
+  if (paneId && paneId === getCurTarget()) { herdrSyncPane = null; setOther(false); followFocus(); return; }
+  if (!paneId && herdrOnOther) { herdrSyncPane = null; followFocus(); return; }
+  herdrSyncPane = paneId || OTHER;
   // 서버가 포커스 요청과 겹친 방송을 focusStale 로 가려 주므로 대기는 연속 방송을 묶는 정도로 짧게 둔다.
   const wait = Math.max(100, lastUserSelect + 1500 - Date.now());
   herdrSyncTimer = setTimeout(() => applyHerdrFocus(herdrSyncPane), wait);
@@ -53,10 +74,12 @@ export function scheduleHerdrSync(paneId) {
 
 function applyHerdrFocus(paneId) {
   if (!paneId || paneId === getCurTarget()) return;
-  if (Date.now() - lastUserSelect < 1500) { scheduleHerdrSync(paneId); return; } // 사용자 선택 우선(쿨다운), 끝나면 다시 판정
+  if (Date.now() - lastUserSelect < 1500) { scheduleHerdrSync(paneId === OTHER ? null : paneId); return; } // 사용자 선택 우선(쿨다운), 끝나면 다시 판정
+  if (paneId === OTHER) { setOther(true); followFocus(); return; }
   const a = agentByPane(paneId);
   if (!a) return; // 아직 목록에 없는 pane이면 스킵
   setCurTarget(paneId);
+  herdrOnOther = false;
   if (a.workspaceId) lastAgentBySpace[a.workspaceId] = paneId; // herdr 역방향 전환도 마지막 탭으로 기록(스페이스 복귀 복원용)
   tName.textContent = nameOf(a); tSub.innerHTML = agentMark(a.agent); tSub.append(Object.assign(document.createElement("span"), { textContent: stateLabel(a) })); paintStateDot(tDot, a);
   if (a.workspaceId && a.workspaceId !== getSelectedSpaceId()) { // workspace 바뀔 때만 무거운 동기화
@@ -65,4 +88,5 @@ function applyHerdrFocus(paneId) {
   renderAgents();
   revealAgentRow(paneId);
   callHook("agentchat.sync"); // herdr 쪽에서 pane 을 옮겨도 채팅 보기가 따라간다
+  followFocus();
 }

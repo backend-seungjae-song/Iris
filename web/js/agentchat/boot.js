@@ -80,7 +80,9 @@ function agentKind(a) {
   return null;
 }
 
+// herdr 가 셸 등 에이전트 아닌 pane 을 보이면 없음 → 대화 화면을 닫고 터미널. 그 pane 의 대화/터미널 선택은 그대로라 돌아오면 다시 열림
 function currentAgent() {
+  if (ctx.herdrShowsOther?.()) return null;
   const target = ctx.getCurTarget();
   return target ? (ctx.getLastAgents() || []).find((a) => a.paneId === target) || null : null;
 }
@@ -157,6 +159,7 @@ export function initCapability(c) {
   document.addEventListener("keydown", onToggleKey, true);
 
   provide("agentchat.sync", () => sync());
+  provide("agentchat.focusInput", () => focusInput());
   provide("agentchat.settingsSection", () => ({ ...settingsSection(defaultView(), settingsFrameHeight), set: (key, value) => { if (key === "defaultView") setDefaultView(value); } }));
   window.addEventListener("message", onSettingsFrameSize);
   provide("agentchat.toggle", () => { toggleByKey(); });
@@ -269,8 +272,17 @@ function addContext(content, kind) {
   saveContexts();
   postState();
 }
+// 화면이 아직 안 떴으면 iris-chat.ready 때 보냄
+let focusWanted = false;
 function focusFrame() {
+  focusWanted = !frameReady && !!view;
   if (frameReady && view) $frame.contentWindow?.postMessage({ type: "iris-chat.focus", key: view.key }, location.origin);
+}
+// 세션을 옮긴 뒤 키 입력 받을 곳. 대화 화면이 보이면 그 입력창에 포커스하고 true, 아니면 false(앱 셸이 터미널에)
+function focusInput() {
+  if (!view || $root.hidden) return false;
+  focusFrame();
+  return true;
 }
 function removeContexts(owner, ids) {
   const list = contexts.get(owner);
@@ -526,6 +538,7 @@ function onFrameMessage(e) {
     if (chatPicking) setChatPickMode(true);
     syncLoading();
     postState();
+    if (focusWanted) focusFrame();
   } else if (e.data?.type === "iris-chat.healthy") {
     clearTimeout(frameWatch?.timer);
     frameWatch = null;

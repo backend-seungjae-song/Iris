@@ -24,6 +24,9 @@ import { childEnv } from "../server/paseo-ui/index.js";
 import { claudeBuiltins, cliBuiltinCommands, listCommands, parseFrontmatter, rankPaths, resetClaudeBuiltinsForTest, suggestFiles } from "../server/agent-chat-tools.js";
 import { parseContext } from "../server/paseo-ui/entry/iris-contexts-model.js";
 import { attachmentTag, attachmentText, contextTag, cutToken, describeAttachment, dropAttachment, dropImage, expandText, findTokens, imageTag, insertAtCaret, isLongPaste, reglue, removedTokens, shrinkTag, tokenLabel, tokensToDelete } from "../server/paseo-ui/entry/iris-inline-tokens.js";
+import { codeForCopy } from "../server/paseo-ui/entry/iris-code-copy.js";
+import { openableUrl, splitUrlTail } from "../server/paseo-ui/entry/iris-link-tail.js";
+import { terminalUrlToken } from "../web/js/panel/url-token.js";
 import { claudeFooter, claudeMeta, codexConfiguredModel, codexMeta, codexModeId, codexModelsFromCache } from "../server/agent-chat-meta.js";
 
 const line = (o) => JSON.stringify(o);
@@ -907,6 +910,31 @@ test("전달 전 보낸 글: 입력줄로 되돌아온 글 찾기, 말풍선 맨
   assert.equal(pinPendingLast([t(1)], [], []), null);
 });
 
+test("보낸 말 행에 기록 글·이미지 입히기는 두 번 적용해도 같은 행(저장소 구독 무한 반복 방지)", async () => {
+  const { patchUserRow } = await import("../server/paseo-ui/entry/iris-user-images.js");
+  const settle = (it, want) => { let cur = it; for (let k = 0; k < 5; k++) { const nx = patchUserRow(cur, want); if (nx === cur) return { row: cur, steps: k }; cur = nx; } return { row: cur, steps: Infinity }; };
+  const img = { id: "a" };
+  const sent = { kind: "user_message", id: "m", text: "⟦칩⟧ 글", images: [img] };
+  const r1 = settle(sent, { metas: [], text: "@/경로.png 글" });
+  assert.ok(r1.steps <= 1, "기록에 이미지가 없어도 멈춤(Codex·이미지 아직 못 받음)");
+  assert.deepEqual([r1.row.text, r1.row.images], ["@/경로.png 글", [img]], "보낼 때 붙인 이미지는 그대로");
+  const meta = { id: "b" };
+  const r2 = settle({ kind: "user_message", id: "m", text: "글" }, { metas: [meta], text: null });
+  assert.deepEqual([r2.steps, r2.row.images, r2.row.text], [1, [meta], "글"]);
+  const same = { kind: "user_message", id: "m", text: "글", images: [meta] };
+  assert.equal(patchUserRow(same, { metas: [meta], text: "글" }), same);
+  assert.equal(patchUserRow({ kind: "tool_call" }, { metas: [], text: "x" }).kind, "tool_call");
+});
+
+test("대화를 바꾼 뒤 처음 생긴 행은 Paseo 앱이 기록을 다시 받게 알림(돌아온 대화의 새 행이 버려지지 않게)", async () => {
+  const { rebuiltRowsNotice } = await import("../server/paseo-ui/entry/iris-rows-notice.js");
+  assert.equal(rebuiltRowsNotice({ hadRows: false, switchedSinceRows: true, fresh: true, count: 5 }), "replace", "바꾼 상태에 행이 함께 옴");
+  assert.equal(rebuiltRowsNotice({ hadRows: false, switchedSinceRows: true, fresh: true, count: 0 }), "none", "바꾼 직후 빈 목록은 행이 올 때까지 기다림");
+  assert.equal(rebuiltRowsNotice({ hadRows: false, switchedSinceRows: true, fresh: false, count: 5 }), "replace", "빈 목록 다음 상태에 행이 옴");
+  assert.equal(rebuiltRowsNotice({ hadRows: false, switchedSinceRows: false, fresh: false, count: 1 }), "stream", "같은 대화의 첫 행(새 대화)은 그대로 알림");
+  assert.equal(rebuiltRowsNotice({ hadRows: true, switchedSinceRows: false, fresh: false, count: 3 }), "replace");
+});
+
 test("입력창 임시 저장: 미리보기, 칩 번호 다시 매기기, 목록 한도", async () => {
   const { isEmptyDraft, parseStashList, pushStash, renumberForRestore, stashPreview, STASH_MAX } = await import("../server/paseo-ui/entry/iris-stash-model.js");
   const el = { id: "e1", no: 3, content: "⟦Iris⟧ 요소 선택\n요소: <button> \"보내기\"\n⟦/Iris⟧" };
@@ -1048,4 +1076,35 @@ test("대화 분기: Paseo 가 새 초안에 넣은 채팅 기록 첨부를 찾�
   assert.equal(pill.kind, "chat_history");
   assert.equal(pill.attachment, att);
   assert.deepEqual(pill.source, { serverId: "s", agentId: "pane:a" });
+});
+
+test("코드 블록 복사 글은 끝 줄바꿈만 빼고 그대로(터미널에 붙여도 마지막 줄이 바로 실행되지 않음)", () => {
+  assert.equal(codeForCopy('def main():\n    print("hi")\nmain()\n'), 'def main():\n    print("hi")\nmain()');
+  assert.equal(codeForCopy("echo hi\n\n\r\n"), "echo hi");
+  assert.equal(codeForCopy("  a\n\n  b"), "  a\n\n  b");
+  assert.equal(codeForCopy(undefined), "");
+});
+
+// 2026-11-10 사용자: "https://example.com에" 가십시오 할 때 "에"까지 링크. 터미널과 같은 규칙
+test("대화 화면 링크 끝의 한글 조사·어미와 문장 부호는 링크 밖 글자", () => {
+  assert.deepEqual(splitUrlTail("https://example.com에", terminalUrlToken), { url: "https://example.com", tail: "에" });
+  assert.deepEqual(splitUrlTail("https://example.com/docs/page에서", terminalUrlToken), { url: "https://example.com/docs/page", tail: "에서" });
+  assert.deepEqual(splitUrlTail("http://localhost:4299/로", terminalUrlToken), { url: "http://localhost:4299/", tail: "로" });
+  assert.deepEqual(splitUrlTail("https://example.com/a?b=1.", terminalUrlToken), { url: "https://example.com/a?b=1", tail: "." });
+  assert.equal(splitUrlTail("https://example.com/wiki/서울", terminalUrlToken), null);
+  assert.equal(splitUrlTail("https://example.com", terminalUrlToken), null);
+  assert.equal(splitUrlTail("링크 글자", terminalUrlToken), null);
+  // <a> 클릭(퍼센트 인코딩)과 window.open(한글 그대로)이 같은 주소가 되어야 1초 안 중복 열기를 막음
+  assert.equal(openableUrl("https://example.com%EC%97%90", terminalUrlToken), "https://example.com/");
+  assert.equal(openableUrl("https://example.com에", terminalUrlToken), "https://example.com/");
+  assert.equal(openableUrl("https://example.com/", terminalUrlToken), openableUrl("https://example.com", terminalUrlToken));
+  assert.equal(openableUrl("https://example.com/wiki/%EC%84%9C%EC%9A%B8", terminalUrlToken), "https://example.com/wiki/%EC%84%9C%EC%9A%B8");
+  assert.equal(openableUrl("https://example.com/wiki/서울", terminalUrlToken), "https://example.com/wiki/%EC%84%9C%EC%9A%B8");
+});
+
+// 새로 띄운 Codex 는 첫 메시지 전까지 rollout 파일이 없고 herdr 도 세션 id 를 모름(uuid null)
+test("새 Codex(기록 파일·세션 id 전)도 빈 대화로 한 번 보낸다", () => {
+  const fresh = { fresh: true, kind: "codex", reason: "x" };
+  assert.deepEqual(noFileFrame({ file: null, uuid: null, missing: 0 }, fresh), { kind: "snapshot", messages: [], hasOlder: false, source: "codex", file: null, gen: null });
+  assert.equal(noFileFrame({ file: null, uuid: null, freshUuid: null, missing: 1 }, fresh), null);
 });

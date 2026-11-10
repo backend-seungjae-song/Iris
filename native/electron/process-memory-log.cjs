@@ -2,7 +2,8 @@
 //
 // 소유 범위
 //   기록 timer, 기록 파일 경로, 파일 크기 상한에 따른 교체, 요청 pid 렌더러의 힙 스냅샷,
-//   앱 창 렌더러의 할당 프로파일(요청 또는 메모리 상한 초과 시).
+//   앱 창 렌더러의 할당 프로파일(요청 또는 메모리 상한 초과 시), 앱 창 문서 크기(5분 기록의 dom),
+//   요청 시 memory-infra 기록(contentTracing).
 //
 // 제공 API
 //   createProcessMemoryLog(...)의 start·sample·watchWindows·snapshotRequested. timer 는 제공하지 않음.
@@ -50,6 +51,28 @@ const FOOTPRINT_CATEGORIES = {
   "IOAccelerator (graphics)": "accelerator",
 };
 
+// 앱 창 문서와 같은 출처 iframe 의 크기. footprint 가 partitionAlloc(Blink)만 늘고 V8 이 평탄할 때
+// 어느 문서가 커지는지 확인용(2026-11 본창 누수). 읽기만 하고 iframe 주소는 query·hash 제외
+const WINDOW_DOM_PROBE = `(() => {
+  const size = (d) => { let sheets = 0, rules = 0;
+    for (const s of d.styleSheets) { sheets++; try { rules += s.cssRules.length; } catch {} }
+    return { elements: d.getElementsByTagName("*").length, sheets, rules, img: d.images.length,
+      canvas: d.getElementsByTagName("canvas").length, video: d.getElementsByTagName("video").length }; };
+  const out = size(document);
+  out.webviews = document.getElementsByTagName("webview").length;
+  out.iframes = [...document.getElementsByTagName("iframe")].slice(0, 8).map((f) => {
+    let doc = null; try { doc = f.contentDocument; } catch {}
+    return { cls: String(f.className).slice(0, 40), src: (f.getAttribute("src") || "").split(/[?#]/)[0].slice(0, 80),
+      shown: !!(f.offsetWidth || f.offsetHeight), ...(doc ? size(doc) : {}) };
+  });
+  return out;
+})()`;
+// 응답 없는 창(멈춘 렌더러)이 기록을 막지 않게
+const DOM_PROBE_MS = 5000;
+// memory-infra 기록 길이와 덤프 간격. 덤프 두 번 이상
+const TRACE_MS = 12000;
+const TRACE_DUMP_MS = 5000;
+
 const mb = (n) => Math.round(n / 104857.6) / 10;
 
 function pageUrl(raw) {
@@ -88,6 +111,7 @@ function createProcessMemoryLog({
   dir,
   fs = require("node:fs"),
   readFootprint = null,
+  contentTracing = null,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
   setTimeoutFn = setTimeout,
@@ -97,6 +121,7 @@ function createProcessMemoryLog({
   let timer = null;
   let watchTimer = null;
   let profiling = false;
+  let tracing = false;
   let lastAutoProfile = -Infinity;
   let lastWebviewProfile = -Infinity;
 
@@ -192,6 +217,23 @@ function createProcessMemoryLog({
     }));
   }
 
+  // 앱 창(type window)마다 WINDOW_DOM_PROBE 결과를 contents 행의 dom 에 붙임. 실패·시간 초과면 dom 없음
+  function windowDom(contents, done) {
+    const jobs = [];
+    for (const wc of allWebContents()) {
+      try {
+        if (wc.isDestroyed() || wc.getType() !== "window" || typeof wc.executeJavaScript !== "function") continue;
+        const row = contents.find((c) => c.wc === wc.id);
+        if (!row) continue;
+        const timeout = new Promise((resolve) => setTimeoutFn(() => resolve(null), DOM_PROBE_MS));
+        jobs.push(Promise.race([wc.executeJavaScript(WINDOW_DOM_PROBE, false), timeout])
+          .then((dom) => { if (dom && typeof dom === "object") row.dom = dom; }, () => {}));
+      } catch {}
+    }
+    if (!jobs.length) { done(); return; }
+    Promise.all(jobs).then(done, done);
+  }
+
   function rotateIfLarge() {
     try {
       if (fs.statSync(file).size < MAX_FILE_BYTES) return;
@@ -217,8 +259,10 @@ function createProcessMemoryLog({
       (readFootprint || defaultFootprint)(row.processes.map((p) => p.pid), (report) => {
         const fp = footprintRows(report);
         if (Object.keys(fp).length) row.footprint = fp;
-        write(row);
-        watchWebviews(fp, row.contents);
+        windowDom(row.contents, () => {
+          write(row);
+          watchWebviews(fp, row.contents);
+        });
       });
     } catch { write(row); }
   }
@@ -298,15 +342,37 @@ function createProcessMemoryLog({
     return null;
   }
 
-  // { pids, profile } — profile 이 참이면 그 pid 의 앱 창에 할당 프로파일, 아니면 힙 스냅샷
+  // memory-infra 기록. PartitionAlloc 을 파티션(array_buffer·buffer·fast_malloc·layout)별로, Blink 객체를 종류별로 나눔
+  // - 힙 스냅샷·할당 프로파일은 V8 만 봄. V8 이 평탄하고 partitionAlloc 만 느는 렌더러용(2026-11 본창)
+  // - 요청으로만. 기록 중 모든 프로세스가 메모리 덤프를 만들고 파일이 수 MB
+  function traceMemory() {
+    if (!contentTracing || tracing) return null;
+    tracing = true;
+    const out = path.join(dir, `memory-infra-${now().getTime()}.json`);
+    const result = (value) => write({ at: now().toISOString(), event: "trace", file: path.basename(out), result: value });
+    (async () => {
+      await contentTracing.startRecording({ included_categories: ["disabled-by-default-memory-infra"], excluded_categories: ["*"],
+        memory_dump_config: { triggers: [{ mode: "detailed", periodic_interval_ms: TRACE_DUMP_MS }] } });
+      await new Promise((resolve) => setTimeoutFn(resolve, TRACE_MS));
+      fs.mkdirSync(dir, { recursive: true });
+      await contentTracing.stopRecording(out);
+      prune(/^memory-infra-.*\.json$/);
+      result("saved");
+    })().catch((e) => result(`failed: ${String(e && e.message || e).slice(0, 120)}`)).finally(() => { tracing = false; });
+    return out;
+  }
+
+  // { pids, profile, trace } — trace 가 참이면 memory-infra 기록(pids 무시),
+  // profile 이 참이면 그 pid 의 앱 창에 할당 프로파일, 아니면 힙 스냅샷
   function snapshotRequested() {
     const request = path.join(dir, "heap-request.json");
     let pids, wantProfile;
     try {
       const body = JSON.parse(fs.readFileSync(request, "utf8"));
+      fs.unlinkSync(request);
+      if (body.trace === true) { const out = traceMemory(); return out ? [out] : []; }
       pids = new Set(body.pids);
       wantProfile = body.profile === true;
-      fs.unlinkSync(request);
     } catch { return []; }
     const files = [];
     for (const wc of allWebContents()) {

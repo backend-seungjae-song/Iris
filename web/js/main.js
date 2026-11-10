@@ -74,7 +74,7 @@ import {
   replaceHerdrState,
 } from "./herdr/state.js";
 import { initAgents, renderAgents, revealAgentRow, setChangedInfo } from "./herdr/agents.js";
-import { initHerdrSync, markHerdrUserSelect, scheduleHerdrSync } from "./herdr/sync.js";
+import { herdrShowsOther, initHerdrSync, markHerdrUserSelect, scheduleHerdrSync } from "./herdr/sync.js";
 import { initTabClose, removeTabsNow, closeTabs, retargetFileTabs, isTabDirty } from "./center/tab-close.js";
 import {
   closedTabsForView, initClosedTabs, queueReopenedBrowserHistory, reopenClosedTab, setClosedBrowserTabs,
@@ -455,6 +455,10 @@ function switchToSpaceOf(a) {
   // 스페이스만 바뀌고 에이전트 섹션이 그대로면 현재 위치를 알 수 없다.
   renderAgents(); revealAgentRow(a.paneId || curTarget);
 }
+// 세션을 옮긴 뒤 키 입력 받을 곳: 대화 화면이 보이면 그 입력창, 아니면 터미널
+function focusSessionInput() {
+  if (!callHook("agentchat.focusInput")) getXterm()?.focus();
+}
 // via: 서버 로그에 남길 조작 출처(입력이 엉뚱한 세션에 들어갔을 때 경위 추적용)
 function selectSession(target, fromSpace, via) {
   markHerdrUserSelect(); // 사용자 클릭 직후 잠깐은 herdr 역동기화가 선택을 뒤집지 못하게.
@@ -467,7 +471,7 @@ function selectSession(target, fromSpace, via) {
   initXterm();
   // 임베드된 herdr(같은 세션)를 이 에이전트 pane으로 이동 → 터미널 화면이 그 에이전트로 전환.
   wsSend({ type: "focus", target, origin: via || "unknown" });
-  if (window.innerWidth > 820) setTimeout(() => { fitTerminal(); getXterm().focus(); }, 0);
+  if (window.innerWidth > 820) setTimeout(() => { fitTerminal(); focusSessionInput(); }, 0);
   // herdr식 연동: 에이전트를 고르면 그 에이전트의 Space도 함께 포커싱(하이라이트+스크롤).
   // fromSpace=true면 Space 쪽에서 이미 온 호출이라 되돌아가는 렌더를 생략(루프 방지).
   if (!fromSpace && a && a.workspaceId && a.workspaceId !== selectedSpaceId) {
@@ -516,7 +520,7 @@ function setHerdrSyncCurTarget(value) { curTarget = value; }
 function herdrSyncSelectedSpaceId() { return selectedSpaceId; }
 initHerdrSync({
   getCurTarget: herdrSyncCurTarget, setCurTarget: setHerdrSyncCurTarget,
-  getSelectedSpaceId: herdrSyncSelectedSpaceId, switchToSpaceOf,
+  getSelectedSpaceId: herdrSyncSelectedSpaceId, switchToSpaceOf, focusInput: focusSessionInput,
   lastAgentBySpace, tName, tSub, tDot,
 });
 // (ANSI 렌더/컴포저는 xterm.js 엔진으로 대체. initXterm/renderTerm 상단 정의)
@@ -1046,6 +1050,8 @@ function handleStateMessage(m) {
       // 포커스 pane 이 에이전트가 아니면 위 동기화가 스페이스를 못 채움. 선택이 없거나 herdr 에서 닫힌 스페이스면
       // 탐색기·실행·메모가 빈 채로 또는 닫힌 스페이스에 남으므로 herdr 포커스 스페이스로 옮김
       else if (!BROWSER_MODE && !getSpaces().some((s) => s.id === selectedSpaceId)) { const w = getSpaces().find((x) => x.focused); if (w) switchToSpaceOf({ workspaceId: w.id }); }
+      // 에이전트 아닌 pane(셸 등)에 포커스 → 대화 화면을 닫고 터미널을 보임
+      if (!foc && !BROWSER_MODE && !m.focusStale && getSpaces().some((s) => s.focused)) scheduleHerdrSync(null);
       if (curTarget) { const a = agentByPane(curTarget); if (a) { tName.textContent = nameOf(a); tSub.innerHTML = `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>`; paintStateDot(tDot, a); } }
       callHook("agentchat.sync"); // 에이전트 상태(답 기다림)와 pane 목록 변화를 채팅 보기에 알린다
       const running = agents.filter((a) => a.status === "working").length;
@@ -1463,6 +1469,7 @@ function capabilityBootArgs(items) {
       getSpaces,
       getLastAgents,
       getCurTarget: terminalCurTarget,
+      herdrShowsOther,
       getProfileChromeSource, autofillBlocked,
       closedTabsForView, reopenClosedTab, uiToken,
       // 공통 북마크가 쓰는 값: 서버 상태의 현재 객체와 북마크바 다시 그리기.

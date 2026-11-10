@@ -35,7 +35,7 @@ for (const [name, re, source = web] of [
   ["분리창 요소 릴레이", /"pickrec\.deliver": \(m\) =>/, pickBoot],
   ["분리창 선택모드는 서버 방송을 따름", /"pick-mode": \(m\) => applyPickMode\(!!m\.on\)/, pickBoot],
   // 쿨다운 중 포커스 변경을 버리면 머리 이름과 실제 입력 대상이 어긋난다. 동작 검사는 test/herdr-sync.mjs
-  ["herdr 역동기화(focused)", /clearTimeout\(herdrSyncTimer\);[\s\S]*herdrSyncPane = paneId && paneId !== getCurTarget\(\) \? paneId : null;[\s\S]*Math\.max\(100, lastUserSelect \+ 1500 - Date\.now\(\)\)[\s\S]*setTimeout\(\(\) => applyHerdrFocus\(herdrSyncPane\), wait\);[\s\S]*if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*Date\.now\(\) - lastUserSelect < 1500\) \{ scheduleHerdrSync\(paneId\); return; \}[\s\S]*const a = agentByPane\(paneId\);[\s\S]*if \(!a\) return/, herdrSync],
+  ["herdr 역동기화(focused)", /clearTimeout\(herdrSyncTimer\);[\s\S]*if \(paneId && paneId === getCurTarget\(\)\) \{ herdrSyncPane = null; setOther\(false\); followFocus\(\); return; \}[\s\S]*Math\.max\(100, lastUserSelect \+ 1500 - Date\.now\(\)\)[\s\S]*setTimeout\(\(\) => applyHerdrFocus\(herdrSyncPane\), wait\);[\s\S]*if \(!paneId \|\| paneId === getCurTarget\(\)\) return;[\s\S]*Date\.now\(\) - lastUserSelect < 1500\) \{ scheduleHerdrSync\(paneId === OTHER \? null : paneId\); return; \}[\s\S]*const a = agentByPane\(paneId\);[\s\S]*if \(!a\) return/, herdrSync],
   // 위 동기화는 에이전트 pane 만 따라가서, 셸만 있는 스페이스로 시작하거나 선택한 스페이스가 herdr 에서 닫히면
   // 탐색기·실행·메모가 비거나 닫힌 스페이스에 남는다.
   ["에이전트 없는 포커스 스페이스도 선택", /scheduleHerdrSync\(foc\.paneId\);[^\n]*\n(?:\s*\/\/[^\n]*\n)+\s*else if \(!BROWSER_MODE && !getSpaces\(\)\.some\(\(s\) => s\.id === selectedSpaceId\)\) \{ const w = getSpaces\(\)\.find\(\(x\) => x\.focused\); if \(w\) switchToSpaceOf\(\{ workspaceId: w\.id \}\); \}/, mainJs],

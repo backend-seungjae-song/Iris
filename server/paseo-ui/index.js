@@ -37,6 +37,8 @@ const { stateHome } = require("../state-home.cjs");
 
 const REPO = "https://github.com/getpaseo/paseo";
 const ENTRY = fileURLToPath(new URL("./entry/iris-chat-entry.tsx", import.meta.url));
+// entry 폴더 밖에서 빌드에 복사하는 Iris 파일 [원본, 빌드 안 이름]. 같은 규칙을 터미널과 대화 화면이 함께 씀
+const SHARED_FILES = [[fileURLToPath(new URL("../../web/js/panel/url-token.js", import.meta.url)), "iris-url-token.js"]];
 const METRO_CONFIG = fileURLToPath(new URL("./entry/metro.config.cjs", import.meta.url));
 const STEP_TIMEOUT_MS = 20 * 60 * 1000;
 const KILL_GRACE_MS = 10 * 1000;
@@ -53,6 +55,7 @@ const STATIC_TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "
 const RECIPE = (() => {
   const h = createHash("sha256");
   for (const name of entryFiles()) h.update(name).update("\0").update(fs.readFileSync(path.join(path.dirname(ENTRY), name))).update("\0");
+  for (const [from, name] of SHARED_FILES) h.update(name).update("\0").update(fs.readFileSync(from)).update("\0");
   h.update(fs.readFileSync(METRO_CONFIG)).update("\0");
   h.update(JSON.stringify({ WORKSPACES, BUILD_SCRIPTS, prepare: String(prepareApp) }));
   return h.digest("hex").slice(0, 12);
@@ -230,6 +233,7 @@ async function build(want, state) {
 function prepareApp(app) {
   // 진입 파일과 그 옆 파일(iris-shim.ts 등). metro 설정은 아래에서 따로 넣음
   for (const name of entryFiles()) fs.copyFileSync(path.join(path.dirname(ENTRY), name), path.join(app, name));
+  for (const [from, name] of SHARED_FILES) fs.copyFileSync(from, path.join(app, name));
   const pkgFile = path.join(app, "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgFile, "utf8"));
   pkg.main = "iris-chat-entry.tsx";
