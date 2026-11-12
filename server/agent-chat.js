@@ -192,7 +192,8 @@ async function resolveTarget(sub) {
     let file = agent.sessionFile || null;
     if (!file && herdr) file = (await resolveCodexSession(herdr, sub.paneId))?.file || null;
     file = file ? inside(codexHome("sessions"), file) : null;
-    return file ? { file, kind } : { reason: "이 pane 에서 실행 중인 Codex 의 rollout 파일을 찾지 못했습니다" };
+    // 새로 띄운 Codex 도 첫 메시지 전까지 rollout 파일이 없음(2026-11-10 확인). Claude 새 대화처럼 빈 대화
+    return file ? { file, kind } : { fresh: true, kind, reason: "Codex 기록 파일이 아직 없습니다(첫 메시지를 보내면 생깁니다)" };
   }
   return { reason: "Claude Code·Codex pane 만 채팅으로 볼 수 있습니다" };
 }
@@ -301,8 +302,9 @@ async function tick(sub) {
       if (!hit.file) {
         const frame = noFileFrame(sub, hit);
         if (frame) send(sub.ws, { type: "agentchat.frame", key: sub.key, ...frame });
-        if (hit.fresh) { sub.freshUuid = sub.uuid; sub.meta = null; sub.metaEnd = 0; sub.metaAt = 0; }
+        if (hit.fresh) { if (sub.freshUuid !== sub.uuid || sub.file) { sub.meta = null; sub.metaEnd = 0; sub.metaAt = 0; } sub.freshUuid = sub.uuid; sub.kind = hit.kind; }
         sub.file = null;
+        if (hit.fresh) await refreshMeta(sub);
         sub.missing++;
         schedule(sub, MISSING_BACKOFF[Math.min(sub.missing - 1, MISSING_BACKOFF.length - 1)]);
         return;
@@ -572,13 +574,14 @@ async function readScreen(paneId) {
 }
 
 
+// 새 대화(기록 파일 전)도 보냄. 안 보내면 Codex 모델 목록이 없어 입력창 모델 칸이 "Error" 이고 보내지 못함
 async function refreshMeta(sub, force = false) {
-  if (sub.agentId || !sub.file || sub.closed) return;
+  if (sub.agentId || sub.closed) return;
   const now = Date.now();
   if (!force && now - sub.metaAt < META_EVERY_MS) return;
   sub.metaAt = now;
   try {
-    const got = readRecords(sub.file, sub.metaEnd);
+    const got = sub.file ? readRecords(sub.file, sub.metaEnd) : null;
     if (got) {
       if (got.end < sub.metaEnd) sub.meta = null;   // 파일이 바뀜
       sub.metaEnd = got.end;
@@ -723,9 +726,14 @@ function answerQuestion(sub, msg, reply) {
   const prev = sendQueues.get(paneId) || Promise.resolve();
   const next = prev.catch(() => {}).then(async () => {
     if (!parsed.answers) { await herdr.paneSendText(paneId, "\x1b"); return; }
+    const screenNow = await screen();
+    // 앞 질문이 이미 답해졌으면(앞서 보내다 멈춤·터미널에서 답함) 지금 화면의 질문부터
+    const start = want.questions.findIndex((q) => showsQuestion(screenNow, q));
+    if (start < 0) throw new Error("질문이 바뀌어 답하지 않았습니다");
     for (const [i, q] of want.questions.entries()) {
-      const p = await screen();
-      if (!showsQuestion(p, q)) throw new Error(i === 0 ? "질문이 바뀌어 답하지 않았습니다" : "터미널 질문 화면이 예상과 달라 멈췄습니다. 남은 답은 터미널에서 해 주세요");
+      if (i < start) continue;
+      const p = i === start ? screenNow : await screen();
+      if (!showsQuestion(p, q)) throw new Error("터미널 질문 화면이 예상과 달라 멈췄습니다. 남은 답은 터미널에서 해 주세요");
       const keys = questionKeys(p, q, parsed.answers[i]);
       if (keys.error) throw new Error(keys.error);
       for (const chunk of keys.chunks) { await herdr.paneSendText(paneId, chunk); await pause(QUESTION_STEP_MS); }

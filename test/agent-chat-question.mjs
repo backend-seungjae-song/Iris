@@ -52,6 +52,13 @@ test("여러 개 고르기: 줄마다 Space, 직접 입력 글, Submit 줄에서
   assert.deepEqual(questionKeys(p, FRUIT, { labels: ["배"], text: "수박" }), { chunks: ["\x1b[B", " ", "\x1b[B\x1b[B", "수박", "\x1b[B", "\r"] });
 });
 
+test("질문이 여럿인 카드의 여러 개 고르기: 끝 줄이 Next 여도 거기서 Enter", () => {
+  const p = frame("ask-q2-next");
+  assert.equal(showsQuestion(p, FRUIT), true);
+  assert.equal(showsQuestion(p, COLOR), false, "앞 질문(색)은 이미 답해져 화면에 없음");
+  assert.deepEqual(questionKeys(p, FRUIT, { labels: ["사과", "귤"], text: null }), { chunks: [" ", "\x1b[B\x1b[B", " ", "\x1b[B\x1b[B", "\r"] });
+});
+
 test("화면보다 긴 질문: 화면에 보이는 끝부분이 기록 질문의 끝이면 같은 질문", () => {
   // 40줄 질문. 터미널에는 14번 줄부터 보이고 화면 해석은 선택지 위 마지막 8줄만 읽음
   const long = ["긴질문시작", ...Array.from({ length: 40 }, (_, i) => `${i + 1}번 이것은 긴 질문의 ${i + 1}번째 줄입니다`), "긴질문끝"].join("\n");
@@ -67,4 +74,19 @@ test("확인 화면은 Submit answers 에서 Enter, 다른 화면이면 null", (
   assert.deepEqual(reviewKeys(frame("ask-review")), ["\r"]);
   assert.equal(reviewKeys(frame("ask-q1")), null);
   assert.equal(showsQuestion(frame("ask-review"), COLOR), false);
+});
+
+// 2026-11-10 사용자: 미리보기(preview) 있는 질문에 대화 화면으로 답하면 오류
+// - 미리보기 화면은 선택지가 왼쪽 좁은 칸이라 "설정 값 따라가기 (Recommended)" 가 두 줄로 접혀 첫 줄만 선택지 글로 읽힘
+test("미리보기 질문: 접혀 첫 줄만 보이는 선택지도 번호와 글 앞부분으로 찾는다", () => {
+  const input = JSON.parse(fs.readFileSync(new URL("./fixtures/ask-question/ask-preview.json", import.meta.url), "utf8")).questions[0];
+  const text = fs.readFileSync(new URL("./fixtures/ask-question/ask-preview.txt", import.meta.url), "utf8");
+  const p = extractPrompt({ text, columns: 106, rows: 44, hash: crypto.createHash("sha256").update(text).digest("hex") });
+  const q = { ...input, options: input.options.map((o) => ({ label: o.label, description: o.description })) };
+  assert.equal(showsQuestion(p, q), true);
+  assert.deepEqual(questionKeys(p, q, { labels: ["설정 값 따라가기 (Recommended)"], text: null }), { chunks: ["\r"] });
+  assert.deepEqual(questionKeys(p, q, { labels: ["이번 범위 밖"], text: null }), { chunks: ["\x1b[B\x1b[B", "\r"] });
+  // 번호가 같아도 글 앞부분이 다르면 다른 선택지
+  const other = { ...q, options: [{ label: "다른 선택지 (Recommended)", description: "" }, ...q.options.slice(1)] };
+  assert.equal(questionKeys(p, other, { labels: ["다른 선택지 (Recommended)"], text: null }).error, '선택지 "다른 선택지 (Recommended)" 를 찾지 못했습니다');
 });

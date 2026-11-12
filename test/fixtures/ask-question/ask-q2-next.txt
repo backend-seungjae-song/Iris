@@ -1,0 +1,18 @@
+─────────────────────────────────────────────────
+←  ☒ 색  ☐ 과일  ✔ Submit  →
+
+│ 무슨 과일?
+
+❯ 1. [ ] 사과
+         빨간 과일
+  2. [ ] 배
+         흰 과일
+  3. [ ] 귤
+         주황 과일
+  4. [ ] Type something
+     Next
+─────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate ·
+Esc to cancel

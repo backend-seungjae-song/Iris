@@ -368,6 +368,35 @@ test("목록 change 는 기준 브랜치 대비 커밋·작업 트리 변경과 
   assert.equal("change" in listed.entries[0], false, "기본 저장소 항목에는 change 를 붙이지 않는다");
 });
 
+test("기본 저장소가 원격 기본 브랜치가 아닌 브랜치에 있으면 change 는 원격 기본 브랜치와 비교한다", async (t) => {
+  const { dir, repo, message } = await fixture(t);
+  git(repo, "update-ref", "refs/remotes/origin/main", "main");
+  git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  const feature = path.join(dir, "feature");
+  git(repo, "worktree", "add", "-b", "feat/one", "--", feature, "main");
+  fs.writeFileSync(path.join(feature, "one.txt"), "one\n");
+  git(feature, "add", "one.txt"); git(feature, "commit", "-m", "feature commit");
+  // 기본 저장소는 main 보다 오래된 QA 브랜치에 머물러 있음
+  git(repo, "checkout", "-b", "qa-fix/old");
+  fs.writeFileSync(path.join(repo, "README.md"), "old\nqa\nlines\n");
+  git(repo, "commit", "-am", "qa commit");
+  const listed = await performWorktreeRequest({ type: "worktrees.list", ...message });
+  assert.deepEqual(listed.entries.find((entry) => entry.path === fs.realpathSync(feature)).change, {
+    base: "origin/main", ahead: 1, added: 1, deleted: 0, uncommitted: 0,
+    lastCommitAt: git(feature, "log", "-1", "--format=%cI", "HEAD"),
+  });
+});
+
+test("기본 저장소가 원격 기본 브랜치와 같은 이름의 브랜치에 있으면 그 로컬 브랜치와 비교한다", async (t) => {
+  const { dir, repo, message } = await fixture(t);
+  git(repo, "update-ref", "refs/remotes/origin/main", "main");
+  git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  const feature = path.join(dir, "feature");
+  git(repo, "worktree", "add", "-b", "feat/one", "--", feature, "main");
+  const listed = await performWorktreeRequest({ type: "worktrees.list", ...message });
+  assert.equal(listed.entries.find((entry) => entry.path === fs.realpathSync(feature)).change.base, "main");
+});
+
 test("worktree Git 상태 하나라도 읽지 못하면 change 는 null 이다", async (t) => {
   const { dir, repo, message } = await fixture(t);
   const broken = path.join(dir, "broken");

@@ -35,7 +35,10 @@ import { AgentStreamView } from "@/agent-stream/view";
 import { ComposerEditingSessionsProvider } from "@/composer/editing-session";
 import { CommandCenterProvider } from "@/command-center/provider";
 import { FloatingPanelPortalHost } from "@/components/ui/floating-panel-portal";
-import { KeyboardActionDispatcherProvider } from "@/keyboard/keyboard-action-dispatcher-context";
+import { KeyboardActionDispatcherProvider, useKeyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher-context";
+import { resolveKeyboardFocusScope } from "@/keyboard/focus-scope";
+import { dispatchTopWebOverlayKeyDown, keyBelongsToDomPopover } from "@/lib/overlay-root";
+import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { KeyboardShiftProvider } from "@/keyboard/shift";
 import { WindowChromeProvider } from "@/utils/desktop-window";
 import { getHostRuntimeStore, useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -59,8 +62,13 @@ import { persistAttachmentFromBlob } from "@/attachments/service";
 import { ContextChips, openContextDialog, type IrisContext } from "./iris-contexts";
 import { TaskBar, cleanOutput, type IrisTask, type TaskReader } from "./iris-tasks";
 import { attachmentText, expandText, insertAtCaret } from "./iris-inline-tokens";
+import { patchUserRow } from "./iris-user-images";
 import { PENDING_SEND_CSS, dropRewound, pinPendingLast, poppedSends, rewoundLastId, staleSends } from "./iris-pending-sends";
 import { StashButton, stashNow, type StashHost } from "./iris-stash";
+import { installCodeCopy } from "./iris-code-copy";
+import { installLinkTail, openableUrl } from "./iris-link-tail";
+// 빌드 때 web/js/panel/url-token.js 를 복사한 파일(server/paseo-ui/index.js SHARED_FILES). 저장소 entry 폴더에는 없음
+import { terminalUrlToken } from "./iris-url-token";
 import { installInlineChips, syncContexts, writeComposer } from "./iris-inline-chips";
 import type { IrisAgentMeta, IrisModelDefinition, IrisPrompt } from "./iris-agent-meta";
 import type { AttachmentMetadata } from "@/attachments/types";
@@ -391,6 +399,12 @@ shimDaemon.host = {
     return { directories: Array.isArray(r.directories) ? r.directories : [], entries: Array.isArray(r.entries) ? r.entries : [], error: r.error || undefined };
   },
   upload({ fileName, bytes }) { return uploadBlob(fileName, bytes); },
+  sendFailed(key, id, text, reason) {
+    useSessionStore.getState().rejectAgentMessageSubmission(SHIM_SERVER_ID, key, id);
+    console.warn(`[iris-chat] 보내지 못함: ${reason}`);
+    // 그 대화가 열려 있을 때만 입력창에 되돌림. 첨부는 되돌리지 않음
+    if (key === currentKey) focusComposer(text);
+  },
   command(key, text) { return sendText(key, `cmd-${Date.now().toString(36)}-${++requestSeq}`, text); },
   async mode(key, modeId) {
     const r = await ask("iris-chat.mode", { key, modeId }, MODE_TIMEOUT_MS);
@@ -416,7 +430,8 @@ let currentContexts: IrisContext[] = [];
 // 답변의 웹 링크. Paseo 는 window.open 으로 여는데 iframe 안이라 Electron 이 창을 띄우지 않음 → 부모가 Iris 브라우저 탭으로 엶
 // - 같은 클릭이 <a> 클릭과 Paseo onPress(window.open) 둘 다로 올 수 있어 1초 안의 같은 주소는 한 번만
 let lastWebLink = { href: "", at: 0 };
-function openWebLink(href: string) {
+function openWebLink(raw: string) {
+  const href = openableUrl(raw, terminalUrlToken);
   if (!/^https?:\/\//i.test(href) || !currentKey) return;
   const now = Date.now();
   if (href === lastWebLink.href && now - lastWebLink.at < 1000) return;
@@ -505,6 +520,24 @@ function focusComposer(insert: string) {
   ta.setSelectionRange(next.caret, next.caret);
 }
 
+// 포커스만 요청(세션 이동 등). 옮긴 직후에는 새 입력창이 아직 없거나 다시 그려져 포커스를 잃으므로 잠깐 동안 다시 맞춤
+// - 이 화면 밖(부모의 터미널 등)으로 포커스가 가거나 사람이 누르면 그만둠
+const FOCUS_RETRY_MS = 1500;
+let focusUntil = 0;
+function focusComposerSoon() {
+  focusUntil = Date.now() + FOCUS_RETRY_MS;
+  const tick = () => {
+    if (Date.now() > focusUntil) return;
+    const ta = composerTextarea();
+    if (ta && document.activeElement !== ta) ta.focus({ preventScroll: true });
+    setTimeout(tick, 100);
+  };
+  tick();
+}
+const stopFocusRetry = () => { focusUntil = 0; };
+window.addEventListener("blur", stopFocusRetry);
+document.addEventListener("pointerdown", stopFocusRetry, true);
+
 // 터미널 입력줄 글을 입력창에 보임. 입력창이 비었거나 지난번에 옮긴 글 그대로일 때만 바꿈
 // - 대화 화면에서 고쳐 쓰는 중이면 덮어쓰지 않음. 보낼 때 서버가 터미널 입력 칸을 다 지움
 // - 보낸 직후에는 지우기 전 화면이 한 번 더 올 수 있어 잠깐 건너뜀
@@ -562,19 +595,32 @@ function dropPoppedSends(key: string, draftText: string) {
 // - 차례가 끝나고 대기 글이 다음 차례로 들어가기 전 잠깐 쉬는 것으로 보일 수 있어 같은 판정이 3초 이어질 때만 뺌
 const STALE_MIN_AGE_MS = 5000;
 const STALE_HOLD_MS = 3000;
+const UNMARKED_MIN_AGE_MS = 20000;
 const staleSince = new Map<string, number>();
+const unmarkedSince = new Map<string, number>();
 const lastTerminal = new Map<string, { running: boolean; draft: string }>();
 let staleTimer: ReturnType<typeof setTimeout> | undefined;
 function dropStaleSends(key: string) {
   clearTimeout(staleTimer);
   const ids = new Set(pendingSendIds(key));
   const term = lastTerminal.get(key);
-  if (!ids.size || !term || key !== currentKey) { staleSince.clear(); return; }
+  if (!ids.size || !term || key !== currentKey) { staleSince.clear(); unmarkedSince.clear(); return; }
   const now = Date.now();
   const sends = shimDaemon.sentNotSeen().filter((s) => ids.has(s.id));
-  const found = new Set(staleSends(sends, { running: term.running, draftText: term.draft, now, minAge: STALE_MIN_AGE_MS }));
+  // shim 이 받지 못한 제출(보내기 중 오류 등)은 처음 본 때부터 나이를 셈. 업로드·붙여넣기 시간을 넘게 기다림
+  const marked = new Set(sends.map((s) => s.id));
+  for (const id of [...unmarkedSince.keys()]) if (!ids.has(id) || marked.has(id)) unmarkedSince.delete(id);
+  const unmarked = [...ids].filter((id) => !marked.has(id)).map((id) => {
+    if (!unmarkedSince.has(id)) unmarkedSince.set(id, now);
+    return { id, text: "", at: unmarkedSince.get(id)! };
+  });
+  const found = new Set([
+    ...staleSends(sends, { running: term.running, draftText: term.draft, now, minAge: STALE_MIN_AGE_MS }),
+    ...staleSends(unmarked, { running: term.running, draftText: term.draft, now, minAge: UNMARKED_MIN_AGE_MS }),
+  ]);
   for (const id of [...staleSince.keys()]) if (!found.has(id)) staleSince.delete(id);
   const store = useSessionStore.getState();
+  let dropped = false;
   for (const id of found) {
     const since = staleSince.get(id) ?? now;
     staleSince.set(id, since);
@@ -582,9 +628,13 @@ function dropStaleSends(key: string) {
     store.rejectAgentMessageSubmission(SHIM_SERVER_ID, key, id);
     shimDaemon.forgetSent(id);
     staleSince.delete(id);
+    unmarkedSince.delete(id);
+    dropped = true;
   }
+  // 앞 글이 멈춰 대기열에 걸린 글. 앱은 에이전트가 멈출 때만 대기열을 보내므로 쉬고 있으면 여기서 보냄
+  if (dropped && !term.running) getHostRuntimeStore().drainQueuedAgentMessage(SHIM_SERVER_ID, key);
   // 상태가 더 오지 않아도 다시 봄. 아직 보낸 지 얼마 안 된 글도 나이가 차면 다시 봄
-  if (sends.length) staleTimer = setTimeout(() => dropStaleSends(key), 1000);
+  if (sends.length || unmarked.length) staleTimer = setTimeout(() => dropStaleSends(key), 1000);
 }
 // 전달 전 말풍선을 맨 아래에(터미널 대기 글처럼). 전달되면 기록 행이 들어간 자리에 대신 들어옴
 function usePendingSendsLast(agentId: string | undefined) {
@@ -596,11 +646,15 @@ function usePendingSendsLast(agentId: string | undefined) {
       el.textContent = PENDING_SEND_CSS;
       document.head.appendChild(el);
     }
+    let applying = false;
     const pin = () => {
+      if (applying) return;
       const s = useSessionStore.getState().sessions[SHIM_SERVER_ID];
       if (!s) return;
       const next = pinPendingLast(s.agentStreamTail.get(agentId) ?? [], s.agentStreamHead.get(agentId) ?? [], pendingSendIds(agentId));
-      if (next) useSessionStore.getState().setAgentStreamState(SHIM_SERVER_ID, agentId, next);
+      if (!next) return;
+      applying = true;
+      try { useSessionStore.getState().setAgentStreamState(SHIM_SERVER_ID, agentId, next); } finally { applying = false; }
     };
     pin();
     return useSessionStore.subscribe(pin);
@@ -709,6 +763,8 @@ function installClientCommandBridge() {
   }, true);
 }
 installClientCommandBridge();
+installCodeCopy();
+installLinkTail(terminalUrlToken);
 installInlineChips({ post, openContext: openContextDialog, mods: pressMods });
 
 // 그리다 실패하면 부모에 알림. 부모는 첫 화면이 실패한 새 빌드면 이전 빌드로 되돌림
@@ -733,7 +789,9 @@ function useParentState() {
       if (e.origin !== window.location.origin || e.source !== window.parent) return;
       const type = e.data?.type;
       if (type === "iris-chat.insert" || type === "iris-chat.focus") {
-        if (e.data.key === currentKey) focusComposer(type === "iris-chat.insert" ? String(e.data.text || "") : "");
+        if (e.data.key !== currentKey) return;
+        if (type === "iris-chat.insert") focusComposer(String(e.data.text || ""));
+        else focusComposerSoon();
         return;
       }
       if (type === "iris-chat.fork-attach") {
@@ -806,23 +864,23 @@ function useUserImages(state: ChatState | null) {
   useEffect(() => {
     if (!state) return;
     const agentId = state.key;
+    // 구독 안에서 저장소를 다시 씀. 쓰기가 이 구독을 바로 다시 부르므로 그 안의 호출은 건너뜀
+    let applying = false;
     const patch = () => {
+      if (applying) return;
       const store = useSessionStore.getState();
       const items = store.sessions[SHIM_SERVER_ID]?.agentStreamTail.get(agentId);
       if (!items) return;
       let changed = false;
       const next = items.map((it: any) => {
         if (it.kind !== "user_message") return it;
-        const want = wanted.get(it.messageId) ?? wanted.get(it.id);
-        if (!want) return it;
-        const { metas } = want;
-        const text = want.text ?? it.text;
-        const has = (it.images?.length ?? 0) === metas.length;
-        if (has && text === it.text) return it;
-        changed = true;
-        return { ...it, text, ...(metas.length ? { images: metas } : {}) };
+        const out = patchUserRow(it, wanted.get(it.messageId) ?? wanted.get(it.id));
+        if (out !== it) changed = true;
+        return out;
       });
-      if (changed) store.setAgentStreamTail(SHIM_SERVER_ID, (tail) => new Map(tail).set(agentId, next));
+      if (!changed) return;
+      applying = true;
+      try { store.setAgentStreamTail(SHIM_SERVER_ID, (tail) => new Map(tail).set(agentId, next)); } finally { applying = false; }
     };
     patch();
     return useSessionStore.subscribe(patch);
@@ -839,6 +897,9 @@ function VisibleAgent({ agentId }: { agentId: string }) {
   useLayoutEffect(() => {
     if (!sync) return;
     sync.replaceVisibleAgentIds("iris-chat", [agentId]);
+    // 앱은 한 번 본 대화를 탭이 닫힐 때까지 받는 대화로 둠. Iris 는 레이아웃에 탭이 없어 지금 대화만 남김
+    // - 떠난 대화는 따라잡기에서 빠지고, 돌아오면 앱이 그 대화를 새로 따라잡음
+    sync.replaceOpenTabAgentIds([agentId]);
     return () => sync.replaceVisibleAgentIds("iris-chat", []);
   }, [agentId, sync]);
   return null;
@@ -923,8 +984,28 @@ const SHEET_HOST = {
   buildContent: () => { throw new Error("Iris 대화 화면은 시트 탭을 그리지 않습니다"); },
 } as any;
 
+// Esc → 일하는 에이전트 중단(Paseo agent-interrupt 단축키)
+// - 그 단축키를 다는 Paseo useKeyboardShortcuts 는 expo-router 가 있어야 해서 이 화면에 없음
+// - 거르는 조건은 Paseo 와 같음: 맨 위 오버레이·열린 팝오버·IME 조합 중이면 넘기고, 입력창·그 밖 포커스에서만
+// - 중단 여부(돌고 있는가·받아쓰기 취소)는 입력창 처리기가 판단
+function useEscapeInterrupt() {
+  const dispatcher = useKeyboardActionDispatcher();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (dispatchTopWebOverlayKeyDown(e) || keyBelongsToDomPopover(e) || isImeComposingKeyboardEvent(e)) return;
+      const scope = resolveKeyboardFocusScope({ target: e.target, commandCenterOpen: false });
+      if (scope !== "message-input" && scope !== "other") return;
+      dispatcher.dispatch({ id: "agent.interrupt", scope: "global" });
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [dispatcher]);
+}
+
 function IrisChat() {
   const state = useParentState();
+  useEscapeInterrupt();
   useEffect(() => useWorkspaceLayoutStore.subscribe(reportOpenedSubagents), []);
   useUserImages(state);
   usePendingSendsLast(state && !state.readOnly ? state.key : undefined);

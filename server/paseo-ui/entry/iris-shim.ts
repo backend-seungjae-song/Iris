@@ -8,6 +8,7 @@
 import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
 import { asUint8Array, decodeFileTransferFrame, FileTransferOpcode } from "@getpaseo/protocol/binary-frames/index";
 import { buildAgentForkContextAttachment } from "../server/src/server/agent/activity-curator";
+import { rebuiltRowsNotice } from "./iris-rows-notice";
 import { CODEX_ONLY_MESSAGE, agentFields, answerRow, permissionRequest, providerEntries, type IrisAgentMeta, type IrisModelDefinition, type IrisPrompt } from "./iris-agent-meta";
 
 export const SHIM_HOST = "iris-shim.invalid:80";
@@ -52,12 +53,18 @@ export interface ShimHost {
   // AskUserQuestion 답(Paseo 질문 카드 answers, 키는 header). null 이면 닫기(Esc)
   answerQuestion?(key: string, promptId: string, answers: Record<string, string> | null): Promise<{ ok: boolean; reason?: string }>;
   upload?(input: { fileName: string; mimeType: string; bytes: Blob }): Promise<{ path: string; size: number; fileName: string }>;
+  // 받았다고 답한 뒤 터미널에 넣지 못한 글. 말풍선을 빼고 글을 입력창에 되돌림
+  sendFailed?(key: string, id: string, text: string, reason: string): void;
 }
 
 // 보낸 글 하나. 보낸 대화, 보낸 때 기록에 있던 행 key 와 마지막 행 key 를 함께 저장
 type SentMark = { text: string; id: string; agent: string; seen: Set<string>; lastKey: string | null; at: number };
 
 type Row = { key: string; item: any; ts: number; seqStart: number; seqEnd: number; sig: string };
+type SavedTimeline = { rows: Row[]; epoch: string; lastSeq: number; minSeq: number; hasOlder: boolean; provider: string };
+// 저장해 두는 대화 수·짝지은 보낸 글 수 상한
+const SAVED_MAX = 30;
+const MESSAGE_IDS_MAX = 5000;
 
 // 처음 seq. 앞쪽(이전 대화)이 붙으면 아래로 내려가며 번호를 줌
 const SEQ_BASE = 1_000_000;
@@ -68,6 +75,11 @@ class ShimDaemon {
   hasOlder = false;
   private rows: Row[] = [];
   private epoch = newEpoch();
+  // 대화를 바꾼 뒤 아직 행을 만들지 않음(rebuiltRowsNotice)
+  private switchedSinceRows = false;
+  // 앞서 연 대화의 행·epoch·seq. 돌아오면 이어 쓰고, 그 대화의 기록 요청에 답할 때 씀
+  private saved = new Map<string, SavedTimeline>();
+  private awaitingRows = false;
   // 마지막으로 발급한 seq. 새 행·도구 갱신 모두 issueSeq 로만 받음(같은 번호를 두 번 주면 앱이 뒤엣것을 버림)
   private lastSeq = SEQ_BASE - 1;
   private minSeq = SEQ_BASE;
@@ -98,22 +110,37 @@ class ShimDaemon {
     const switched = !prev || prev.id !== next.id;
     // 이전 대화가 새로 생기면 앱은 대화 기록을 다시 받아야 앎. epoch 를 바꿔 다시 받게 함
     const olderAppeared = !switched && hasOlder && !this.hasOlder;
+    let restored = false;
+    if (switched) {
+      if (prev) this.saveTimeline(prev);
+      const back = this.saved.get(next.id);
+      this.saved.delete(next.id);
+      if (back) {
+        // 데몬처럼 대화마다 epoch·seq 유지. 앱은 저장해 둔 epoch 와 다른 행 알림을 버림
+        this.rows = back.rows; this.epoch = back.epoch; this.lastSeq = back.lastSeq; this.minSeq = back.minSeq;
+        this.switchedSinceRows = false;
+        this.awaitingRows = true;
+        restored = true;
+      } else {
+        this.rows = [];
+        this.switchedSinceRows = true;
+        this.awaitingRows = false;
+        this.epoch = newEpoch();
+        this.resetSeq();
+      }
+      this.turnId = null;
+    }
     this.agent = next;
     this.hasOlder = hasOlder;
     if (next.codexModels) this.codexModels = next.codexModels;
-    if (switched) {
-      this.rows = [];
-      this.epoch = newEpoch();
-      this.resetSeq();
-      this.turnId = null;
-      this.messageIds.clear();
-    }
     if (next.running && !this.turnId) {
       this.turnId = `iris-turn-${Date.now().toString(36)}`;
       this.turnStartedAt = new Date().toISOString();
       if (!switched) this.broadcastStream({ type: "turn_started", provider: next.provider, turnId: this.turnId });
     }
-    this.applyItems(this.withSentIds(items), switched);
+    // 돌아온 대화: 부모가 기록을 다시 받기 전의 빈 목록은 저장해 둔 행을 지우지 않게 건너뜀
+    if (items.length) this.awaitingRows = false;
+    if (!(this.awaitingRows && !items.length)) this.applyItems(this.withSentIds(items), switched && !restored);
     if (olderAppeared) { this.epoch = newEpoch(); this.replace(); }
     if (!next.running && this.turnId) {
       const turnId = this.turnId;
@@ -150,6 +177,8 @@ class ShimDaemon {
         id = this.pending[n].id;
         this.pending.splice(n, 1);
         this.messageIds.set(r.key, id);
+        // 대화를 바꿔도 비우지 않음. 기록 행 key 는 대화마다 달라 섞이지 않음
+        if (this.messageIds.size > MESSAGE_IDS_MAX) this.messageIds.delete(this.messageIds.keys().next().value!);
       }
       return { ...r, item: { ...r.item, messageId: id, clientMessageId: id } };
     });
@@ -176,6 +205,11 @@ class ShimDaemon {
     this.pending = this.pending.filter((s) => s.id !== id);
   }
 
+  private saveTimeline(agent: ShimAgent) {
+    this.saved.set(agent.id, { rows: this.rows, epoch: this.epoch, lastSeq: this.lastSeq, minSeq: this.minSeq, hasOlder: this.hasOlder, provider: agent.provider });
+    if (this.saved.size > SAVED_MAX) this.saved.delete(this.saved.keys().next().value!);
+  }
+
   private resetSeq() {
     this.lastSeq = SEQ_BASE - 1;
     this.minSeq = SEQ_BASE;
@@ -191,12 +225,13 @@ class ShimDaemon {
   private applyItems(items: ShimItem[], fresh: boolean) {
     const sig = (r: ShimItem) => JSON.stringify(r.item);
     if (fresh || this.rows.length === 0) {
-      const replaced = this.rows.length > 0;
+      const notice = rebuiltRowsNotice({ hadRows: this.rows.length > 0, switchedSinceRows: this.switchedSinceRows, fresh, count: items.length });
       this.rows = [];
       this.resetSeq();
       for (const r of items) this.rows.push(this.row(r, sig(r)));
-      if (replaced) this.replace();
-      else if (!fresh) for (const row of this.rows) this.broadcastRow(row);
+      if (items.length) this.switchedSinceRows = false;
+      if (notice === "replace") this.replace();
+      else if (notice === "stream") for (const row of this.rows) this.broadcastRow(row);
       return;
     }
     const start = items.findIndex((r) => r.key === this.rows[0].key);
@@ -436,48 +471,73 @@ class ShimDaemon {
 
   // fetch_agent_timeline_request 응답 본문
   // - tail: 끝에서 limit 개. before: cursor 앞쪽 limit 개, 모자라면 부모에 이전 대화를 받아 옴. after: cursor 뒤 전부
+  // - 요청한 대화로 답함(데몬과 같음). 지금 대화가 아니면 저장해 둔 행으로, 그것도 없으면 빈 쪽
+  // - 끝 커서는 데몬과 같게 tail·after 는 창 끝(lastSeq), before 는 요청 커서 바로 앞. 앱은 before 쪽이 커서에 이어지지 않으면 버림
   async timeline(req: any) {
-    const agent = this.snapshot();
+    const current = !!this.agent && String(req.agentId) === this.agent.id;
+    const src: SavedTimeline | null = current
+      ? { rows: this.rows, epoch: this.epoch, lastSeq: this.lastSeq, minSeq: this.minSeq, hasOlder: this.hasOlder, provider: this.agent!.provider }
+      : this.saved.get(String(req.agentId)) ?? null;
     const direction = req.direction ?? "tail";
+    const merge = req.mergeWindow === true ? { mergeWindow: true } : {};
+    const projection = req.projection === "canonical" ? "canonical" : "projected";
+    if (!src) {
+      const cursor = req.cursor ?? null;
+      const seq = cursor?.seq ?? 0;
+      return {
+        agentId: String(req.agentId), agent: null, direction, projection, epoch: cursor?.epoch ?? newEpoch(), reset: false, staleCursor: false, gap: false,
+        window: { minSeq: seq, maxSeq: seq, nextSeq: seq + 1 }, startCursor: cursor, endCursor: cursor,
+        hasOlder: false, hasNewer: false, entries: [], error: null, ...merge,
+      };
+    }
+    const rows = src.rows;
     const limit = typeof req.limit === "number" && req.limit > 0 ? req.limit : 40;
-    const cursor = req.cursor && req.cursor.epoch === this.epoch ? req.cursor : null;
+    const cursor = req.cursor && req.cursor.epoch === src.epoch ? req.cursor : null;
     const staleCursor = !!req.cursor && !cursor;
     let picked: Row[];
     let reset = false;
+    let endSeq: number | null;
     if (direction === "before" && cursor) {
-      let idx = this.rows.findIndex((r) => r.seqStart >= cursor.seq);
-      if (idx < 0) idx = this.rows.length;
-      if (idx < limit && this.hasOlder && this.host) {
+      let idx = rows.findIndex((r) => r.seqStart >= cursor.seq);
+      if (idx < 0) idx = rows.length;
+      if (current && idx < limit && this.hasOlder && this.host) {
         // 부모가 답하지 않으면 host.loadOlder 의 제한 시간 뒤 지금 있는 행으로 답함
         await new Promise<void>((resolve) => { this.olderWaiters.push(resolve); void this.host!.loadOlder().then(resolve); });
+        // 기다리는 사이 다른 대화로 바뀌었으면 빈 쪽
+        if (this.agent?.id !== String(req.agentId)) return this.timeline(req);
         idx = this.rows.findIndex((r) => r.seqStart >= cursor.seq);
         if (idx < 0) idx = this.rows.length;
-      }
-      picked = this.rows.slice(Math.max(0, idx - limit), idx);
+        picked = this.rows.slice(Math.max(0, idx - limit), idx);
+      } else picked = rows.slice(Math.max(0, idx - limit), idx);
+      endSeq = cursor.seq - 1;
     } else if (direction === "after" && cursor) {
-      picked = this.rows.filter((r) => r.seqEnd > cursor.seq);
+      picked = rows.filter((r) => r.seqEnd > cursor.seq);
+      endSeq = Math.max(src.lastSeq, cursor.seq);
     } else {
-      picked = this.rows.slice(-limit);
+      picked = rows.slice(-limit);
       reset = direction !== "tail" || staleCursor;
+      endSeq = picked.length ? src.lastSeq : null;
     }
+    const all = current ? this.rows : rows;
     const first = picked[0];
     const last = picked[picked.length - 1];
-    const minSeq = this.rows[0]?.seqStart ?? this.lastSeq + 1;
-    const maxSeq = Math.max(this.lastSeq, 0);
-    const firstIdx = first ? this.rows.indexOf(first) : this.rows.length;
+    const minSeq = all[0]?.seqStart ?? src.lastSeq + 1;
+    const maxSeq = Math.max(src.lastSeq, 0);
+    const firstIdx = first ? all.indexOf(first) : all.length;
+    const turnId = current ? this.turnId : null;
     return {
-      agentId: this.agent?.id ?? req.agentId, agent, direction, projection: req.projection === "canonical" ? "canonical" : "projected",
-      epoch: this.epoch, reset, staleCursor, gap: false,
+      agentId: String(req.agentId), agent: current ? this.snapshot() : null, direction, projection,
+      epoch: src.epoch, reset, staleCursor, gap: false,
       window: { minSeq, maxSeq, nextSeq: maxSeq + 1 },
-      startCursor: first ? { epoch: this.epoch, seq: first.seqStart } : (cursor ?? null),
-      endCursor: last ? { epoch: this.epoch, seq: last.seqEnd } : (cursor ?? null),
-      hasOlder: firstIdx > 0 || this.hasOlder, hasNewer: false,
+      startCursor: first ? { epoch: src.epoch, seq: first.seqStart } : (cursor ?? null),
+      endCursor: endSeq !== null ? { epoch: src.epoch, seq: endSeq } : (cursor ?? null),
+      hasOlder: firstIdx > 0 || (current ? this.hasOlder : src.hasOlder), hasNewer: false,
       entries: picked.map((r) => ({
-        provider: this.agent?.provider ?? "claude", item: r.item, timestamp: new Date(r.ts).toISOString(),
+        provider: src.provider, item: r.item, timestamp: new Date(r.ts).toISOString(),
         seqStart: r.seqStart, seqEnd: r.seqEnd, sourceSeqRanges: [{ startSeq: r.seqStart, endSeq: r.seqEnd }], collapsed: [],
-        ...(this.turnId && r === last ? { turnId: this.turnId } : {}),
+        ...(turnId && r === last ? { turnId } : {}),
       })),
-      error: null,
+      error: null, ...merge,
     };
   }
 
@@ -714,7 +774,8 @@ class ShimSocket extends EventTarget {
       case "fetch_agent_request": {
         const agent = shimDaemon.snapshot();
         const hit = agent && m.agentId === agent.id;
-        this.reply("fetch_agent_response", { requestId, agent: hit ? agent : null, project: hit ? shimDaemon.project() : null, error: hit ? null : `Agent not found: ${m.agentId}` });
+        // 모르는 대화는 오류 없는 빈 답(데몬 handleFetchAgent 와 같음)
+        this.reply("fetch_agent_response", { requestId, agent: hit ? agent : null, project: hit ? shimDaemon.project() : null, error: null });
         return;
       }
       case "agent.fork_context.request": {
@@ -737,13 +798,19 @@ class ShimSocket extends EventTarget {
         const id = String(m.messageId || requestId);
         if (!host) { this.reply("send_agent_message_response", { requestId, agentId: m.agentId, accepted: false, error: "Iris 창과 연결되지 않았습니다" }); return; }
         const mark = shimDaemon.markSend(String(m.agentId));
+        // 받자마자 받았다고 답함(데몬이 대기열에 넣은 글과 같음). 터미널에 넣기는 업로드·붙여넣기로 1초 넘게 걸림
+        // - 답을 기다리는 동안 앱은 입력창을 빈 것으로 보고 보내기 단추 자리에 중단 단추를 둠 → 연달아 보낸 글이 중단으로 눌림
+        this.reply("send_agent_message_response", { requestId, agentId: m.agentId, accepted: true, deliveryStatus: "queued", error: null });
+        const text = String(m.text ?? "");
         const res = await host.send({
-          key: String(m.agentId), id, text: String(m.text ?? ""), images: Array.isArray(m.images) ? m.images : [], attachments: Array.isArray(m.attachments) ? m.attachments : [],
-          remember: (text) => shimDaemon.rememberSent(text, id, mark),
+          key: String(m.agentId), id, text, images: Array.isArray(m.images) ? m.images : [], attachments: Array.isArray(m.attachments) ? m.attachments : [],
+          remember: (full) => shimDaemon.rememberSent(full, id, mark),
         });
         // 실패한 글은 짝 목록에서 뺌. 남겨 두면 다음에 같은 글을 보낼 때 그 기록 행을 이 글이 가져감
-        if (!res.ok) shimDaemon.forgetSent(id);
-        this.reply("send_agent_message_response", { requestId, agentId: m.agentId, accepted: !!res.ok, error: res.ok ? null : (res.reason || "보내지 못했습니다") });
+        if (!res.ok) {
+          shimDaemon.forgetSent(id);
+          host.sendFailed?.(String(m.agentId), id, text, res.reason || "보내지 못했습니다");
+        }
         return;
       }
       case "cancel_agent_request":
@@ -814,6 +881,19 @@ class ShimSocket extends EventTarget {
         this.uploads.set(requestId, { fileName: String(m.fileName || "file"), mimeType: String(m.mimeType || "application/octet-stream"), size, received: 0, chunks: [], failed: null });
         return;
       }
+      // 설정 화면이 읽는 데몬 설정. 바꿀 수 있는 설정이 없어 기본값만
+      // - rpc_error 로 답하면 앱이 같은 요청을 계속 다시 보냄
+      case "get_daemon_config_request":
+        this.reply("get_daemon_config_response", { requestId, config: { mcp: { injectIntoAgents: false } } });
+        return;
+      // git 상태. Iris 는 git 화면을 쓰지 않아 git 아닌 폴더로 답함(CheckoutStatusNotGitSchema)
+      case "checkout_status_request":
+        this.reply("checkout_status_response", {
+          cwd: String(m.cwd ?? ""), error: null, requestId, isGit: false, isPaseoOwnedWorktree: false,
+          repoRoot: null, currentBranch: null, isDirty: null, baseRef: null, aheadBehind: null,
+          aheadOfOrigin: null, behindOfOrigin: null, hasRemote: false, remoteUrl: null,
+        });
+        return;
       // /exit·/clear 의 보관 요청. 진입 파일이 입력창 단계에서 그 글을 터미널로 보내므로 여기까지 오면 거절
       // - 성공으로 답하면 앱이 이 대화를 보관된 것으로 표시함
       case "archive_agent_request":

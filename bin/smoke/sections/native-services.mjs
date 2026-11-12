@@ -202,6 +202,66 @@ export default async function run() {
       } finally { rmSync(dir, { recursive: true, force: true }); }
     });
 
+    await checkAsync("프로세스 메모리 기록은 앱 창에만 문서 크기를 붙이고, 응답 없는 창이 있어도 기록한다", async () => {
+      const { createProcessMemoryLog } = require_("../native/electron/process-memory-log.cjs");
+      const dir = mkdtempSync(path.join(tmpdir(), "iris-window-dom-"));
+      try {
+        const scripts = [];
+        const wc = (id, type, run) => ({ id, isDestroyed: () => false, getType: () => type, getOSProcessId: () => id * 100,
+          getURL: () => "http://127.0.0.1:4271/", hostWebContents: null,
+          executeJavaScript: (code) => { scripts.push({ id, code }); return run(); } });
+        const shell = wc(1, "window", async () => ({ elements: 2000, iframes: [{ src: "/paseo-ui/", shown: true, elements: 900 }] }));
+        const stuck = wc(3, "window", () => new Promise(() => {}));
+        const page = wc(2, "webview", async () => ({ elements: 1 }));
+        const log = createProcessMemoryLog({
+          app: { getAppMetrics: () => [] }, allWebContents: () => [shell, page, stuck], dir,
+          setTimeoutFn: (fn) => setImmediate(fn), readFootprint: (_pids, done) => done(null),
+        });
+        log.sample();
+        const file = path.join(dir, "process-memory.jsonl");
+        for (let i = 0; i < 100 && !existsSync(file); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        if (!existsSync(file)) throw new Error("응답 없는 창 때문에 기록하지 않는다");
+        const row = JSON.parse(readFileSync(file, "utf8").trim());
+        const dom = row.contents.find((c) => c.wc === 1).dom;
+        if (dom?.elements !== 2000 || dom.iframes[0].src !== "/paseo-ui/") throw new Error(`앱 창 문서 크기를 안 남긴다: ${JSON.stringify(dom)}`);
+        if ("dom" in row.contents.find((c) => c.wc === 3)) throw new Error("응답 없는 창에 dom 을 붙인다");
+        if (scripts.some((s) => s.id === 2) || "dom" in row.contents.find((c) => c.wc === 2)) throw new Error("웹 페이지(webview)에서 스크립트를 실행한다");
+        return true;
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    await checkAsync("memory-infra 기록은 trace 요청으로만 하고, 하는 중에는 겹쳐 시작하지 않는다", async () => {
+      const { createProcessMemoryLog } = require_("../native/electron/process-memory-log.cjs");
+      const dir = mkdtempSync(path.join(tmpdir(), "iris-memory-trace-"));
+      try {
+        const calls = [];
+        let finish;
+        const contentTracing = {
+          startRecording: async (config) => { calls.push(["start", config]); },
+          stopRecording: async (out) => { calls.push(["stop", out]); writeFileSync(out, "{}"); return out; },
+        };
+        const log = createProcessMemoryLog({ app: { getAppMetrics: () => [] }, allWebContents: () => [], dir, contentTracing,
+          setTimeoutFn: (fn) => { finish = fn; } });
+        const request = path.join(dir, "heap-request.json");
+        writeFileSync(request, JSON.stringify({ pids: [], profile: true }));
+        if (log.snapshotRequested().length || calls.length) throw new Error("trace 없는 요청으로 기록한다");
+        writeFileSync(request, JSON.stringify({ trace: true }));
+        const [out] = log.snapshotRequested();
+        if (!out || !path.basename(out).startsWith("memory-infra-") || existsSync(request)) throw new Error(`trace 요청을 처리하지 않는다: ${out}`);
+        for (let i = 0; i < 100 && !finish; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        const config = calls[0]?.[1];
+        if (!config?.included_categories?.includes("disabled-by-default-memory-infra") || config.memory_dump_config?.triggers?.[0]?.mode !== "detailed")
+          throw new Error(`memory-infra 상세 덤프로 시작하지 않는다: ${JSON.stringify(config)}`);
+        writeFileSync(request, JSON.stringify({ trace: true }));
+        if (log.snapshotRequested().length) throw new Error("기록 중에 겹쳐 시작한다");
+        finish();
+        const logFile = path.join(dir, "process-memory.jsonl");
+        for (let i = 0; i < 100 && !(existsSync(logFile) && readFileSync(logFile, "utf8").includes('"saved"')); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        if (!existsSync(out) || !readFileSync(logFile, "utf8").includes('"event":"trace"')) throw new Error("기록 파일이나 결과 행을 안 남긴다");
+        return true;
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
     await checkAsync("footprint 가 1.5GB 넘은 webview 만 5분 기록에서 프로파일하고, 끊기면 10분 뒤 다시 한다", async () => {
       const { createProcessMemoryLog, WEBVIEW_PROFILE_MB } = require_("../native/electron/process-memory-log.cjs");
       const dir = mkdtempSync(path.join(tmpdir(), "iris-webview-profile-"));

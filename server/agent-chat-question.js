@@ -111,7 +111,15 @@ export function questionKeys(p, q, a) {
     cur = to;
     if (d) chunks.push((d < 0 ? "\x1b[A" : "\x1b[B").repeat(Math.abs(d)));
   };
-  const find = (name) => opts.findIndex((o) => o.role !== "text" && label(o) === name);
+  // 미리보기(preview) 질문은 선택지가 좁은 왼쪽 칸에 접혀 첫 줄만 선택지 글로 읽힘 → 같은 번호이고 글 앞부분이 같으면 그 선택지
+  const no = (o) => Number(/^\s*(?:[›❯●○]\s*)?(\d+)[.)]/u.exec(o.text)?.[1]) || 0;
+  const find = (name) => {
+    const exact = opts.findIndex((o) => o.role !== "text" && label(o) === name);
+    if (exact >= 0) return exact;
+    const n = q.options.findIndex((o) => o.label === name) + 1;
+    const want = squash(name);
+    return n ? opts.findIndex((o) => o.role !== "text" && no(o) === n && !!squash(label(o)) && want.startsWith(squash(label(o)))) : -1;
+  };
   const typeRow = opts.findIndex((o) => o.role === "text");
   if (a.text && typeRow < 0) return { error: "직접 입력 칸을 찾지 못했습니다" };
   if (!q.multiSelect) {
@@ -128,7 +136,9 @@ export function questionKeys(p, q, a) {
     if (!!opts[i].checked !== want.has(name)) { move(i); chunks.push(" "); }
   }
   if (a.text) { move(typeRow); chunks.push(a.text); }
-  const submit = find("Submit");
+  // 질문이 여럿인 카드는 마지막 질문 전까지 끝 줄이 "Next"
+  let submit = find("Submit");
+  if (submit < 0) submit = find("Next");
   if (submit < 0) return { error: "Submit 줄을 찾지 못했습니다" };
   move(submit); chunks.push("\r");
   return { chunks };

@@ -225,7 +225,7 @@ const resourceGuard = createResourceGuard({
 });
 const processMemoryLog = createProcessMemoryLog({
   app, allWebContents: () => webContents.getAllWebContents(), allWindows: () => BrowserWindow.getAllWindows(),
-  screen, dir: path.join(IRIS_HOME, "diagnostics"),
+  screen, dir: path.join(IRIS_HOME, "diagnostics"), contentTracing: require("electron").contentTracing,
 });
 
 // 터미널 붙여넣기용 클립보드 읽기(동기). sandbox preload는 clipboard 모듈이 없어 메인이 대신 읽는다.

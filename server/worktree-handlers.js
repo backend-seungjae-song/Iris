@@ -460,8 +460,19 @@ function changeOf(target, base) {
 function forgetChange(target) {
   for (const key of changeCache.keys()) if (key.startsWith(`${target}\0`)) changeCache.delete(key);
 }
+// 비교 기준
+// - 기본 저장소가 원격 기본 브랜치와 다른 브랜치에 있으면 원격 기본 브랜치(origin/HEAD)
+// - 오래된 브랜치를 기준으로 쓰면 diff 가 수천 파일로 커져 30초마다 수 초씩 CPU 사용(2026-11-10 marble-walk 5,220파일 9.9초)
+// - 원격 기본 브랜치가 없거나 같은 이름이면 기본 저장소 브랜치
+async function compareBase(ctx) {
+  const branch = ctx.entries[0]?.branch || null;
+  let remote = "";
+  try { remote = (await git(ctx.repo, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])).trim(); } catch { return branch; }
+  if (!remote || !branch || branch === remote.slice(remote.indexOf("/") + 1)) return branch;
+  return remote;
+}
 async function describe(ctx, useOf = null) {
-  const base = ctx.entries[0]?.branch || null;
+  const base = await compareBase(ctx);
   const changes = await Promise.all(ctx.entries.map((entry, index) => index !== 0 && !entry.prunable ? changeOf(entry.path, base) : null));
   return ctx.entries.map((entry, index) => ({
     path: entry.path, label: readLabel(entry.path), branch: entry.branch || "(HEAD 분리됨)", primary: index === 0,

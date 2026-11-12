@@ -38,11 +38,14 @@ import {
 import {
   agentBranchKey, ancestorBranchKeys, buildAgentForest, visibleAgentNodes,
 } from "./agent-tree.js";
+import { herdrShowsOther } from "./sync.js";
 
 let $, esc, cssEsc, wsSend;
 let getIsLocal, getCurTarget, orderedSpaces, spk, saveCollapsed, selectSession, copyText, showToast, getSelectedSpaceId;
 let renderSpaces;
 let collapsed;
+// 고른 세션이고 터미널도 그 세션을 보이는 중. herdr 가 셸 pane 을 보이면 고른 세션이어도 다시 눌렀을 때 그 세션으로 이동
+const shownNow = (paneId) => paneId === getCurTarget() && !herdrShowsOther();
 let agentList;
 let changedInfo = new Map();
 let dragTab = null, dragTabSpace = null, dragTreeParent = null;
@@ -90,7 +93,7 @@ export function initAgents(deps) {
       const paneId = info.dataset.subPane;
       const parent = agentByPane(paneId);
       if (!parent) return;
-      if (paneId !== getCurTarget()) selectSession(paneId, false, "subagent-row");
+      if (!shownNow(paneId)) selectSession(paneId, false, "subagent-row");
       callHook("agentchat.openSubagent", {
         paneId, agentId: info.dataset.subAgent, parentLabel: nameOf(parent),
         description: info.dataset.subDesc || "", agentType: info.dataset.subType || "",
@@ -102,10 +105,10 @@ export function initAgents(deps) {
     const target = row.dataset.target;
     const agent = agentByPane(target);
     // 서브에이전트 보기가 열려 있으면 부모 줄 클릭은 그 보기를 닫는 데만 쓰고 하위 목록은 접지 않는다.
-    if (target === getCurTarget() && callHook("agentchat.closeSubagent", target)) return;
+    if (shownNow(target) && callHook("agentchat.closeSubagent", target)) return;
     const hasChildren = agent?.subagents?.length || getLastAgents().some((a) => a.parentPaneId === target);
     // 고르지 않은 줄은 이동만. 하위 목록 접기·펴기는 이미 고른 줄을 다시 누를 때만
-    if (target !== getCurTarget() || !(hasChildren && agent)) { selectSession(target, false, "sidebar"); return; }
+    if (!shownNow(target) || !(hasChildren && agent)) { selectSession(target, false, "sidebar"); return; }
     toggleAgentBranch(agentBranchKey(agent));
   });
   agentList.addEventListener("dragstart", (e) => {

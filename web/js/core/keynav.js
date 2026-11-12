@@ -40,6 +40,7 @@ import {
 import { isAgentRenaming, revealAgentRow, startInlineRename } from "../herdr/agents.js";
 import { nextRootAgentPane } from "../herdr/agent-tree.js";
 import { agentByPane, agentsOfSpace, getTabsForSpace } from "../herdr/state.js";
+import { followInputFocus } from "../herdr/sync.js";
 import { callHook } from "./hooks.js";
 import { mayWriteSharedActive } from "../browser/active-tab.js";
 import { getTerminal } from "../panel/terminal.js";
@@ -283,6 +284,7 @@ export function cycleCenterTab(dir) {
   i = (i + dir + arr.length) % arr.length;
   lastTabBySpace[sp] = arr[i].tabId;
   wsSend({ type: "tab-focus", tabId: arr[i].tabId, origin: "key-tab" }); // 세션 유무 무관 tab_id로 herdr 탭 포커스 → attach 화면 전환, 그 탭에 입력 가능
+  followInputFocus(); // 옮긴 탭이 대화 화면이면 그 입력창, 아니면 터미널에 키 입력
 }
 
 // 새 herdr 터미널 탭을 현재 스페이스(없으면 선택된 에이전트의 스페이스)에 만든다. 원격에서는 만들 수 없다.
