@@ -22,7 +22,10 @@ import {
   handleFor,
   hasTab,
   markControl,
+  partitionForProfile,
+  profileNames,
   raceDialog,
+  requestBgTab,
   requestCdp,
   resolveTarget,
   sessionSpace,
@@ -65,7 +68,8 @@ export function createCurrentServerHostPorts({ targetTokenFor, executeRelay, del
     const explicit = input.tabRef ?? input.tabId ?? input.tab;
     const tabId = explicit == null ? resolveTarget(identity.session)?.tabId : access.tabIdOfRef(explicit);
     if (!tabId) throw hostError("NOT_FOUND", "명령을 실행할 탭을 찾지 못했습니다.");
-    const gate = access.tabAllowed(identity.session, tabId);
+    // 공유 백그라운드 탭(bg:)은 서버 소유라 모든 세션이 씀 · 세션 탭 판정(tabAllowed)은 그대로
+    const gate = String(tabId).startsWith("bg:") ? { ok: true } : access.tabAllowed(identity.session, tabId);
     if (!gate.ok) throw hostError("SESSION_DENIED", gate.why || "이 세션이 쓸 수 있는 탭이 아닙니다.");
     const owner = access.qaOwner(tabId);
     if (input.requireQaOwner && owner !== identity.run) throw hostError("QA_OWNED", "QA 탭 소유권이 없습니다.");
@@ -211,6 +215,25 @@ export function createCurrentServerHostPorts({ targetTokenFor, executeRelay, del
       return result;
     },
     status: () => ({ executorReady: cdpExecutorReady(), mutationRevision, ...status() }),
+    // 공유 백그라운드 탭을 열거나 찾아 실행 대상을 돌려줌 · 같은 프로필·주소면 모든 세션이 같은 탭
+    bgOpen: async ({ identity, input }) => {
+      const partition = partitionForProfile(input.profile);
+      if (partition === null) throw hostError("NOT_FOUND", `그런 로그인 칸(프로필)이 없습니다: ${input.profile}. 있는 것: ${profileNames().join(" · ") || "(없음)"}`);
+      const opened = await requestBgTab({ op: "open", url: String(input.url || ""), partition });
+      if (!opened?.ok) throw hostError(opened?.code || "BG_TAB", opened?.error || "공유 탭을 열지 못했습니다.");
+      const tabId = String(opened.data?.tabId || "");
+      if (!tabId.startsWith("bg:")) throw hostError("BG_TAB", "공유 탭 식별자가 올바르지 않습니다.");
+      if (!await waitForTabWc(tabId, 12000)) throw hostError("TIMEOUT", "공유 탭이 서버에 등록되지 않았습니다.", { retryable: true });
+      return { ...(await resolveForCommand(identity, { tabId })), fresh: opened.data?.fresh === true,
+        challenge: opened.data?.challenge === true };
+    },
+    // 공유 탭 페이지 작업 결과를 메인이 파일로 씀 · 큰 결과가 명령 결과 보관을 거치지 않게
+    bgSave: async ({ input }) => {
+      const saved = await requestBgTab({ op: "save", tabId: String(input.tabId || ""), jobId: String(input.jobId || ""),
+        file: String(input.file || ""), base64: input.base64 === true }, 120000);
+      if (!saved?.ok) throw hostError(saved?.code || "BG_TAB", saved?.error || "공유 탭 결과를 저장하지 못했습니다.");
+      return saved.data;
+    },
     promptTargetsActivate: ({ identity, input }) => runSessionCmd("prompt-targets", input, identity.session),
     pickList: ({ identity, input }) => input.kind === "app" && identity.run
       ? runQaAppCommand("app-picks", {}, identity.session)

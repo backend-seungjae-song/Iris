@@ -1,7 +1,6 @@
 // browser_wait until: 조건이 맞는 순간 돌아오고, 넘으면 마지막 상태와 함께 돌아온다.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evalWriteHit } from "../server/human-path.js";
 import { withMcp } from "./lib/mcp-child.mjs";
 
 // eval 을 부를 때마다 다음 상태를 준다. 마지막 상태는 계속 반복한다.
@@ -67,15 +66,6 @@ test("잘못된 until·읽을 수 없는 선택자는 오류로 돌려준다", a
     assert.ok(c.isError);
     assert.match(c.content[0].text, /선택자를 읽을 수 없습니다/);
   });
-});
-
-test("판정 식은 서버의 eval 쓰기 차단에 걸리지 않는다", async () => {
-  const exprs = [];
-  await withMcp(states([{ has: true, gone: true, text: true, h: 1, len: 1 }], exprs), async (callTool) => {
-    await callTool("browser_wait", { until: { selector: "input.q[name='x']", gone: ".spinner", text: "완료", stable_ms: 0 } });
-  });
-  assert.equal(exprs.length, 1);
-  assert.equal(evalWriteHit(exprs[0]), null);
 });
 
 test("until 이 없으면 지금처럼 고정 대기를 서버에 넘긴다", async () => {

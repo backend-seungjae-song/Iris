@@ -35,7 +35,7 @@ window.feature=initCapability({acHost:{emulator:host},getSelectedSpaceId:()=> 's
 feature.screen.enter(); window.ready=true;
 `;
 
-async function withPage(run) {
+async function withPage(run, source = fixture, ready = ".emu-dp-row") {
   const server = http.createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url, "http://localhost").pathname;
@@ -43,7 +43,7 @@ async function withPage(run) {
       if (pathname === "/") {
         res.setHeader("Content-Type", "text/html");
         content = '<!doctype html><body class="layout-on emu-active"><main class="app"><aside id="emu-panel"></aside><div id="center"><div id="tabbar-row"></div><div id="emulatorview"></div></div></main><script type="module" src="/fixture.js"></script>';
-      } else if (pathname === "/fixture.js") content = fixture;
+      } else if (pathname === "/fixture.js") content = source;
       else {
         const file = path.resolve(web, `.${pathname}`);
         if (!file.startsWith(`${web}/`)) throw new Error("invalid path");
@@ -62,7 +62,7 @@ async function withPage(run) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.waitForFunction(() => window.ready);
-    await page.waitForSelector(".emu-dp-row");
+    await page.waitForSelector(ready);
     await run(page);
     assert.deepEqual(errors, []);
   } finally {
@@ -155,3 +155,52 @@ test("AVD 이름으로 복귀한 화면은 backend 없는 기존 Android 세션 
   assert.equal(await page.evaluate(() => androidPane.current().attached), true);
   assert.equal(await page.evaluate(() => androidPane.current().udid), "emulator-5554");
 }));
+
+// 분리 창이 떠 있는 채 본 창만 다시 로드된 상황: 자리 기록으로 분리 탭을 복원하는 동안 창 열기 응답이 늦음
+const detachedFixture = `
+import { initCapability, panelHtml } from '/js/emulator/boot.js';
+import { setCenterSpace } from '/js/center/tab-store.js';
+localStorage.setItem('ac.emulator.places', JSON.stringify([{ key: 'space', id: 'emu-d', label: 'iPhone', deviceId: 'ios-a', deviceKey: 'ios-a',
+  group: 'emulator', name: 'iPhone', running: true, place: 'detached', home: 'column', detachHome: 'column', index: -1 }]));
+window.messages = []; window.reports = []; window.opens = 0;
+const host = {
+  getSettings: async () => ({ ok: true, settings: {} }), setSettings: async (settings) => ({ ok: true, settings }),
+  rpc: async (method) => ({ ok: true, result: method === 'emulator.listDevices' ? [] : {} }),
+  useVolume: async () => ({ ok: true, volume: 1, muted: false }),
+  openWindow: async () => { opens += 1; await new Promise((resolve) => { window.releaseOpen = resolve; }); return { ok: true }; },
+  closeWindow: async () => ({ ok: true }),
+  onWindowClosed() {}, onQuitting() {}, onWindowBounds() {}, setPickState() {}, setRecordState() {},
+  onControlRequest(cb) { window.control = cb; }, reportControl(m) { reports.push(m.message); },
+};
+document.querySelector('#emu-panel').innerHTML = panelHtml;
+setCenterSpace('space');
+window.feature = initCapability({ acHost: { emulator: host }, getSelectedSpaceId: () => 'space', getSpaces: () => [{ id: 'space' }], spk: (id) => id,
+  renderTabs() {}, showActiveTab() {}, wsSend: (m) => messages.push(m), getCurTarget: () => 'pane-1', showToast() {} });
+feature.screen.enter(); window.ready = true;
+`;
+
+test("본 창이 다시 로드돼도 켜진 채 떠 있는 분리 창의 기기를 지목할 수 있다", async () => withPage(async (page) => {
+  await page.waitForFunction(() => typeof releaseOpen === "function");
+  await page.evaluate(() => releaseOpen());
+  await page.waitForFunction(() => opens === 1);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const running = await page.evaluate(() => JSON.parse(localStorage.getItem("ac.emulator.places")).find((r) => r.id === "emu-d").running);
+  assert.equal(running, true);
+  await page.evaluate(() => control({ action: "target", tab: "emu-d", device: "ios-a" }));
+  await page.waitForFunction(() => messages.some((m) => m.type === "emulator.target-pending") || reports.length);
+  assert.deepEqual(await page.evaluate(() => reports), []);
+  assert.equal(await page.evaluate(() => messages.find((m) => m.type === "emulator.target-pending")?.udid), "ios-a");
+}, detachedFixture, "body"));
+
+test("켜짐 기록이 이미 꺼짐으로 남았어도 분리 창이 보낸 기기로 지목하고 기록을 고친다", async () => withPage(async (page) => {
+  await page.waitForFunction(() => typeof releaseOpen === "function");
+  await page.evaluate(() => releaseOpen());
+  await page.waitForFunction(() => opens === 1);
+  await page.evaluate(() => control({ action: "target", tab: "emu-d", device: "ios-a" }));
+  await page.waitForFunction(() => messages.some((m) => m.type === "emulator.target-pending") || reports.length);
+  assert.deepEqual(await page.evaluate(() => reports), []);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("ac.emulator.places")).find((r) => r.id === "emu-d").running), true);
+  await page.evaluate(() => control({ action: "target", tab: "emu-d", device: null }));
+  await page.waitForFunction(() => reports.length);
+  assert.deepEqual(await page.evaluate(() => reports), ["먼저 기기에 연결하세요"]);
+}, detachedFixture.replace("running: true", "running: false"), "body"));

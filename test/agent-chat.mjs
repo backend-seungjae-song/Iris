@@ -237,10 +237,11 @@ test("이미지 블록은 데이터 대신 줄 위치(off)와 내용 순번(i)�
   const second = line({ type: "user", uuid: "u1", timestamp: TS, message: { role: "user", content: [{ type: "text", text: "봐 줘" }, img] } });
   const win = readTailWindow(bufferSource(`${first}\n${second}\n`), { end: Buffer.byteLength(`${first}\n${second}\n`), want: 10, kind: "claude" });
   const blocks = win.messages.find((m) => m.id === "u1").blocks;
-  assert.deepEqual(blocks[1], { type: "image", i: 1, off: Buffer.byteLength(first) + 1 });
+  assert.deepEqual({ ...blocks[1], sig: undefined }, { type: "image", i: 1, off: Buffer.byteLength(first) + 1, sig: undefined });
+  assert.match(blocks[1].sig, /^12:[0-9a-f]+$/);
   assert.ok(!JSON.stringify(win.messages).includes("iVBORw0KGgo"), "이미지 데이터가 메시지에 실렸다");
   const codex = decodeLine("codex", line({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "이것" }, { type: "input_image", image_url: "data:image/png;base64,AAAA" }] } }), "L0");
-  assert.deepEqual(codex[0].blocks[1], { type: "image", i: 1 });
+  assert.deepEqual({ ...codex[0].blocks[1], sig: undefined }, { type: "image", i: 1, sig: undefined });
 });
 
 test("기록 줄에서 이미지 꺼내기: Claude base64·대기 입력·Codex data URL, 이미지가 아니면 null", () => {
@@ -582,7 +583,8 @@ test("도구 결과 안 이미지는 위치(i·j)만 남기고 그 위치로 다
     { type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "찍음" }, png] }] } };
   const [m] = decodeLine("claude", JSON.stringify(claude), "L0");
   const r = m.blocks.find((b) => b.type === "tool-result");
-  assert.deepEqual(r.images, [{ i: 0, j: 1 }]);
+  assert.deepEqual(r.images.map(({ i, j }) => ({ i, j })), [{ i: 0, j: 1 }]);
+  assert.equal(r.images[0].sig, imageFromRecord(claude, 0, 1).sig, "기록의 서명과 다시 꺼낸 이미지의 서명이 같다");
   assert.match(r.output, /찍음/);
   assert.equal(imageFromRecord(claude, 0, 1).bytes.toString(), "shot");
   assert.equal(imageFromRecord(claude, 0, 0), null);       // 글 칸은 이미지 아님
@@ -590,7 +592,7 @@ test("도구 결과 안 이미지는 위치(i·j)만 남기고 그 위치로 다
   const codex = { type: "response_item", timestamp: "2026-11-06T00:00:00Z", payload: { type: "function_call_output", call_id: "c1",
     output: [{ type: "input_text", text: "ok" }, { type: "input_image", image_url: `data:image/png;base64,${Buffer.from("cx").toString("base64")}` }] } };
   const [cm] = decodeLine("codex", JSON.stringify(codex), "L0");
-  assert.deepEqual(cm.blocks[0].images, [{ i: 0, j: 1 }]);
+  assert.deepEqual(cm.blocks[0].images.map(({ i, j }) => ({ i, j })), [{ i: 0, j: 1 }]);
   assert.equal(imageFromRecord(codex, 0, 1).bytes.toString(), "cx");
   // 이미지 없는 도구 결과에는 images 칸이 없음(폰 기록 변환이 받는 모양 그대로)
   const plain = { ...claude, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t2", content: "텍스트" }] } };
@@ -1107,4 +1109,28 @@ test("새 Codex(기록 파일·세션 id 전)도 빈 대화로 한 번 보낸다
   const fresh = { fresh: true, kind: "codex", reason: "x" };
   assert.deepEqual(noFileFrame({ file: null, uuid: null, missing: 0 }, fresh), { kind: "snapshot", messages: [], hasOlder: false, source: "codex", file: null, gen: null });
   assert.equal(noFileFrame({ file: null, uuid: null, freshUuid: null, missing: 1 }, fresh), null);
+});
+
+// 권한 질문의 자동 차단 카운트다운은 매초 바뀜. 질문 id 와 내용에 넣으면 누른 답이 "질문이 바뀌어"로 거절됨
+test("권한 질문 id 는 자동 차단 카운트다운이 줄어도 그대로다", async () => {
+  const { extractPrompt } = await import("../server/remote/features/prompts.js");
+  const { createHash } = await import("node:crypto");
+  const screen = (left) => [
+    "─".repeat(60), " Bash command", " Find store-touched files", "╌".repeat(60),
+    " │ git diff --name-only HEAD | sort -rn | head -40", "╌".repeat(60),
+    " │ Dangerous rm operation not ruled out — the shell may read this command",
+    " │ differently than it was parsed",
+    ` ⚠ Claude Code will automatically block this request in ${left}, to avoid holding up an`,
+    " unattended session", "", "", " Do you want to proceed?", " ❯ 1. Yes", "   2. No", "",
+    " Esc to cancel · Tab to amend · ctrl+e to explain",
+  ].join("\n");
+  const read = (text) => extractPrompt({ text, hash: createHash("sha256").update(text).digest("hex"), columns: 100, rows: 40 });
+  const sub = { paneId: "p1", promptGen: 0 };
+  for (const [a, b] of [["1:27", "1:26"], ["about 2 minutes", "about 1 minute"]]) {
+    const [pa, pb] = [read(screen(a)), read(screen(b))];
+    assert.equal(cardChoices(pa).length, 2);
+    assert.equal(promptIdOf(sub, pa), promptIdOf(sub, pb), `${a} → ${b}`);
+    assert.doesNotMatch(pa.detail, /automatically block|unattended session/);
+    assert.match(pa.detail, /Dangerous rm operation not ruled out/);
+  }
 });

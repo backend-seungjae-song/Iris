@@ -19,7 +19,10 @@ int remoteInboundFrameLimit(String data) {
   try {
     final decoded = jsonDecode(data);
     if (decoded is Map<String, dynamic>) {
-      if (decoded['type'] == 'browser.frame') return maximumBrowserFrameBytes;
+      if (decoded['type'] == 'browser.frame' ||
+          decoded['type'] == 'media.image.result') {
+        return maximumBrowserFrameBytes;
+      }
       if (decoded['type'] == 'browser.draft.result') {
         return maximumBrowserDraftBytes;
       }

@@ -325,6 +325,23 @@ class TranscriptPage extends ServerMessage {
   final String? before;
 }
 
+// 대화 속 이미지(iris-media) 바이트 한 조각. offset 부터 bytes 길이만큼, 전체는 size
+class MediaImageChunk extends ServerMessage {
+  const MediaImageChunk({
+    required this.rid,
+    required this.mime,
+    required this.size,
+    required this.offset,
+    required this.bytes,
+  });
+
+  final String rid;
+  final String mime;
+  final int size;
+  final int offset;
+  final Uint8List bytes;
+}
+
 class TranscriptAppend extends ServerMessage {
   const TranscriptAppend({required this.agent, required this.items});
 
@@ -726,6 +743,23 @@ Map<String, Object> transcriptPageRequest({
   };
 }
 
+Map<String, Object> mediaImageRequest({
+  required String rid,
+  required String media,
+  required int offset,
+}) {
+  if (!_hex128.hasMatch(media)) {
+    throw const ProtocolException('이미지 주소가 올바르지 않습니다.');
+  }
+  if (offset < 0) throw const ProtocolException('이미지 위치가 올바르지 않습니다.');
+  return {
+    'type': 'media.image',
+    'rid': _checkedRid(rid),
+    'media': media,
+    'offset': offset,
+  };
+}
+
 Map<String, Object> transcriptWatchRequest({
   required String rid,
   required String agent,
@@ -964,6 +998,47 @@ ServerMessage parseServerMessage(String text) {
           decoded['requests'] is List) {
         final requests = _parseList(decoded['requests'], _parseRequest);
         if (requests != null) return RequestsMessage(requests);
+      }
+    case 'media.image.result':
+      final size = decoded['size'];
+      final offset = decoded['offset'];
+      final data = decoded['data'];
+      if (_hasExactKeys(decoded, {
+            'type',
+            'rid',
+            'mime',
+            'size',
+            'offset',
+            'data',
+          }) &&
+          _validRid(decoded['rid']) &&
+          const {
+            'image/png',
+            'image/jpeg',
+            'image/gif',
+            'image/webp',
+          }.contains(decoded['mime']) &&
+          size is int &&
+          size > 0 &&
+          size <= 64 * 1024 * 1024 &&
+          offset is int &&
+          offset >= 0 &&
+          offset <= size &&
+          data is String) {
+        try {
+          final bytes = base64Decode(data);
+          if (offset + bytes.length <= size) {
+            return MediaImageChunk(
+              rid: decoded['rid'] as String,
+              mime: decoded['mime'] as String,
+              size: size,
+              offset: offset,
+              bytes: bytes,
+            );
+          }
+        } on FormatException {
+          // 아래의 형식 오류로 처리
+        }
       }
     case 'transcript':
       if (_hasExactKeys(decoded, {'type', 'rid', 'agent', 'items', 'before'}) &&

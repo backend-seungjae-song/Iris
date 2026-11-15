@@ -1,0 +1,9 @@
+  Question 1/2 (2 unanswered)
+  좋아하는 색은 무엇인가요?
+
+  › 1. 빨강               빨강을 선택합니다.
+    2. 파랑               파랑을 선택합니다.
+    3. 초록               초록을 선택합니다.
+    4. None of the above  Optionally, add details in notes (tab)
+
+  tab to add notes | enter to submit answer | ←/→ to navigate questions | esc to interrupt

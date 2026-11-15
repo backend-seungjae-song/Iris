@@ -67,7 +67,7 @@ import * as spaceKey from "./space-key.js";
 //   pick 기록 함수와 answerUserAsk. 원시 Map·Set·timer는 노출하지 않는다.
 //
 // 의존 대상
-//   browser-runtime·browser-state-owner·qa-journal·human-path·bulk-fill owner에 의존하고,
+//   browser-runtime·browser-state-owner·qa-journal·bulk-fill owner에 의존하고,
 //   broadcast는 composition root에서 주입받으며 inbound handler나 transport를 import하지 않는다.
 //
 // 유지 조건

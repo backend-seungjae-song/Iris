@@ -122,6 +122,8 @@ const { createCdpTransport } = require("./cdp-transport.cjs");
 const { createContextActionCommand } = require("./cdp-context-action.cjs");
 let contextActionCommand = async () => ({ ok: false, code: "unavailable" });
 function setContextActionProvider(getActions) { contextActionCommand = createContextActionCommand(getActions); }
+let bgTabsHandler = null;
+function setBgTabsHandler(fn) { bgTabsHandler = typeof fn === "function" ? fn : null; }
 const deviceEmulation = createDeviceEmulation({
   attach: (wc) => ensureAttached(wc, { observe: false }),
   yieldToExplicitViewport: (wcId) => hiddenViewport.yieldToExplicitViewport(wcId),
@@ -168,6 +170,7 @@ const cdpTransport = createCdpTransport({
   relayControl: unitWiring.relayControl(BASE_COMMANDS),
   features: ["worker-command-unit", "worker-input-commands", "worker-page-commands", "worker-native-commands", "worker-qa-input-commands", "worker-qa-observe-commands", "worker-ax-tree"],
   onRegistered: () => replayExecutorState(),
+  bgTabs: (args) => (bgTabsHandler ? bgTabsHandler(args) : Promise.reject(new Error("공유 탭이 아직 준비되지 않았습니다."))),
 });
 const { ctlSend, setupCdpControl } = cdpTransport;
 
@@ -1049,7 +1052,7 @@ function paintState(wcId) {
   try { return paintableProbe(wcId) || { ok: true }; } catch { return { ok: true }; }
 }
 function setViewportNotify(fn) { viewportNotify = fn; }
-module.exports = { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setContextActionProvider,
+module.exports = { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setContextActionProvider, setBgTabsHandler,
   applyViewportTo: (wc, args) => deviceEmulation.apply(wc, args),
   setTouchDrag: (wc, on) => deviceEmulation.setTouchDrag(wc, on),
   forgetSecrets: resultSafety.forgetSecrets, clearAutoViewport, setShownProbe, setShownKnownProbe, setDefaultViewport,

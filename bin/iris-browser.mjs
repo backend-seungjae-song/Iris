@@ -7,10 +7,10 @@
 //   iris-browser click @e5             ref 요소 클릭 (snapshot 후)
 //   iris-browser click "button.pay"    CSS 선택자로 클릭 (snapshot 불필요, 녹화 재현용)
 //   iris-browser dblclick @e5          더블클릭
-//   iris-browser goto google.com       URL 이동(다른 사이트로 넘어갈 때만. 같은 사이트 안은 눌러서 간다)
+//   iris-browser goto google.com       URL 이동
 //   iris-browser type "안녕"           현재 포커스에 텍스트 입력
 //   iris-browser key Enter             특수 키(Enter/Tab/Backspace…)
-//   iris-browser eval "document.title" 페이지에서 JS 실행. 읽기만 가능(누르기·값 주입·이동은 서버가 거부)
+//   iris-browser eval "document.title" 페이지에서 JS 실행
 //   iris-browser text                  본문 텍스트(innerText)
 //   iris-browser screenshot            PNG 저장(경로 반환)
 //   iris-browser url                   현재 URL/제목
@@ -64,13 +64,9 @@ import { port as acPort } from "../server/env.cjs";
 // 지목받았거나 자기 스페이스인 탭만 통과한다. 그 판정은 서버가 한다.
 const argv = process.argv.slice(2);
 let adhocTab = null;
-// --reason "…" : 같은 사이트 안을 굳이 주소로 이동해야 할 때의 이유. 서버가 그 이동을 통과시키고
-// 회차 기록에 "주소로 건너뜀"으로 남긴다. 눌러서 갈 수 있는 곳에는 쓰지 않는다.
-let skipReason = null;
 for (let i = 0; i < argv.length; i++) {
   // 쉼표로 여러 개(최대 4)를 줄 수 있다. 그룹으로 묶어둔 탭들에 같은 명령을 한 번에 실행한다.
   if (argv[i] === "--tab" && argv[i + 1] != null) { adhocTab = String(argv[i + 1]).split(",").map((t) => t.trim().replace(/^@/, "")).filter(Boolean).join(","); argv.splice(i, 2); i--; continue; }
-  if (argv[i] === "--reason" && argv[i + 1] != null) { skipReason = String(argv[i + 1]); argv.splice(i, 2); i--; }
 }
 const [cmd, ...rest] = argv;
 // 목록을 직접 적어두면 명령이 늘어도 그대로 남아, 있는 명령이 없는 것처럼 보인다(확인 결과:
@@ -80,12 +76,10 @@ const HELP = `사용법: iris-browser <명령> [인자]  (공통: --tab @핸들 
   보기      snapshot [--role R] [--name N] [--region R] [--cursor N] [--budget N]
             text · url · screenshot · observe · tabs
   이동      goto <url> · back · forward · reload · wait [ms]
-            goto는 다른 사이트로 넘어갈 때만 — 같은 사이트 안은 눌러서 간다(서버가 거부).
-            그 경로가 확인 대상이 아니면 goto <url> --reason "이유"
   조작      click · dblclick · hover · fill <대상> <값> · type <글> · key <키> · select <대상> <값>
             focus <대상> · clear <대상> · check <대상> [off]
             scroll <down|up|top|bottom|픽셀> · scrollto <y>
-            eval <식>   읽기만 — 누르기·값 주입·이동은 위 조작 명령으로(서버가 거부)
+            eval <식>   페이지에서 JS 실행
   화면      viewport <가로> <세로> [배율]   탭 화면 크기 지정(반응형 확인) · viewport clear 해제
   로그인    login [아이디]        저장된 계정으로 아이디/비번 칸을 채운다(허용된 것만)
   파일      upload <경로…> · download <폴더|off> [once]
@@ -117,7 +111,7 @@ switch (cmd) {
     if (a.startsWith("@")) args.ref = rest[0]; else args.sel = a;
     break;
   }
-  case "goto": args.url = arg; if (skipReason) args.reason = skipReason; break;
+  case "goto": args.url = arg; break;
   case "type": args.text = arg; break;
   case "key": args.key = rest[0] || "Enter"; break;   // "Shift+Enter"처럼 조합도 한 인자로
   case "eval": args.expression = arg; break;

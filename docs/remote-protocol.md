@@ -67,6 +67,8 @@ Mac 화면은 연결 순서의 PIN 단계 안에서 숫자 6–32자리와 확�
 
 `transcript.page`의 `user`·`assistant` 글과 질문·허용 요청·사람 차례 본문은 GitHub Flavored Markdown으로 표시한다. 폰은 제목, 굵게·기울임, 중첩 목록, 인용, 표, 링크, 인라인 코드와 코드 블록을 지원한다. 코드 블록은 언어 이름에 따라 문법을 표시하고 줄을 접지 않으며 복사할 수 있다. `diff` 블록은 추가·삭제 줄을 구분한다. 링크와 이미지 대체 글자를 누르면 주소 확인과 복사를 제공한다. 대화의 확인창에는 caps에 `browser.tab.new`가 있을 때 `Mac 브라우저에서 열기`를 표시한다. 사용자가 이 버튼을 누를 때만 해당 에이전트 스페이스에 새 탭을 요청한다. 성공하면 응답의 `tab` ref와 해당 `agent` ref로 폰의 BrowserScreen을 연다. 실패하면 이동하지 않고 주소·파일·서버 오류에 맞는 사유를 표시한다. 새 탭 ref가 없는 이전 서버 응답에는 Mac 열기 성공만 안내한다. 사용자가 이 버튼을 누른 요청에만 화면을 이동하며 이미지도 네트워크에서 받지 않는다.
 
+대화 기록 속 이미지(사용자가 붙인 이미지, 도구 결과의 스크린샷)는 `transcript.page`·`transcript.append` 글에 `![이미지](iris-image:<32자리 ref>)`로 들어간다. ref는 아래 파일 링크와 같은 보관 한도(4,096개)를 쓰며 기록 파일 이름·inode·줄 위치·이미지 데이터 서명에 묶인다. 같은 이미지는 첫 쪽과 실시간 알림에서 같은 ref를 받는다. 폰은 `{type:"media.image",rid,media,offset}`로 바이트를 받는다. 응답 `{type:"media.image.result",rid,mime,size,offset,data}`의 `data`는 원본 최대 360KiB의 base64이고 `mime`은 PNG·JPEG·GIF·WebP 중 하나다. 이 응답은 `browser.frame`과 같은 520KiB 프레임 한도를 쓴다. 폰은 `offset`을 늘려 `size`까지 이어 받는다. 기록 파일이 다시 쓰였거나 그 줄의 이미지가 달라졌거나 ref가 만료됐으면 `expired` 오류다. 폰은 `iris-image` 이미지만 대화 안에 그리고 누르면 확대 화면을 연다. 다른 주소의 이미지는 계속 받지 않는다. `iris-media` 파일 링크는 전처럼 누르면 Mac에서 연다.
+
 폰은 `transcript.page` 응답을 30초 동안 기다리며 그동안 대화 화면에 진행 표시를 둔다. 브라우저 화면과 조작은 CDP 명령 30초, 잠든 탭 준비 12초와 화면 변환 시간을 포함한 요청별 한도를 쓴다. 다른 요청은 기본 10초 한도를 쓴다.
 
 ## 2. 새 요청 표
@@ -115,10 +117,6 @@ Mac 화면은 연결 순서의 PIN 단계 안에서 숫자 6–32자리와 확�
 | `github.pr` | 현재 브랜치 PR과 검사 상태 | `github.pr.result` |
 | `github.check.log` | 선택한 실패 검사 로그 | `github.check.log.result` |
 | `github.check.draft` | 실패 로그를 입력창에 넣기 | `remote.action.result` |
-| `paseo.open` | 대화 화면 웹뷰 티켓 | `paseo.open.result` |
-| `chat.open` | Paseo 대화 열기 | `chat.open.result` |
-| `chat.older` | 이전 대화 요청 | `remote.action.result` |
-| `chat.close` | 대화 닫기 | `remote.action.result` |
 
 Git 요청은 읽기 전용이다. stage, commit, push 요청은 없다. `git.diff.draft`와 `github.check.draft`는 내용을 제출하지 않고 에이전트 입력창에 넣는다. 에이전트가 작업 중이면 `busy`다.
 
@@ -287,34 +285,6 @@ GitHub capability는 `gh` 실행 파일 설치 여부로 결정한다. 로그인
 - `github.check.log`: `{type,rid,agent,run}`. `run`은 숫자 1–18자리이며 현재 PR의 검사여야 한다.
 - 결과: `{type:"github.check.log.result",rid,run,log,truncated}`. `log`는 UTF-8 40,000바이트 이하다. 서버가 자르면 `truncated:true`다.
 - `github.check.draft`: `{type,rid,agent,run,text?}`. `text` 1–2,000자. 서버가 실패 로그와 글을 에이전트 입력창에 넣는다.
-
-## 6-1. Paseo 대화 화면
-
-`caps.get` 의 `requests` 에 `chat.open` 이 있으면 폰이 에이전트의 Paseo 대화 화면을 열 수 있다. 화면은 Mac 의 Iris 서버가 빌드한 Paseo UI(`/paseo-ui/`)이고, 대화 데이터는 이 연결로 받아 웹뷰에 넣는다. Paseo 데몬은 쓰지 않는다.
-
-| 요청 | 모양 | 응답 |
-|---|---|---|
-| `paseo.open` | `{type,rid}` | `{type:"paseo.open.result",rid,ticket}` 30초 안에 한 번만 쓰는 64자리 hex 티켓 |
-| `chat.open` | `{type,rid,agent}` agent 는 Agent.ref | `{type:"chat.open.result",rid,key}` key 는 32자리 hex. 연결마다 4개까지 |
-| `chat.older` | `{type,rid,key}` | `remote.action.result` 이전 대화를 `chat.older` 로 보냄 |
-| `chat.close` | `{type,rid,key}` | `remote.action.result` |
-
-서버가 보내는 푸시는 아래와 같다. 모든 프레임은 64 KiB 안이며 큰 메시지는 잘려서 온다.
-
-- `{type:"chat.ui",phase,message,version?,url?}`: 화면 빌드 상태. `phase` 는 `none|building|ready|error`. `ready` 일 때 `url` 은 `/paseo-ui/?v=<버전>`. `chat.open` 직후와 상태가 바뀔 때 온다. 빌드는 첫 `chat.open` 이 시작한다.
-- `{type:"chat.frame",key,kind,messages,hasOlder?}`: `kind` 는 `snapshot|replacement|append`. 한 묶음이 상한을 넘으면 첫 묶음만 원래 `kind` 와 `hasOlder` 를 갖고 나머지는 `append` 다.
-- `{type:"chat.frame",key,kind,reason}`: `kind` 는 `missing|error`.
-- `{type:"chat.older",key,messages,hasOlder}`: 앞쪽에 붙일 메시지. 여러 묶음이면 가장 뒤쪽 묶음부터 온다.
-- 메시지는 `{id,role,ts,blocks}`. `chat.frame` 은 `chat.open.result` 보다 먼저 올 수 있어 폰은 응답 전에 온 프레임을 모아 둔다. 이미지 블록은 `{type:"image",off,i}` 이고 데이터가 없다. 폰은 `key` 를 pane 값으로 써서 `/agentchat-image?pane=<key>&agent=&off=&i=` 를 부른다.
-
-웹뷰 접속은 `remote/1` 과 같은 주소·포트·인증서 고정을 쓴다.
-
-- 웹뷰는 `GET /.iris-paseo/enter?t=<ticket>` 을 연다. 서버는 `Host` 가 `<Tailscale 주소>:<포트>` 이고 요청한 소켓의 Tailscale 노드가 티켓을 받은 연결의 노드와 같을 때만 받는다. 성공하면 `303 Location: /paseo-ui/` 와 `__Host-iris-paseo` 쿠키(`Secure; HttpOnly; SameSite=Strict; Path=/`)를 준다.
-- 쿠키가 있는 `GET` 만 전달한다. 전달하는 경로는 `/paseo-ui/**` 와 `/agentchat-image` 뿐이고 나머지와 WebSocket 업그레이드는 받지 않는다. 쿠키가 없거나 `Origin` 이 있는데 `https://<Host>` 가 아니면 받지 않는다.
-- `/agentchat-image` 의 `pane` 은 `chat.open` 이 준 `key` 만 받고 서버가 진짜 pane 으로 바꾼다. 모르는 값과 `agent` 쿼리가 있는 요청은 거절한다.
-- `/agentchat-file`(답변 속 로컬 이미지 파일)은 전달하지 않는다. 폰이 경로를 정해 Mac 의 파일을 읽는 통로가 되기 때문이다. 그래서 답변 마크다운이 가리키는 로컬 이미지 파일은 폰에서 표시되지 않는다.
-- 메시지의 문자열에서 Mac 절대 경로와 세션 식별자는 `[Mac 경로]`·`[내부 식별자]` 로 가려 보낸다. `role` 은 서버가 해석한 값(`user`, `assistant`, `reasoning`, `tool`, `system` 등)이고 `ts` 는 해석하지 못하면 `null` 이다.
-- 쿠키·pane 값은 티켓을 발급한 `remote/1` 연결에 묶인다. 그 연결이 닫히면(PIN 기한 만료, 기기 해제, 원격 끄기, 단절 포함) 쿠키와 열린 전달 소켓이 즉시 끊긴다. 폰에서 자기 기기를 해제하면 응답용 연결이 잠시 남지만 쿠키는 해제와 함께 끊긴다. 폰은 다시 인증한 뒤 `paseo.open` 으로 새 티켓을 받아 웹뷰를 다시 연다.
 
 ## 7. 오류
 

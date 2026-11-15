@@ -21,7 +21,7 @@ import { createRemoteRpcHost } from "../server/remote/rpc-host.js";
 
 const SERVER_INSTANCE = "1".repeat(32);
 const CERT_HASH = "2".repeat(64);
-const REQUESTS = ["caps.get", "ping", "watch", "session.watch", "transcript.page", "transcript.watch",
+const REQUESTS = ["caps.get", "ping", "watch", "session.watch", "transcript.page", "transcript.watch", "media.image",
   "agent.stop", "agent.message", "request.answer"];
 
 function configuration() {

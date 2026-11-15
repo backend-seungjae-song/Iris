@@ -157,7 +157,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final chat = find.byKey(const Key('session-chat'));
-    final position = tester.widget<ListView>(chat).controller!.position;
+    final position = tester.widget<ScrollView>(chat).controller!.position;
     expect(position.pixels, position.maxScrollExtent);
     expect(find.byKey(const Key('session-scroll-bottom')), findsNothing);
 

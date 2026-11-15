@@ -75,5 +75,31 @@ export function mediaText(text, agent) {
 
 export function resolveMedia(ref, agent, options) {
   const link = links.get(ref);
-  return link?.agent === agent.ref ? safeMediaUrl(link.value, { ...options, cwd: agent.source?.cwd }) : null;
+  return link?.agent === agent.ref && typeof link.value === "string"
+    ? safeMediaUrl(link.value, { ...options, cwd: agent.source?.cwd }) : null;
+}
+
+// 대화 기록 속 이미지 → iris-image 주소. 폰은 바이트를 media.image 요청으로 받음
+// - image: { file, ino, off, i, j, sig } 기록 파일 이름·inode·줄 위치·데이터 서명. 하나라도 다르면 내주지 않음
+// - 같은 이미지에는 같은 주소. 첫 쪽과 실시간 알림이 같은 항목을 같은 글로 보내야 폰이 겹친 항목을 알아봄
+// - 파일 링크(iris-media)와 다른 이름. 폰은 iris-image 만 받아 그리고 iris-media 는 Mac 에서 엶
+const imageRefs = new Map();   // agent·위치 → ref
+export function mediaImage(agent, image) {
+  if (!agent?.ref) return null;
+  const key = JSON.stringify([agent.ref, image.file, image.ino, image.off, image.i, image.j ?? null, image.sig ?? null]);
+  let ref = imageRefs.get(key);
+  if (!ref || links.get(ref)?.image === undefined) {
+    ref = randomBytes(16).toString("hex");
+    imageRefs.set(key, ref);
+    while (imageRefs.size > 4096) imageRefs.delete(imageRefs.keys().next().value);
+  }
+  links.delete(ref);
+  links.set(ref, { agent: agent.ref, image });
+  while (links.size > 4096) links.delete(links.keys().next().value);
+  return `iris-image:${ref}`;
+}
+
+export function resolveMediaImage(ref) {
+  const link = links.get(ref);
+  return link?.image ? { agent: link.agent, ...link.image } : null;
 }

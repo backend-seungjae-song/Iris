@@ -1,13 +1,12 @@
-// 소유 범위: 사람 경로 게이트·CSV/TSV·뷰어·시트부터 [메뉴] 실제 연결까지의 사용자 표면 계약.
-// 제공 API: 원래 사람 경로 게이트 자리에서 한 번 호출하는 비동기 기본 run.
+// 소유 범위: 일반 MCP·QA 경계·CSV/TSV·뷰어·시트부터 [메뉴] 실제 연결까지의 사용자 표면 계약.
+// 제공 API: 러너가 한 번 호출하는 비동기 기본 run.
 // 의존 대상: core의 공유 검사·파일 도구, sources의 뷰어·시트·메뉴 소스, slice-anchor와 Node 경로 API.
 // 유지 조건: 검사 이름·순서·문구, 실제 메뉴 비의존 가짜 주입, full smoke 출력.
 // 영향 범위: 러너가 50 두 흐름 섹션 뒤·80 RED 블록 섹션 앞에서 이 run을 호출한다.
 //   지금 목록은 이걸로 센다: node bin/importers.mjs bin/smoke/sections/70-viewer-and-menu.mjs
-import path from "node:path";
 import { runInNewContext } from "node:vm";
 
-import { b4Function, check, checkAsync, fnBody, read, readAll, require_, ROOT } from "../core.mjs";
+import { b4Function, check, checkAsync, fnBody, read, readAll, require_ } from "../core.mjs";
 import {
   allCss, centerTabs, css, fileRouting, mcp, pick, serverIndexSource as srv,
   sheetActions, sheetConditional, sheetEdit, sheetEvents, sheetFormula, sheetModel,
@@ -16,79 +15,9 @@ import {
 import { sliceBetween, sliceFrom } from "../../slice-anchor.mjs";
 
 export default async function run() {
-// ── 사람 경로 게이트 ─────────────────────────────────────────────────────────
-// 규칙은 문서에 있지만(qa-run "밟지 않은 경로는 확인된 것이 아니다"), 문서만으로는 주소로
-// 건너뛰고 JS로 조작한 뒤 확인됐다고 적는 것을 막지 못한다.
-// 그래서 여기서는 판정 함수를 실제로 실행한다. 소스에 해당 문자열이 있는지가 아니라, 그 입력이
-// 실제로 거부되는지를 확인한다.
-console.log("[2q] 사람 경로 게이트 — 확인은 사람이 밟는 길로만");
+// ── 일반 MCP 와 QA 채널의 경계 ───────────────────────────────────────────────
+console.log("[2q] 일반 MCP 와 QA 채널의 경계");
 {
-  const { humanPathDeny } = await import(path.join(ROOT, "server/human-path.js"));
-  const deny = (cmd, args, url) => humanPathDeny(cmd, args, url);
-
-  check("같은 사이트 안을 주소로 건너뛰면 거부", () =>
-    !!deny("goto", { url: "https://shop.com/cart" }, "https://shop.com/product/12"));
-  check("거부 문구가 무엇을 대신 하라는지 말한다", () => {
-    const why = deny("goto", { url: "https://shop.com/cart" }, "https://shop.com/product/12") || "";
-    return why.includes("browser_click") && why.includes("browser_snapshot") && why.includes("reason");
-  });
-  check("포트·스킴이 다르면 다른 사이트로 본다", () =>
-    !deny("goto", { url: "https://shop.com/cart" }, "https://shop.com:8443/product")
-    && !deny("goto", { url: "https://shop.com/a" }, "http://shop.com/b"));
-  check("다른 사이트로 넘어가는 것은 통과", () =>
-    !deny("goto", { url: "https://other.com/x" }, "https://shop.com/product/12"));
-  check("빈 탭에서의 첫 진입은 통과", () =>
-    !deny("goto", { url: "https://shop.com/cart" }, "about:blank") && !deny("goto", { url: "https://shop.com" }, ""));
-  check("reason을 적으면 통과", () =>
-    !deny("goto", { url: "https://shop.com/cart", reason: "결제 완료 복귀 주소 자체가 확인 대상" }, "https://shop.com/product/12"));
-  check("browser_new_tab의 진입 주소(entry)는 막지 않는다", () =>
-    !deny("goto", { url: "https://shop.com/cart", entry: true }, "https://shop.com/product/12"));
-
-  // eval은 읽는 도구다. 조작에는 우회 인자가 없다.
-  for (const [label, expr] of [
-    ["클릭", "document.querySelector('#buy').click()"],
-    ["값 주입", "document.querySelector('#qty').value = 3"],
-    ["체크", "el.checked = true"],
-    ["폼 제출", "document.forms[0].submit()"],
-    ["주소 이동", "location.href = '/cart'"],
-    ["주소 대입", "location = '/cart'"],
-    ["새로고침", "location.reload()"],
-    ["히스토리", "history.pushState({}, '', '/cart')"],
-    ["새 창", "window.open('/cart')"],
-    ["이벤트 발사", "el.dispatchEvent(new Event('input'))"],
-    ["DOM 주입", "document.body.innerHTML = ''"],
-    ["속성 설정", "el.setAttribute('disabled', '')"],
-    ["포커스", "document.querySelector('input').focus()"],
-    // 이름을 하나씩 적어 막으면 적지 않은 이름은 통과한다(예: document.title).
-    ["제목 바꾸기", "document.title = 'x'"],
-    ["스타일 주입", "el.style.display = 'none'"],
-    ["이미지 주소 바꾸기", "img.src = '/other.png'"],
-    ["클래스 조작", "el.classList.add('active')"],
-    ["노드 제거", "document.querySelector('.modal').remove()"],
-    ["노드 삽입", "document.body.appendChild(el)"],
-    ["보이는 곳으로 스크롤", "el.scrollIntoView()"],
-  ]) check(`eval ${label} 거부`, () => !!deny("eval", { expression: expr }));
-
-  for (const [label, expr] of [
-    ["개수 세기", "document.querySelectorAll('.item').length"],
-    ["값 읽기", "document.querySelector('#qty').value"],
-    ["텍스트 읽기", "document.body.innerText.slice(0, 100)"],
-    ["비교식", "el.checked === true"],
-    ["주소 읽기", "location.href"],
-    ["상태 시드", "localStorage.setItem('seen', '1')"],
-    // 거부 범위가 읽기까지 포함하면 확인할 방법이 없어진다. 대입이 아닌 식은 모두 통과해야 한다.
-    ["일치 비교", "document.title === '장바구니'"],
-    ["화살표 함수", "[...document.querySelectorAll('a')].map((x) => x.href)"],
-    ["구조 분해", "const { top } = el.getBoundingClientRect(); top"],
-    ["스타일 읽기", "getComputedStyle(el).display"],
-    ["보이는지 판정", "el.getBoundingClientRect().height > 0"],
-  ]) check(`eval ${label} 통과`, () => !deny("eval", { expression: expr }));
-
-  check("일반 MCP 경로는 humanPathDeny를 호출하지 않는다", () => {
-    const src = read("server/mcp-worker/browser-service.js");
-    return !/humanPathDeny/.test(src)
-      && /ordinaryCommandDenied\(command\)/.test(src);
-  });
   // QA 소유 탭은 거부하고 같은 요청의 일반 탭만 실행
   await checkAsync("QA 소유 탭 거부는 그 탭의 입력 전달 전에 반환된다", async () => {
     const { createWorkerBrowserService } = await import("../../../server/mcp-worker/browser-service.js");
@@ -449,7 +378,6 @@ console.log("\n[표 뷰어] 엑셀·CSV를 표로 연다");
 console.log("\n[탭] 사람이 보던 화면을 덮지 않는다");
 {
   const srv = read("server/browser-commands.js");
-  const hp = read("server/human-path.js");
   const mcp = read("bin/iris-mcp.mjs");
   check("지목받은 탭에 다른 사이트를 싣지 않는다", () =>
     /function coverWarning\(session, tabId, url\)/.test(srv)
@@ -466,9 +394,6 @@ console.log("\n[탭] 사람이 보던 화면을 덮지 않는다");
     return !/grantTab/.test(seg);
   });
   check("같은 사이트 판정이 있다", () => /function sameSiteUrl\(a, b\)/.test(srv) && /function hostOfUrl\(u\)/.test(srv));
-  check("같은 주소면 새로고침 길을 알려준다", () =>
-    /const same = String\(currentUrl \|\| ""\)\.split\("#"\)\[0\]/.test(hp)
-    && /browser_history \{action:"reload"\}/.test(hp));
   check("새로고침 도구가 그 이름으로 찾아진다", () =>
     /desc: "뒤로·앞으로·새로고침\(리로드·refresh·F5·⌘R\)/.test(mcp));
   check("new_tab은 새로고침에 쓰지 말라고 적혀 있다", () =>

@@ -60,6 +60,8 @@ function reviewOf(lines) {
 // Codex 질문·승인 화면의 첫 줄: 구분선이 없어 이 줄에서 맥락을 자름
 const HEADER = /^\s{0,3}(?:Question\s+\d+\/\d+\b.*|Would you like to\b.*|Do you want to\b.*|Implement this plan\?.*|Ready to submit\b.*)$/i;
 const TIP = /^\s*Tip:/i;
+// 자동 차단 카운트다운("… block this request in 1:27, to avoid holding up an unattended session"). 매초 바뀌어 내용에서 뺌
+const AUTO_BLOCK = /Claude Code will automatically block\b/i;
 
 // 경로 하드 랩 이음과 공통 들여쓰기 제거
 function joinWrapped(lines) {
@@ -77,14 +79,17 @@ function joinWrapped(lines) {
   return out.map(l => l.slice(Math.min(base, l.length - l.trimStart().length)));
 }
 
-// 상자 안 장식 줄(╌ 구분선, Tip 안내와 이어지는 줄)을 뺀 본문
+// 상자 안 장식 줄(╌ 구분선, Tip 안내·자동 차단 카운트다운과 이어지는 줄)을 뺀 본문
 function cleanDetail(lines) {
   const out = [];
   let skip = 0;
+  let countdown = false;   // 카운트다운 줄이 접혀 이어지는 중
   for (const line of lines) {
     if (skip > 0) { skip--; continue; }
     if (/^\s*[─━═╌┄\-_]{8,}\s*$/u.test(line)) continue;
     if (TIP.test(line)) { skip = (line.match(/"/g) || []).length % 2 ? 1 : 0; continue; }
+    if (AUTO_BLOCK.test(line)) { countdown = !/unattended session/i.test(line); continue; }
+    if (countdown) { countdown = !/unattended session/i.test(line) && Boolean(line.trim()); continue; }
     out.push(line);
   }
   // 상자 첫 줄의 종류 제목(Bash command 등)은 화면 종류 표시와 겹쳐 뺌

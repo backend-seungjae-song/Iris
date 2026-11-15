@@ -96,6 +96,19 @@ function requestCdpMessage(message, timeoutMs = 30000) {
   });
 }
 
+// 세션 공유 백그라운드 탭 요청(native/electron/bg-tabs.cjs) · 결과는 cdp-result 로 옴
+function requestBgTab(args, timeoutMs = 45000) {
+  return requestCdpMessage({ type: "bg-tab", args: args || {} }, timeoutMs);
+}
+
+// 프로필 이름·id → webview partition · web/js/browser/profiles.js partitionFor 와 같은 규칙 · 없는 이름은 null
+function partitionForProfile(ref) {
+  if (ref == null || String(ref).trim() === "") return "persist:acbrowser";
+  const id = profileRefToId(ref);
+  if (id === null) return null;
+  return id ? "persist:acprof:" + id : "persist:acbrowser";
+}
+
 function requestWorkerRelay({ workerGeneration, commandId, callId, targetToken, command, args, wc, unit, timeoutMs = 30000 }) {
   return requestCdpMessage({ type: "cdp-exec", workerGeneration, commandId, callId, targetToken,
     cmd: command, args: args || {}, wc, ...(unit ? { unit } : {}) }, timeoutMs);
@@ -1026,6 +1039,8 @@ function flushNow() {
 
 export {
   MAX_PINS,
+  partitionForProfile,
+  requestBgTab,
   absorbIntoSessionGroup,
   addPin,
   adoptGroup,

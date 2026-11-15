@@ -3,17 +3,25 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { claudeHome, codexHome } from "../agent-homes.js";
-import { readForward, readTailWindow } from "../agent-chat-transcript.js";
+import { imageFromRecord, readForward, readTailWindow } from "../agent-chat-transcript.js";
 import stateHomeModule from "../state-home.cjs";
-import { mediaText } from "./media-links.js";
+import { mediaImage, mediaText, resolveMediaImage } from "./media-links.js";
 import { projectItem, projectTranscriptAppend } from "./projection.js";
 
 const { stateHome } = stateHomeModule;
 const PAGE_ITEMS = 50;
 const PAGE_BYTES = 48 * 1024;
-const READ_BYTES = 2 * 1024 * 1024;
+// 한 번에 읽는 기록 범위. 스크린샷이 든 줄은 수 MB 라 그보다 커야 줄을 통째로 읽음
+const READ_BYTES = 32 * 1024 * 1024;
+// 파일 끝의 마지막 완성 줄을 찾을 때 거슬러 읽는 한도. 쓰이는 중인 큰 줄 하나 때문에 많이 읽지 않게
+const TAIL_PROBE_BYTES = 2 * 1024 * 1024;
 const POLL_MS = 1000;
 const CURSOR_LIMIT = 128;
+// 폰이 그릴 수 있는 형식만. 한 번 응답에 담는 원본 바이트(base64 로 늘어도 큰 프레임 한도 안)
+const IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+export const IMAGE_CHUNK_BYTES = 360 * 1024;
+const MAX_IMAGE_LINE = 64 * 1024 * 1024;
+const IMAGE_TEXT = "[이미지]";
 
 function inside(root, file) {
   return !!root && (file === root || file.startsWith(root + path.sep));
@@ -34,8 +42,33 @@ function oneLine(value) {
   return clip(String(text || "").replace(/\s+/g, " ").trim(), 200);
 }
 
-function itemsOf(messages, agent) {
-  const item = (value) => projectItem({ ...value, text: clip(mediaText(value.text, agent), 4000) });
+// 항목 글 상한. 이미지 주소는 이 안에서 잘리지 않게 통째로 넣고 남는 것은 개수만 적음
+const ITEM_TEXT = 4000;
+const IMAGE_LINE = "![이미지](iris-image:" + "0".repeat(32) + ")";
+
+// 글(파일 링크를 바꾼 뒤)을 이미지 주소 자리를 남기고 자르고, 이미지 주소를 줄마다 붙임
+export function joinImages(text, refs) {
+  const room = Math.max(0, ITEM_TEXT - (text ? 1 : 0));
+  const fit = Math.min(refs.length, Math.floor((room + 1) / (IMAGE_LINE.length + 1)));
+  const shown = refs.slice(0, fit).map((ref) => `![이미지](${ref})`);
+  if (fit < refs.length) shown.push(`이미지 ${refs.length - fit}개 더`);
+  const tail = shown.join("\n");
+  if (!tail) return clip(text, ITEM_TEXT);
+  const head = clip(text, Math.max(0, ITEM_TEXT - tail.length - 1));
+  return head ? `${head}\n${tail}` : tail;
+}
+
+// 도구 결과 글에서 해석기가 이미지 자리에 넣은 "[이미지]" 줄만 이미지 수만큼 뺌. 문장 속 같은 글자는 둠
+export function withoutImageLines(output, count) {
+  let left = count;
+  return String(output || "").split("\n").filter((line) => !(left > 0 && line === IMAGE_TEXT && left--)).join("\n").trim();
+}
+
+// source: { file, ino } 읽은 기록 파일. 이미지 블록은 그 파일의 줄 위치·서명으로 iris-image 주소를 만듦
+function itemsOf(messages, agent, source) {
+  const item = (value, refs = []) => projectItem({ ...value, text: joinImages(mediaText(value.text, agent), refs) });
+  const image = (off, i, j, sig) => (source && Number.isSafeInteger(off)
+    ? mediaImage(agent, { file: source.file, ino: source.ino, off, i, j, sig: typeof sig === "string" ? sig : null }) : null);
   const tools = new Map();
   const items = [];
   for (const message of messages || []) {
@@ -43,7 +76,9 @@ function itemsOf(messages, agent) {
     const at = Number.isSafeInteger(message.ts) && message.ts >= 0 ? message.ts : undefined;
     const text = (message.blocks || []).filter((block) => block?.type === "text")
       .map((block) => block.text).join("\n").trim();
-    if (text) items.push(item({ role: message.role, text: clip(text, 4000), ...(at === undefined ? {} : { at }) }));
+    const refs = (message.blocks || []).filter((block) => block?.type === "image")
+      .map((block) => image(block.off, block.i, null, block.sig)).filter(Boolean);
+    if (text || refs.length) items.push(item({ role: message.role, text, ...(at === undefined ? {} : { at }) }, refs));
     for (const block of message.blocks || []) {
       if (block?.type === "tool-call") {
         const tool = clip(block.name || "tool", 200) || "tool";
@@ -51,9 +86,11 @@ function itemsOf(messages, agent) {
         items.push(item({ role: "tool", text: oneLine(block.input), tool, ...(at === undefined ? {} : { at }) }));
       } else if (block?.type === "tool-result") {
         const tool = block.id && tools.get(block.id);
-        const output = clip(block.output || "", 4000);
-        if (output) items.push(item({ role: "tool", text: output,
-          ...(tool ? { tool } : {}), ...(at === undefined ? {} : { at }) }));
+        const refs = (Array.isArray(block.images) ? block.images : [])
+          .map((spot) => image(block.off, spot.i, spot.j, spot.sig)).filter(Boolean);
+        const output = refs.length ? withoutImageLines(block.output, refs.length) : String(block.output || "");
+        if (output || refs.length) items.push(item({ role: "tool", text: output,
+          ...(tool ? { tool } : {}), ...(at === undefined ? {} : { at }) }, refs));
       }
     }
   }
@@ -81,7 +118,7 @@ function withFile(file, fn) {
   try { return fn(fd, fs.fstatSync(fd)); } finally { fs.closeSync(fd); }
 }
 
-function completeEndWithin(source, maximumBytes = READ_BYTES) {
+function completeEndWithin(source, maximumBytes = TAIL_PROBE_BYTES) {
   let position = source.size;
   let read = 0;
   while (position > 0 && read < maximumBytes) {
@@ -95,6 +132,37 @@ function completeEndWithin(source, maximumBytes = READ_BYTES) {
     if (got < length) break;
   }
   return { end: 0, read };
+}
+
+// off 에서 시작하는 한 줄을 JSON 으로. MAX_IMAGE_LINE 을 넘거나 깨진 줄은 null
+function readLine(fd, size, off) {
+  const chunks = [];
+  let position = off;
+  let total = 0;
+  while (total < MAX_IMAGE_LINE && position < size) {
+    const buffer = Buffer.alloc(Math.min(1024 * 1024, size - position));
+    const got = fs.readSync(fd, buffer, 0, buffer.length, position);
+    if (got <= 0) break;
+    const newline = buffer.subarray(0, got).indexOf(10);
+    chunks.push(buffer.subarray(0, newline < 0 ? got : newline));
+    total += newline < 0 ? got : newline;
+    if (newline >= 0) break;
+    position += got;
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return null; }
+}
+
+// from 뒤 첫 줄 끝 다음 위치. 읽기 범위보다 큰 줄을 건너뛸 때. 끝까지 개행이 없으면 null
+function nextLineStart(fd, size, from) {
+  const buffer = Buffer.alloc(1024 * 1024);
+  for (let position = from; position < size;) {
+    const got = fs.readSync(fd, buffer, 0, Math.min(buffer.length, size - position), position);
+    if (got <= 0) return null;
+    const newline = buffer.subarray(0, got).indexOf(10);
+    if (newline >= 0) return position + newline + 1;
+    position += got;
+  }
+  return null;
 }
 
 export function createTranscriptService(options = {}) {
@@ -145,7 +213,7 @@ export function createTranscriptService(options = {}) {
       const complete = tail.end;
       const stopAt = Math.max(0, complete - (READ_BYTES - tail.read));
       const window = readTailWindow(source, { end: complete, stopAt, want: PAGE_ITEMS, kind: hit.kind });
-      return { items: itemsOf(window.messages, hit.agent).reverse(), end: window.start,
+      return { items: itemsOf(window.messages, hit.agent, { file: hit.file, ino: stat.ino }).reverse(), end: window.start,
         hasOlder: window.hasOlder || stopAt > 0 };
     });
   }
@@ -179,6 +247,34 @@ export function createTranscriptService(options = {}) {
     const next = taken.rest.length || hasOlder
       ? saveCursor(connId, { agent: agentRef, file: hit.file, pending: taken.rest, end, hasOlder }) : null;
     return { ok: true, items: taken.selected, before: next };
+  }
+
+  // iris-image 이미지 바이트를 offset 부터 IMAGE_CHUNK_BYTES 만큼
+  // - 조각마다 에이전트 기록 접근과 파일 inode 를 다시 확인. 줄의 이미지 서명이 다르면 expired
+  // - 같은 이미지의 다음 조각마다 큰 줄을 다시 해석하지 않게 마지막 하나만 바이트를 둠. 파일 크기·수정 시각이 그대로일 때만 씀
+  let lastImage = null;
+  function image(media, offset) {
+    const link = resolveMediaImage(media);
+    if (!link) return { ok: false, error: "expired" };
+    const hit = target(link.agent);
+    if (!hit || hit.file !== link.file) return { ok: false, error: "expired" };
+    let found = null;
+    try {
+      found = withFile(hit.file, (fd, stat) => {
+        if (stat.ino !== link.ino || link.off >= stat.size) return null;
+        if (lastImage?.media === media && lastImage.size === stat.size && lastImage.mtime === stat.mtimeMs) return lastImage;
+        const record = readLine(fd, stat.size, link.off);
+        const picked = imageFromRecord(record, link.i, link.j ?? null, IMAGE_MIMES);
+        if (!picked || (link.sig && picked.sig !== link.sig)) return null;
+        return (lastImage = { media, size: stat.size, mtime: stat.mtimeMs, mime: picked.mime, bytes: picked.bytes });
+      });
+    } catch {
+      return { ok: false, error: "unavailable" };
+    }
+    if (!found) return { ok: false, error: "expired" };
+    if (offset > found.bytes.length) return { ok: false, error: "invalid-request" };
+    const data = found.bytes.subarray(offset, offset + IMAGE_CHUNK_BYTES);
+    return { ok: true, mime: found.mime, size: found.bytes.length, offset, data: data.toString("base64") };
   }
 
   function stopWatch(connId) {
@@ -216,8 +312,14 @@ export function createTranscriptService(options = {}) {
           }
           const maximum = Math.min(stat.size, watch.end + READ_BYTES);
           const result = readForward(fileSource(fd, maximum), watch.end, watch.kind);
+          // 읽기 범위보다 큰 줄: 뒤에 이어진 줄이 있으면 그 줄은 건너뛰고 다음 줄부터. 그대로 두면 이후 대화가 멈춤
+          if (result.end === watch.end && maximum < stat.size) {
+            const next = nextLineStart(fd, stat.size, maximum);
+            if (next !== null) watch.end = next;
+            return;
+          }
           watch.end = result.end;
-          watch.pending.push(...itemsOf(result.messages, hit.agent));
+          watch.pending.push(...itemsOf(result.messages, hit.agent, { file: hit.file, ino: stat.ino }));
         });
       }
       if (watch.pending.length) {
@@ -264,5 +366,5 @@ export function createTranscriptService(options = {}) {
     }
   }
 
-  return { page, watch, refreshAgent, closeConnection, close };
+  return { page, watch, image, refreshAgent, closeConnection, close };
 }

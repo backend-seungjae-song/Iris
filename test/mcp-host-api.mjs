@@ -20,7 +20,7 @@ import { sliceBetween } from "../bin/slice-anchor.mjs";
 const EXPECTED_OPERATIONS = [
   "browser.sessionView", "browser.targetGet", "browser.targetSet", "browser.targetClear", "browser.commandGuard",
   "browser.commandTargetState", "browser.resolveForCommand",
-  "browser.tabCreate", "browser.tabWake", "browser.tabClose", "browser.status",
+  "browser.tabCreate", "browser.tabWake", "browser.tabClose", "browser.status", "browser.bgOpen", "browser.bgSave",
   "browser.promptTargetsActivate", "browser.pickRecord", "browser.pickList",
   "browser.executeWithDialog", "browser.dialogState", "browser.dialogAnswer", "browser.legacyHostTask", "qa.anchorUpdate",
   "qa.claimIfFree", "qa.releaseIfOwner", "qa.owner", "qa.tabCreate", "qa.tabsRestore",

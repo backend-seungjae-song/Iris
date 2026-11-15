@@ -37,6 +37,7 @@ function createCdpTransport({
   relayControl = null,
   features = [],
   onRegistered = null,
+  bgTabs = null,
 }) {
   // main이 서버(기본 4271, IRIS_PORT로 갈림)에 WS 실행기로 붙어 cdp-exec를 처리한다. 서버 재시작에도 자동 재연결.
   // 팝업 창처럼 렌더러가 모르는 조종 대상은 여기서 서버에 알린다. 연결이 끊겨 있으면 붙은 뒤에 보낸다.
@@ -127,6 +128,16 @@ function createCdpTransport({
           } catch (e) {
             try { sock.send(JSON.stringify({ type: "worker.retired", id: m.id, workerGeneration: m.workerGeneration,
               ok: false, error: String((e && e.message) || e), code: e && e.code, details: e && e.details })); } catch {}
+          }
+          return;
+        }
+        // 세션 공유 백그라운드 탭(bg-tabs.cjs) · 결과는 cdp-exec 와 같은 cdp-result 로 돌려줌
+        if (m.type === "bg-tab") {
+          try {
+            if (typeof bgTabs !== "function") throw new Error("이 앱은 공유 탭을 지원하지 않습니다.");
+            sock.send(JSON.stringify({ type: "cdp-result", id: m.id, ok: true, data: await bgTabs(m.args || {}) }));
+          } catch (e) {
+            try { sock.send(JSON.stringify({ type: "cdp-result", id: m.id, ok: false, error: String((e && e.message) || e) })); } catch {}
           }
           return;
         }

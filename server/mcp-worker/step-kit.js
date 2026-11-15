@@ -75,7 +75,10 @@ export function createStepKit(base) {
   // 최종 응답은 비밀 원문을 가진 메인의 redactSecrets 를 한 번 거쳐 나감 (옛 경로의 guard 와 같음) · 가리지 못하면 응답을 내지 않음
   const redacted = async (value, last) => {
     const response = await rawCall("result.redact", { value }, { last });
-    if (!response.ok || !response.data || !("value" in response.data)) return { ok: false, error: "결과를 안전하게 가리지 못했습니다." };
+    // 가리기 실패의 원인(명령 시간 초과 등)을 함께 알림 · 원인 문구는 메인이 만든 것이라 비밀 원문이 없음
+    if (!response.ok || !response.data || !("value" in response.data)) {
+      return { ok: false, error: `결과를 안전하게 가리지 못했습니다${response.error ? `(${response.error})` : ""}.` };
+    }
     return response.data.value;
   };
 

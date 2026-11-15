@@ -47,7 +47,8 @@ check("앱 찾는 길이 셋이다", () => {
   const ap = read("server/app-pick.js");
   return /_dartVmService\._tcp/.test(ap) && /async function discoverAdb/.test(ap)
     && /async function discoverFromPanes/.test(ap)
-    && /Promise\.all\(\[discoverMdns\(\), discoverAdb\(\), discoverFromPanes\(deps\.herdr\)\]\)/.test(ap)
+    // 셋을 다 기다리지 않고 찾는 대로 연결(pane 읽기 25초가 mDNS 결과를 붙잡았음)
+    && /Promise\.all\(\[discoverMdns\(\), discoverAdb\(\), discoverFromPanes\(deps\.herdr\)\]\.map\(\(p\) => p\.then\(queueAttach, \(\) => \{\}\)\)\)/.test(ap)
     && /redirect: "manual"/.test(ap)      // 302의 location이 진짜 접속 지점이다
     && /import \{ adbPath \} from "\.\/adb-path\.js"/.test(ap)   // launchd PATH에는 adb가 없다
     && /function adbPath\(\)/.test(read("server/adb-path.js"));
@@ -71,7 +72,8 @@ check("앱에서 고른 것이 소스까지 실려 전달된다", () => {
 // 가장 나중에 그려진 ModalBarrier 뒤에 있는 후보만 남기고 앱 안에서 선택을 옮긴다.
 check("앱 요소 선택은 맨 위 층만 집는다", () => {
   const ap = read("server/app-pick.js");
-  return /const TOP_LAYER_EXPR = \[/.test(ap)
+  return /const topLayerExpr = \(candidates\) => \[/.test(ap)
+    && /const TOP_LAYER_EXPR = topLayerExpr\(/.test(ap)
     && /\]\.join\(" "\)/.test(ap)                                  // 줄바꿈이 하나라도 있으면 컴파일이 안 된다
     && /contains\('ModalBarrier'\)/.test(ap)                       // 경계는 가장 나중에 그려진 배리어
     && /if \(bars\.contains\(o\) && i - 1 > cut\) cut = i - 1;/.test(ap)
@@ -460,7 +462,7 @@ check("메모는 실행 도크 위에 있다", () => web.indexOf('id="panel-memo
 // 실행기 소켓이 바깥 변수 하나를 공유하면, close 핸들러가 그 변수를 비운 뒤 error 핸들러가
 // 해제된 참조를 읽고 이전 핸들러가 새 소켓을 건드려, 서버를 재시작해도 제어가 돌아오지 않는다.
 check("서버만 다시 떠도 실행기가 스스로 붙는다", () => {
-  const seg = sliceFrom(cdpTransportSource, "function setupCdpControl", 5200, "서버만 다시 떠도 실행기가 스스로 붙는다");
+  const seg = sliceFrom(cdpTransportSource, "function setupCdpControl", 6000, "서버만 다시 떠도 실행기가 스스로 붙는다");
   return /let sock;/.test(seg)                       // 소켓마다 지역 변수
     && /let done = false;/.test(seg)                 // 재연결 예약은 한 번만
     && /sock\.on\("close", again\)/.test(seg)

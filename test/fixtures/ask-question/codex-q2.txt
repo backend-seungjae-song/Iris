@@ -1,0 +1,8 @@
+  Question 2/2 (1 unanswered)
+  좋아하는 계절은 무엇인가요?
+
+  › 1. 봄                 봄을 선택합니다.
+    2. 여름               여름을 선택합니다.
+    3. None of the above  Optionally, add details in notes (tab)
+
+  tab to add notes | enter to submit all | ←/→ to navigate questions | esc to interrupt

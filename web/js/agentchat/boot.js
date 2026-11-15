@@ -26,6 +26,7 @@ import { shortcutLabel } from "../core/keymap.js";
 //   서버 짝은 server/agent-chat.js. 현재 목록 확인: node bin/importers.mjs web/js/agentchat/boot.js
 
 import { provide } from "../core/hooks.js";
+import { needsResnapshot } from "./resnapshot.js";
 import { ANYWHERE, MAIN_WINDOW, bindingOf, matchBinding, resolvedKeymap } from "../core/keymap.js";
 import { openInSpaceBrowser, openTerminalTarget, revealTerminalPath, wantsReveal } from "../center/file-routing.js";
 import { DEFAULT_VIEW_KEY, chatFor, parseDefaultView, settingsSection } from "./view-pref.js";
@@ -455,8 +456,17 @@ function onFrame(m) {
     view.hasOlder = !!m.hasOlder;
     view.file = typeof m.file === "string" ? m.file : null;
     view.gen = typeof m.gen === "string" ? m.gen : null;
+    view.appended = 0;
   } else if (m.kind === "append") {
-    view.messages = view.messages.concat(Array.isArray(m.messages) ? m.messages : []);
+    const added = Array.isArray(m.messages) ? m.messages : [];
+    view.messages = view.messages.concat(added);
+    view.appended = (view.appended || 0) + added.length;
+    if (needsResnapshot(view)) {
+      // 다시 구독하면 서버가 최근 창(LIMITS.initial)만 다시 보냄. 이전 기록 위치도 그 창 기준으로 맞춰짐
+      view.appended = 0;
+      unsubscribe();
+      subscribe();
+    }
   }
   view.loaded = true;
   view.reason = "";
@@ -624,8 +634,9 @@ function forwardFrameKey(e) {
   $frame.dispatchEvent(copy);
   if (copy.defaultPrevented) { e.preventDefault(); e.stopImmediatePropagation(); }
 }
+// - frameReady 는 여기서 되돌리지 않음. iris-chat.ready 가 load 보다 먼저 오는 경우가 있어 되돌리면 로딩 표시가 남음
+// - 되돌림은 주소를 바꿀 때(render·releaseFrame)
 function bindFrameKeys() {
-  frameReady = false;
   try { $frame.contentWindow?.addEventListener("keydown", forwardFrameKey, true); } catch {}
 }
 
@@ -689,7 +700,7 @@ function render() {
   if (view.reason && !view.loaded) { showEmpty("대화 기록을 보여 줄 수 없습니다", view.reason, canTerm); $loading.hidden = true; return; }
   $empty.hidden = true;
   $frame.hidden = false;
-  if ($frame.getAttribute("src") !== ui.url) { $frame.setAttribute("src", ui.url); watchFrame(); }
+  if ($frame.getAttribute("src") !== ui.url) { frameReady = false; $frame.setAttribute("src", ui.url); watchFrame(); }
   syncLoading();
   postState();
 }
@@ -697,6 +708,36 @@ function render() {
 // 화면이 뜨고 이 대화 기록을 받을 때까지 덮음. pane 을 바꾼 직후 iframe 에 남은 이전 대화도 가림
 function syncLoading() {
   $loading.hidden = !view || $frame.hidden || (frameReady && view.loaded);
+  watchLoading();
+}
+
+// 덮개가 오래 남으면 안 온 쪽을 다시 받음: 기록이면 다시 구독, iframe 준비 신호면 iframe 을 다시 띄움
+// - 그때마다 서버 기록에 남김(agentchat.stall). 몇 번 해도 안 되면 덮개 대신 실패 안내
+// - 안내 뒤에도 기록·준비 신호가 오면 render 가 대화를 다시 보임
+const LOADING_STALL_MS = 10 * 1000;
+const LOADING_RETRIES = 3;
+let loadingStall = null;            // { key, tries, timer }
+function watchLoading() {
+  if ($loading.hidden || !view) { clearTimeout(loadingStall?.timer); loadingStall = null; return; }
+  if (loadingStall?.key === view.key) return;
+  clearTimeout(loadingStall?.timer);
+  loadingStall = { key: view.key, tries: 0, timer: setTimeout(onLoadingStall, LOADING_STALL_MS) };
+}
+function onLoadingStall() {
+  const s = loadingStall;
+  if (!s || !view || view.key !== s.key || $loading.hidden) { loadingStall = null; return; }
+  const missing = [!frameReady && "frame", !view.loaded && "history"].filter(Boolean);
+  ctx.wsSend({ type: "agentchat.stall", key: view.key, build: ui.build || "", missing, tries: s.tries });
+  if (s.tries >= LOADING_RETRIES) {
+    loadingStall = null;
+    showEmpty("대화를 불러오지 못했습니다", missing.includes("frame") ? "대화 화면이 뜨지 않았습니다" : "대화 기록을 받지 못했습니다", !view.agentId);
+    $loading.hidden = true;
+    return;
+  }
+  s.tries++;
+  s.timer = setTimeout(onLoadingStall, LOADING_STALL_MS);
+  if (!view.loaded) subscribe();
+  if (!frameReady) { $frame.removeAttribute("src"); render(); }
 }
 
 // 입력창 도구 결과(명령 목록·파일 후보)를 iframe 에 그대로 돌려줌

@@ -39,7 +39,7 @@ import {
 } from "./screen-switch.js";
 import { isAgentRenaming, revealAgentRow, startInlineRename } from "../herdr/agents.js";
 import { nextRootAgentPane } from "../herdr/agent-tree.js";
-import { agentByPane, agentsOfSpace, getTabsForSpace } from "../herdr/state.js";
+import { agentByPane, agentsOfSpace, getTabsForSpace, nameOf } from "../herdr/state.js";
 import { followInputFocus } from "../herdr/sync.js";
 import { callHook } from "./hooks.js";
 import { mayWriteSharedActive } from "../browser/active-tab.js";
@@ -48,7 +48,7 @@ import { toggleDevTools } from "../panel/touch-drag.js";
 
 let wsSend, BROWSER_MODE, MEMO_MODE, acHost;
 let orderedSpaces, selectSession, focusSpace, newBrowserTab;
-let getCurTarget, getSelectedSpaceId, getIsLocal;
+let getCurTarget, getSelectedSpaceId, getIsLocal, askConfirm;
 let lastTabBySpace;
 let getSwitcherState;
 
@@ -60,7 +60,7 @@ export function initKeynav(deps) {
   ({
     wsSend, BROWSER_MODE, MEMO_MODE, acHost,
     orderedSpaces, selectSession, focusSpace, newBrowserTab,
-    getCurTarget, getSelectedSpaceId, getIsLocal,
+    getCurTarget, getSelectedSpaceId, getIsLocal, askConfirm,
     lastTabBySpace,
   } = deps);
   getSwitcherState = typeof deps.getSwitcherState === "function" ? deps.getSwitcherState : currentSwitcherState;
@@ -189,7 +189,8 @@ export function initKeynav(deps) {
     }
     // cmd+w / ctrl+w = 현재 가운데 탭(파일/브라우저) 닫기
     // 탭 닫기: cmd+w=선택한 herdr pane 삭제(메인 창), ctrl+w=브라우저·센터 탭.
-    if (e.metaKey && !e.ctrlKey && !e.altKey && k === "w" && !BROWSER_MODE) { e.preventDefault(); if (!e.repeat) closeCurrentHerdrPane(); return; }
+    // ⌘⇧W 는 비워 둠(사용자 지정). k 는 소문자라 shift 를 따로 막지 않으면 ⌘W 로 잡힘
+    if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && k === "w" && !BROWSER_MODE) { e.preventDefault(); if (!e.repeat) closeCurrentHerdrPane(); return; }
     // Windows에서는 Ctrl+Shift+W를 pane 닫기에 사용한다. Ctrl+W는 셸의 단어 삭제를 보존한다.
     if (isHostWindows() && e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && k === "w" && !BROWSER_MODE) { e.preventDefault(); if (!e.repeat) closeCurrentHerdrPane(); return; }
     // ctrl+w=브라우저·센터 탭 닫기. 터미널 포커스 시엔 ctrl+w=셸 단어삭제라 양보.
@@ -296,17 +297,29 @@ export function newHerdrTab() {
 }
 
 // Cmd+W는 선택한 세션 하나만 닫는다. 부모·자식이 같은 탭에 있어도 탭 전체를 닫지 않는다.
-export function closeCurrentHerdrPane() {
-  if (!getIsLocal() || BROWSER_MODE) return;
+// ⌘W 로 잘못 닫는 일이 잦아 한 번 물음. 확인 창은 확인 단추에 포커스를 두어 Enter 로 바로 닫힘
+// - 문구는 사이드바 메뉴의 "이 세션 닫기"와 같게
+let closeAsking = false;
+export async function closeCurrentHerdrPane() {
+  if (!getIsLocal() || BROWSER_MODE || closeAsking) return;
   const target = getCurTarget();
   const selected = agentByPane(target);
   if (target && !selected) return; // 사라진 자식 선택을 부모 닫기로 바꾸지 않는다.
   const agent = selected || agentsOfSpace(getSelectedSpaceId()).find((a) => a.focused);
   if (agent) {
-    if (agent.paneId && agent.terminalId) wsSend({ type: "pane-close", paneId: agent.paneId, terminalId: agent.terminalId });
+    if (!agent.paneId || !agent.terminalId) return;
+    if (!(await askClose(`"${nameOf(agent)}"을(를) 닫을까요?`, "되돌릴 수 없습니다. 접기와 달리 되살릴 열쇠를 남기지 않습니다."))) return;
+    wsSend({ type: "pane-close", paneId: agent.paneId, terminalId: agent.terminalId });
     return;
   }
   // 에이전트가 없는 단일-pane 탭의 기존 닫기는 유지한다. 서버도 live pane 수를 다시 확인한다.
   const tab = getTabsForSpace(getSelectedSpaceId()).find((t) => t.focused);
-  if (tab?.paneCount === 1) wsSend({ type: "tab-close", tabId: tab.tabId });
+  if (tab?.paneCount !== 1) return;
+  if (!(await askClose(`"${tab.label || `탭 ${tab.number}`}"을(를) 닫을까요?`, "되돌릴 수 없습니다."))) return;
+  wsSend({ type: "tab-close", tabId: tab.tabId });
+}
+
+async function askClose(title, note) {
+  closeAsking = true;
+  try { return await askConfirm(title, note); } finally { closeAsking = false; }
 }

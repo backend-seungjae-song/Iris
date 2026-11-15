@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import https from "node:https";
 import { TextDecoder } from "node:util";
 
@@ -12,7 +11,6 @@ import {
 } from "../contract/ipc.js";
 import { isAllowedListenAddress } from "./address.js";
 import { createGatewayIpcQueue } from "./ipc-queue.js";
-import { createPaseoProxy } from "./paseo-proxy.js";
 import { createWhoisResolver } from "./whois.js";
 import { resetTokenBucket, takeToken } from "../contract/rate-limit.js";
 
@@ -23,8 +21,6 @@ const PREAUTH_RATE = 5;
 const AUTHENTICATED_RATE = 10;
 const AUTHENTICATED_BURST = 30;
 const WS_PENDING_LIMIT = 1024 * 1024;
-// 쿠키 인증을 통과한 Paseo 웹뷰 소켓. 사전 인증 한도와 따로 센다
-const PASEO_SOCKET_LIMIT = 48;
 
 const GATEWAY_LIMITS = Object.freeze({
   preauthGlobal: PREAUTH_GLOBAL_LIMIT,
@@ -59,15 +55,12 @@ export function createGateway(options) {
   const socketReservations = new Map();
   const perIp = new Map();
   const blockedIps = new Map();
-  const promoted = new Set();
   let gatewaySequence = 0;
   let server = null;
   let websocketServer = null;
   let config = null;
   let stopping = false;
   let failed = false;
-  let listenPort = 0;
-  let whois = null;
 
   function fail(error) {
     if (failed || stopping) return;
@@ -107,32 +100,9 @@ export function createGateway(options) {
     else perIp.set(address, next);
   }
 
-  function promoteSocket(socket) {
-    if (promoted.has(socket)) return true;
-    if (promoted.size >= PASEO_SOCKET_LIMIT || !sockets.has(socket)) return false;
-    releaseSocket(socket);
-    promoted.add(socket);
-    socket.once("close", () => promoted.delete(socket));
-    return true;
-  }
-
-  const paseo = createPaseoProxy({
-    now,
-    randomHex: (bytes) => randomBytes(bytes).toString("hex"),
-    isConnectionLive: (connId) => {
-      const connection = connections.get(connId);
-      return !!connection && !connection.closed && connection.authenticated;
-    },
-    resolveNode: (peerIp) => whois ? whois.resolve(peerIp) : Promise.resolve(null),
-    externalHost: () => `${config?.address}:${listenPort}`,
-    promoteSocket,
-    ...(options.paseoProxyOptions || {}),
-  });
-
   function finalizeConnection(connection, reason, notify = true) {
     if (connection.closed) return;
     connection.closed = true;
-    if (connection.connId) paseo.revokeConnection(connection.connId);
     bySequence.delete(connection.gwSeq);
     if (connection.connId) {
       connections.delete(connection.connId);
@@ -239,7 +209,7 @@ export function createGateway(options) {
     }
     if (!allowListenAddress(nextConfig.address)) throw new Error("listen address is not allowed");
     config = nextConfig;
-    whois = options.whoisResolver || createWhoisResolver({
+    const whois = options.whoisResolver || createWhoisResolver({
       executable: config.tailscalePath,
       execFile: options.execFile,
       now,
@@ -253,13 +223,11 @@ export function createGateway(options) {
       cert: config.certPem,
       minVersion: "TLSv1.3",
       handshakeTimeout: options.handshakeTimeoutMs ?? 2_000,
-    }, (request, response) => {
-      paseo.handleRequest(request, response).catch(() => {
-        if (response.headersSent) response.destroy();
-        else { response.writeHead(404, { "content-type": "text/plain; charset=utf-8", connection: "close" }); response.end("Not found"); }
-      });
+    }, (_request, response) => {
+      response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      response.end("Not found");
     });
-    server.maxConnections = (options.globalLimit ?? PREAUTH_GLOBAL_LIMIT) + PASEO_SOCKET_LIMIT;
+    server.maxConnections = options.globalLimit ?? PREAUTH_GLOBAL_LIMIT;
     server.on("secureConnection", (socket) => {
       const peerIp = peerAddress(socket);
       if (!peerIp || !reserveSocket(socket, peerIp)) socket.destroy();
@@ -267,11 +235,7 @@ export function createGateway(options) {
     server.on("upgrade", (request, socket, head) => {
       if (stopping || failed) return socket.destroy();
       const peerIp = peerAddress(socket);
-      if (!peerIp) return socket.destroy();
-      let pathname = "/";
-      try { pathname = new URL(request.url || "/", "https://iris.invalid").pathname; } catch { return socket.destroy(); }
-      if (pathname !== "/") return socket.destroy();
-      if (!sockets.has(socket)) return socket.destroy();
+      if (!peerIp || !sockets.has(socket)) return socket.destroy();
       Promise.resolve(whois.resolve(peerIp)).then((nodeId) => {
         if (stopping || failed || socket.destroyed) return socket.destroy();
         websocketServer.handleUpgrade(request, socket, head, (ws) => acceptWebSocket(ws, socket, peerIp, nodeId));
@@ -292,7 +256,6 @@ export function createGateway(options) {
       server.listen(config.port, config.address);
     });
     const bound = server.address();
-    listenPort = bound?.port || config.port;
     emit({ type: "listening", address: config.address, port: bound?.port || config.port, certHash: config.certHash }, "gateway");
     return { address: config.address, port: bound?.port || config.port };
   }
@@ -326,16 +289,6 @@ export function createGateway(options) {
       closeConnection(connection, message.reason, false);
       return true;
     }
-    if (message.type === "paseo.grant") {
-      return paseo.grant({ connId: message.connId, ticket: message.ticket, nodeId: message.nodeId, port: message.port });
-    }
-    if (message.type === "paseo.pane") {
-      return paseo.addPane({ connId: message.connId, token: message.token, paneId: message.paneId });
-    }
-    if (message.type === "paseo.revoke") {
-      paseo.revokeConnection(message.connId);
-      return true;
-    }
     if (message.type === "conn.authenticated") {
       connection.authenticated = true;
       resetTokenBucket(connection, now(), AUTHENTICATED_BURST);
@@ -361,8 +314,7 @@ export function createGateway(options) {
     if (stopping) return;
     stopping = true;
     for (const connection of [...bySequence.values()]) closeConnection(connection, "gateway-stopped", false);
-    paseo.stop();
-    for (const socket of [...sockets, ...promoted]) socket.destroy();
+    for (const socket of [...sockets]) socket.destroy();
     try { websocketServer?.close(); } catch {}
     try { server?.close(); } catch {}
   }

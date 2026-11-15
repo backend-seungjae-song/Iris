@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 
-import { pendingQuestion, questionAnswers, questionKeys, reviewKeys, showsQuestion, splitMultiSelectAnswer } from "../server/agent-chat-question.js";
+import { codexQuestionKeys, pendingCodexQuestion, pendingQuestion, questionAnswers, questionKeys, reviewKeys, showsQuestion, splitMultiSelectAnswer } from "../server/agent-chat-question.js";
 import { extractPrompt } from "../server/remote/features/prompts.js";
 
 // 시험 pane 에서 찍은 Claude Code AskUserQuestion 화면(폭 49칸)
@@ -89,4 +89,45 @@ test("미리보기 질문: 접혀 첫 줄만 보이는 선택지도 번호와 �
   // 번호가 같아도 글 앞부분이 다르면 다른 선택지
   const other = { ...q, options: [{ label: "다른 선택지 (Recommended)", description: "" }, ...q.options.slice(1)] };
   assert.equal(questionKeys(p, other, { labels: ["다른 선택지 (Recommended)"], text: null }).error, '선택지 "다른 선택지 (Recommended)" 를 찾지 못했습니다');
+});
+
+// Codex request_user_input: 시험 pane 에서 찍은 화면(폭 140칸)과 같은 모양의 rollout 기록
+const SEASON = { id: "favorite_season", header: "좋아하는 계절", question: "좋아하는 계절은 무엇인가요?", options: [{ label: "봄", description: "봄을 선택합니다." }, { label: "여름", description: "여름을 선택합니다." }] };
+const HUE = { id: "favorite_color", header: "좋아하는 색", question: "좋아하는 색은 무엇인가요?", options: ["빨강", "파랑", "초록"].map((l) => ({ label: l, description: `${l}을 선택합니다.` })) };
+const codexCall = (callId, questions) => line({ type: "response_item", payload: { type: "function_call", name: "request_user_input", call_id: callId, arguments: JSON.stringify({ questions }) } });
+const asCard = (q) => ({ question: q.question, header: q.header, multiSelect: false, options: q.options });
+const codexFrame = (name) => {
+  const text = fs.readFileSync(new URL(`./fixtures/ask-question/${name}.txt`, import.meta.url), "utf8");
+  return extractPrompt({ text, columns: 140, rows: 40, hash: crypto.createHash("sha256").update(text).digest("hex") });
+};
+
+test("Codex 기록 끝의 답 없는 request_user_input 을 찾고, 답이 오거나 사람 말이 나오면 없다", () => {
+  const call = codexCall("call_1", [HUE, SEASON]);
+  assert.deepEqual(pendingCodexQuestion([call]), { toolUseId: "call_1", questions: [asCard(HUE), asCard(SEASON)] });
+  const output = line({ type: "response_item", payload: { type: "function_call_output", call_id: "call_1", output: "{}" } });
+  assert.equal(pendingCodexQuestion([call, output]), null);
+  assert.equal(pendingCodexQuestion([call, line({ type: "response_item", payload: { type: "message", role: "user", content: [] } })]), null);
+  // 재지 않은 모양(여러 개 고르기·선택지 없음)은 질문 카드로 보이지 않음
+  assert.equal(pendingCodexQuestion([codexCall("call_2", [{ ...HUE, multiSelect: true }])]), null);
+  assert.equal(pendingCodexQuestion([codexCall("call_3", [{ ...HUE, options: [] }])]), null);
+  assert.equal(pendingCodexQuestion([line({ type: "response_item", payload: { type: "function_call", name: "request_user_input", call_id: "c", arguments: "{깨짐" } })]), null);
+});
+
+test("Codex 질문 화면: Question n/m 줄을 빼고 같은 질문으로 본다", () => {
+  assert.equal(showsQuestion(codexFrame("codex-q1"), HUE), true);
+  assert.equal(showsQuestion(codexFrame("codex-q1"), SEASON), false);
+  assert.equal(showsQuestion(codexFrame("codex-q2"), SEASON), true);
+});
+
+test("Codex 키: 선택지는 줄 이동 + Enter, 직접 입력은 None of the above 에서 Tab + 글 + Enter", () => {
+  assert.deepEqual(codexQuestionKeys(codexFrame("codex-q1"), HUE, { labels: ["초록"], text: null }), { chunks: ["\x1b[B\x1b[B", "\r"] });
+  assert.deepEqual(codexQuestionKeys(codexFrame("codex-q1"), HUE, { labels: [], text: "보라색" }), { chunks: ["\x1b[B\x1b[B\x1b[B", "\t", "보라색", "\r"] });
+  assert.deepEqual(codexQuestionKeys(codexFrame("codex-q2"), SEASON, { labels: ["봄"], text: null }), { chunks: ["\r"] });
+  assert.equal(codexQuestionKeys(codexFrame("codex-q2"), SEASON, { labels: ["가을"], text: null }).error, '선택지 "가을" 를 찾지 못했습니다');
+});
+
+test("AskUserQuestion 선택지의 미리보기(preview)를 질문 카드에 넘긴다", () => {
+  const input = JSON.parse(fs.readFileSync(new URL("./fixtures/ask-question/ask-preview.json", import.meta.url), "utf8"));
+  const got = pendingQuestion([ask("toolu_p", input.questions)]);
+  assert.deepEqual(got.questions[0].options.map((o) => o.preview), input.questions[0].options.map((o) => o.preview || undefined));
 });

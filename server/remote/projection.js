@@ -113,6 +113,10 @@ export function projectTranscript({ rid, agent, items, before }) {
   return checked({ type: "transcript", rid, agent, items: items.map(projectItem), before }, isOperationProjection);
 }
 
+export function projectMediaImage({ rid, mime, size, offset, data }) {
+  return checked({ type: "media.image.result", rid, mime, size, offset, data }, isOperationProjection);
+}
+
 export function projectTranscriptAppend({ agent, items }) {
   return checked({ type: "transcript.append", agent, items: items.map(projectItem) }, isOperationProjection);
 }

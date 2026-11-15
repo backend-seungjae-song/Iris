@@ -40,6 +40,8 @@ const WINDOW_PROFILE_KB = 700 * 1024;
 // YouTube 탭 590MB → 2GB(17시간), 한때 5.5GB 관측
 const WEBVIEW_PROFILE_MB = 1500;
 const PROFILE_MS = 120000;
+// 응답 없는 CDP 명령에서 멈추면 프로파일러가 붙은 채 남아 본창 CPU 40~50%·메모리 계속 증가(2026-11-14 관측)
+const PROFILE_COMMAND_MS = 60000;
 const AUTO_PROFILE_GAP_MS = 6 * 3600000;
 const PROFILE_RETRY_MS = 10 * 60000;
 const KEEP_FILES = 8;
@@ -69,9 +71,11 @@ const WINDOW_DOM_PROBE = `(() => {
 })()`;
 // 응답 없는 창(멈춘 렌더러)이 기록을 막지 않게
 const DOM_PROBE_MS = 5000;
-// memory-infra 기록 길이와 덤프 간격. 덤프 두 번 이상
-const TRACE_MS = 12000;
-const TRACE_DUMP_MS = 5000;
+// memory-infra 기록 길이와 덤프 간격. 덤프는 시작 직후 한 번
+// - 스왑된 렌더러는 BlinkGC·Malloc 덤프 하나에 3~6초, 12초 기록에서 전체 덤프가 안 끝나 상세 덤프 0건(2026-11-14 설치 앱)
+// - 덤프가 끝나기 전에 다음 덤프를 요청하지 않게 간격을 기록 길이보다 길게
+const TRACE_MS = 60000;
+const TRACE_DUMP_MS = 3600000;
 
 const mb = (n) => Math.round(n / 104857.6) / 10;
 
@@ -291,15 +295,17 @@ function createProcessMemoryLog({
     const out = path.join(dir, `renderer-${pid}-wc${wc.id}-${now().getTime()}-${reason}.heapprofile`);
     const result = (value) => write({ at: now().toISOString(), event: "profile", wc: wc.id, pid, type, reason, result: value });
     const finish = () => { try { if (dbg.isAttached()) dbg.detach(); } catch {} profiling = false; };
+    const send = (method, params) => Promise.race([dbg.sendCommand(method, params),
+      new Promise((_, reject) => setTimeoutFn(() => reject(new Error(`${method} timeout`)), PROFILE_COMMAND_MS))]);
     (async () => {
-      await dbg.sendCommand("HeapProfiler.enable");
-      await dbg.sendCommand("HeapProfiler.startSampling", { samplingInterval: 32768,
+      await send("HeapProfiler.enable");
+      await send("HeapProfiler.startSampling", { samplingInterval: 32768,
         includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
-      await dbg.sendCommand("Profiler.enable");
-      await dbg.sendCommand("Profiler.start");
+      await send("Profiler.enable");
+      await send("Profiler.start");
       await new Promise((resolve) => setTimeoutFn(resolve, PROFILE_MS));
-      const { profile } = await dbg.sendCommand("HeapProfiler.stopSampling");
-      const { profile: cpu } = await dbg.sendCommand("Profiler.stop");
+      const { profile } = await send("HeapProfiler.stopSampling");
+      const { profile: cpu } = await send("Profiler.stop");
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(out, JSON.stringify(profile));
       fs.writeFileSync(out.replace(/\.heapprofile$/, ".cpuprofile"), JSON.stringify(cpu));
@@ -410,4 +416,5 @@ function createProcessMemoryLog({
   return { start, sample, watchWindows, snapshotRequested };
 }
 
-module.exports = { createProcessMemoryLog, SAMPLE_INTERVAL_MS, WINDOW_PROFILE_KB, WEBVIEW_PROFILE_MB, PROFILE_MS };
+module.exports = {
+  TRACE_MS, TRACE_DUMP_MS, createProcessMemoryLog, SAMPLE_INTERVAL_MS, WINDOW_PROFILE_KB, WEBVIEW_PROFILE_MB, PROFILE_MS };

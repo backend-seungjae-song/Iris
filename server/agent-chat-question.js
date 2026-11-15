@@ -20,7 +20,8 @@ function parseQuestions(input) {
     const options = [];
     for (const o of q.options.slice(0, MAX_OPTIONS)) {
       if (typeof o?.label !== "string" || !o.label.trim()) return null;
-      options.push({ label: o.label, description: typeof o.description === "string" ? o.description : "" });
+      options.push({ label: o.label, description: typeof o.description === "string" ? o.description : "",
+        ...(typeof o.preview === "string" && o.preview ? { preview: o.preview } : {}) });
     }
     out.push({ question: q.question, header: typeof q.header === "string" && q.header ? q.header : q.question, multiSelect: q.multiSelect === true, options });
   }
@@ -47,6 +48,31 @@ export function pendingQuestion(lines) {
       const questions = parseQuestions(c.input);
       return questions ? { toolUseId: c.id, questions } : null;
     }
+  }
+  return null;
+}
+
+// Codex 기록(rollout JSONL 줄들) 끝에서 아직 답이 없는 request_user_input. { toolUseId, questions } | null
+// - 질문 모양은 Paseo codex-app-server-agent.ts normalizeCodexQuestionPrompts 와 같음(id·header·question 필수)
+// - 여러 개 고르기·선택지 없는 질문은 터미널 화면을 재지 않아 제외(일반 카드로 남음)
+export function pendingCodexQuestion(lines) {
+  const answered = new Set();
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let rec;
+    try { rec = JSON.parse(lines[i]); } catch { continue; }
+    const p = rec?.type === "response_item" ? rec.payload : null;
+    if (!p) continue;
+    if (p.type === "function_call_output" && typeof p.call_id === "string") { answered.add(p.call_id); continue; }
+    if (p.type === "message" && p.role === "user") return null;
+    if (p.type !== "function_call" || p.name !== "request_user_input" || typeof p.call_id !== "string") continue;
+    if (answered.has(p.call_id)) return null;
+    let input;
+    try { input = JSON.parse(p.arguments); } catch { return null; }
+    const raw = Array.isArray(input?.questions) ? input.questions : null;
+    if (!raw?.length || raw.some((q) => typeof q?.id !== "string" || !q.id || typeof q.header !== "string" || !q.header.trim()
+      || q.multiSelect === true || !Array.isArray(q.options) || !q.options.length)) return null;
+    const questions = parseQuestions({ questions: raw.map((q) => ({ ...q, multiSelect: false })) });
+    return questions ? { toolUseId: p.call_id, questions } : null;
   }
   return null;
 }
@@ -92,10 +118,13 @@ const same = (a, b) => String(a).replace(/\s+/g, " ").trim() === String(b).repla
 // - 화면 해석은 선택지 위 마지막 8줄만 읽고 화면보다 긴 질문은 윗부분이 가려짐 → 화면 글이 질문의 끝부분이면 같은 질문
 // - 끝부분 비교는 공백을 다 뺌. 터미널 줄바꿈이 낱말 중간에 들어가 공백 위치가 기록과 다름
 const squash = (s) => String(s).replace(/\s+/g, "");
+// - Codex 화면은 질문 위에 "Question 1/2 (2 unanswered)" 줄이 있음
+const CODEX_STEP = /^\s*Question \d+\/\d+[^\n]*\n/;
 export function showsQuestion(p, q) {
   if (!p || p.variant === "review") return false;
-  if (same(p.question, q.question)) return true;
-  const seen = squash(p.question);
+  const text = String(p.question).replace(CODEX_STEP, "");
+  if (same(text, q.question)) return true;
+  const seen = squash(text);
   return !!seen && squash(q.question).endsWith(seen);
 }
 
@@ -141,6 +170,33 @@ export function questionKeys(p, q, a) {
   if (submit < 0) submit = find("Next");
   if (submit < 0) return { error: "Submit 줄을 찾지 못했습니다" };
   move(submit); chunks.push("\r");
+  return { chunks };
+}
+
+// Codex request_user_input 화면의 키(실제 화면에서 잰 것)
+// - 선택지 = 줄 이동 + Enter, 직접 입력 = "None of the above" 줄에서 Tab(notes 칸) + 글 + Enter
+// - Enter 하면 다음 질문으로, 마지막 질문의 Enter 는 전부 제출(확인 화면 없음)
+export function codexQuestionKeys(p, q, a) {
+  const opts = p.options;
+  const label = (o) => optionLabel(o.text);
+  let cur = Math.max(0, opts.findIndex((o) => o.row === p.selectedRow));
+  const chunks = [];
+  const move = (to) => {
+    const d = to - cur;
+    cur = to;
+    if (d) chunks.push((d < 0 ? "\x1b[A" : "\x1b[B").repeat(Math.abs(d)));
+  };
+  if (a.text) {
+    const other = opts.findIndex((o) => /^None of the above$/i.test(label(o)));
+    if (other < 0) return { error: "직접 입력 줄(None of the above)을 찾지 못했습니다" };
+    move(other); chunks.push("\t", a.text, "\r");
+    return { chunks };
+  }
+  const n = q.options.findIndex((o) => o.label === a.labels[0]) + 1;
+  const i = opts.findIndex((o) => label(o) === a.labels[0]);
+  const at = i >= 0 ? i : opts.findIndex((o) => Number(/^\s*(?:›\s*)?(\d+)[.)]/u.exec(o.text)?.[1]) === n);
+  if (!n || at < 0) return { error: `선택지 "${a.labels[0]}" 를 찾지 못했습니다` };
+  move(at); chunks.push("\r");
   return { chunks };
 }
 

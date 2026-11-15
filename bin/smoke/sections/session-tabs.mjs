@@ -247,7 +247,7 @@ check("CLI·MCP 양쪽에 노출", () => {
   const cli = read("bin/iris-browser.mjs"), m = read("bin/iris-mcp.mjs");
   return /case "newtab"/.test(cli) && /name: "browser_new_tab"/.test(m)
     && /case "closetab"/.test(cli) && /name: "browser_close_tab"/.test(m)
-    && /NO_TAB = new Set\(\["browser_tabs", "browser_target", "browser_new_tab", "browser_close_tab", "browser_trace", "browser_picks", "app_picks"\]\)/.test(m);
+    && /NO_TAB = new Set\(\["browser_tabs", "browser_target", "browser_new_tab", "browser_close_tab", "browser_trace", "browser_picks", "app_picks", "bg_eval", "figma_dump"\]\)/.test(m);
 });
 
 }

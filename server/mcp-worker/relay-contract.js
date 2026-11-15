@@ -29,7 +29,7 @@ export const INTERNAL_RELAY_COMMANDS = new Set([
 export const INTERNAL_HOST_API_COMMANDS = new Set([
   "browser.sessionView", "browser.targetGet", "browser.targetSet", "browser.targetClear", "browser.commandGuard",
   "browser.commandTargetState", "browser.resolveForCommand",
-  "browser.tabCreate", "browser.tabWake", "browser.tabClose", "browser.status", "browser.promptTargetsActivate",
+  "browser.tabCreate", "browser.tabWake", "browser.tabClose", "browser.status", "browser.bgOpen", "browser.bgSave", "browser.promptTargetsActivate",
   "browser.pickRecord", "browser.pickList", "browser.executeWithDialog", "browser.dialogState", "browser.dialogAnswer",
   "browser.legacyHostTask",
   "qa.anchorUpdate", "qa.claimIfFree", "qa.releaseIfOwner", "qa.owner", "qa.tabCreate", "qa.tabsRestore",

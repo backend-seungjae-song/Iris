@@ -40,7 +40,6 @@ import {
 } from "./qa-journal.js";
 import * as archive from "./archive.js";
 import { handleArtifacts, initArtifactsHandlers } from "./artifacts-handlers.js";
-import { humanPathDeny } from "./human-path.js";
 import { bulkPolicy } from "./bulk-fill.js";
 import * as spaceKey from "./space-key.js";
 import { createSpaceOrderStore, handleSpaceOrderMessage } from "./space-order.js";

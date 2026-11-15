@@ -385,9 +385,9 @@ export const CAPABILITIES = [
     // 없이 터미널 머리 단추 하나와 터미널 위의 덮개 판에 붙는다. 서브에이전트 줄을 누르면 그
     // 서브에이전트의 대화도 같은 판에 연다. 대화 목록은 Paseo 대화 화면(UI 코드만 빌드)이 그린다.
     id: "agentchat",
-    files: ["agentchat/boot.js", "agentchat/view-pref.js", "agentchat/chat-pick.js"],
+    files: ["agentchat/boot.js", "agentchat/view-pref.js", "agentchat/chat-pick.js", "agentchat/resnapshot.js"],
     css: ["35-agent-chat.css"],
-    server: ["server/agent-chat.js", "server/paseo-ui/index.js", "server/remote/features/paseo.js"],
+    server: ["server/agent-chat.js", "server/paseo-ui/index.js"],
     label: "에이전트 채팅 보기",
     load: () => import("../agentchat/boot.js"),
   },

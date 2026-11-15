@@ -260,6 +260,25 @@ const TOOLS = [
     desc: "페이지에서 JS를 실행하고 결과를 받는다. 이 결과는 QA 근거에 포함되지 않는다.",
     schema: { expression: { type: "string" } }, req: ["expression"],
     run: (a, C) => C("eval", { expression: String(a.expression) }) },
+  { name: "bg_eval",
+    desc: "모든 세션이 같이 쓰는 숨은 탭에서 url 페이지를 열어 JS를 실행한다. 같은 url·profile 이면 탭 하나를 같이 쓰고 3분 안 쓰면 닫힌다. 페이지 로드가 끝난 뒤 실행하고, Figma 파일 주소면 figma_dump 와 같은 탭에서 window.figma 가 준비된 뒤 실행한다. 식 하나는 오래 걸려도 끝까지 기다린다. 결과가 크거나 out 을 주면 파일로 저장하고 경로를 돌려준다.",
+    schema: { url: { type: "string" }, expression: { type: "string" },
+      profile: { type: "string", description: "로그인 칸(프로필) 이름. 로그인이 필요한 사이트는 로그인된 칸을 준다." },
+      out: { type: "string", description: "결과를 쓸 파일의 절대 경로" } },
+    req: ["url", "expression"],
+    run: (a, C) => C("bg_eval", { url: String(a.url), expression: String(a.expression),
+      ...(a.profile ? { profile: String(a.profile) } : {}), ...(a.out ? { out: String(a.out) } : {}) }) },
+  { name: "figma_dump",
+    desc: "Figma 파일을 공유 숨은 탭에서 열어 노드와 그 아래 전체(깊이 제한 없음)를 JSON 파일로 저장한다. 크기·레이아웃·채우기·텍스트 스타일·컴포넌트·CSS 를 담는다. 이미지 원본, 디자이너가 내보내기를 지정한 노드, 아이콘은 같은 이름의 -assets 폴더에 파일로 저장하고 목록은 assets.json 에 적는다(실패한 항목은 errors).",
+    schema: { url: { type: "string", description: "Figma 파일 주소. node-id 가 있으면 그 노드" },
+      node: { type: "string", description: "노드 id(예: 163:17). url 에 node-id 가 없을 때" },
+      profile: { type: "string", description: "Figma 에 로그인된 칸(프로필) 이름" },
+      export: { type: "string", enum: ["png", "svg"], description: "그 노드 이미지도 같은 폴더에 저장" },
+      assets: { type: "boolean", description: "false 면 에셋 파일을 저장하지 않음(기본 저장)" } },
+    req: ["url"],
+    run: (a, C) => C("figma_dump", { url: String(a.url), ...(a.node ? { node: String(a.node) } : {}),
+      ...(a.profile ? { profile: String(a.profile) } : {}), ...(a.export ? { export: String(a.export) } : {}),
+      ...(a.assets === false ? { assets: false } : {}) }) },
   { name: "browser_screenshot",
     desc: "화면을 PNG로 저장한다. mark로 볼 곳에 번호·테두리·설명을 얹을 수 있다. element면 해당 요소만, full이면 전체 페이지를 찍는다. 이 이미지는 QA 근거에 포함되지 않는다.",
     schema: {
@@ -371,7 +390,7 @@ const TAB_PARAM = { tab: {
   type: ["string", "array"], items: { type: "string" }, maxItems: 4,
   description: "이 호출만 지정한 탭에서 실행. browser_tabs가 준 핸들(예: claude-tab-a3f9k2)을 쓴다 — 핸들은 앱을 재시작해도 같은 탭을 가리킨다. 여러 개를 주면(배열 또는 쉼표, 최대 4) 그 탭들에 같은 명령을 동시에 돌리고 결과를 대상별로 돌려준다. 생략하면 고정된 탭, 고정이 없으면 이 세션 그룹의 탭.",
 } };
-const NO_TAB = new Set(["browser_tabs", "browser_target", "browser_new_tab", "browser_close_tab", "browser_trace", "browser_picks", "app_picks"]);
+const NO_TAB = new Set(["browser_tabs", "browser_target", "browser_new_tab", "browser_close_tab", "browser_trace", "browser_picks", "app_picks", "bg_eval", "figma_dump"]);
 // 행동 바로 뒤에 좁힌 snapshot 이나 읽기 eval 을 따로 부르는 일이 행동의 40%였다(30일 기록).
 // 결과는 짧고 비용은 왕복 자체라서, 볼 것이 정해져 있으면 같은 호출에 붙인다.
 const THEN_TOOLS = new Set(["browser_wait", "browser_click", "browser_dblclick", "browser_hover", "browser_fill", "browser_focus",
@@ -381,7 +400,7 @@ const THEN_BUDGET = 4000;
 const THEN_PARAM = { then: {
   type: "object",
   description: "행동 뒤에 볼 것이 이미 정해져 있으면 여기 적어 같은 호출로 받는다. 따로 browser_snapshot·browser_eval 을 부르면 왕복이 하나 는다. "
-    + "snapshot 은 role·name·region 중 하나 이상으로 좁힌다(budget 기본 4000). eval 은 browser_eval 과 같은 읽기 전용 식. "
+    + "snapshot 은 role·name·region 중 하나 이상으로 좁힌다(budget 기본 4000). eval 은 browser_eval 과 같은 식. "
     + "after_ms 는 관측 전 기다릴 시간(최대 5000). 행동이 실패하면 관측하지 않는다. 공식 QA 판정은 iris-qa에서 한다.",
   properties: {
     snapshot: { type: "object", properties: { role: { type: "string" }, name: { type: "string" },
@@ -477,7 +496,7 @@ async function attachCandidates(a, r, C) {
     kind: missKind(miss) };
 }
 // 조건 대기. 모델이 wait(ms)와 관측을 번갈아 부르던 순환(30일 204회, 1,462호출)을 한 호출로 줄인다.
-// 판정은 읽기 전용 eval 한 번으로 하므로 서버의 eval 쓰기 차단을 그대로 거친다.
+// 판정은 eval 한 번
 const UNTIL_KEYS = ["selector", "gone", "text", "stable_ms"];
 async function waitUntil(u, timeoutMs, C) {
   if (!u || typeof u !== "object" || Array.isArray(u)) return { ok: false, error: "until 은 {selector, gone, text, stable_ms} 객체입니다." };

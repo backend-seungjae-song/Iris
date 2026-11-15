@@ -76,10 +76,22 @@ const INSPECTOR_LIB = "package:flutter/src/widgets/widget_inspector.dart";
 // 않음) · behind(모달 바깥을 눌러 남는 후보가 없음) · same(이미 최상위) · moved(이동함).
 // 가려진 후보 수를 함께 세는 이유는 픽에 담아 보내기 위해서다. 뒤의 요소가 선택되면 픽 내용만
 // 보고도 가린 레이어를 거르지 못한 것인지 가린 레이어가 없었던 것인지 구분할 수 있다.
-const TOP_LAYER_EXPR = [
+// Flutter 3.41 이후 검사기는 후보를 "지금 맨 위 라우트" 하나로 먼저 거른다(_filterInspectorHitCandidatesToModalRouteScope).
+// 맨 위는 isCurrent(자기 Navigator 안에서 맨 위)로 고르는데, 탭마다 Navigator 가 있는 앱(go_router StatefulShellRoute)은
+// 뒤 페이지도 isCurrent 라 팝업 후보가 통째로 지워진다(확인 결과: 팝업 안 탭의 후보 33개가 전부 뒤 페이지).
+// 그래서 검사기 상태의 마지막 탭 위치로 거르기 전 hit test 를 다시 구해 같은 기준으로 고른다.
+// 검사기 라이브러리 안에서 평가하므로 비공개 이름을 쓸 수 있다. 이름이 없는 판이면 컴파일이 실패하고 TOP_LAYER_EXPR 로 돌아간다
+const RAW_CANDIDATES = [
+  "var cands = s.candidates;",
+  "_WidgetInspectorState? st; void fs(Element e) { if (st != null) return; if (e is StatefulElement && e.state is _WidgetInspectorState) { st = e.state as _WidgetInspectorState; return; } e.visitChildren(fs); }",
+  "final r0 = WidgetsBinding.instance.rootElement; if (r0 != null) fs(r0);",
+  "final pos = st?._lastPointerLocation; final ip = st?._ignorePointerKey.currentContext?.findRenderObject();",
+  "if (st != null && pos != null && ip is RenderIgnorePointer && ip.child != null) cands = st!.hitTest(pos, ip.child!);",
+];
+const topLayerExpr = (candidates) => [
   "(() {",
   "final s = WidgetInspectorService.instance.selection;",
-  "final cands = s.candidates;",
+  ...candidates,
   "if (cands.isEmpty) return 'none|0';",
   "final bars = <RenderObject>{};",
   "void we(Element e) { if (e.widget.runtimeType.toString().contains('ModalBarrier')) { final ro = e.findRenderObject(); if (ro != null) bars.add(ro); } e.visitChildren(we); }",
@@ -90,14 +102,49 @@ const TOP_LAYER_EXPR = [
   "final idx = <RenderObject, int>{}; var cut = -1; var i = 0;",
   "void walk(RenderObject o) { if (want.contains(o)) idx[o] = i; i = i + 1; o.visitChildren(walk); if (bars.contains(o) && i - 1 > cut) cut = i - 1; }",
   "for (final v in RendererBinding.instance.renderViews) { walk(v); }",
-  "RenderObject? pick; var hidden = 0;",
-  "for (final c in cands) { final k = idx[c]; if (k == null) continue; if (k <= cut) { hidden = hidden + 1; continue; } if (pick == null && c.debugCreator is DebugCreator) pick = c; }",
-  "if (pick == null) return 'behind|' + hidden.toString();",
-  "if (identical(pick, s.current)) return 'same|' + hidden.toString();",
-  "s.current = pick;",
+  "final top = <RenderObject>[]; RenderObject? pick; var hidden = 0;",
+  "for (final c in cands) { final k = idx[c]; if (k == null) continue; if (k <= cut) { hidden = hidden + 1; continue; } top.add(c); if (pick == null && c.debugCreator is DebugCreator) pick = c; }",
+  // 모달 뒤 요소는 후보·강조에서 모두 뺌. 맨 위 층에 고를 것이 없으면(막을 누름) 선택을 비움
+  "if (pick == null) { if (s.candidates.isNotEmpty || s.current != null) s.clear(); return 'behind|' + hidden.toString(); }",
+  "if (hidden == 0 && identical(pick, s.current)) return 'same|0';",
+  "s.candidates = top; s.index = top.indexOf(pick);",
   "return 'moved|' + hidden.toString();",
   "})()",
 ].join(" ");
+const TOP_LAYER_EXPR = topLayerExpr(["final cands = s.candidates;"]);
+// 앱 안에서 선택이 정해지는 순간 바로잡는 보정. 서버가 탭 이벤트를 받은 뒤 고치면 뒤쪽 강조가 먼저 그려졌다가 옮겨짐
+// - InspectorSelection 은 ChangeNotifier 이고 탭 후보를 정할 때(_inspectAt → candidates) 그리기 전에 동기로 알림
+// - 새 후보 목록일 때만 거르기 전 hit test 로 다시 골라 맨 위 층만 남김. 자기가 바꾼 알림은 busy 로 건너뜀
+// - 한 번만 건다. 걸었다는 표시는 서비스 확장 이름(ext.iris.pickTopLayer). hot restart 하면 표시도 사라져 다시 건다
+const IN_APP_TOP_LAYER_EXPR = [
+  "(() {",
+  "try { developer.registerExtension('ext.iris.pickTopLayer', (String m, Map<String, String> p) async => developer.ServiceExtensionResponse.result('{}')); } catch (_) { return 'already'; }",
+  "final s = WidgetInspectorService.instance.selection;",
+  "var busy = false; List<RenderObject>? seen;",
+  "s.addListener(() {",
+  "  if (busy || identical(s.candidates, seen) || s.candidates.isEmpty) return;",
+  "  busy = true;",
+  "  try {",
+  "    _WidgetInspectorState? st; void fs(Element e) { if (st != null) return; if (e is StatefulElement && e.state is _WidgetInspectorState) { st = e.state as _WidgetInspectorState; return; } e.visitChildren(fs); }",
+  "    final root = WidgetsBinding.instance.rootElement; if (root == null) return; fs(root);",
+  "    final pos = st?._lastPointerLocation; final ip = st?._ignorePointerKey.currentContext?.findRenderObject();",
+  "    if (st == null || pos == null || ip is! RenderIgnorePointer || ip.child == null) return;",
+  "    final bars = <RenderObject>{}; void we(Element e) { if (e.widget.runtimeType.toString().contains('ModalBarrier')) { final ro = e.findRenderObject(); if (ro != null) bars.add(ro); } e.visitChildren(we); } we(root);",
+  "    if (bars.isEmpty) return;",
+  "    final cands = st!.hitTest(pos, ip.child!);",
+  "    final want = <RenderObject>{}..addAll(cands); final idx = <RenderObject, int>{}; var cut = -1; var i = 0;",
+  "    void walk(RenderObject o) { if (want.contains(o)) idx[o] = i; i = i + 1; o.visitChildren(walk); if (bars.contains(o) && i - 1 > cut) cut = i - 1; }",
+  "    for (final v in RendererBinding.instance.renderViews) { walk(v); }",
+  "    final top = <RenderObject>[]; RenderObject? pick;",
+  "    for (final c in cands) { final k = idx[c]; if (k == null || k <= cut) continue; top.add(c); if (pick == null && c.debugCreator is DebugCreator) pick = c; }",
+  "    if (pick == null) { s.clear(); } else { s.candidates = top; s.index = top.indexOf(pick); }",
+  "  } catch (_) {} finally { seen = s.candidates; busy = false; }",
+  "});",
+  "return 'installed';",
+  "})()",
+].join(" ");
+
+const TOP_LAYER_RAW_EXPR = topLayerExpr(RAW_CANDIDATES);
 
 function run(cmd, args, ms = 5000) {
   return new Promise((resolve) => {
@@ -127,14 +174,14 @@ async function discoverMdns() {
     const m = /_dartVmService\._tcp\.\s+(.+?)\s*$/.exec(line);
     if (m && m[1] && !/Instance Name/.test(line)) names.add(m[1].trim());
   }
-  const found = [];
-  for (const name of names) {
+  // 앱마다 1.2초씩 기다리므로 차례로 하지 않고 함께 조회
+  const found = await Promise.all([...names].map(async (name) => {
     const res = await dnssd(["-L", name, "_dartVmService._tcp", "local."], 1200);
     const port = /:(\d+)\s+\(interface/.exec(res);
     const code = /authCode=(\S+)/.exec(res);
-    if (port && code) found.push({ port: Number(port[1]), token: code[1], label: name.replace(/\s*\(\d+\)$/, "") });
-  }
-  return found;
+    return port && code ? { port: Number(port[1]), token: code[1], label: name.replace(/\s*\(\d+\)$/, "") } : null;
+  }));
+  return found.filter(Boolean);
 }
 
 // 안드로이드 에뮬레이터. mDNS에는 잡히지 않고(확인 결과: iOS 앱만 보였다) 접속 주소는 flutter run을 실행한
@@ -208,6 +255,7 @@ class Target {
     this.dead = false;
     this.libId = undefined; // 아직 찾지 않음(null은 없다는 결론)
     this.liftOff = false;   // 최상위 레이어로 올리기를 중단했는지 여부
+    this.rawOff = false;    // 거르기 전 hit test 식을 쓸 수 없는 Flutter 판인지 여부
   }
   get key() { return `${this.port}/${this.token}`; }
   get uri() { return `ws://127.0.0.1:${this.port}/${this.token}/ws`; }
@@ -320,6 +368,16 @@ class Target {
     return this.libId;
   }
 
+  // 앱 안 보정을 건다. 걸었거나 이미 걸려 있으면 true. 이 Flutter 판에서 쓸 수 없으면 false(서버 보정으로)
+  async inAppLayer(libId) {
+    if (this.inApp !== undefined) return this.inApp;
+    try {
+      const r = await this.call("evaluate", { isolateId: this.isolateId, targetId: libId, expression: IN_APP_TOP_LAYER_EXPR });
+      this.inApp = r?.valueAsString === "installed" || r?.valueAsString === "already";
+    } catch { this.inApp = false; }
+    return this.inApp;
+  }
+
   // 선택을 최상위 레이어로 올린다. 앱 안에서 후보를 다시 거르므로 화면 하이라이트도 함께 이동한다.
   // 확인 결과(iOS 시뮬레이터): 요소 5969개 + 렌더 2683개를 탐색해 warm 16~28ms
   // (첫 회 86~219ms는 식 컴파일 포함). 탭 한 번에 한 번이면 비용이 충분히 낮다.
@@ -327,9 +385,14 @@ class Target {
     if (this.liftOff) return null;
     const libId = await this.inspectorLib();
     if (!libId) { this.liftOff = true; return null; }
+    if (await this.inAppLayer(libId)) return null;
     let r;
     try {
-      r = await this.call("evaluate", { isolateId: this.isolateId, targetId: libId, expression: TOP_LAYER_EXPR });
+      if (!this.rawOff) {
+        try { r = await this.call("evaluate", { isolateId: this.isolateId, targetId: libId, expression: TOP_LAYER_RAW_EXPR }); }
+        catch { this.rawOff = true; }   // 이 Flutter 판에는 거르기 전 hit test 에 쓰는 이름이 없음
+      }
+      if (this.rawOff) r = await this.call("evaluate", { isolateId: this.isolateId, targetId: libId, expression: TOP_LAYER_EXPR });
     } catch {
       // 식을 컴파일하지 못하는 실행 방식이 있다(flutter run으로 실행하지 않은 경우 등).
       // 그때는 한 번만 알리고 다시 시도하지 않는다. 탭마다 같은 실패를 반복할 이유가 없다.
@@ -573,6 +636,8 @@ async function attach(cands) {
       if (!on) { t.close(); return; }
       await t.setSelect(true);
       if (!on) { try { await t.setSelect(false); } catch {} t.close(); return; }
+      // 첫 탭부터 앱 안에서 맨 위 층으로 고르게 미리 건다
+      try { const libId = await t.inspectorLib(); if (libId) await t.inAppLayer(libId); } catch {}
       t.onCommit = (tt) => { deliver(tt).catch(() => {}); };
       await t.listenEvents();
       // 켜기 전부터 선택돼 있던 항목은 방금 가리킨 것이 아니므로 기준값으로만 사용한다.
@@ -593,12 +658,18 @@ function remember(t) {
   known = [{ port: t.port, token: t.token, label: t.label }, ...known.filter((k) => k.port !== t.port)].slice(0, 4);
 }
 
+// 찾는 방법마다 결과가 나오는 대로 연결
+// - pane 읽기는 세션 수만큼 차례로 읽어 수십 초 걸림(22개 25초). 모두 기다리면 4초 만에 찾은 앱도 그만큼 늦게 연결됨
 async function discover() {
   if (!on) return;
-  const got = await Promise.all([discoverMdns(), discoverAdb(), discoverFromPanes(deps.herdr)]);
-  const seen = new Set();
-  const cands = got.flat().filter((c) => { const k = `${c.port}/${c.token}`; if (seen.has(k)) return false; seen.add(k); return true; });
-  await attach(cands);
+  await Promise.all([discoverMdns(), discoverAdb(), discoverFromPanes(deps.herdr)].map((p) => p.then(queueAttach, () => {})));
+}
+
+// 연결은 한 번에 하나씩. 여러 찾기 결과가 동시에 와도 같은 앱을 두 번 연결하지 않게
+let attaching = Promise.resolve();
+function queueAttach(cands) {
+  attaching = attaching.then(() => attach(cands)).catch(() => {});
+  return attaching;
 }
 
 // 현재 선택을 한 건으로 만들어 보낸다. 확정 신호와 폴링 폴백 모두 이 경로를 쓴다.
@@ -673,7 +744,8 @@ export function start({ herdr, onPick, onNote }) {
   if (on) return;
   on = true;
   // 기억해 둔 앱에 먼저 연결하고(즉시), 그 다음에 새로 탐색한다(느림). 유효하지 않은 주소면 조용히 실패한다.
-  attach(known).catch(() => {}).then(() => discover().catch(() => {}));
+  queueAttach(known);
+  discover().catch(() => {});
   pollTimer = setInterval(() => { poll().catch(() => {}); }, POLL_MS);
   discoverTimer = setInterval(() => { discover().catch(() => {}); }, REDISCOVER_MS);
 }

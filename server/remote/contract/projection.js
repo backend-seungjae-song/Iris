@@ -194,17 +194,6 @@ export function isErrorProjection(value) {
     && isErrorCode(value.error.code);
 }
 
-// 대화 메시지는 서버가 해석한 기록이라 필드를 엄격히 고정하지 않고 모양과 크기만 확인
-function chatMessage(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value)
-    && isString(value.id, 1, 200) && isString(value.role, 1, 20) && (value.ts === null || Number.isFinite(value.ts))
-    && Array.isArray(value.blocks) && value.blocks.length <= 500
-    && value.blocks.every((block) => !!block && typeof block === "object" && !Array.isArray(block) && isString(block.type, 1, 40));
-}
-function chatMessages(value) {
-  return Array.isArray(value) && value.length <= 400 && value.every(chatMessage);
-}
-
 export function isOperationProjection(value) {
   if (hasExactKeys(value, ["type", "rid"]) && value.type === "pong") return isRequestId(value.rid);
   if (hasExactKeys(value, ["type", "agents"]) && value.type === "agents") {
@@ -222,6 +211,13 @@ export function isOperationProjection(value) {
     return isRequestId(value.rid) && REF.test(value.agent) && Array.isArray(value.items)
       && value.items.every(isItemProjection) && (value.before === null || REF.test(value.before));
   }
+  // data: 원본 IMAGE_CHUNK_BYTES(360KiB) 까지의 base64
+  if (hasExactKeys(value, ["type", "rid", "mime", "size", "offset", "data"]) && value.type === "media.image.result") {
+    return isRequestId(value.rid) && ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(value.mime)
+      && Number.isSafeInteger(value.size) && value.size > 0 && value.size <= 64 * 1024 * 1024
+      && Number.isSafeInteger(value.offset) && value.offset >= 0 && value.offset <= value.size
+      && typeof value.data === "string" && value.data.length <= 480 * 1024 && /^[A-Za-z0-9+/]*={0,2}$/.test(value.data);
+  }
   if (hasExactKeys(value, ["type", "agent", "items"]) && value.type === "transcript.append") {
     return REF.test(value.agent) && Array.isArray(value.items) && value.items.length > 0
       && value.items.every(isItemProjection);
@@ -234,27 +230,6 @@ export function isOperationProjection(value) {
   }
   if (hasExactKeys(value, ["type", "rid", "result"]) && value.type === "request.answer.result") {
     return isRequestId(value.rid) && ["delivered", "already-answered", "expired", "failed"].includes(value.result);
-  }
-  if (hasExactKeys(value, ["type", "rid", "key"]) && value.type === "chat.open.result") {
-    return isRequestId(value.rid) && REF.test(value.key);
-  }
-  if (hasExactKeys(value, ["type", "key", "kind", "reason"]) && value.type === "chat.frame") {
-    return REF.test(value.key) && ["missing", "error"].includes(value.kind) && isString(value.reason, 0, 300);
-  }
-  if (hasExactKeys(value, ["type", "key", "kind", "messages"], ["hasOlder"]) && value.type === "chat.frame") {
-    return REF.test(value.key) && ["snapshot", "replacement", "append"].includes(value.kind)
-      && chatMessages(value.messages) && (value.hasOlder === undefined || typeof value.hasOlder === "boolean");
-  }
-  if (hasExactKeys(value, ["type", "key", "messages", "hasOlder"]) && value.type === "chat.older") {
-    return REF.test(value.key) && chatMessages(value.messages) && typeof value.hasOlder === "boolean";
-  }
-  if (hasExactKeys(value, ["type", "phase", "message"], ["version", "url"]) && value.type === "chat.ui") {
-    return ["none", "building", "ready", "error"].includes(value.phase) && isString(value.message, 0, 300)
-      && (value.version === undefined || isString(value.version, 1, 40))
-      && (value.url === undefined || /^\/paseo-ui\/\?v=[A-Za-z0-9._-]{1,40}$/.test(value.url));
-  }
-  if (hasExactKeys(value, ["type", "rid", "ticket"]) && value.type === "paseo.open.result") {
-    return isRequestId(value.rid) && /^[0-9a-f]{64}$/.test(value.ticket);
   }
   if (hasExactKeys(value, ["type", "rid", "result"], ["tab"]) && value.type === "remote.action.result") {
     return isRequestId(value.rid) && ["done", "unchanged", "sent"].includes(value.result)

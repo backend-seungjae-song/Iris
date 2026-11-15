@@ -6,7 +6,7 @@
 //
 // 제공 API
 //   decodeLine(kind, line, fallbackId) · isNoiseMessage(msg) · readTailWindow(source, opts) ·
-//   readForward(source, from, kind) · LIMITS.
+//   readForward(source, from, kind) · imageFromRecord(rec, i, j, mimes) · LIMITS.
 //
 // 의존 대상
 //   아무것도 import 하지 않는다. 파일은 source({ size, readAt(buf, pos) }) 로만 받으므로 검사가
@@ -20,7 +20,7 @@
 //   response_item 과 event_msg 의 turn_aborted·item_completed(도구 항목)를 읽는다.
 //
 // 영향 범위
-//   server/agent-chat.js 와 test/agent-chat.mjs. 현재 목록 확인: node bin/importers.mjs server/agent-chat-transcript.js
+//   server/agent-chat.js · server/remote/transcript.js 와 test/agent-chat.mjs. 현재 목록 확인: node bin/importers.mjs server/agent-chat-transcript.js
 
 export const LIMITS = {
   chunk: 64 * 1024,
@@ -76,11 +76,21 @@ function boundInput(value, depth = 0) {
   return out;
 }
 
-// 도구 결과 안 이미지의 위치(content 배열 칸 번호). 데이터는 싣지 않고 창이 /agentchat-image 로 따로 받음
+// 이미지 데이터의 짧은 서명(길이·끝 256자의 FNV-1a). 같은 위치의 줄이 다른 이미지로 바뀌었는지 가릴 때
+// - 데이터 자체는 메시지에 싣지 않음
+function imageSig(c) {
+  const data = typeof c?.source?.data === "string" ? c.source.data
+    : typeof c?.image_url === "string" ? c.image_url : typeof c?.image_url?.url === "string" ? c.image_url.url : "";
+  let h = 0x811c9dc5;
+  for (let k = Math.max(0, data.length - 256); k < data.length; k++) h = Math.imul(h ^ data.charCodeAt(k), 0x01000193);
+  return `${data.length}:${(h >>> 0).toString(16)}`;
+}
+
+// 도구 결과 안 이미지의 위치(content 배열 칸 번호 j)와 서명. 데이터는 싣지 않고 창이 /agentchat-image 로 따로 받음
 function resultImages(content) {
   if (!Array.isArray(content)) return [];
   const out = [];
-  content.forEach((c, j) => { if (c && (c.type === "image" || c.type === "input_image") && out.length < 20) out.push(j); });
+  content.forEach((c, j) => { if (c && (c.type === "image" || c.type === "input_image") && out.length < 20) out.push({ j, sig: imageSig(c) }); });
   return out;
 }
 
@@ -135,7 +145,7 @@ function decodeQueuedPrompt(rec, fallbackId) {
   if (!a || a.type !== "queued_command" || a.commandMode !== "prompt" || a.origin?.kind !== "human") return [];
   const blocks = typeof a.prompt === "string" ? (a.prompt ? [{ type: "text", text: clip(unwrapPasted(a.prompt), LIMITS.text) }] : [])
     : Array.isArray(a.prompt) ? a.prompt.flatMap((c, i) => c?.type === "text" && typeof c.text === "string" && c.text
-      ? [{ type: "text", text: clip(unwrapPasted(c.text), LIMITS.text) }] : c?.type === "image" ? [{ type: "image", i }] : []) : [];
+      ? [{ type: "text", text: clip(unwrapPasted(c.text), LIMITS.text) }] : c?.type === "image" ? [{ type: "image", i, sig: imageSig(c) }] : []) : [];
   if (!blocks.length) return [];
   const id = typeof rec.uuid === "string" ? rec.uuid : fallbackId;
   return [{ id, role: "user", blocks, ts: ts(a.timestamp || rec.timestamp) }];
@@ -205,9 +215,9 @@ function decodeClaude(rec, fallbackId) {
     } else if (c.type === "tool_use") {
       main.push({ type: "tool-call", id: typeof c.id === "string" ? c.id : null, name: String(c.name || "tool"), input: boundInput(c.input) });
     } else if (c.type === "tool_result") {
-      const images = resultImages(c.content).map((j) => ({ i, j }));
+      const images = resultImages(c.content).map(({ j, sig }) => ({ i, j, sig }));
       results.push({ type: "tool-result", id: typeof c.tool_use_id === "string" ? c.tool_use_id : null, output: clip(resultText(c.content), LIMITS.toolResult), isError: c.is_error === true, ...(images.length ? { images } : {}) });
-    } else if (c.type === "image" && !machine) main.push({ type: "image", i });
+    } else if (c.type === "image" && !machine) main.push({ type: "image", i, sig: imageSig(c) });
   }
   if (main.length) out.push({ id, role: rec.type === "assistant" ? "assistant" : "user", blocks: main, ts: time, ...(rec.type === "user" ? parentOf(rec) : {}) });
   if (results.length) out.push({ id: `${id}:t`, role: "tool", blocks: results, ts: time });
@@ -222,7 +232,7 @@ function codexContentBlocks(content) {
   for (const [i, c] of content.entries()) {
     if (!c || typeof c !== "object") continue;
     if (typeof c.text === "string" && c.text && /text$/.test(String(c.type || "text"))) blocks.push({ type: "text", text: clip(c.text, LIMITS.text) });
-    else if (c.type === "input_image" || c.type === "image") blocks.push({ type: "image", i });
+    else if (c.type === "input_image" || c.type === "image") blocks.push({ type: "image", i, sig: imageSig(c) });
   }
   return blocks;
 }
@@ -302,7 +312,7 @@ function decodeCodex(rec, fallbackId) {
     const o = p.output;
     const isError = !!(o && typeof o === "object" && !Array.isArray(o) && (o.success === false || o.is_error === true));
     // Codex 도구 결과 이미지는 payload.output 배열 칸. i 는 쓰지 않음(0)
-    const images = resultImages(o).map((j) => ({ i: 0, j }));
+    const images = resultImages(o).map(({ j, sig }) => ({ i: 0, j, sig }));
     return [{ id, role: "tool", blocks: [{ type: "tool-result", id: typeof p.call_id === "string" ? p.call_id : null, output: clip(resultText(o), LIMITS.toolResult), isError, ...(images.length ? { images } : {}) }], ts: time }];
   }
   return [];
@@ -397,4 +407,25 @@ export function completeEnd(source) {
     pos -= n;
   }
   return 0;
+}
+
+// 기록 줄 하나에서 i 번째 내용 블록의 이미지 → { mime, bytes } 또는 null. mimes 에 든 형식만
+// j 가 있으면 도구 결과 안 이미지: Claude 는 content[i].content[j], Codex 는 payload.output[j]
+export function imageFromRecord(rec, i, j, mimes) {
+  const list = Array.isArray(rec?.message?.content) ? rec.message.content
+    : Array.isArray(rec?.attachment?.prompt) ? rec.attachment.prompt
+      : Array.isArray(rec?.payload?.content) ? rec.payload.content : null;
+  const nested = j === null ? null
+    : Array.isArray(rec?.payload?.output) ? rec.payload.output
+      : Array.isArray(list?.[i]?.content) && list[i].type === "tool_result" ? list[i].content : null;
+  const c = j === null ? list?.[i] : nested?.[j];
+  if (!c || typeof c !== "object") return null;
+  if (c.type === "image" && c.source?.type === "base64" && typeof c.source.data === "string") {
+    const mime = String(c.source.media_type || "");
+    return mimes.includes(mime) ? { mime, bytes: Buffer.from(c.source.data, "base64"), sig: imageSig(c) } : null;
+  }
+  const url = typeof c.image_url === "string" ? c.image_url : typeof c.image_url?.url === "string" ? c.image_url.url : "";
+  const m = /^data:(image\/[a-z+.-]+);base64,(.*)$/s.exec(url);
+  if (m && mimes.includes(m[1])) return { mime: m[1], bytes: Buffer.from(m[2], "base64"), sig: imageSig(c) };
+  return null;
 }

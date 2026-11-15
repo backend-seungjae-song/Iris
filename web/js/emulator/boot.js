@@ -549,7 +549,9 @@ function mountEntry(tab, space, show) {
 // 탭의 기기. 분리한 탭은 이 창에 화면이 없으므로 마지막으로 붙었던 기기를 쓴다.
 function entryDevice(entry) {
   if (entry.detached) return { udid: entry.tab.deviceId || null, name: entry.tab.label || "", attached: !!entry.running };
-  const current = entry.pane ? entry.pane.current() : { udid: null, name: "", attached: false };
+  // 화면이 아직 없는 탭(분리 창 복원 대기 등)은 켜짐 기록을 모르는 채로 덮어쓰지 않음
+  if (!entry.pane) return { udid: entry.tab.deviceId || null, name: entry.tab.label || "", attached: false };
+  const current = entry.pane.current();
   if (current.loading && entry.running) return { ...current, udid: entry.tab.deviceId, name: entry.tab.label, attached: true };
   if (current.attached) entry.running = true;
   else if (!current.loading) entry.running = false;
@@ -1039,9 +1041,11 @@ async function designateDevice(tabId, pickedDevice = null) {
   const entry = mounted.get(tabId);
   const pane = ctx.getCurTarget?.();
   const device = entry ? entryDevice(entry) : null;
-  const udid = entry && (entry.detached ? entry.running && pickedDevice : device.attached && device.udid);
+  // 분리 창은 기기에 붙어 있을 때만 기기를 보냄. 본 창의 켜짐 기록은 본 창이 다시 로드되면 낡을 수 있어 창의 값을 따름
+  const udid = entry && (entry.detached ? pickedDevice : device.attached && device.udid);
   if (!pane) { ctx.showToast?.("먼저 에이전트 세션을 선택하세요", { level: "warn" }); return "먼저 에이전트 세션을 선택하세요"; }
   if (!udid) { ctx.showToast?.("먼저 기기에 연결하세요", { level: "warn" }); return "먼저 기기에 연결하세요"; }
+  if (entry.detached && !entry.running) { entry.running = true; savePlaces(); }
 
   const request = crypto.randomUUID();
   return new Promise((resolve) => {
@@ -1135,7 +1139,7 @@ function leaveRail() {
 // ---- 자리 기록: 앱 재시작 때 있던 자리에 다시 열기 ----
 // 켜짐: 본 창 화면은 지금 붙어 있는가, 분리 창은 창이 보고한 값. 복원으로 켜는 중(booting)도 켜짐
 function entryRunning(entry, d) {
-  if (entry.detached) return !!entry.running;
+  if (entry.detached || !entry.pane) return !!entry.running;
   if (entry.booting) {
     if (d.attached || d.error) entry.booting = false;
     else return true;

@@ -106,8 +106,12 @@ class ActiveRemoteSession {
       StreamController<TranscriptAppend>.broadcast();
   final StreamController<TerminalFrame> _terminalFrames =
       StreamController<TerminalFrame>.broadcast();
-  final StreamController<ServerMessage> _chatEvents =
-      StreamController<ServerMessage>.broadcast();
+  // 최근에 받은 대화 이미지. 대화창을 다시 그릴 때 다시 받지 않게
+  // - 개수와 바이트 총량 둘 다 한도. 큰 스크린샷 24장이면 수백 MiB
+  static const _mediaImageLimit = 24;
+  static const _mediaImageByteLimit = 48 << 20;
+  final LinkedHashMap<String, Future<Uint8List>> _mediaImages = LinkedHashMap();
+  final Map<String, int> _mediaImageBytes = {};
   final StreamController<BrowserFrame> _browserFrames =
       StreamController<BrowserFrame>.broadcast();
   final StreamController<RemoteConnectionStatus> _connectionStates =
@@ -144,9 +148,6 @@ class ActiveRemoteSession {
   Stream<TranscriptAppend> get transcriptAppends => _transcriptAppends.stream;
 
   Stream<TerminalFrame> get terminalFrames => _terminalFrames.stream;
-
-  // 대화 화면 푸시. ChatUi · ChatFrame · ChatOlder
-  Stream<ServerMessage> get chatEvents => _chatEvents.stream;
 
   final StreamController<BrowserFrameStatus> _browserFrameStatuses =
       StreamController.broadcast();
@@ -198,6 +199,63 @@ class ActiveRemoteSession {
         timeoutMessage:
             '컴퓨터가 대화 기록을 30초 안에 보내지 못했습니다. 컴퓨터에서 Iris가 응답하는지 확인한 뒤 다시 열어 주세요.',
       );
+
+  // 대화 속 이미지(iris-image ref)를 조각으로 이어 받음. 같은 이미지는 화면을 다시 그려도 한 번만 받음
+  // - 실패한 받기는 캐시에서 빼서 다시 시도할 수 있게
+  Future<Uint8List> mediaImage(String media) {
+    final cached = _mediaImages.remove(media);
+    if (cached != null) {
+      _mediaImages[media] = cached;
+      return cached;
+    }
+    final loading = _loadMediaImage(media);
+    _mediaImages[media] = loading;
+    loading.then(
+      (bytes) {
+        if (!identical(_mediaImages[media], loading)) return;
+        _mediaImageBytes[media] = bytes.length;
+        _trimMediaImages();
+      },
+      onError: (Object _) {
+        if (identical(_mediaImages[media], loading)) {
+          _mediaImages.remove(media);
+          _mediaImageBytes.remove(media);
+        }
+      },
+    );
+    _trimMediaImages();
+    return loading;
+  }
+
+  void _trimMediaImages() {
+    var total = _mediaImageBytes.values.fold(0, (a, b) => a + b);
+    while (_mediaImages.length > 1 &&
+        (_mediaImages.length > _mediaImageLimit ||
+            total > _mediaImageByteLimit)) {
+      final oldest = _mediaImages.keys.first;
+      _mediaImages.remove(oldest);
+      total -= _mediaImageBytes.remove(oldest) ?? 0;
+    }
+  }
+
+  Future<Uint8List> _loadMediaImage(String media) async {
+    final builder = BytesBuilder(copy: false);
+    var size = -1;
+    while (size < 0 || builder.length < size) {
+      final chunk = await _request<MediaImageChunk>(
+        (rid) =>
+            mediaImageRequest(rid: rid, media: media, offset: builder.length),
+      );
+      if (chunk.offset != builder.length ||
+          (size >= 0 && chunk.size != size) ||
+          (chunk.bytes.isEmpty && chunk.offset < chunk.size)) {
+        throw const RemoteFailure('이미지를 받는 중 내용이 바뀌었습니다.');
+      }
+      size = chunk.size;
+      builder.add(chunk.bytes);
+    }
+    return builder.takeBytes();
+  }
 
   Future<AgentStopResult> stopAgent(String agent) => _request<AgentStopResult>(
     (rid) => agentStopRequest(rid: rid, agent: agent),
@@ -705,24 +763,6 @@ class ActiveRemoteSession {
     ),
   );
 
-  // 웹뷰가 대화 화면을 열 때 쓰는 일회용 티켓
-  Future<PaseoOpenResult> openPaseo() =>
-      _request<PaseoOpenResult>((rid) => paseoOpenRequest(rid: rid));
-
-  Future<ChatOpenResult> openChat(String agent) => _request<ChatOpenResult>(
-    (rid) => chatOpenRequest(rid: rid, agent: agent),
-  );
-
-  Future<RemoteActionResult> chatOlder(String key) =>
-      _request<RemoteActionResult>(
-        (rid) => chatOlderRequest(rid: rid, key: key),
-      );
-
-  Future<RemoteActionResult> chatClose(String key) =>
-      _request<RemoteActionResult>(
-        (rid) => chatCloseRequest(rid: rid, key: key),
-      );
-
   Future<GitHubPrResult> githubPr(String agent) => _request<GitHubPrResult>(
     (rid) => githubPrRequest(rid: rid, agent: agent),
   );
@@ -1043,6 +1083,8 @@ class ActiveRemoteSession {
         _complete(message.rid, message);
       case TranscriptPage():
         _complete(message.rid, message);
+      case MediaImageChunk():
+        _complete(message.rid, message);
       case AgentStopResult():
         _complete(message.rid, message);
       case AgentMessageResult():
@@ -1083,16 +1125,6 @@ class ActiveRemoteSession {
         _complete(message.rid, message);
       case GitHubPrResult():
         _complete(message.rid, message);
-      case PaseoOpenResult():
-        _complete(message.rid, message);
-      case ChatOpenResult():
-        _complete(message.rid, message);
-      case ChatUi():
-        _chatEvents.add(message);
-      case ChatFrame():
-        _chatEvents.add(message);
-      case ChatOlder():
-        _chatEvents.add(message);
       case GitHubCheckLogResult():
         _complete(message.rid, message);
       default:
@@ -1145,7 +1177,6 @@ class ActiveRemoteSession {
         _transcriptAppends.close(),
         _terminalFrames.close(),
         _browserFrames.close(),
-        _chatEvents.close(),
         _browserFrameStatuses.close(),
         _connectionStates.close(),
       ]);

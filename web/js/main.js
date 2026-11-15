@@ -943,7 +943,7 @@ initKeynav({
   wsSend, BROWSER_MODE, MEMO_MODE, acHost: window.acHost,
   orderedSpaces, selectSession, focusSpace, newBrowserTab,
   getCurTarget: terminalCurTarget, getSelectedSpaceId: keynavSelectedSpaceId,
-  getIsLocal: keynavIsLocal, lastTabBySpace,
+  getIsLocal: keynavIsLocal, askConfirm, lastTabBySpace,
 });
 
 // ── AC1: 복귀 변경 식별 ──

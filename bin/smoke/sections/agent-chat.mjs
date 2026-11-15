@@ -88,11 +88,12 @@ export default async function run() {
   // - promptId·row: 권한 질문 답(서버가 읽은 화면과 같을 때만 그 줄로 옮겨 Enter). modeId: 권한 모드 이름(정해진 목록만)
   // - taskId·from: 백그라운드 작업 출력 읽기. taskId 는 그 구독의 기록에서 찾은 작업 id 만, from 은 바이트 위치
   // - answers·dismiss: AskUserQuestion 답. 질문은 서버가 기록에서 읽은 것이고, 답 글은 문자열만 터미널 입력으로 씀
+  // - missing·tries: 불러오기 멈춤 로그 한 줄. missing 은 정해진 두 값만, tries 는 숫자만 씀
   check("채팅 서버는 기록 파일 경로를 창에서 받지 않는다", () => {
     const src = read("server/agent-chat.js");
     const fields = new Set([...src.matchAll(/\bmsg\.(\w+)/g)].map((m) => m[1]));
     if (!fields.size) throw new Error("msg 칸을 하나도 세지 못했다");
-    const extra = [...fields].filter((f) => !["type", "key", "paneId", "agentId", "text", "id", "build", "reason", "query", "promptId", "row", "modeId", "taskId", "from", "answers", "dismiss"].includes(f));
+    const extra = [...fields].filter((f) => !["type", "key", "paneId", "agentId", "text", "id", "build", "reason", "query", "promptId", "row", "modeId", "taskId", "from", "answers", "dismiss", "missing", "tries"].includes(f));
     if (extra.length) throw new Error(`창에서 받는 칸: ${extra.join(", ")}`);
     return true;
   });

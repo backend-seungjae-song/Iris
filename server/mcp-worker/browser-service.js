@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
+import path from "node:path";
 
 import { bulkPolicy } from "../bulk-fill.js";
+import { stateHome } from "../state-home.cjs";
+import { createBgCommands } from "./bg-commands.js";
 import { ordinaryCommandDenied, sanitizeBrowserArgs } from "../qa-command-contract.js";
 import { COMMAND_ROUTES, requiredFeatures, runsOutsideQueue, workerHandlerFor } from "./command-routes.js";
 import { INTERNAL_HOST_API_COMMANDS, INTERNAL_RELAY_COMMANDS } from "./relay-contract.js";
@@ -82,6 +85,7 @@ export function createWorkerBrowserService({ hostApi, activity, routes = COMMAND
   };
 
   const executeOne = async (command, args, identity, noAutoTab = false) => {
+    if (command === "bg_eval" || command === "figma_dump") return bgCommand(command, args);
     const local = await sessionCommand(command, args);
     if (local) {
       if (command !== "newtab" || !local.ok || !local.data?._navigate) return local;
@@ -126,6 +130,11 @@ export function createWorkerBrowserService({ hostApi, activity, routes = COMMAND
       });
       if (policy.mode !== "free") return { ok: false, error: policy.reason, need: policy.mode, cap: policy.cap };
     }
+    return runOnTarget(command, args, target);
+  };
+
+  // 정해진 대상 탭에서 명령 하나 실행 · 세션 탭과 공유 백그라운드 탭이 같이 씀
+  const runOnTarget = async (command, args, target) => {
     const relayCall = (relayCommand, relayArgs, unit, token = target.targetToken) => call("browser.executeWithDialog", {
       tabId: target.tabId,
       targetToken: token,
@@ -136,6 +145,22 @@ export function createWorkerBrowserService({ hostApi, activity, routes = COMMAND
     // 메인이 단위 실행을 알릴 때만 worker 경로 · 아니면 옛 봉투로 보내 지금 설치 앱의 메인과 호환
     if (workerHandler && await hasFeatures(requiredFeatures(command))) return runWorkerHandler(workerHandler, command, args, relayCall, target.targetToken, runsOutsideQueue(command), target.tabId);
     return commandResponse(await relayCall(command, args));
+  };
+
+  const bg = createBgCommands({
+    open: async ({ url, profile }) => call("browser.bgOpen", { url, profile }),
+    evalOn: async (target, expression) => {
+      const response = await runOnTarget("eval", { expression }, target);
+      if (!response?.ok) throw new Error(response?.error || "공유 탭 eval 실패");
+      return response.data !== undefined ? response.data.value : response.value;
+    },
+    save: async (input) => call("browser.bgSave", input),
+    outDir: path.join(stateHome(), "bg-out"),
+  });
+  const bgCommand = async (command, args) => {
+    if (!args.url) return { ok: false, error: "url 이 필요합니다." };
+    try { return { ok: true, data: command === "bg_eval" ? await bg.bgEval(args) : await bg.figmaDump(args) }; }
+    catch (error) { return resultError(error); }
   };
 
   const execute = async (command, rawArgs, identity, onAttempt) => {

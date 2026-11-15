@@ -48,7 +48,7 @@ check("호스트로 중계된다", () => /sendToHost\("ac-webauthn"/.test(wvpre)
 // 로그인 흐름은 iframe 안에서 도는 경우가 많다(AWS 등). preload가 최상위 문서에만 걸리면 못 잡는다.
 check("preload가 하위 프레임에도 걸린다", () => {
   const m = readAll("native").match(/webPreferences\.nodeIntegrationInSubFrames = true;/g);
-  return !!m && m.length === 3; // 콘솔 창 + 분리 브라우저 창 + 탭 분리 창 (native 전체에서 센다)
+  return !!m && m.length === 4; // 콘솔 창 + 분리 브라우저 창 + 탭 분리 창 + 공유 숨은 탭 창 (native 전체에서 센다)
 });
 // 하위 프레임까지 preload가 실행되면 호스트의 el.send가 모든 프레임에 전달된다. 비밀번호는 요청한
 // 프레임만 받아야 하는데, webview 태그에는 프레임 지정 전송이 없어 id 반향으로 제한한다.

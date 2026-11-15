@@ -32,13 +32,13 @@ import { claudeHome, codexHome } from "./agent-homes.js";
 import { indexProjects } from "./join.js";
 import { resolveCodexSession } from "./codex-session.js";
 import { snapshot } from "./runtime-state.js";
-import { LIMITS, completeEnd, readForward, readTailWindow } from "./agent-chat-transcript.js";
+import { LIMITS, completeEnd, imageFromRecord as recordImage, readForward, readTailWindow } from "./agent-chat-transcript.js";
 import { isLoopbackRequest } from "./http-handler.js";
 import { claudeBuiltins, listCommands, suggestFiles } from "./agent-chat-tools.js";
 import { TASK_ID_RE, claudeTmpRoot, emptyTaskIndex, readTaskOutput, scanTaskFile, taskList, taskOutputSize, taskTail, tasksDirFor } from "./agent-chat-tasks.js";
 import { claudeFooter, claudeMeta, codexConfiguredModel, codexMeta, codexModelsFromCache } from "./agent-chat-meta.js";
 import { clearKeys, terminalDraft } from "./agent-chat-draft.js";
-import { optionLabel, pendingQuestion, questionAnswers, questionKeys, reviewKeys, showsQuestion } from "./agent-chat-question.js";
+import { codexQuestionKeys, optionLabel, pendingCodexQuestion, pendingQuestion, questionAnswers, questionKeys, reviewKeys, showsQuestion } from "./agent-chat-question.js";
 export { optionLabel };
 // 권한·질문 화면 해석은 폰 기능의 것을 그대로 씀(같은 화면, 같은 판정)
 import { extractPrompt } from "./remote/features/prompts.js";
@@ -107,7 +107,15 @@ export function handleAgentChat(ws, msg) {
   else if (msg.type === "agentchat.mode") setMode(ws, key, msg);
   else if (msg.type === "agentchat.taskread") readTask(ws, key, msg);
   else if (msg.type === "agentchat.ui-broken" && typeof msg.build === "string") reportPaseoUiBroken(msg.build.slice(0, 100), String(msg.reason || ""));
+  else if (msg.type === "agentchat.stall") logStall(key, msg);
   return true;
+}
+
+// 창의 "대화를 불러오는 중"이 오래 남음. 무엇이 안 왔는지(frame: iframe 준비 신호, history: 기록) 남겨 원인 조사에 씀
+function logStall(key, msg) {
+  const clean = (v, n) => String(v ?? "").replace(/[^\w:.-]/g, "?").slice(0, n);
+  const missing = Array.isArray(msg.missing) ? msg.missing.filter((m) => m === "frame" || m === "history").join(",") : "";
+  console.log(`[agentchat] ${new Date().toISOString()} 불러오기 멈춤 key=${clean(key, 120)} missing=${missing || "-"} tries=${Number(msg.tries) || 0} build=${clean(msg.build, 60)}`);
 }
 
 function agentOf(paneId) {
@@ -601,9 +609,9 @@ async function refreshMeta(sub, force = false) {
         if (waiting) {
           const p = extractPrompt(frame);
           const choices = cardChoices(p);
-          const asked = sub.kind === "claude" ? askedQuestion(sub, p) : null;
+          const asked = askedQuestion(sub, p);
           if (asked) {
-            // AskUserQuestion: 화면 선택지 대신 기록의 질문 그대로(Paseo 질문 카드)
+            // AskUserQuestion·Codex request_user_input: 화면 선택지 대신 기록의 질문 그대로(Paseo 질문 카드)
             const id = `question-${asked.toolUseId}`;
             prompt = { id, kind: "question", toolUseId: asked.toolUseId, questions: asked.questions, options: [] };
             sub.prompt = { id, toolUseId: asked.toolUseId, questions: asked.questions };
@@ -657,7 +665,7 @@ function transcriptTail(file) {
 function askedQuestion(sub, p) {
   if (!p || !sub.file) return null;
   let q = null;
-  try { q = pendingQuestion(transcriptTail(sub.file)); } catch { return null; }
+  try { q = (sub.kind === "codex" ? pendingCodexQuestion : pendingQuestion)(transcriptTail(sub.file)); } catch { return null; }
   if (!q || sub.answeredQuestion === q.toolUseId) return null;
   return p.variant === "review" || q.questions.some((x) => showsQuestion(p, x)) ? q : null;
 }
@@ -734,7 +742,7 @@ function answerQuestion(sub, msg, reply) {
       if (i < start) continue;
       const p = i === start ? screenNow : await screen();
       if (!showsQuestion(p, q)) throw new Error("터미널 질문 화면이 예상과 달라 멈췄습니다. 남은 답은 터미널에서 해 주세요");
-      const keys = questionKeys(p, q, parsed.answers[i]);
+      const keys = (sub.kind === "codex" ? codexQuestionKeys : questionKeys)(p, q, parsed.answers[i]);
       if (keys.error) throw new Error(keys.error);
       for (const chunk of keys.chunks) { await herdr.paneSendText(paneId, chunk); await pause(QUESTION_STEP_MS); }
       await pause(QUESTION_SETTLE_MS);
@@ -793,25 +801,9 @@ function sendImage(res, mime, bytes) {
   res.end(bytes);
 }
 
-// 기록 줄 하나에서 i 번째 내용 블록의 이미지 → { mime, bytes } 또는 null
-// j 가 있으면 도구 결과 안 이미지: Claude 는 content[i].content[j], Codex 는 payload.output[j]
+// 기록 줄 하나의 이미지. 해석은 agent-chat-transcript.js, 형식은 이 화면이 내주는 이미지 형식
 export function imageFromRecord(rec, i, j = null) {
-  const list = Array.isArray(rec?.message?.content) ? rec.message.content
-    : Array.isArray(rec?.attachment?.prompt) ? rec.attachment.prompt
-      : Array.isArray(rec?.payload?.content) ? rec.payload.content : null;
-  const nested = j === null ? null
-    : Array.isArray(rec?.payload?.output) ? rec.payload.output
-      : Array.isArray(list?.[i]?.content) && list[i].type === "tool_result" ? list[i].content : null;
-  const c = j === null ? list?.[i] : nested?.[j];
-  if (!c || typeof c !== "object") return null;
-  if (c.type === "image" && c.source?.type === "base64" && typeof c.source.data === "string") {
-    const mime = String(c.source.media_type || "");
-    return Object.values(IMAGE_TYPES).includes(mime) ? { mime, bytes: Buffer.from(c.source.data, "base64") } : null;
-  }
-  const url = typeof c.image_url === "string" ? c.image_url : typeof c.image_url?.url === "string" ? c.image_url.url : "";
-  const m = /^data:(image\/[a-z+.-]+);base64,(.*)$/s.exec(url);
-  if (m && Object.values(IMAGE_TYPES).includes(m[1])) return { mime: m[1], bytes: Buffer.from(m[2], "base64") };
-  return null;
+  return recordImage(rec, i, j, Object.values(IMAGE_TYPES));
 }
 
 // GET /agentchat-image?pane=&agent=&off=&i=[&f=&g=] — 그 pane 의 기록 파일에서 off 위치 줄만 다시 읽음

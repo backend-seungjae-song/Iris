@@ -11,6 +11,7 @@ export const REMOTE_REQUEST_TYPES = Object.freeze([
   "session.watch",
   "transcript.page",
   "transcript.watch",
+  "media.image",
   "agent.stop",
   "agent.message",
   "request.answer",
@@ -80,6 +81,9 @@ const validators = new Map([
     && (value.before === undefined || (typeof value.before === "string" && CURSOR.test(value.before)))],
   ["transcript.watch", (value) => hasExactKeys(value, ["type", "rid", "agent"])
     && isRequestId(value.rid) && isHex(value.agent, 16)],
+  ["media.image", (value) => hasExactKeys(value, ["type", "rid", "media", "offset"])
+    && isRequestId(value.rid) && isHex(value.media, 16)
+    && Number.isSafeInteger(value.offset) && value.offset >= 0 && value.offset <= 64 * 1024 * 1024],
   ["agent.stop", (value) => hasExactKeys(value, ["type", "rid", "agent"])
     && isRequestId(value.rid) && isHex(value.agent, 16)],
   ["agent.message", (value) => hasExactKeys(value, ["type", "rid", "agent", "text"], ["drafts"])

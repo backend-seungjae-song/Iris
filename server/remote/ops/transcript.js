@@ -1,4 +1,4 @@
-import { projectError, projectTranscript } from "../projection.js";
+import { projectError, projectMediaImage, projectTranscript } from "../projection.js";
 
 export function createTranscriptOperations(options) {
   const transcripts = options.transcripts;
@@ -15,5 +15,11 @@ export function createTranscriptOperations(options) {
     return result.ok ? null : projectError(result.error, message.rid);
   }
 
-  return { page, watch };
+  function image(_entry, message) {
+    const result = transcripts.image(message.media, message.offset);
+    if (!result.ok) return projectError(result.error, message.rid);
+    return projectMediaImage({ rid: message.rid, mime: result.mime, size: result.size, offset: result.offset, data: result.data });
+  }
+
+  return { page, watch, image };
 }

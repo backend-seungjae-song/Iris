@@ -26,13 +26,14 @@ export function createRemoteOperations(options) {
   const macName = options.macName || readMacName;
   const table = new Map();
   table.set("caps.get", async () => projectCaps([...table.keys()].filter((name) => name === "caps.get"
-    || ["ping", "watch", "session.watch", "transcript.page", "transcript.watch", "agent.stop", "agent.message", "request.answer"].includes(name)
+    || ["ping", "watch", "session.watch", "transcript.page", "transcript.watch", "media.image", "agent.stop", "agent.message", "request.answer"].includes(name)
     || features.capabilities().includes(name)).concat(features.terminal.available() ? ["terminal.prompts", "terminal.prompt-fallback"] : []), await macName()));
   table.set("ping", handlePing);
   table.set("watch", watch.handle);
   table.set("session.watch", (entry, message) => { if (message.prompts === true) prompts.start(entry.connId); else prompts.stop(entry.connId); return watch.handle(entry, message); });
   table.set("transcript.page", transcript.page);
   table.set("transcript.watch", transcript.watch);
+  table.set("media.image", transcript.image);
   table.set("agent.stop", createStopOperation(options));
   table.set("agent.message", createMessageOperation({ ...options, browserDrafts: features.browser }));
   table.set("request.answer", createRequestAnswerOperation(options));

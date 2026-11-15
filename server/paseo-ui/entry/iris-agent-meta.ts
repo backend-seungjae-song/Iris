@@ -15,7 +15,7 @@ export interface IrisAgentMeta {
 }
 export interface IrisPromptOption { row: number; text: string; role?: string | null }
 // AskUserQuestion 질문(서버가 기록의 tool_use 입력에서 읽음)
-export interface IrisQuestion { question: string; header: string; multiSelect: boolean; options: { label: string; description: string }[] }
+export interface IrisQuestion { question: string; header: string; multiSelect: boolean; options: { label: string; description: string; preview?: string }[] }
 export interface IrisPrompt {
   id: string;
   // "question": Paseo 질문 카드로 보임. options 대신 questions
@@ -77,7 +77,8 @@ export function agentFields(provider: string, meta: IrisAgentMeta | null) {
 
 // 터미널이 답을 기다리는 질문 → 권한 요청. 카드는 title·description·actions 를 그림(plan 은 metadata.planText 를 계획 카드로)
 // Paseo 서버가 AskUserQuestion 으로 만드는 요청과 같은 모양(packages/server/src/server/agent/providers/claude/agent.ts handlePermissionRequest)
-// - allowOther: 직접 입력 칸. 터미널의 Type something
+// - allowOther: 직접 입력 칸. 터미널의 Type something(Codex 는 None of the above + notes)
+// - 미리보기(preview) 질문은 터미널에 직접 입력 줄이 없음(notes 만 있음) → 직접 입력 칸 없음
 function questionRequest(provider: string, prompt: IrisPrompt, questions: IrisQuestion[]) {
   const first = questions[0];
   return {
@@ -87,7 +88,7 @@ function questionRequest(provider: string, prompt: IrisPrompt, questions: IrisQu
     kind: "question" as const,
     title: first.question.trim(),
     description: first.options.map((o) => o.label).join(" / "),
-    input: { questions: questions.map((q) => ({ question: q.question, header: q.header, multiSelect: q.multiSelect, options: q.options, allowOther: true })) },
+    input: { questions: questions.map((q) => ({ question: q.question, header: q.header, multiSelect: q.multiSelect, options: q.options, allowOther: !q.options.some((o) => o.preview) })) },
     metadata: { toolUseId: prompt.toolUseId ?? null },
   };
 }

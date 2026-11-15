@@ -60,7 +60,7 @@ export function fitsRemoteOutboundPayload(payload) {
   if (bytes > MAX_BROWSER_FRAME_MESSAGE_BYTES) return false;
   try {
     const decoded = JSON.parse(payload);
-    if (decoded?.type === "browser.frame") return bytes <= MAX_BROWSER_FRAME_MESSAGE_BYTES;
+    if (decoded?.type === "browser.frame" || decoded?.type === "media.image.result") return bytes <= MAX_BROWSER_FRAME_MESSAGE_BYTES;
     if (decoded?.type === "browser.draft.result") return bytes <= MAX_BROWSER_DRAFT_MESSAGE_BYTES;
     if (decoded?.type === "browser.tabs.result") return bytes <= MAX_BROWSER_TABS_MESSAGE_BYTES;
   } catch {}
@@ -134,18 +134,6 @@ export function isHostMessage(message) {
   if (message.type === "conn.authenticated") {
     return exact(message, ["type", "connId"])
       && HEX_128.test(message.connId);
-  }
-  if (message.type === "paseo.grant") {
-    return exact(message, ["type", "connId", "ticket", "nodeId", "port"])
-      && HEX_128.test(message.connId) && /^[0-9a-f]{64}$/.test(message.ticket)
-      && shortString(message.nodeId, 256) && port(message.port);
-  }
-  if (message.type === "paseo.pane") {
-    return exact(message, ["type", "connId", "token", "paneId"])
-      && HEX_128.test(message.connId) && /^[0-9a-f]{32}$/.test(message.token) && shortString(message.paneId, 100);
-  }
-  if (message.type === "paseo.revoke") {
-    return exact(message, ["type", "connId"]) && HEX_128.test(message.connId);
   }
   if (message.type === "ip.block") {
     return exact(message, ["type", "peerIp", "blockedUntil"])

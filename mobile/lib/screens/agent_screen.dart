@@ -17,7 +17,6 @@ import 'package:iris_remote/remote/protocol.dart';
 import 'package:iris_remote/remote/session.dart';
 import 'package:iris_remote/screens/browser_screen.dart';
 import 'package:iris_remote/screens/conversation_request_card.dart';
-import 'package:iris_remote/screens/paseo_screen.dart';
 import 'package:iris_remote/screens/response_host.dart';
 import 'package:iris_remote/screens/source_control_screen.dart';
 import 'package:iris_remote/screens/terminal_question_screen.dart';
@@ -191,6 +190,9 @@ class _AgentScreenState extends State<AgentScreen> {
           );
         }
         return IrisLinkScope(
+          loadImage: widget.state.supports('media.image')
+              ? widget.state.session.mediaImage
+              : null,
           open: widget.state.supports('browser.tab.new')
               ? (href) async {
                   final media = href.startsWith('iris-media:')
@@ -315,16 +317,6 @@ class _AgentScreenState extends State<AgentScreen> {
             onBrowser: widget.state.supports('browser.tabs')
                 ? _openBrowser
                 : null,
-            onPaseo: widget.state.supports('chat.open')
-                ? () => Navigator.of(context).push<void>(
-                    MaterialPageRoute(
-                      builder: (_) => PaseoChatScreen(
-                        session: widget.state.session,
-                        agent: agent,
-                      ),
-                    ),
-                  )
-                : null,
             onGitHub:
                 widget.state.supports('git.changes') ||
                     widget.state.supports('github.pr')
@@ -363,7 +355,6 @@ class AgentSessionView extends StatefulWidget {
     this.onStop,
     this.onTerminal,
     this.onBrowser,
-    this.onPaseo,
     this.onGitHub,
     this.loading = false,
     this.loadingEarlier = false,
@@ -399,7 +390,6 @@ class AgentSessionView extends StatefulWidget {
   final Future<void> Function()? onStop;
   final VoidCallback? onTerminal;
   final VoidCallback? onBrowser;
-  final VoidCallback? onPaseo;
   final VoidCallback? onGitHub;
   final bool canMessage;
   final bool loading;
@@ -433,8 +423,22 @@ class _AgentSessionViewState extends State<AgentSessionView> {
   int _unseen = 0;
   // 사용자가 맨 아래를 보고 있었는가. 목록이 비었다 채워지는 리로드에서는 현재 위치로 판정할 수 없어 사용자 스크롤로만 갱신
   bool _pinnedToBottom = true;
-  // 옛 대화를 불러와 스크롤 위치를 되돌릴 때까지 true. 그동안 다시 불러오거나 맨 아래로 가지 않음
+  // 옛 대화를 불러오는 동안 true. 그동안 다시 불러오거나 맨 아래로 가지 않음
   bool _earlierPending = false;
+  // 처음 받은 쪽의 첫 항목. 이 항목 앞은 위로 자라는 목록, 이 항목부터는 아래로 자라는 목록
+  // - 옛 대화를 앞에 붙여도 보던 줄이 움직이지 않음(CustomScrollView center). 높이 추정값으로 위치를 되돌리면 어긋남
+  TranscriptItem? _anchorItem;
+  static const _centerKey = ValueKey('session-chat-center');
+
+  // 대화가 통째로 바뀌면(다른 에이전트·다시 불러오기) 새 첫 항목을 기준으로 삼음
+  void _updateAnchor() {
+    final anchor = _anchorItem;
+    if (anchor != null &&
+        widget.transcript.any((item) => identical(item, anchor))) {
+      return;
+    }
+    _anchorItem = widget.transcript.firstOrNull;
+  }
 
   int get _itemCount =>
       widget.transcript.length +
@@ -447,6 +451,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
     _messageController = TextEditingController(text: widget.composerText)
       ..addListener(_messageChanged);
     _scrollController.addListener(_onScroll);
+    _updateAnchor();
     if (!widget.loading) {
       _initialScrollDone = true;
       _scrollToBottom();
@@ -462,7 +467,9 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       _showScrollToBottom = false;
       _unseen = 0;
       _pinnedToBottom = true;
+      _anchorItem = null;
     }
+    _updateAnchor();
     if (_messageController.text != widget.composerText) {
       _messageController.value = TextEditingValue(
         text: widget.composerText,
@@ -551,25 +558,17 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       _pinnedToBottom = position.extentAfter < 80;
     }
     if (_earlierPending ||
-        _scrollController.offset > 48 ||
+        position.extentBefore > 48 ||
         !widget.hasEarlier ||
         widget.loadingEarlier ||
         widget.onLoadEarlier == null) {
       return;
     }
-    final oldExtent = _scrollController.position.maxScrollExtent;
-    final oldOffset = _scrollController.offset;
-    // 불러오는 동안 모든 줄을 배치해 두어야 늘어난 높이가 추정값이 아닌 실제 값이 됨
     setState(() => _earlierPending = true);
     widget.onLoadEarlier!().whenComplete(() {
-      // 새 항목이 배치된 다음 프레임에서 늘어난 높이만큼 내려 보던 위치를 유지
+      // 앞에 붙은 항목이 그려진 다음 프레임까지. 그 갱신을 새 항목으로 세지 않게
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (_scrollController.hasClients) {
-          final added = _scrollController.position.maxScrollExtent - oldExtent;
-          if (added > 0) _scrollController.jumpTo(oldOffset + added);
-        }
-        setState(() => _earlierPending = false);
+        if (mounted) setState(() => _earlierPending = false);
       });
     });
   }
@@ -600,10 +599,22 @@ class _AgentSessionViewState extends State<AgentSessionView> {
   };
 
   // 본문 목록. 항목 사이 간격 14
-  List<Widget> _items(BuildContext context) {
+  // split: 기준 항목(_anchorItem)이 시작하는 위젯 위치. 그 앞은 위로 자라는 목록에 들어감
+  (List<Widget>, int) _items(BuildContext context) {
     final out = <Widget>[];
+    final anchor = _anchorItem;
+    final anchorIndex = anchor == null
+        ? 0
+        : widget.transcript.indexWhere((item) => identical(item, anchor));
+    int? split;
+    var atAnchor = false;
+    // 기준 항목 앞 간격은 위 목록에. 아래 목록의 첫 줄 모양이 옛 대화를 붙이기 전과 같아야 화면이 안 움직임
     void add(Widget child) {
       if (out.isNotEmpty) out.add(const SizedBox(height: 14));
+      if (atAnchor) {
+        split = out.length;
+        atAnchor = false;
+      }
       out.add(child);
     }
 
@@ -612,10 +623,13 @@ class _AgentSessionViewState extends State<AgentSessionView> {
     DateTime? lastDay;
     var index = 0;
     while (index < items.length) {
+      if (split == null && index >= anchorIndex) atAnchor = true;
       final item = items[index];
       final time = _itemTime(item);
+      // 기준 항목은 날짜 표시를 유지. 앞에 같은 날 옛 대화가 붙어 날짜가 빠지면 그 높이만큼 화면이 움직임
       if (time != null &&
-          (lastDay == null ||
+          (index == anchorIndex ||
+              lastDay == null ||
               lastDay.year != time.year ||
               lastDay.month != time.month ||
               lastDay.day != time.day)) {
@@ -623,8 +637,11 @@ class _AgentSessionViewState extends State<AgentSessionView> {
         add(_DayLabel(time));
       }
       if (item.role == 'tool') {
-        var end = index;
-        while (end < items.length && items[end].role == 'tool') {
+        // 도구 묶음은 기준 항목에서 끊음. 옛 도구 줄과 한 표로 합쳐지면 기준 위치가 표 뒤로 밀림
+        var end = index + 1;
+        while (end < items.length &&
+            items[end].role == 'tool' &&
+            end != anchorIndex) {
           end++;
         }
         final group = items.sublist(index, end);
@@ -646,7 +663,11 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       if (item.role == 'user') {
         add(_UserBubble(item: item, time: time));
       } else {
-        final first = index == 0 || items[index - 1].role != 'assistant';
+        // 기준 항목은 이름표를 유지. 앞에 옛 답변이 붙어 이름표가 빠지면 그 높이만큼 화면이 움직임
+        final first =
+            index == 0 ||
+            index == anchorIndex ||
+            items[index - 1].role != 'assistant';
         add(
           _AssistantBlock(
             item: item,
@@ -656,7 +677,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
       }
       index++;
     }
-    return out;
+    return (out, split ?? out.length);
   }
 
   @override
@@ -687,6 +708,10 @@ class _AgentSessionViewState extends State<AgentSessionView> {
           widget.onTerminal != null)
         _QuestionFallbackCard(onTerminal: widget.onTerminal!),
     ];
+    final (items, split) = widget.loading || widget.transcript.isEmpty
+        ? (const <Widget>[], 0)
+        : _items(context);
+    final earlier = items.sublist(0, split);
     final body = <Widget>[
       if (widget.loading)
         const Padding(
@@ -719,7 +744,7 @@ class _AgentSessionViewState extends State<AgentSessionView> {
           ),
         )
       else
-        ..._items(context),
+        ...items.sublist(split),
       for (final card in cards) ...[const SizedBox(height: 14), card],
     ];
     return Scaffold(
@@ -735,7 +760,6 @@ class _AgentSessionViewState extends State<AgentSessionView> {
               onSelectAgent: widget.onSelectAgent,
               onTerminal: widget.onTerminal,
               onBrowser: widget.onBrowser,
-              onPaseo: widget.onPaseo,
               onGitHub: widget.onGitHub,
               githubFailed: widget.githubFailed,
             ),
@@ -748,12 +772,28 @@ class _AgentSessionViewState extends State<AgentSessionView> {
                         _scheduleScrollVisibilityUpdate();
                         return false;
                       },
-                      child: ListView(
+                      child: CustomScrollView(
                         key: const Key('session-chat'),
                         controller: _scrollController,
-                        cacheExtent: _earlierPending ? 200000 : null,
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                        children: body,
+                        center: _centerKey,
+                        slivers: [
+                          // 위 여백 8 은 늘 위 목록에. 옛 대화가 붙을 때 아래 목록이 움직이지 않게
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                            sliver: SliverList(
+                              delegate: SliverChildListDelegate(
+                                earlier.reversed.toList(growable: false),
+                              ),
+                            ),
+                          ),
+                          SliverPadding(
+                            key: _centerKey,
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            sliver: SliverList(
+                              delegate: SliverChildListDelegate(body),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -865,7 +905,6 @@ class _SessionHeader extends StatelessWidget {
     required this.onSelectAgent,
     this.onTerminal,
     this.onBrowser,
-    this.onPaseo,
     this.onGitHub,
     this.githubFailed = false,
   });
@@ -877,7 +916,6 @@ class _SessionHeader extends StatelessWidget {
   final ValueChanged<RemoteAgent> onSelectAgent;
   final VoidCallback? onTerminal;
   final VoidCallback? onBrowser;
-  final VoidCallback? onPaseo;
   final VoidCallback? onGitHub;
   final bool githubFailed;
 
@@ -904,7 +942,6 @@ class _SessionHeader extends StatelessWidget {
       onChat: () {},
       onTerminal: onTerminal,
       onBrowser: onBrowser,
-      onPaseo: onPaseo,
       onGitHub: onGitHub,
       githubFailed: githubFailed,
     );

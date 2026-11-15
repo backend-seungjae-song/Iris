@@ -6,13 +6,23 @@ import 'package:iris_remote/design/tokens.dart';
 import 'package:markdown/markdown.dart' as md;
 
 class IrisLinkScope extends InheritedWidget {
-  const IrisLinkScope({required this.open, required super.child, super.key});
+  const IrisLinkScope({
+    required this.open,
+    this.loadImage,
+    required super.child,
+    super.key,
+  });
   final Future<String> Function(String href)? open;
+  // 대화 기록 속 이미지(iris-image ref) 바이트. 없으면 그 이미지도 다른 주소처럼 받지 않음
+  final Future<Uint8List> Function(String media)? loadImage;
   static IrisLinkScope? of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<IrisLinkScope>();
   @override
-  bool updateShouldNotify(IrisLinkScope oldWidget) => open != oldWidget.open;
+  bool updateShouldNotify(IrisLinkScope oldWidget) =>
+      open != oldWidget.open || loadImage != oldWidget.loadImage;
 }
+
+final RegExp _mediaRef = RegExp(r'^[0-9a-f]{32}$');
 
 // 변경 줄 색. 1차 시안(dir-3)의 진한 글자 + 줄 배경
 class IrisDiffColors {
@@ -218,7 +228,16 @@ class IrisMarkdown extends StatelessWidget {
         'diffadd': _DiffCountBuilder(true),
         'diffdel': _DiffCountBuilder(false),
       },
-      imageBuilder: (uri, title, alt) => _BlockedImage(alt: alt, uri: uri),
+      imageBuilder: (uri, title, alt) {
+        final load = IrisLinkScope.of(context)?.loadImage;
+        // iris-media 는 Mac 파일 링크라 받지 않고 눌러서 Mac 에서 엶
+        final media = uri.scheme == 'iris-image' && _mediaRef.hasMatch(uri.path)
+            ? uri.path
+            : null;
+        return media != null && load != null
+            ? IrisMediaImage(media: media, load: load)
+            : _BlockedImage(alt: alt, uri: uri);
+      },
       onTapLink: (text, href, title) {
         if (href != null) _showLink(context, href);
       },
@@ -260,6 +279,167 @@ Future<void> _showLink(BuildContext context, String href) async {
           child: const Text('주소 복사'),
         ),
       ],
+    ),
+  );
+}
+
+// 대화 속 이미지. 컴퓨터에서 받아 작게 보여 주고 누르면 확대 화면
+class IrisMediaImage extends StatefulWidget {
+  const IrisMediaImage({required this.media, required this.load, super.key});
+
+  final String media;
+  final Future<Uint8List> Function(String media) load;
+
+  @override
+  State<IrisMediaImage> createState() => _IrisMediaImageState();
+}
+
+class _IrisMediaImageState extends State<IrisMediaImage> {
+  late Future<Uint8List> _bytes = widget.load(widget.media);
+
+  @override
+  void didUpdateWidget(covariant IrisMediaImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.media != widget.media) _bytes = widget.load(widget.media);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.iris;
+    return FutureBuilder<Uint8List>(
+      future: _bytes,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (snapshot.hasError || (snapshot.hasData && bytes!.isEmpty)) {
+          return _ImageNotice(
+            key: const Key('media-image-failed'),
+            label: '이미지를 불러오지 못했습니다 · 다시 시도',
+            onTap: () => setState(() {
+              _bytes = widget.load(widget.media);
+            }),
+          );
+        }
+        if (bytes == null) {
+          return Container(
+            key: const Key('media-image-loading'),
+            width: 160,
+            height: 120,
+            decoration: BoxDecoration(
+              color: colors.level1,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Semantics(
+              label: '이미지 불러오는 중',
+              child: const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        }
+        return Semantics(
+          button: true,
+          label: '이미지, 눌러서 크게 보기',
+          child: GestureDetector(
+            key: const Key('media-image'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                fullscreenDialog: true,
+                builder: (_) => IrisImageViewer(bytes: bytes),
+              ),
+            ),
+            // 아주 작은 이미지도 누를 수 있게 48 이상
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: 48,
+                minHeight: 48,
+                maxHeight: 280,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.memory(
+                  bytes,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                  errorBuilder: (context, error, stack) =>
+                      const _ImageNotice(label: '이미지를 표시할 수 없습니다'),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ImageNotice extends StatelessWidget {
+  const _ImageNotice({required this.label, this.onTap, super.key});
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: context.iris.level1,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IrisIcon('file-text', size: 15, color: context.iris.muted),
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: context.iris.muted, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// 이미지 확대 화면. 두 손가락으로 확대·이동
+class IrisImageViewer extends StatelessWidget {
+  const IrisImageViewer({required this.bytes, super.key});
+
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    key: const Key('media-image-viewer'),
+    backgroundColor: Colors.black,
+    appBar: AppBar(
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+      leading: IconButton(
+        key: const Key('media-image-close'),
+        tooltip: '닫기',
+        icon: const Icon(Icons.close),
+        onPressed: () => Navigator.of(context).pop(),
+      ),
+    ),
+    body: SafeArea(
+      child: InteractiveViewer(
+        minScale: 1,
+        maxScale: 8,
+        child: Center(
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+          ),
+        ),
+      ),
     ),
   );
 }

@@ -202,6 +202,28 @@ export default async function run() {
       } finally { rmSync(dir, { recursive: true, force: true }); }
     });
 
+    await checkAsync("앱 창 프로파일 명령이 응답하지 않으면 실패로 남기고 debugger 를 떼어 프로파일러를 멈춘다", async () => {
+      const { createProcessMemoryLog, WINDOW_PROFILE_KB } = require_("../native/electron/process-memory-log.cjs");
+      const dir = mkdtempSync(path.join(tmpdir(), "iris-profile-hang-"));
+      try {
+        let attached = false;
+        const dbg = { isAttached: () => attached, attach: () => { attached = true; }, detach: () => { attached = false; },
+          sendCommand: async (method) => method === "HeapProfiler.stopSampling" ? new Promise(() => {}) : {} };
+        const shell = { id: 1, isDestroyed: () => false, getType: () => "window", getOSProcessId: () => 101, debugger: dbg };
+        const log = createProcessMemoryLog({
+          app: { getAppMetrics: () => [{ pid: 101, type: "Tab", memory: { workingSetSize: WINDOW_PROFILE_KB + 1 } }] },
+          allWebContents: () => [shell], dir, now: () => new Date(0), setTimeoutFn: (fn) => setImmediate(fn),
+        });
+        if (!log.watchWindows()) throw new Error("상한을 넘은 앱 창을 프로파일하지 않는다");
+        const logFile = path.join(dir, "process-memory.jsonl");
+        for (let i = 0; i < 100 && !existsSync(logFile); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        const event = existsSync(logFile) ? JSON.parse(readFileSync(logFile, "utf8").trim()) : null;
+        if (!String(event?.result).includes("timeout")) throw new Error(`응답 없는 명령을 실패로 안 남긴다: ${JSON.stringify(event)}`);
+        if (attached) throw new Error("응답 없는 명령 뒤 debugger 를 붙인 채 둔다");
+        return true;
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
     await checkAsync("프로세스 메모리 기록은 앱 창에만 문서 크기를 붙이고, 응답 없는 창이 있어도 기록한다", async () => {
       const { createProcessMemoryLog } = require_("../native/electron/process-memory-log.cjs");
       const dir = mkdtempSync(path.join(tmpdir(), "iris-window-dom-"));
@@ -235,13 +257,13 @@ export default async function run() {
       const dir = mkdtempSync(path.join(tmpdir(), "iris-memory-trace-"));
       try {
         const calls = [];
-        let finish;
+        let finish, waitMs;
         const contentTracing = {
           startRecording: async (config) => { calls.push(["start", config]); },
           stopRecording: async (out) => { calls.push(["stop", out]); writeFileSync(out, "{}"); return out; },
         };
         const log = createProcessMemoryLog({ app: { getAppMetrics: () => [] }, allWebContents: () => [], dir, contentTracing,
-          setTimeoutFn: (fn) => { finish = fn; } });
+          setTimeoutFn: (fn, ms) => { finish = fn; waitMs = ms; } });
         const request = path.join(dir, "heap-request.json");
         writeFileSync(request, JSON.stringify({ pids: [], profile: true }));
         if (log.snapshotRequested().length || calls.length) throw new Error("trace 없는 요청으로 기록한다");
@@ -252,6 +274,9 @@ export default async function run() {
         const config = calls[0]?.[1];
         if (!config?.included_categories?.includes("disabled-by-default-memory-infra") || config.memory_dump_config?.triggers?.[0]?.mode !== "detailed")
           throw new Error(`memory-infra 상세 덤프로 시작하지 않는다: ${JSON.stringify(config)}`);
+        // 스왑된 렌더러가 많으면 전체 덤프에 12초 넘게 걸림. 덤프 한 번이 끝날 때까지 기다림
+        if (!(waitMs >= 45000) || !(config.memory_dump_config.triggers[0].periodic_interval_ms > waitMs))
+          throw new Error(`전체 덤프가 끝나기 전에 기록을 멈추거나 덤프를 겹쳐 요청한다: ${waitMs}ms, 간격 ${config.memory_dump_config.triggers[0].periodic_interval_ms}ms`);
         writeFileSync(request, JSON.stringify({ trace: true }));
         if (log.snapshotRequested().length) throw new Error("기록 중에 겹쳐 시작한다");
         finish();

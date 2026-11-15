@@ -81,6 +81,8 @@ export function createMcpHostHandlers(ports = {}) {
         || { ok: true, data: { count: 0, picks: [] } };
     },
     "browser.executeWithDialog": (ctx) => required(browser, "executeWithDialog")(ctx),
+    "browser.bgOpen": (ctx) => required(browser, "bgOpen")(ctx),
+    "browser.bgSave": (ctx) => required(browser, "bgSave")(ctx),
     "browser.dialogState": (ctx) => required(browser, "dialogState")(ctx),
     "browser.dialogAnswer": (ctx) => required(browser, "dialogAnswer")(ctx),
     "browser.legacyHostTask": (ctx) => required(browser, "legacyHostTask")(ctx),

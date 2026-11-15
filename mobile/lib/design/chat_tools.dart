@@ -420,10 +420,14 @@ class _ToolDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.iris;
     final light = Theme.of(context).brightness == Brightness.light;
-    final output = row.output ?? '';
+    final raw = row.output ?? '';
     final media = RegExp(
-      r'\[([^\]]+)\]\((iris-media:[0-9a-f]{32}|https?://[^\s)]+)\)',
-    ).allMatches(output);
+      r'!?\[([^\]]+)\]\((iris-(?:media|image):[0-9a-f]{32}|https?://[^\s)]+)\)',
+    ).allMatches(raw).toList();
+    // 이미지 주소 줄은 글 대신 아래에 이미지로
+    final output = raw
+        .replaceAll(RegExp(r'!\[[^\]]*\]\(iris-image:[0-9a-f]{32}\)\n?'), '')
+        .trimRight();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Column(

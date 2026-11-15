@@ -79,7 +79,7 @@ const { port: acPort } = require("../../server/env.cjs");
 const { createTouchDragArm } = require("./touch-drag-arm.cjs");
 const { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setShownKnownProbe, applyViewportTo, setTouchDrag, forgetSecrets, clearAutoViewport, setShownProbe, setDefaultViewport, noteChildSession, dropChildSession, noteFrameOrigin, injectOverlayAllFrames, hoverAtPoint, diagSince,
   registerSessionPrimer, noteNavigation, noteDocumentNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, runCdp, aiDriving, aiDrivingAnywhere,
-  holdAiCausality, setPaintableProbe, setContextActionProvider, noteUserKey } = require("./cdp-control.cjs"); // AI→브라우저 CDP 제어 실행기
+  holdAiCausality, setPaintableProbe, setContextActionProvider, setBgTabsHandler, noteUserKey } = require("./cdp-control.cjs"); // AI→브라우저 CDP 제어 실행기
 const downloadState = require("./download-state.cjs");
 
 
@@ -729,7 +729,7 @@ const APP_URL = "http://127.0.0.1:" + APP_PORT;
 
 app.on("second-instance", () => {
   const current = getMainWindow();
-  const w = current && !current.isDestroyed() ? current : BrowserWindow.getAllWindows()[0];
+  const w = current && !current.isDestroyed() ? current : BrowserWindow.getAllWindows().find((x) => !bgTabs.isHost(x));
   if (!w) return;
   try { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } catch {}
 });
@@ -801,6 +801,20 @@ const browserWindowManager = createBrowserWindowManager({
   markAppAlive: () => { appQuitting = false; },
   log: (...args) => console.log(...args),
 });
+
+// 세션 공유 백그라운드 탭 · 일반 브라우저 창과 같은 webview preload·partition 검사
+const bgTabs = require("./bg-tabs.cjs").createBgTabs({
+  BrowserWindow,
+  webContents,
+  webviewPreloadPath: path.join(__dirname, "webview-preload.cjs"),
+  guardWebviewPartition,
+  isAllowedPartition: require("./profile-session-policy.cjs").isProfilePartition,
+  ctlSend,
+  randomUuid: () => crypto.randomUUID(),
+  log: (...args) => console.log(...args),
+});
+setBgTabsHandler((args) => bgTabs.handle(args));
+app.on("will-quit", () => { try { bgTabs.closeAll(); } catch {} });
 
 const memoWindowManager = createMemoWindowManager({
   BrowserWindow,
@@ -889,7 +903,7 @@ switcherHost = createSwitcherHost({
   // 이 앱의 자기 창은 앱이 직접 올린다. 자기 창이 아니면 false 를 돌려 기존 경로로 보낸다.
   raiseOwnWindow: (target) => {
     if (!target) return false;
-    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && !bgTabs.isHost(w));
     const win = wins[switcherCore.findOwnWindow(target, wins.map(switcherWindowFacts))];
     if (!win) return false;
     try {
