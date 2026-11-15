@@ -10,9 +10,7 @@ macOS에서는 macOS 14 이상과 Apple Silicon Mac이 필요합니다. Windows 
 
 [설치하기](#설치하기) · [비개발자 튜토리얼](docs/tutorials/non-developers.md) · [개발자 튜토리얼](docs/tutorials/developers.md)
 
-[![여러 대상을 짚어 에이전트에게 보내기, 대화 화면, 브라우저 프로필, 휴대전화 원격 조작, 편의 기능을 차례로 보여 주는 Iris 소개 영상](docs/media/iris-intro.gif)](https://github.com/user-attachments/assets/ae5b07ec-9532-41cb-92f5-54196a54a5b5)
-
-영상을 누르면 MP4(33초, 1080p)로 볼 수 있습니다.
+https://github.com/user-attachments/assets/88b635b1-2981-4111-9b1d-c4d535718b05
 
 ## 이런 작업에 사용할 수 있습니다
 
