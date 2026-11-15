@@ -10,7 +10,7 @@ macOS에서는 macOS 14 이상과 Apple Silicon Mac이 필요합니다. Windows 
 
 [설치하기](#설치하기) · [비개발자 튜토리얼](docs/tutorials/non-developers.md) · [개발자 튜토리얼](docs/tutorials/developers.md)
 
-https://github.com/user-attachments/assets/88b635b1-2981-4111-9b1d-c4d535718b05
+https://github.com/user-attachments/assets/b6d45d4d-c6e2-40a4-b526-2377fe2aa881
 
 ## 이런 작업에 사용할 수 있습니다
 
