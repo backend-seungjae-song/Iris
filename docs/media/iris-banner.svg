@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="Iris: Pick anything, Chat, Profiles, Mobile">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#132A3A"/>
+      <stop offset="1" stop-color="#0A1620"/>
+    </linearGradient>
+    <radialGradient id="dot" cx="0.42" cy="0.36" r="0.75">
+      <stop offset="0" stop-color="#BFF4FB"/>
+      <stop offset="0.55" stop-color="#85E8F6"/>
+      <stop offset="1" stop-color="#3FC6E0"/>
+    </radialGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#85E8F6" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#85E8F6" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#85E8F6" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#85E8F6" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+    <filter id="soft" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="18"/></filter>
+    <clipPath id="card"><rect width="1280" height="320" rx="24"/></clipPath>
+  </defs>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+    .arc { stroke-dasharray: 760; stroke-dashoffset: 760; animation: draw 1.1s cubic-bezier(.65,0,.35,1) .1s forwards; }
+    .core { transform-box: fill-box; transform-origin: center; transform: scale(0); animation: pop .6s cubic-bezier(.34,1.56,.64,1) .9s forwards; }
+    .glow { transform-box: fill-box; transform-origin: center; opacity: 0; animation: pulse 2.8s ease-in-out 1.4s infinite; }
+    .word { opacity: 0; animation: rise .7s cubic-bezier(.22,1,.36,1) 1.1s forwards; }
+    .w { opacity: 0; animation: rise .6s cubic-bezier(.22,1,.36,1) forwards; }
+    .w1 { animation-delay: 1.5s; } .w2 { animation-delay: 1.7s; } .w3 { animation-delay: 1.9s; } .w4 { animation-delay: 2.1s; }
+    .sweep { animation: slide 6s ease-in-out 2.4s infinite; transform: translateX(-500px); }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+    @keyframes pop { to { transform: scale(1); } }
+    @keyframes pulse { 0%, 100% { opacity: .25; transform: scale(.9); } 50% { opacity: .6; transform: scale(1.15); } }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slide { 0% { transform: translateX(-500px); } 60%, 100% { transform: translateX(1400px); } }
+  </style>
+  <g clip-path="url(#card)">
+    <rect width="1280" height="320" fill="url(#bg)"/>
+    <rect width="1280" height="320" fill="url(#grid)"/>
+    <rect class="sweep" x="0" y="0" width="420" height="320" fill="url(#sweep)"/>
+  </g>
+  <g transform="translate(100 0)">
+  <g>
+    <circle class="glow" cx="228" cy="160" r="54" fill="#85E8F6" filter="url(#soft)"/>
+    <g transform="translate(228 160) scale(0.29) translate(-512 -512)">
+      <path class="arc" d="M378 288 A272 272 0 0 0 378 736" fill="none" stroke="#EAF3FA" stroke-width="74" stroke-linecap="round"/>
+      <path class="arc" d="M646 288 A272 272 0 0 1 646 736" fill="none" stroke="#8FB0C4" stroke-width="74" stroke-linecap="round"/>
+    </g>
+    <circle class="core" cx="228" cy="160" r="22.6" fill="url(#dot)"/>
+  </g>
+  <text class="word" x="340" y="168" fill="#F4F9FC" font-size="92" font-weight="700" letter-spacing="-2">Iris</text>
+  <g font-size="30" font-weight="600">
+    <text class="w w1" x="344" y="222" fill="#85E8F6">Pick anything</text>
+    <text class="w w2" x="577" y="222" fill="#F4F9FC">Chat</text>
+    <text class="w w3" x="685" y="222" fill="#F4F9FC">Profiles</text>
+    <text class="w w4" x="834" y="222" fill="#F4F9FC">Mobile</text>
+  </g>
+  </g>
+</svg>
