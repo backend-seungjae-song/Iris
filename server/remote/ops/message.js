@@ -9,7 +9,7 @@ export function createMessageOperation(options) {
   return async function handleMessage(entry, message) {
     const agent = agents.resolve(message.agent);
     if (!agent) return projectError("forbidden", message.rid);
-    if (agent.kind !== "claude" && agent.kind !== "codex") return projectMessageResult(message.rid, "unsupported");
+    if (!agent.source?.managedProvider && agent.kind !== "claude" && agent.kind !== "codex") return projectMessageResult(message.rid, "unsupported");
     const expanded = browserDrafts?.expandDrafts(entry.connId, message.agent, message.drafts || [], message.text)
       || { ok: !message.drafts?.length, text: message.text, consume() {} };
     if (!expanded.ok) return projectError(expanded.code || "forbidden", message.rid);

@@ -1,5 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { resolveCodexSession } from "../codex-session.js";
+import { createManagedAgentOperations, hasManagedAgentIdentity } from "./managed-agent.js";
+import { isActualEmbedded } from "./agents.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BRACKETED_PASTE_START = "\x1b[200~";
@@ -13,6 +15,7 @@ export function createMessageBridge(options = {}) {
   const execFile = options.execFile || nodeExecFile;
   const codexExecutable = options.codexExecutable || "codex";
   const getHerdr = options.getHerdr || (() => null);
+  const managed = createManagedAgentOperations({ ...options.managedOptions, getHerdr });
   let claudeChannel = null;
 
   function registerClaudeMessageChannel(channel) {
@@ -24,6 +27,8 @@ export function createMessageBridge(options = {}) {
   }
 
   function canMessage(agent) {
+    if (isActualEmbedded(agent.source)) return false;
+    if (agent.source?.managedProvider) return hasManagedAgentIdentity(agent.source);
     if (agent.kind === "codex") return UUID.test(agent.source.sessionUuid || "");
     if (agent.kind !== "claude") return false;
     try {
@@ -56,12 +61,18 @@ export function createMessageBridge(options = {}) {
   }
 
   async function send(agent, text, resolveCurrent) {
+    if (isActualEmbedded(agent.source)) return "unsupported";
+    if (agent.source?.managedProvider) return managed.send(agent, text, resolveCurrent || (() => agent));
     if (!["codex", "claude"].includes(agent.kind)) return "unsupported";
-    let current = typeof resolveCurrent === "function" ? resolveCurrent() : agent;
+    const resolveNativeAgent = () => {
+      const candidate = typeof resolveCurrent === "function" ? resolveCurrent() : agent;
+      return isActualEmbedded(candidate?.source) || candidate?.source?.managedProvider ? null : candidate;
+    };
+    let current = resolveNativeAgent();
     if (!current) return "forbidden";
     try {
       if (current.kind === "claude" && claudeChannel?.canSend(current.source) === true) {
-        current = typeof resolveCurrent === "function" ? resolveCurrent() : current;
+        current = resolveNativeAgent();
         if (!current) return "forbidden";
         return await claudeChannel.send(current.source, text) === "sent" ? "sent" : "failed";
       }
@@ -69,7 +80,7 @@ export function createMessageBridge(options = {}) {
       return "failed";
     }
     const herdr = getHerdr();
-    current = typeof resolveCurrent === "function" ? resolveCurrent() : current;
+    current = resolveNativeAgent();
     if (!current) return "forbidden";
     // 로컬 TUI는 --no-daemon일 수 있다. 전송 실패 뒤 queue로 재시도하면 중복 입력될 수 있다.
     if (current.kind === "codex" && typeof herdr?.paneSendText !== "function") return sendCodex(current, text);
@@ -77,8 +88,13 @@ export function createMessageBridge(options = {}) {
     try {
       if (current.kind === "codex" && typeof herdr.paneGet === "function") {
         const live = await resolveCodexSession(herdr, current.source.paneId);
-        current = typeof resolveCurrent === "function" ? resolveCurrent() : current;
+        current = resolveNativeAgent();
         if (!current || !live || live.uuid !== current.source.sessionUuid) return "forbidden";
+      } else if (current.kind === "claude" && typeof herdr.paneGet === "function") {
+        const pane = await herdr.paneGet(current.source.paneId);
+        current = resolveNativeAgent();
+        if (!current || pane?.pane_id !== current.source.paneId || !String(pane.agent || "").toLowerCase().startsWith("claude") ||
+          (current.source.terminalId && pane.terminal_id !== current.source.terminalId)) return "forbidden";
       }
       await herdr.paneSendText(current.source.paneId, paneMessage(text));
       return "sent";
@@ -87,5 +103,5 @@ export function createMessageBridge(options = {}) {
     }
   }
 
-  return { registerClaudeMessageChannel, canMessage, send };
+  return { registerClaudeMessageChannel, canMessage, send, stopManaged: managed.stop };
 }

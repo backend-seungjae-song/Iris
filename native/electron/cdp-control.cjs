@@ -45,12 +45,14 @@ const refRegistry = require("./cdp-ref-registry.cjs");
 const { withLayout } = require("./cdp-layout.cjs");
 const { createUploadController } = require("./cdp-upload.cjs");
 const { createAiCausality } = require("./ai-causality.cjs");
+const { createAiFocusGuard } = require("./ai-focus-guard.cjs");
 const userFocus = require("./user-focus.cjs");
 // 그 탭을 담은 창을 사용자가 지금 쓰고 있는지(OS 키 창). 모르면 쓰는 쪽
 const windowFocused = (host) => { const w = BrowserWindow.fromWebContents(host); return !w || w.isDestroyed() || w.isFocused(); };
 const focusStateOf = (wc) => userFocus.focusState(wc, { windowFocused });
 const ownsUserFocus = async (wc) => userFocus.canSendKeys(await focusStateOf(wc));
-const pressAllowed = async (wc) => userFocus.canPress(await focusStateOf(wc));
+// 뒤에 깐 AI 탭의 누르기는 포커스 에뮬레이션으로 도달하고, 옮겨진 창 안 포커스는 명령이 끝날 때 되돌림(aiScope)
+const pressAllowed = async (wc) => isTabBehind(wc.id) || userFocus.canPress(await focusStateOf(wc));
 // QA 진짜 입력 준비. 누르기가 사용자 포커스를 옮기지 않는 창이면 그 창 안에서 이 탭에 포커스를 주고 trusted
 // 사용자가 쓰는 창의 다른 곳에 포커스가 있으면 입력 동안만 빌리고(borrowed) 끝나면 returnFocus 로 반환
 // 빌리지 못하면 guarded
@@ -62,10 +64,13 @@ function noteUserKey(wcId) {
   if (aiDriving(wcId)) return;
   lastUserKeyAt = Date.now();
 }
-async function qaPrepareFocus(wc) {
+// 뒤에 깐 탭에서도 키·글자는 그 창의 포커스 위젯으로 가므로 기존 판정(빌리기·기다리기)을 따른다
+const QA_POINTER_ACTIONS = new Set(["click", "dblclick", "drag"]);
+async function qaPrepareFocus(wc, action) {
+  const pointerBehind = isTabBehind(wc.id) && QA_POINTER_ACTIONS.has(action);
   for (const started = Date.now(); ;) {
     const state = await focusStateOf(wc);
-    const plan = userFocus.qaFocusPlan(state, userFocus.userQuiet(lastUserKeyAt, Date.now()));
+    const plan = userFocus.qaFocusPlan(state, userFocus.userQuiet(lastUserKeyAt, Date.now()), pointerBehind);
     if (plan === "trusted") return "trusted";
     if (plan === "borrow") return (await userFocus.borrowWindowFocus(wc)) ? "borrowed" : "guarded";
     if (plan === "claim") {
@@ -97,6 +102,7 @@ const observation = createObservation({
 const { createHiddenViewport } = require("./cdp-hidden-viewport.cjs");
 const hiddenViewport = createHiddenViewport({
   isTabShown: (wcId) => isTabShown(wcId),
+  isBehindTab: (wcId) => isTabBehind(wcId),
   shownStateKnown: () => shownStateKnown(),
   // 명시 지정 크기(QA 화면 크기 포함)도 숨은 탭 대체 크기 적용 대상에서 제외
   hasExplicitDevice: (wcId) => deviceEmulation.hasExplicitDevice(wcId) || !!deviceEmulation.viewportFor(wcId),
@@ -325,11 +331,11 @@ function withCmdTimeout(promise, wcId, cmd) {
       reject(codedError(ERROR_CODES.TIMEOUT,
         `이 탭이 ${Math.round(timeoutMs / 1000)}초 동안 ${cmd}에 응답하지 않았습니다(wc=${wcId}).`
         + (open
-          ? ` 대화상자가 떠 있어 페이지가 멈춰 있습니다(${open.type}: "${open.message}"). 사람이 닫거나 \`iris-browser dialogs ok\`로 무장한 뒤 다시 시도하세요.`
+          ? ` 대화상자가 열려 있어 페이지가 멈춰 있습니다(${open.type}: "${open.message}"). 사람이 닫거나 \`iris-browser dialogs ok\`로 자동 응답을 설정한 뒤 다시 시도하세요.`
           : cmd === "screenshot" || cmd === "observe" || cmd === "diff"
             ? " 페이지가 멈춰 있거나(모달·무한 루프·resolve 안 되는 promise), 그 탭의 창이 최소화·숨김"
-              + " 상태라 그리기가 멈춰 있을 수 있습니다 — 창을 띄워 달라고 사람에게 부탁하고 다시 찍으세요"
-              + "(browser_ask_user). 다른 창에 그냥 가려진 것만으로는 멈추지 않습니다."
+              + " 상태라 그리기가 멈춰 있을 수 있습니다. 사람에게 창을 열어 달라고 요청한 뒤 다시 찍으세요"
+              + "(browser_ask_user). 다른 창에 가려진 것만으로는 멈추지 않습니다."
             : " 페이지가 멈춰 있을 수 있습니다(모달·무한 루프·resolve 안 되는 promise).")
         + " 다른 탭은 영향받지 않습니다."));
     }, timeoutMs);
@@ -379,8 +385,16 @@ const READ_ONLY_CMDS = new Set(["snapshot", "text", "url", "tabs", "shotsizes", 
   "qa-screenshot", "qa-observe", "qa-login-info", "qa-select-resolve", "qa-viewport-state",
   "qa-reaction-start", "qa-reaction-poll", "qa-reaction-end", "qa-target-resolve", "qa-background-observe", "qa-reaction-drain", "qa-settle"]);
 const causality = createAiCausality();
-function enterAiCommand(wcId, cmd) { return READ_ONLY_CMDS.has(cmd) ? null : causality.enter(wcId); }
-function leaveAiCommand(ticket) { causality.leave(ticket); }
+// 뒤에 깐 탭을 조작하는 명령은 AI 조작이 옮긴 창 안 포커스를 즉시 직전 요소로 되돌린다(arm 은 명령 실행 전에 끝나야 함)
+const aiScope = createAiFocusGuard({ causality, isBehind: (wcId) => isTabBehind(wcId), liveWc,
+  arm: (wc) => userFocus.armAiFocus(wc), release: (wc) => userFocus.releaseAiFocus(wc) });
+async function enterAiCommand(wcId, cmd) {
+  if (READ_ONLY_CMDS.has(cmd)) return null;
+  const ticket = aiScope.enter(wcId);
+  if (ticket != null) await aiScope.armed(ticket);
+  return ticket;
+}
+function leaveAiCommand(ticket) { aiScope.leave(ticket); }
 function aiDriving(wcId) { return causality.driving(wcId); }
 // 어디서든 AI 명령이 실행 중인가. 그 순간 새로 생긴 창·webview 는 그 명령이 만든 것이다.
 function aiDrivingAnywhere() { return causality.anyDriving(); }
@@ -433,7 +447,7 @@ electronRelay = createElectronRelay({
     if (attachPolicy.blocked(wc.id)) {
       detachAiSession(wc);
       throw codedError(ERROR_CODES.CDP_BLOCKED,
-        `로그인 호스트에서는 CDP 를 붙이지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: `
+        `로그인 호스트에서는 CDP 를 연결하지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: `
         + [...CDP_FREE_CMDS].join(" ") + ". 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.");
     }
     attachPolicy.touch(wc.id);
@@ -448,7 +462,7 @@ electronRelay = createElectronRelay({
       detachAiSession(wc);
       if (!CDP_FREE_CMDS.has(command)) {
         throw codedError(ERROR_CODES.CDP_BLOCKED,
-          `로그인 호스트에서는 CDP 를 붙이지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: `
+          `로그인 호스트에서는 CDP 를 연결하지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: `
           + [...CDP_FREE_CMDS].join(" ") + ". 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.");
       }
       return { noCdp: true, ...cdpSession.targetGenerations(wc.id) };
@@ -464,14 +478,15 @@ electronRelay = createElectronRelay({
   same: (prev, buffer) => captureTools.samePng(prev, buffer),
   refs: { record: (wcId, map) => refRegistry.recordSnapshot(wcId, map), resolve: (wcId, ref) => refRegistry.resolveRef(wcId, ref) },
   detachIdle: (wc) => detachIdle(wc),
-  ai: causality,
+  ai: aiScope,
   captureHold: (wcId, on) => captureHold ? captureHold(wcId, on) : false,
   focus: {
     state: async (wc) => {
       const state = await focusStateOf(wc);
       return {
         canSendKeys: userFocus.canSendKeys(state),
-        canPress: userFocus.canPress(state),
+        canPress: isTabBehind(wc.id) || userFocus.canPress(state),
+        behind: isTabBehind(wc.id),
         shown: isTabShown(wc.id),
         shownKnown: shownStateKnown(),
         // 그림이 나오는 창인가 · 옛 cdpExecInner 의 WINDOW_NOT_DRAWING 판정 입력
@@ -614,6 +629,9 @@ function setShownProbe(fn) { shownProbe = typeof fn === "function" ? fn : null; 
 let shownKnownProbe = null;
 function setShownKnownProbe(fn) { shownKnownProbe = typeof fn === "function" ? fn : null; }
 function shownStateKnown() { try { return !!(shownKnownProbe && shownKnownProbe()); } catch { return false; } }
+let behindProbe = null;
+function setBehindProbe(fn) { behindProbe = typeof fn === "function" ? fn : null; }
+function isTabBehind(wcId) { try { return !!(behindProbe && behindProbe(Number(wcId))); } catch { return false; } }
 function isTabShown(wcId) { try { return !!(shownProbe && shownProbe(Number(wcId))); } catch { return false; } }
 async function ensureQaReady(send, wc, cmd) {
   // 이동으로 호스트 확대가 바뀌었으면 QA 크기 다시 적용
@@ -905,16 +923,16 @@ async function cdpExecRaw(webContentsMod, wcId, cmd, args) {
     detachAiSession(wc);
     if (!CDP_FREE_CMDS.has(cmd)) {
       throw codedError(ERROR_CODES.CDP_BLOCKED,
-        `로그인 호스트에서는 CDP 를 붙이지 않아 ${cmd} 를 실행할 수 없습니다. 쓸 수 있는 것: `
+        `로그인 호스트에서는 CDP 를 연결하지 않아 ${cmd} 를 실행할 수 없습니다. 쓸 수 있는 것: `
         + [...CDP_FREE_CMDS].join(" ") + ". 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.");
     }
-    const aiTicket = enterAiCommand(wc.id, cmd);
+    const aiTicket = await enterAiCommand(wc.id, cmd);
     try { return noteLoginResult(wc, cmd, await runWithoutCdp(wc, cmd, args)); }
     finally { leaveAiCommand(aiTicket); }
   }
   attachPolicy.touch(wc.id);
   const send = ensureAttached(wc);
-  const aiTicket = enterAiCommand(wc.id, cmd);
+  const aiTicket = await enterAiCommand(wc.id, cmd);
   try { return noteLoginResult(wc, cmd, await cdpExecInner(send, wc, cmd, args, webContentsMod)); }
   finally { leaveAiCommand(aiTicket); }
 }
@@ -943,7 +961,7 @@ function handoff(wc) {
   attachPolicy.release(wc.id);
   const after = cdpSession.primed(wc.id);
   return { ok: true, detached: before && !after, attached: after,
-    ...(after ? { note: "녹화·지목·기기 에뮬레이션·대화상자/업로드 계획이 남아 있어 CDP 를 유지합니다." } : {}) };
+    ...(after ? { note: "녹화·요소 선택·기기 에뮬레이션·대화상자/업로드 계획이 남아 있어 CDP 를 유지합니다." } : {}) };
 }
 // CDP 없이 되는 명령의 실행기. 기존 handler 중 send 를 안 쓰는 것은 그대로 재사용하고, send 를 쓰는
 // wait·text·screenshot 만 Electron API 로 바꾼다. 실수로 send 를 부르면 관문 오류가 난다.
@@ -1003,8 +1021,8 @@ async function cdpExecInner(send, wc, cmd, args, webContentsMod) {
     try { paint = paintableProbe(wc.id) || { ok: true }; } catch { paint = { ok: true }; }
     if (!paint.ok) {
       throw codedError(ERROR_CODES.WINDOW_NOT_DRAWING,
-        `이 탭을 담은 창이 ${paint.why} 상태라 화면을 그리지 않습니다 — ${cmd} 를 보내도 도달하지 않습니다.`
-        + " 창을 띄워 달라고 사람에게 부탁하고 다시 하세요(browser_ask_user).");
+        `이 탭이 있는 창이 ${paint.why} 상태라 화면을 그리지 않습니다. ${cmd} 를 보내도 전달되지 않습니다.`
+        + " 사람에게 창을 열어 달라고 요청한 뒤 다시 하세요(browser_ask_user).");
     }
   }
   if ((!wantsKeys && !wantsFrames) || !captureHold || isTabShown(wc.id))
@@ -1055,7 +1073,7 @@ function setViewportNotify(fn) { viewportNotify = fn; }
 module.exports = { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setContextActionProvider, setBgTabsHandler,
   applyViewportTo: (wc, args) => deviceEmulation.apply(wc, args),
   setTouchDrag: (wc, on) => deviceEmulation.setTouchDrag(wc, on),
-  forgetSecrets: resultSafety.forgetSecrets, clearAutoViewport, setShownProbe, setShownKnownProbe, setDefaultViewport,
+  forgetSecrets: resultSafety.forgetSecrets, clearAutoViewport, setShownProbe, setBehindProbe, setShownKnownProbe, setDefaultViewport,
   noteChildSession, dropChildSession, noteFrameOrigin, injectOverlayAllFrames, hoverAtPoint, diagSince,
   aiDriving, aiDrivingAnywhere, holdAiCausality, noteUserKey,
   registerSessionPrimer, noteNavigation, noteDocumentNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, setPaintableProbe,

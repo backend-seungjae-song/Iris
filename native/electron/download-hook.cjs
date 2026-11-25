@@ -122,7 +122,7 @@ function createDownloadHook({ fs, path, downloadState, allWindows, now = Date.no
           // 없으면 버튼이 동작하지 않는 것처럼 보인다.
           try {
             const host = wc.hostWebContents;
-            const line = `내려받기를 취소했습니다: ${item.getFilename()} — AI 조작 중이고 받을 자리가 정해져 있지 않았습니다. 다시 눌러 주세요.`;
+            const line = `다운로드를 취소했습니다: ${item.getFilename()}. AI 조작 중인데 저장 폴더가 정해지지 않았습니다. 다시 눌러 주세요.`;
             if (host && !host.isDestroyed()) host.send("ac-native-notice", { text: line });
             else for (const w of allWindows()) if (!w.isDestroyed()) w.webContents.send("ac-native-notice", { text: line });
           } catch {}

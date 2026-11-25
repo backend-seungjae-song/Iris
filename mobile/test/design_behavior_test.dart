@@ -1407,7 +1407,7 @@ void main() {
       ),
       safeBottom: 48,
     );
-    expect(tester.getBottomRight(find.text('다 했음')).dy, lessThanOrEqualTo(806));
+    expect(tester.getBottomRight(find.text('완료')).dy, lessThanOrEqualTo(806));
 
     await _pump(tester, designPermissionScene(), safeBottom: 48);
     expect(

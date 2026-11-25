@@ -1,11 +1,11 @@
-// 파일 트리가 파일 시스템을 다루는 세 동작: 위치 보기·휴지통·동일성 확인.
+// 파일 트리·경로 링크가 파일 시스템을 다루는 네 동작: 위치 보기·폴더 열기·휴지통·동일성 확인.
 //
 // 소유 범위
-//   ac-reveal-in-finder · ac-trash-item · ac-trash-items · ac-path-identity 네 IPC 의 판정과
+//   ac-reveal-in-finder · ac-open-folder · ac-trash-item · ac-trash-items · ac-path-identity 다섯 IPC 의 판정과
 //   응답 모양.
 //
 // 제공 API
-//   createFsIpc(deps) 가 네 핸들러를 등록한다. 등록 외에는 아무것도 제공하지 않는다.
+//   createFsIpc(deps) 가 다섯 핸들러를 등록한다. 등록 외에는 아무것도 제공하지 않는다.
 //
 // 의존 대상
 //   Electron 을 require 하지 않는다. ipcMain·shell 과 fs·path·os·발신자 판정을 주입받는다.
@@ -37,6 +37,15 @@ function createFsIpc({ ipcMain, shell, fs, path, os, isTrustedSender }) {
       const abs = p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p;
       if (path.isAbsolute(abs) && fs.existsSync(abs)) shell.showItemInFolder(abs);
     } catch {}
+  });
+  // 대화·터미널의 폴더 경로 링크. 폴더면 그 폴더를 Finder 창으로 열고 true, 아니면 false(호출부가 파일로 엶)
+  ipcMain.handle("ac-open-folder", async (e, p) => {
+    try {
+      if (!isTrustedSender(e) || typeof p !== "string" || !p) return false;
+      const abs = p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p;
+      if (!path.isAbsolute(abs) || !fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory()) return false;
+      return (await shell.openPath(path.resolve(abs))) === "";
+    } catch { return false; }
   });
   // 파일/폴더를 macOS 휴지통으로(되돌릴 수 있음). 신뢰 렌더러 + 존재하는 절대 경로만. 결과 { ok, error }.
   ipcMain.handle("ac-trash-item", async (e, p) => {

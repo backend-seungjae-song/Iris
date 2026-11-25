@@ -132,7 +132,7 @@ export function runSessionCmd(cmd, args, session, runId) {
     if (args?.registerOnly === true) return { ok: true, data: { activated: [], rejected: [] } };
     const markers = Array.isArray(args?.markers) ? args.markers : [];
     if (markers.length > MAX_PROMPT_TARGET_MARKERS) {
-      return { ok: false, error: `지목 구분자는 한 메시지에 최대 ${MAX_PROMPT_TARGET_MARKERS}개입니다.` };
+      return { ok: false, error: `등록 구분자는 한 메시지에 최대 ${MAX_PROMPT_TARGET_MARKERS}개입니다.` };
     }
     try {
       const result = activatePromptTargets({ pane: session, markers, actions: {
@@ -156,7 +156,7 @@ export function runSessionCmd(cmd, args, session, runId) {
       } });
       return { ok: true, data: result };
     } catch (error) {
-      return { ok: false, error: `지목 등록 실패: ${String(error?.message || error)}` };
+      return { ok: false, error: `대상 등록 실패: ${String(error?.message || error)}` };
     }
   }
   if (cmd === "picks") {
@@ -206,10 +206,10 @@ export function runSessionCmd(cmd, args, session, runId) {
       groupName: mine && groupExists(mine, sessionGroupId(session)) ? sessionGroupName(session) : null,
       // 서로 다른 계정으로 같은 사이트를 동시에 봐야 할 때 고를 수 있는 로그인 칸.
       profiles: profileNames(),
-      handleNote: "탭 지정에는 핸들(@스페이스-tab-난수)을 쓰세요 — 뒤의 난수가 그 탭의 정체성이라 그것만 적어도 됩니다. 탭이 살아 있는 한 바뀌지 않습니다.",
+      handleNote: "탭 지정에는 핸들(@스페이스-tab-난수)을 쓰세요. 뒤의 난수가 그 탭의 고유 ID라 그것만 적어도 됩니다. 탭을 닫기 전까지 바뀌지 않습니다.",
       scope: mine
-        ? `이 세션(${session})은 자기 그룹 "${sessionGroupName(session)}" 안의 탭${grantedList.length ? ` + 지목받은 탭 ${grantedList.map((h) => "@" + h).join(" ")}` : ""}만 조작합니다. 지정 없는 명령은 그룹 밖으로 나가지 않고, 그룹이 비어 있으면 이 세션 몫의 탭을 새로 만듭니다. 앱에서 지목받은 그룹 없는 탭을 target/--tab으로 쓰면 이 세션 그룹에 들어옵니다. 남의 그룹 탭은 사용자가 앱에서 지목해 줘야 씁니다.`
-        : `이 세션의 스페이스를 알 수 없습니다(${session ? "HERDR_PANE_ID 미해석" : "세션 식별자 자체가 없음"}) — 조작할 수 있는 탭이 없어 목록도 비웁니다${grantedList.length ? "(지목받은 탭 제외)" : ""}. herdr pane 안에서 실행하거나, 위임 프로세스라면 IRIS_SESSION에 부모 pane id를 넘겨주세요.`,
+        ? `이 세션(${session})은 자기 그룹 "${sessionGroupName(session)}" 안의 탭${grantedList.length ? ` + 사용자가 선택한 탭 ${grantedList.map((h) => "@" + h).join(" ")}` : ""}만 조작합니다. 지정 없는 명령은 그룹 밖으로 나가지 않고, 그룹이 비어 있으면 이 세션의 탭을 새로 만듭니다. 사용자가 앱에서 선택한 그룹 없는 탭을 target/--tab으로 쓰면 이 세션 그룹에 들어옵니다. 남의 그룹 탭은 사용자가 앱에서 선택해 줘야 씁니다.`
+        : `이 세션의 스페이스를 알 수 없습니다(${session ? "HERDR_PANE_ID 미해석" : "세션 식별자 자체가 없음"}) — 조작할 수 있는 탭이 없어 목록도 비웁니다${grantedList.length ? "(사용자가 선택한 탭 제외)" : ""}. herdr pane 안에서 실행하거나, 위임 프로세스라면 IRIS_SESSION에 부모 pane id를 넘겨주세요.`,
     } };
   }
   if (cmd === "target") {
@@ -238,7 +238,7 @@ export function runSessionCmd(cmd, args, session, runId) {
     // 가고, 전부에 실행하려면 tab에 목록을 준다. 어떤 탭을 쓰는지 보이지 않으면 선택할 수 없다.
     return { ok: true, data: { session, pinned: handleFor(wantTab), handle: handleFor(wantTab), tabId: wantTab, tab: meta,
       pinnedAll: pins.map((id) => handleFor(id)).filter(Boolean),
-      note: pins.length > 1 ? `이 세션이 ${pins.length}개를 들고 있습니다(최대 ${MAX_PINS}). 지정 없는 명령은 마지막으로 쓴 탭으로 가고, 전부에 돌리려면 tab에 목록을 주세요.` : undefined } };
+      note: pins.length > 1 ? `이 세션이 ${pins.length}개를 고정했습니다(최대 ${MAX_PINS}). 지정 없는 명령은 마지막으로 쓴 탭으로 가고, 전부에 돌리려면 tab에 목록을 주세요.` : undefined } };
   }
   if (cmd === "untarget") {
     // 화면에는 지목 해제로 표시한다. 고정만 풀고 지목을 남기면 그 탭은 계속 조작할 수 있다.
@@ -290,7 +290,7 @@ function coverWarning(session, tabId, url) {
   if (!g || typeof g.has !== "function" || !g.has(tabId)) return null;
   const cur = (tabMeta(tabId) || {}).url || "";
   if (!cur || sameSiteUrl(cur, url)) return null;      // 같은 사이트 안에서 이어 가는 것은 막지 않는다
-  return `이 탭 @${handleFor(tabId) || tabId}은(는) 사람이 지목해 준 화면입니다(${hostOfUrl(cur)}). 보고 있던 것을 덮지 않았습니다.\n`
+  return `이 탭 @${handleFor(tabId) || tabId}은(는) 사람이 선택해 준 화면입니다(${hostOfUrl(cur)}). 보고 있던 것을 덮지 않았습니다.\n`
     + `· 같은 흐름의 다음 단계로 넘어가는 것이면 → browser_goto (그 탭에서 이어집니다)\n`
     + `· 지금 페이지를 그대로 다시 부르려면 → browser_history {action:"reload"}\n`
     + `· 그와 무관한 페이지가 따로 필요하면 → parallel:true (새 탭이 생기고 사람 화면은 그대로)`;
@@ -316,7 +316,7 @@ function closeTabForSession(args, session) {
   const space = storageSpaceOfTab(id);
   const handle = handleFor(id) || id;
   if (!space || grantedByTabId(session, id) || controlOwnerOf(space, id) !== sessionGroupId(session)) {
-    return { ok: false, error: `@${handle}은(는) 이 세션 그룹의 탭이 아니라 닫지 않습니다 — 사용자가 지목해 준 탭은 사용자가 닫습니다.` };
+    return { ok: false, error: `@${handle}은(는) 이 세션 그룹의 탭이 아니라 닫지 않습니다 — 사용자가 선택해 준 탭은 사용자가 닫습니다.` };
   }
   if (!closeBrowserTab(id)) return { ok: false, error: `@${handle}을(를) 닫지 못했습니다.` };
   return { ok: true, data: { closed: handle, remaining: visibleTabsFor(session).map((t) => t.handle || t.tabId) } };
@@ -350,7 +350,7 @@ function createTabForSession(args, session, qaRunId = null) {
         if (cover) { resolve({ ok: false, error: cover }); return; }
         resolve({ ok: true, data: { handle: handleFor(reuse), tabId: reuse, reused: true,
           space: sessionSpace(session), url: url || (tabMeta(reuse) || {}).url || "",
-          note: `새로 만들지 않고 이 세션이 쓰던 탭 @${handleFor(reuse) || reuse}을(를) 씁니다. 두 페이지를 동시에 띄워야 하거나 다른 계정으로 열어야 하면 parallel:true를 주세요.`,
+          note: `새로 만들지 않고 이 세션이 쓰던 탭 @${handleFor(reuse) || reuse}을(를) 씁니다. 두 페이지를 동시에 열어 둬야 하거나 다른 계정으로 열어야 하면 parallel:true를 주세요.`,
           ...(url ? { _navigate: url } : {}) } });
         setLastTab(String(session), reuse);
         return;
@@ -553,7 +553,7 @@ function notifyUser(args, session) {
   if (tabId && !tabAllowed(session, tabId).ok) return { ok: false, error: "이 세션이 쓸 수 있는 탭이 아닙니다." };
   // review: 사람이 확인할 화면을 띄운 탭. 그 탭으로 가는 단추가 알림의 목적이라 탭이 꼭 필요
   const review = args?.review === true;
-  if (review && !tabId) return { ok: false, error: "review 알림은 확인할 화면을 띄운 tab이 필요합니다." };
+  if (review && !tabId) return { ok: false, error: "review 알림은 확인할 화면을 연 tab이 필요합니다." };
   const now = Date.now();
   const recent = (notifyRecent.get(skey) || []).filter((item) => now - item.at < 10000);
   const key = args?.key ? skey + ":" + String(args.key).slice(0, 100) : "";

@@ -323,9 +323,11 @@ function createWebviewLifecycle({
       // postMessage(JWT)로 opener에 결과를 전달하며 토큰도 저장된다. 그러나 사이트(챗플 등)가 이 환경에서
       // 반응성 UI를 즉시 갱신하지 못해 메인 페이지는 새로고침 전까지 로그아웃 상태로 보인다(새로고침하면 다시 반영된다).
       // → 팝업이 opener 도메인(로그인 콜백)까지 도달한 뒤 닫히면 opener를 자동 reload해 저장된 로그인을 반영한다.
-      wc.on("did-create-window", (childWin) => {
+      function attachPopup(wc, childWin) {
         try {
-          const cwc = childWin.webContents; cwc.setBackgroundThrottling(!noThrottleOpt);
+          const cwc = childWin.webContents;
+          guardCrashedSend(cwc);
+          cwc.setBackgroundThrottling(!noThrottleOpt);
           cwc.on("will-prevent-unload", (ev) => { try { if (confirmLeave(cwc, childWin)) ev.preventDefault(); } catch {} });
           // 사용자가 눌러 뜬 팝업은 앞으로 띄운다(뒤에 숨는 것 방지). 자동화가 연 팝업은 층위를 한 단계
           // 내려서 띄운다. showInactive 는 포커스 없이 띄우는 것일 뿐 다른 앱 창 위에 표시되기 때문이다
@@ -354,11 +356,48 @@ function createWebviewLifecycle({
             });
             // 보이지 않게 만들었으면 표시하는 자리도 있어야 한다. 이 처리가 없으면 자동화가 연 손자 창이
             // 만들어지기만 하고 표시되지 않아 사용자가 찾을 수 없다.
-            cwc.on("did-create-window", (grandWin) => presentPopup(cwc.id, grandWin));
+            cwc.on("did-create-window", (grandWin) => attachPopup(cwc, grandWin));
           } catch {}
           const popupId = "popup:" + randomUuid();
           registerPopup(popupId, cwc);
-          registerSessionPrimer(cwc.id, () => {});
+          // 팝업 확인창·패스키·사람 확인 주입 목록
+          let popupDialogSrc = "";
+          try { popupDialogSrc = dialogScript(cwc.id, new URL(getAppUrl()).port || 4271); } catch {}
+          const popupPrimer = (_w, d) => {
+            if (webAuthnScript) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+              { source: webAuthnScript, runImmediately: true }).catch(() => {});
+            if (botcheckScript) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+              { source: botcheckScript, runImmediately: true }).catch(() => {});
+            if (popupDialogSrc) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+              { source: popupDialogSrc, runImmediately: true }).catch(() => {});
+            if (openerScript) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+              { source: openerScript, runImmediately: true }).catch(() => {});
+            d.sendCommand("Target.setAutoAttach",
+              { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }).catch(() => {});
+            d.sendCommand("Page.enable", {}).catch(() => {});
+          };
+          const popupChildPrimer = (d, sid) => {
+            d.sendCommand("Target.setAutoAttach",
+              { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sid).catch(() => {});
+            if (popupDialogSrc) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+              { source: popupDialogSrc, runImmediately: true }, sid).catch(() => {});
+            if (webAuthnScript) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+              { source: webAuthnScript, runImmediately: true }, sid).catch(() => {});
+            if (openerScript) d.sendCommand("Page.addScriptToEvaluateOnNewDocument",
+              { source: openerScript, runImmediately: true }, sid).catch(() => {});
+          };
+          registerSessionPrimer(cwc.id, popupPrimer, popupChildPrimer);
+          try {
+            const dbg = cwc.debugger;
+            dbg.on("message", (_e, method, params) => {
+              if (method === "Page.frameNavigated") { noteFrameOrigin(cwc.id, params && params.frame && params.frame.url); return; }
+              if (method === "Target.detachedFromTarget") { dropChildSession(cwc.id, params && params.sessionId); return; }
+              if (method !== "Target.attachedToTarget") return;
+              const sid = params && params.sessionId;
+              const ti = params && params.targetInfo;
+              if (sid && ti && (ti.type === "iframe" || ti.type === "page")) noteChildSession(cwc.id, sid, dbg);
+            });
+          } catch {}
           const syncPopupFocus = () => setThrottleReason(cwc, "popup-focused", childWin.isFocused());
           childWin.on("focus", syncPopupFocus);
           childWin.on("blur", syncPopupFocus);
@@ -449,7 +488,8 @@ function createWebviewLifecycle({
             }, POPUP_LOGIN_RELOAD_DELAY_MS);
           });
         } catch {}
-      });
+      }
+      wc.on("did-create-window", (childWin) => attachPopup(wc, childWin));
     } catch {}
   });
 }

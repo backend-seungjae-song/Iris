@@ -750,7 +750,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   selected: _history == null && _stick ? 0 : 1,
                   items: [
                     TerminalSegmentItem(
-                      label: '자동 따라가기',
+                      label: '자동 스크롤',
                       leading: Container(
                         width: 7,
                         height: 7,
@@ -2178,7 +2178,7 @@ class _StepChip extends StatelessWidget {
           width: 32,
           height: 32,
           child: IconButton(
-            tooltip: '$label 빼기',
+            tooltip: '$label 삭제',
             padding: EdgeInsets.zero,
             onPressed: onRemove,
             icon: Icon(Icons.close, size: 16, color: context.iris.brand),

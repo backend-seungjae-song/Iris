@@ -34,7 +34,7 @@ if (!host || !params.get("space")) {
     onDeviceChange: (device) => host.requestControl({ action: "device", tab: params.get("tab"), device }),
     onRequestDetach: () => {},
     detachable: false,
-    actions: [{ label: "다시 붙이기", icon: "totab", title: "기기를 원래 자리로 다시 붙입니다", onClick: () => { void host.closeWindow({ tab: params.get("tab") }); } }],
+    actions: [{ label: "탭으로 되돌리기", icon: "totab", title: "기기를 원래 탭으로 되돌립니다", onClick: () => { void host.closeWindow({ tab: params.get("tab") }); } }],
     onPick: params.get("pick") === "1" ? () => host.requestControl({ action: "pick", tab: params.get("tab") }) : undefined,
     pickOn: () => picking,
     onRecord: params.get("record") === "1" ? () => host.requestControl({ action: "record", tab: params.get("tab") }) : undefined,

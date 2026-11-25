@@ -286,7 +286,7 @@ test("(g) 대기열 밖 단위도 끊긴 세션을 한 번 다시 붙여 재시�
     timeoutMs: 100,
     tailGraceMs: 10,
   });
-  const out = await units.run({ workerGeneration: "g1", commandId: "g1/r", callId: 1, command: "cdp.send", target: { wcId: 7, childSessionId: "c" }, args: {} },
+  const out = await units.run({ workerGeneration: "g1", commandId: "g1/r", callId: 1, command: "cdp.send", target: { wcId: 7 }, args: {} },
     { unit: { command: "nativekey", phase: "last", outside: true }, key: 7 });
   assert.deepEqual(out, { ok: true, command: "cdp.send" });
   assert.deepEqual(resets, [7]);

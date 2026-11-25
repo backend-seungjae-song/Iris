@@ -119,7 +119,7 @@ class _ConnectionScreenState extends State<ConnectionScreen>
     if (token == null || !mounted) return;
     setState(() {
       _busy = true;
-      _status = '이전 연결을 이어 가는 중…';
+      _status = '다시 연결하는 중…';
     });
     // 앱을 열면서 Tailscale 을 켜는 중이라 처음 몇 번은 통신이 안 될 수 있어 잠시 기다리며 다시 시도
     for (var attempt = 0; mounted; attempt++) {
@@ -141,7 +141,7 @@ class _ConnectionScreenState extends State<ConnectionScreen>
             () => _status = error.requiresPin
                 ? 'PIN 기한이 지나 다시 확인이 필요합니다. 접속 PIN을 입력하세요.'
                 : waiting
-                ? 'Tailscale 연결을 기다리는 중…'
+                ? 'Tailscale 연결 대기 중…'
                 : error.message,
           );
         }
@@ -189,7 +189,7 @@ class _ConnectionScreenState extends State<ConnectionScreen>
     _clearRetry();
     setState(() {
       _busy = true;
-      _status = 'PIN을 확인하는 중…';
+      _status = 'PIN 확인 중…';
     });
     try {
       final connection = await widget.remoteSession.connect(

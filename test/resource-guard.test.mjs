@@ -57,7 +57,7 @@ test("13:50 실측값은 심각이고 상한 넘은 개발 서버를 이름으�
     processes: [{ pid: 61318, mb: 3944, dev: true }, { pid: 2, mb: 30000, dev: false }] });
   assert.equal(r.level, "critical"); assert.equal(r.discardTabs, true);
   assert.ok(r.reasons.includes("스왑 13105MB/14336MB"));
-  assert.ok(r.reasons.some((x) => /상한 넘은 개발 서버 61318 3\.9GB/.test(x)));
+  assert.ok(r.reasons.some((x) => /상한 초과 개발 서버 61318 3\.9GB/.test(x)));
   assert.deepEqual(r.overCap.map((p) => p.pid), [61318]);
 });
 

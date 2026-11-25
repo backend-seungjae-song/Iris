@@ -31,6 +31,8 @@ const FAILURE_LIMIT = 5;
 const PREAUTH_RATE = 5;
 const AUTHENTICATED_RATE = 50;
 const AUTHENTICATED_BURST = 90;
+const GATEWAY_STOP_TIMEOUT_MS = 3000;
+const GATEWAY_KILL_GRACE_MS = 1000;
 
 export function createRemoteRpcHost(options) {
   const serverInstance = options?.serverInstance;
@@ -63,6 +65,7 @@ export function createRemoteRpcHost(options) {
   const messages = options.messageBridge || createMessageBridge({
     execFile: options.execFile,
     codexExecutable: options.codexExecutable,
+    getHerdr: options.getHerdr,
   });
   const agents = options.agentStore || createAgentStore({ randomBytes });
   const requests = options.requestStore || createRequestStore({
@@ -111,22 +114,75 @@ export function createRemoteRpcHost(options) {
     record.handlers = null;
   }
 
-  function kill(record = childRecord) {
-    if (!record?.process) return true;
-    try {
-      if (record.process.kill("SIGTERM") === false) return false;
-      detach(record);
+  function kill(record = childRecord, onStopped = () => {}, { waitForExit = true } = {}) {
+    if (!record?.process) { onStopped(); return true; }
+    if (record.stopPromise) return true;
+    const processHandle = record.process;
+    if (processHandle.exitCode != null || processHandle.signalCode != null) {
+      onStopped();
       return true;
+    }
+    let finished = false;
+    let timer = null;
+    let graceTimer = null;
+    let finish = null;
+    const cancel = () => {
+      if (timer) clearTimer(timer);
+      if (graceTimer) clearTimer(graceTimer);
+      if (finish) processHandle.removeListener("exit", finish);
+      finish = null;
+      record.stopPromise = false;
+    };
+    finish = () => {
+      if (finished) return;
+      finished = true;
+      if (timer) clearTimer(timer);
+      processHandle.removeListener("exit", finish);
+      detach(record);
+      onStopped();
+    };
+    record.stopPromise = true;
+    processHandle.once("exit", finish);
+    try {
+      if (processHandle.kill("SIGTERM") === false) {
+        cancel();
+        return false;
+      }
     } catch {
+      cancel();
       return false;
     }
+    detach(record);
+    if (!waitForExit) {
+      processHandle.removeListener("exit", finish);
+      finish = null;
+      record.stopPromise = false;
+      return true;
+    }
+    if (!finished) {
+      timer = setTimer(() => {
+        try { processHandle.kill("SIGKILL"); } catch {}
+        if (!finished) {
+          graceTimer = setTimeout(finish, GATEWAY_KILL_GRACE_MS);
+          graceTimer.unref?.();
+        }
+      }, GATEWAY_STOP_TIMEOUT_MS);
+      timer.unref?.();
+    }
+    return true;
   }
 
   function terminateCurrent(reason) {
     const record = childRecord;
     if (!record || record.failed) return;
     record.failed = true;
-    const stopped = kill(record);
+    const stopped = kill(record, () => {
+      if (childRecord !== record) return;
+      childRecord = null;
+      child = null;
+      queue = null;
+      handleFailure(reason);
+    });
     clearConnections(reason);
     listening = null;
     if (!stopped) {
@@ -137,12 +193,6 @@ export function createRemoteRpcHost(options) {
       onFailureLimit({ code: error.code, reason });
       return;
     }
-    if (childRecord === record) {
-      childRecord = null;
-      child = null;
-      queue = null;
-    }
-    handleFailure(reason);
   }
 
   function sendControl(message, key = "gateway") {
@@ -587,7 +637,7 @@ export function createRemoteRpcHost(options) {
     restartTimer = null;
     settleReady(new Error("gateway-stopped"));
     const record = childRecord;
-    const stopped = kill(record);
+    const stopped = kill(record, () => {}, { waitForExit: false });
     if (stopped && childRecord === record) {
       childRecord = null;
       child = null;
@@ -595,6 +645,8 @@ export function createRemoteRpcHost(options) {
     }
     listening = null;
     clearConnections("gateway-stopped");
+    operations.close?.();
+    auth?.closeAll?.();
     onStatus({ type: "stopped", generation });
     return !wasActive || stopped;
   }

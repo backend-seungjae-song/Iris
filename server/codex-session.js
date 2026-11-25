@@ -164,7 +164,7 @@ export async function resolveCodexSession(herdr, paneId, knownPane = null) {
     const reported = agentSessionPathFor(paneId, "codex");
     if (knownPane || typeof herdr.paneGet === "function") {
       const pane = knownPane || await herdr.paneGet(paneId);
-      if (pane?.agent !== "codex") return null;
+      if (!String(pane?.agent || "").toLowerCase().startsWith("codex")) return null;
       if (pane?.agent_session?.kind === "id") {
         const id = pane.agent_session.value;
         if (!ID_RE.test(id || "")) return null;
@@ -207,7 +207,7 @@ export function prewarmCodexScan() {
 }
 
 export async function attachCodexSessions(state, herdr, rawAgents = []) {
-  const need = (state || []).filter((s) => String(s.agent || "").toLowerCase() === "codex" && !s.sessionFile);
+  const need = (state || []).filter((s) => String(s.agent || "").toLowerCase().startsWith("codex") && !s.sessionFile);
   if (!need.length) return state;
   const rawByPane = new Map((rawAgents || []).filter((a) => a?.pane_id && a.agent_session).map((a) => [a.pane_id, a]));
   await Promise.all(need.map(async (s) => {

@@ -15,8 +15,10 @@ import { isHostWindows, samePath as sameHostPath, pathWithin, pathBasename, norm
 
 import { provide } from "../core/hooks.js";
 import { createDropdown } from "../core/dropdown.js";
+import { patchHtml } from "../core/patch-html.js";
 import { renderSpaces } from "../explorer/tree.js";
 import { askConfirm, askInfo, askText, showCtx } from "../explorer/context-menu.js";
+import { sessionLaunchOptions } from "../herdr/session-providers.js";
 import { getLastAgents, getTabsForSpace, nameOf } from "../herdr/state.js";
 import { buildAgentForest } from "../herdr/agent-tree.js";
 
@@ -64,7 +66,7 @@ function samePath(a, b) { return a && b && (isHostWindows() ? sameHostPath(a, b)
 function esc(s) { return app.esc(String(s ?? "")); }
 // Claude Code 가 하위 에이전트마다 만드는 임시 worktree 다. 열린 스페이스가 아니면 목록에 세지 않는다.
 const SUBAGENT_WORKTREE = /\/\.claude\/worktrees\/agent-[^/]+\/?$/;
-let composing = null, draft = "", draftError = "", draftCaret = null;
+let composing = null, draft = "", draftError = "";
 const ICON = {
   caret: `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`,
   terminal: `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 6 6 6-6 6M13 18h6"/></svg>`,
@@ -120,7 +122,7 @@ function markMissing(rowHtml) {
   const nameAt = rowHtml.indexOf('<span class="space-name">');
   const nameEnd = nameAt < 0 ? -1 : rowHtml.indexOf("</span>", nameAt) + "</span>".length;
   if (nameAt < 0 || nameEnd < nameAt) return rowHtml;
-  return rowHtml.slice(0, nameEnd) + `<span class="wt-gone" title="스페이스 폴더가 지워졌습니다. 필요 없으면 스페이스를 닫으세요">폴더 없음</span>` + rowHtml.slice(nameEnd);
+  return rowHtml.slice(0, nameEnd) + `<span class="wt-gone" title="스페이스 폴더가 삭제되었습니다. 필요 없으면 스페이스를 닫으세요">폴더 없음</span>` + rowHtml.slice(nameEnd);
 }
 // 삭제 비활성 판정: 서버 삭제 거부와 같은 기준(스페이스·에이전트 cwd·pane cwd) + 실행 중
 function busyOf(item) {
@@ -129,7 +131,7 @@ function busyOf(item) {
 }
 function busyReason(item) {
   const count = busyOf(item);
-  return count ? `세션 ${count}개가 쓰는 중이라 삭제할 수 없습니다` : "";
+  return count ? `세션 ${count}개가 사용 중이라 삭제할 수 없습니다` : "";
 }
 // 쓰는 세션·실행 중 프로세스·살아 있는 생성 세션이 모두 없으면 안 쓰는 worktree.
 // 작업 기록·마지막 실행 기록으로만 이어진 세션은 제외. 한 곳에만 이어지면 그 묶음에 행으로 보이고, 여러 곳이면 기본 묶음에 보여서 이 묶음은 빈 채로 남음
@@ -139,14 +141,14 @@ function inUse(item) {
 function usageKnown(item) { return Array.isArray(item.users) && Array.isArray(item.running); }
 function deleteReason(item) {
   if (item.change?.uncommitted > 0) return "커밋하지 않은 변경이 있어 삭제할 수 없습니다";
-  if (!usageKnown(item)) return "사용 여부 모름";
+  if (!usageKnown(item)) return "사용 여부 확인 불가";
   return busyReason(item);
 }
 // 삭제를 막는 이유. 비활성 항목만 보이면 왜 못 지우는지 알 수 없음
 function deleteLabel(item) {
   const why = item.primary ? "기본 worktree" : !item.managed ? "Iris 에서 만든 것만"
-    : item.change?.uncommitted > 0 ? "커밋하지 않은 변경 있음" : !usageKnown(item) ? "사용 여부 모름"
-    : busyOf(item) ? "쓰는 세션을 닫은 뒤" : "";
+    : item.change?.uncommitted > 0 ? "커밋하지 않은 변경 있음" : !usageKnown(item) ? "사용 여부 확인 불가"
+    : busyOf(item) ? "사용 중인 세션을 닫은 뒤" : "";
   return why ? `worktree 삭제 (${why})` : "worktree 삭제";
 }
 function defaultBase(data) {
@@ -154,14 +156,14 @@ function defaultBase(data) {
   const branches = data.branches || [];
   return branches.includes("main") ? "main" : branches[0];
 }
-function composeHtml(primary, data) {
+function composeHtml(primary, data, spaceId) {
   if (composing !== primary) {
     return `<div class="wt-new wt-add" role="button" tabindex="0" data-worktree-action="compose" data-wt-repo="${esc(primary)}">${ICON.plus}<span>새 worktree</span></div>`;
   }
   const slug = draft.trim() || "이름";
   const hint = draftError ? `<div class="wt-compose-hint wt-compose-error" role="alert">${esc(draftError)}</div>`
     : `<div class="wt-compose-hint" aria-live="polite"><span>브랜치 <b>feat/${esc(slug)}</b> · 기준 <b>${esc(data.repositories ? "저장소별 기본 브랜치" : defaultBase(data) || "")}</b></span><span>Enter 생성 · Esc 취소</span></div>`;
-  return `<div class="wt-compose" data-wt-repo="${esc(primary)}"><input class="rename-input wt-compose-input" type="text" aria-label="새 worktree 이름" placeholder="이름 (예: review-search)" value="${esc(draft)}" autocomplete="off" spellcheck="false">${hint}</div>`;
+  return `<div class="wt-compose" data-render-key="compose:${esc(spaceId)}" data-wt-repo="${esc(primary)}"><input class="rename-input wt-compose-input" type="text" aria-label="새 worktree 이름" placeholder="이름 (예: review-search)" value="${esc(draft)}" autocomplete="off" spellcheck="false">${hint}</div>`;
 }
 // 목록 아래 한 줄: 고른 스페이스의 현재 브랜치. 목록은 이름만 표시하므로 브랜치는 여기서 본다.
 function renderCurrent(spaces) {
@@ -188,18 +190,7 @@ function renderCurrent(spaces) {
     line.setAttribute("aria-live", "polite");
     list.after(line);
   }
-  if (line.innerHTML !== html) line.innerHTML = html;
-}
-// 목록을 다시 그리면 입력칸이 새로 만들어진다. 적던 위치와 포커스를 이어 준다.
-function restoreCompose() {
-  if (composing === null || typeof document === "undefined") return;
-  queueMicrotask(() => {
-    const input = document.querySelector("#space-list .wt-compose-input");
-    if (!input) return;
-    if (document.activeElement !== input) input.focus();
-    const at = draftCaret ?? input.value.length;
-    input.setSelectionRange(at, at);
-  });
+  patchHtml(line, html);
 }
 // 목록 조회와 스페이스 행은 유지하고, 워크트리 계층은 에이전트 렌더 훅에서 만든다.
 function renderGrouped(spaces, renderSpace) {
@@ -217,7 +208,6 @@ function renderGrouped(spaces, renderSpace) {
       : data?.error ? renderSpace(space, `<div class="wt-meta" role="status">Git 정보를 읽지 못했습니다: ${esc(data.error)}</div>`) : renderSpace(space);
   }).join("");
   renderCurrent(spaces);
-  restoreCompose();
   return html;
 }
 const closedGroups = new Set();
@@ -296,14 +286,14 @@ function groupHtml(group) {
   }), { added: 0, deleted: 0, uncommitted: 0 }) : null;
   const changeLabel = change && (change.added + change.deleted ? `+${change.added} −${change.deleted}` : change.uncommitted ? `미커밋 ${change.uncommitted}` : "");
   const stats = changeLabel ? `<span class="wt-stat">${changeLabel}</span>` : "";
-  return `<div class="wt-group" ${groupAttributes(group)}><div class="wt-group-head">`
+  return `<div class="wt-group" ${groupAttributes(group)} data-render-key="group:${esc(group.key)}"><div class="wt-group-head">`
     + `<button type="button" class="wt-group-toggle" data-worktree-action="group-toggle" ${groupAttributes(group)} aria-expanded="${open}" title="${esc(group.path)}"><span class="wt-caret${open ? " open" : ""}">${ICON.caret}</span>${ICON.worktree}<span class="wt-group-name">${esc(groupTitle(group))}</span></button>`
     + (!open && count ? `<span class="wt-stat">${count}</span>` : "")
     + (app.getIsLocal() ? groupButton(group, "group-add", ICON.plus, `${groupTitle(group)}에 추가`) : "")
     + groupButton(group, "group-menu", "···", `${groupTitle(group)} 메뉴`) + `</div>`
     + `<div class="wt-group-meta"><span class="wt-loc-branch">${esc(branch)}</span>${stats}</div>`
     + (open ? `<div class="wt-group-sessions">${group.rows.map((row) => row.html.replace('data-tree-parent=""', `data-tree-parent="${esc(group.key)}"`)).join("")}${group.terminals.map((tab) =>
-      `<button type="button" class="wt-terminal-session${tab.focused ? " sel" : ""}" data-worktree-action="terminal" data-wt-tab="${esc(tab.tabId)}" title="${esc(tab.cwd || "작업 폴더 확인 중")}"><span class="wt-terminal-spacer" aria-hidden="true"></span><span class="srow-name">${esc(tab.label || `터미널 ${tab.number ?? ""}`)}</span><span class="srow-mark wt-terminal-sign" role="img" aria-label="터미널">${ICON.terminal}</span></button>`).join("")}</div>` : "") + `</div>`;
+      `<button type="button" class="wt-terminal-session${tab.focused ? " sel" : ""}" data-worktree-action="terminal" data-wt-tab="${esc(tab.tabId)}" data-render-key="terminal:${esc(tab.tabId)}" title="${esc(tab.cwd || "작업 폴더 확인 중")}"><span class="wt-terminal-spacer" aria-hidden="true"></span><span class="srow-name">${esc(tab.label || `터미널 ${tab.number ?? ""}`)}</span><span class="srow-mark wt-terminal-sign" role="img" aria-label="터미널">${ICON.terminal}</span></button>`).join("")}</div>` : "") + `</div>`;
 }
 function groupAgents({ spaceId, open, rows, count }) {
   const space = app.orderedSpaces().find((candidate) => candidate.id === spaceId);
@@ -327,7 +317,7 @@ function groupAgents({ spaceId, open, rows, count }) {
   for (const group of groups) { group.space = space; renderedGroups.set(group.key, group); }
   const repositories = cached.repositories ? [{ ...cached, primary: cached.repo }] : [cached];
   const creation = repositories.some((data) => data.repositories?.length || data.branches?.length)
-    ? composeHtml(cached.primary || cached.repo, cached) : "";
+    ? composeHtml(cached.primary || cached.repo, cached, spaceId) : "";
   const notes = repositories.map((data) => pendingCreates.has(data.primary)
     ? `<div class="wt-meta" role="status">${esc(pendingCreates.get(data.primary))} 생성 중…</div>`
     : uncertainRepos.has(data.primary) ? `<div class="wt-meta" role="status">${shortcutLabel("작업 결과를 받지 못했습니다. ⌘⇧R로 새로고침하세요.")}</div>` : "").join("");
@@ -336,13 +326,13 @@ function groupAgents({ spaceId, open, rows, count }) {
     && !group.members.some(({ item }) => inUse(item)));
   const idleOpen = openIdle.has(spaceId);
   const idleHtml = idle.length ? `<button type="button" class="wt-more" data-worktree-action="idle-toggle" data-wt-space="${esc(spaceId)}" aria-expanded="${idleOpen}">`
-    + `<span class="wt-caret${idleOpen ? " open" : ""}">${ICON.caret}</span>안 쓰는 worktree ${idle.length}</button>`
+    + `<span class="wt-caret${idleOpen ? " open" : ""}">${ICON.caret}</span>미사용 worktree ${idle.length}</button>`
     + (idleOpen ? idle.map(groupHtml).join("") : "") : "";
   return { count: count + groups.reduce((sum, group) => sum + group.terminals.length, 0), open, hasChildren: groups.length > 0,
-    html: open ? `<div class="wt-space-groups">${groups.filter((group) => !idle.includes(group)).map(groupHtml).join("")}${idleHtml}${notes}${app.getIsLocal() ? creation : ""}</div>` : "" };
+    html: open ? `<div class="wt-space-groups" data-render-key="groups:${esc(spaceId)}">${groups.filter((group) => !idle.includes(group)).map(groupHtml).join("")}${idleHtml}${notes}${app.getIsLocal() ? creation : ""}</div>` : "" };
 }
 function sessionItems(spaceId, cwd) {
-  return [["claude", "새 Claude 세션"], ["codex", "새 Codex 세션"], ["", "새 터미널"]].map(([launch, label]) => ({
+  return sessionLaunchOptions().map(([launch, label]) => ({
     label, disabled: !app.getIsLocal(), act: () => {
       if (app.getIsLocal()) app.wsSend({ type: "tab.create", workspaceId: spaceId, cwd, launch, ...(launch ? { name: launch } : {}) });
     },
@@ -431,7 +421,7 @@ function createDialog(spaceId) {
   let base = branches.includes("main") ? "main" : branches[0];
   let launch = "";
   const baseDrop = createDropdown({ items: branches.map((value) => ({ value, label: value || "저장소별 기본 브랜치" })), value: base, ariaLabel: "기준 브랜치", onChange: (value) => { base = value; } });
-  const launchDrop = createDropdown({ items: [{ value: "", label: "빈 터미널" }, { value: "codex", label: "Codex" }, { value: "claude", label: "Claude" }], value: launch, ariaLabel: "실행", onChange: (value) => { launch = value; } });
+  const launchDrop = createDropdown({ items: [{ value: "", label: "빈 터미널" }, { value: "codex", label: "Codex" }, { value: "claude", label: "Claude" }, { value: "agy", label: "Antigravity" }], value: launch, ariaLabel: "실행", onChange: (value) => { launch = value; } });
   wrap.querySelector(".wt-base").append(baseDrop.el);
   wrap.querySelector(".wt-launch").append(launchDrop.el);
   const name = wrap.querySelector(".wt-name"), branch = wrap.querySelector(".wt-branch"), error = wrap.querySelector(".wt-error");
@@ -477,12 +467,13 @@ function repoFound(primary) {
   return null;
 }
 function openCompose(primary) {
-  composing = primary; draft = ""; draftError = ""; draftCaret = null;
+  composing = primary; draft = ""; draftError = "";
   renderSpaces();
+  document.querySelector("#space-list .wt-compose-input")?.focus({ preventScroll: true });
 }
 function closeCompose(focusAdd) {
   const primary = composing;
-  composing = null; draft = ""; draftError = ""; draftCaret = null;
+  composing = null; draft = ""; draftError = "";
   renderSpaces();
   if (focusAdd) document.querySelector(`#space-list .wt-add[data-wt-repo="${CSS.escape(primary)}"]`)?.focus();
 }
@@ -496,7 +487,7 @@ function createFromCompose() {
   if (draftError) { renderSpaces(); return; }
   activeOps.add(primary);
   pendingCreates.set(primary, name);
-  composing = null; draft = ""; draftCaret = null;
+  composing = null; draft = "";
   request("create", { spaceId: found.space.id, repo: found.data.repo, name, branch, base: defaultBase(found.data), launch: "" });
   renderSpaces();
 }
@@ -511,7 +502,7 @@ function menuFor(spaceId, path, x, y) {
   const opened = app.orderedSpaces().some((space) => samePath(space.folder, item.path));
   const workspaceId = app.orderedSpaces().find((space) => samePath(space.folder, item.path))?.id || found.space.id;
   showCtx(x, y, [
-    ...[["claude", "새 Claude 세션"], ["codex", "새 Codex 세션"], ["", "새 터미널"]].map(([launch, label]) => ({
+    ...sessionLaunchOptions().map(([launch, label]) => ({
       label, disabled: !app.getIsLocal() || item.prunable,
       act: () => {
         if (!app.getIsLocal() || item.prunable) return;
@@ -569,7 +560,8 @@ function handleResult(message) {
         byFolder.set(folder, { ...data, entries: message.entries, ok: true, fetchedAt: Date.now() });
     }
     if (pending.op === "create") {
-      app.wsSend({ type: "tab.create", workspaceId: pending.spaceId, cwd: message.spaceCwd, launch: pending.launch || "", ...(pending.launch ? { name: pending.launch } : {}) });
+      app.wsSend({ type: "tab.create", workspaceId: pending.spaceId, cwd: message.spaceCwd, launch: pending.launch || "",
+        ...(pending.launch ? { name: pending.launch } : {}) });
       if (pending.launch) pendingBinds.set(message.spaceCwd, { workspaceId: pending.spaceId, repo: pending.repo, launch: pending.launch, until: Date.now() + BIND_WAIT_MS });
       app.showToast("worktree를 만들었습니다", { level: "ok", id: pending.toastId });
     } else app.showToast(pending.op === "rename" ? "표시 이름을 바꿨습니다" : "worktree를 삭제했습니다", { level: "ok", id: pending.toastId });
@@ -659,7 +651,7 @@ function attachEvents() {
   }, true);
   list.addEventListener("input", (event) => {
     if (!event.target.matches(".wt-compose-input")) return;
-    draft = event.target.value; draftCaret = event.target.selectionStart;
+    draft = event.target.value;
     const hint = list.querySelector(".wt-compose-hint");
     if (draftError) { draftError = ""; renderSpaces(); return; }
     const name = hint?.querySelector("b");
@@ -670,13 +662,11 @@ function attachEvents() {
       if (event.isComposing) return;
       if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); createFromCompose(); }
       else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeCompose(true); }
-      else draftCaret = null;
       return;
     }
     if ((event.key === "Enter" || event.key === " ") && event.target.matches(".wt-add")) { event.preventDefault(); openCompose(event.target.dataset.wtRepo); }
   });
-  list.addEventListener("keyup", (event) => { if (event.target.matches(".wt-compose-input")) draftCaret = event.target.selectionStart; });
-  // 비운 채 입력칸을 벗어나면 닫는다. 다시 그리느라 잠깐 포커스를 잃은 경우는 새 입력칸이 포커스를 받는다.
+  // 빈 이름으로 입력칸을 벗어나면 편집 종료
   list.addEventListener("focusout", (event) => {
     if (!event.target.matches(".wt-compose-input")) return;
     setTimeout(() => {

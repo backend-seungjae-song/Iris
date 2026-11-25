@@ -823,7 +823,7 @@ void main() {
               'body': {
                 'title': '카드 인증',
                 'text': '직접 진행해 주세요.',
-                'choices': ['다 했음', '못 하겠음'],
+                'choices': ['완료', '할 수 없음'],
                 'tab': tab,
               },
             },

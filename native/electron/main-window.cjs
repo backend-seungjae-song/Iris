@@ -94,6 +94,7 @@ function matchRelay(input) {
 
 function createMainWindow({
   app, BrowserWindow, dialog, shell, webContents, windowLayout, guardWebviewPartition,
+  adjustBrowserZoom,
   pinHiddenViewportById, preloadPath, webviewPreloadPath, appUrl: APP_URL,
   audioDiagEnabled: AUDIO_DIAG_ENABLED, noThrottleOpt: NO_THROTTLE_OPT,
   markAppAlive, console, hidden = false,
@@ -248,9 +249,8 @@ function createMainWindow({
         }
         if (kl === "w" && input.control && !input.meta && !input.shift) return send("close-tab");
         if (kl === "r" && (!input.control || isWin)) return send(isWin && input.shift ? "app-refresh" : input.shift ? "force-reload-tab" : "reload-tab");
-        if (k === "=" || k === "+") { contents.setZoomLevel(contents.getZoomLevel() + 0.5); ev.preventDefault(); }
-        else if (k === "-" || k === "_") { contents.setZoomLevel(contents.getZoomLevel() - 0.5); ev.preventDefault(); }
-        else if (k === "0") { contents.setZoomLevel(0); ev.preventDefault(); }
+        const action = k === "=" || k === "+" ? "in" : k === "-" || k === "_" ? "out" : k === "0" ? "reset" : null;
+        if (action) { ev.preventDefault(); adjustBrowserZoom(contents, action); }
       });
     }
   });

@@ -46,7 +46,7 @@ const ALLOWED_HOSTS = new Set([
   "127.0.0.1", "0.0.0.0", "localhost",
   // 프로젝트가 의존하는 곳
   "herdr.dev", "github.com", "raw.githubusercontent.com", "www.npmjs.com", "npmjs.com",
-  "nodejs.org", "www.electronjs.org", "pnpm.io", "docx-editor.dev", "www.apache.org",
+  "nodejs.org", "www.electronjs.org", "pnpm.io", "docx-editor.dev", "www.apache.org", "a2ui.org",
   "opensource.org", "www.w3.org", "developer.mozilla.org", "www.chromium.org",
   "source.chromium.org", "bugs.chromium.org", "chromedevtools.github.io",
   "support.google.com", "security.googleblog.com", "developers.googleblog.com", "developer.chrome.com", "pptr.dev",
@@ -56,7 +56,7 @@ const ALLOWED_HOSTS = new Set([
   "github.io", "xtermjs.org", "microsoft.github.io", "vercel.com", "www.gstatic.com",
   "fonts.googleapis.com", "fonts.gstatic.com", "openfontlicense.org", "tailscale.com", "login.tailscale.com", "www.anthropic.com",
   // 구독 사용량을 물어보는 제공자 엔드포인트 (server/usage.js)
-  "api.anthropic.com", "chatgpt.com", "cloudcode-pa.googleapis.com", "opencode.ai",
+  "api.anthropic.com", "chatgpt.com", "cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com", "opencode.ai",
   "api.kimi.com", "platform.minimax.io", "cli-chat-proxy.grok.com", "auth.x.ai",
   // 기능이 그 사이트를 대상으로 삼아 이름을 대는 곳
   //   claude.ai: Chrome 미러가 붙는 오리진, 챌린지 복구가 목적지를 가리는 기준

@@ -55,6 +55,38 @@ class FakeWebContents extends EventEmitter {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test("탭별 확대 범위 설정은 인증과 같은 워커를 쓰고 해당 요청의 응답을 기다림", async (t) => {
+  const f = fixture(t);
+  const ipc = new EventEmitter();
+  const sent = [];
+  let starts = 0;
+  const worker = {
+    versionId: 1, ipc, isDestroyed: () => false, startTask: () => ({}),
+    send: (channel, ...args) => sent.push([channel, ...args]),
+  };
+  f.session.serviceWorkers.startWorkerForScope = async () => { starts++; return worker; };
+  let firstFinished = false;
+  const first = f.rules.isolateTab(f.session, 11).then(() => { firstFinished = true; });
+  const second = f.rules.isolateTab(f.session, 12);
+  await flush();
+  assert.equal(firstFinished, false);
+  assert.equal(starts, 1);
+  assert.equal(f.session.extensions.getAllExtensions().length, 1);
+  assert.deepEqual(sent.map(([channel, id]) => [channel, id]), [
+    ["iris-browser-tab-zoom", 11], ["iris-browser-tab-zoom", 12],
+  ]);
+
+  // 두 번째 요청이 먼저 끝나는 경우의 응답 처리
+  const [, , secondRequest] = sent[1];
+  ipc.emit(`iris-browser-tab-zoom-reply-${secondRequest}`, {}, null);
+  await second;
+  assert.equal(firstFinished, false);
+  const [, , firstRequest] = sent[0];
+  ipc.emit(`iris-browser-tab-zoom-reply-${firstRequest}`, {}, null);
+  await first;
+  assert.equal(firstFinished, true);
+});
+
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), "iris-auth-rules-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

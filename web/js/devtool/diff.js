@@ -148,7 +148,7 @@ export function renderDiffView(t, ready) {
   const hasHunk = !!t.patch && /^@@ /m.test(t.patch);
   // 파일 머리 줄은 접어 두고 index 는 머리글에 적는다. hunk 가 없는 patch(바이너리 등)는 머리 줄이 내용 전부라 접지 않는다.
   const meta = hasHunk
-    ? `<button class="dv-meta" type="button" aria-pressed="${t.showMeta ? "true" : "false"}" title="${t.showMeta ? "파일 머리 줄 접기" : "파일 머리 줄 보기"}">${idx ? "index " + escapeHtml(idx[1]) : "머리 줄"}</button>`
+    ? `<button class="dv-meta" type="button" aria-pressed="${t.showMeta ? "true" : "false"}" title="${t.showMeta ? "파일 헤더 접기" : "파일 헤더 보기"}">${idx ? "index " + escapeHtml(idx[1]) : "헤더"}</button>`
     : "";
   const bar = `<div class="dv-bar"><span class="dv-tag">${escapeHtml(tag)}</span>`
     + `<span class="dv-crumb" title="${escapeHtml(t.root ? (isHostWindows() ? joinPath(t.root, rel) : t.root + "/" + rel) : t.label)}">${crumb}</span>` + meta + `</div>`;
@@ -167,7 +167,7 @@ export function renderDiffView(t, ready) {
     t.showMeta = !t.showMeta;
     const pre = dv.querySelector(".dv-body"); if (pre) pre.classList.toggle("fold-meta", !t.showMeta);
     btn.setAttribute("aria-pressed", t.showMeta ? "true" : "false");
-    btn.title = t.showMeta ? "파일 머리 줄 접기" : "파일 머리 줄 보기";
+    btn.title = t.showMeta ? "파일 헤더 접기" : "파일 헤더 보기";
   };
   if (t.patch.trim()) highlightDiff(dv.querySelector(".dv-body"), t);
   const pre = dv.querySelector(".dv-body");

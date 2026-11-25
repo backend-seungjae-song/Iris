@@ -26,6 +26,7 @@ import { initMarkdown, markdownWebLink, mdToHtml } from "./core/markdown.js";
 import { cycleAgent, initKeynav } from "./core/keynav.js";
 import { initScreenSwitch } from "./core/screen-switch.js";
 import { initMotion } from "./core/motion.js";
+import { installFramePress } from "./core/frame-press.js";
 import { pushNotice, updateNotice, expireNotice, removeNotice, hasNotice, focusNotice, anchorNotices } from "./core/notice-center.js";
 import { showActionNotice } from "./core/action-notice.js";
 
@@ -40,7 +41,7 @@ import {
   closeProfileMenu, getProfileChromeSource, getProfiles, getSpaceDefaults, initProfiles, openProfileMenu,
   profileById, profileIdForStored, profileOfTab,
 } from "./browser/profiles.js";
-import { boundSpace, bsMutate, getBrowserState, initBrowserState, isBrowserStateLoaded } from "./browser/state.js";
+import { boundSpace, bsMutate, getBrowserState, initBrowserState, isBrowserStateLoaded, resetBrowserStateLoaded } from "./browser/state.js";
 import { linkRole } from "./browser/link-role.js";
 import { linkRuleForPageTab, matchLinkRule } from "./browser/link-rules.js";
 import {
@@ -73,6 +74,7 @@ import {
   agentByPane, agentKey, agentsOfSpace, getLastAgents, getSpaces, getTabsForSpace, nameOf,
   replaceHerdrState,
 } from "./herdr/state.js";
+import { patchHtml } from "./core/patch-html.js";
 import { initAgents, renderAgents, revealAgentRow, setChangedInfo } from "./herdr/agents.js";
 import { herdrShowsOther, initHerdrSync, markHerdrUserSelect, scheduleHerdrSync } from "./herdr/sync.js";
 import { initTabClose, removeTabsNow, closeTabs, retargetFileTabs, isTabDirty } from "./center/tab-close.js";
@@ -107,6 +109,7 @@ window.addEventListener("error", (e) => {
 });
 applyHostUi();
 initMotion();   // 다른 초기화보다 먼저: 켜져 있던 전환·애니메이션이 첫 프레임부터 멈춰 있어야 한다
+installFramePress();
 const $ = (s) => document.querySelector(s);
 const esc = (s) => (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // 파일 계열 탭인지 판정한다. 순수 함수이고, init 인자로 즉시 평가되므로 위쪽에 둔다.
@@ -165,6 +168,8 @@ let lastAgentBySpace = {};       // spaceId → 마지막으로 머문 에이전
 let lastTabBySpace = {};
 
 function wsSend(o) {
+  if (o?.type === "pty.input" && callHook("agentchat.ownsInput")) return false;
+  if (["focus", "tab-focus", "workspace-focus", "tab.create"].includes(o?.type) && callHook("agentchat.navigate", o)) return;
   // 오래된 호출 모양도 fs.write만큼은 correlation 통로에 합류시킨다. sendTabIo 자체는 socket.send를
   // 직접 써 재귀하지 않으며, 반환 Promise는 이후 저장/닫기 흐름에서 그대로 소비할 수 있다.
   if (o && o.type === "fs.write" && !o.requestId) {
@@ -337,8 +342,7 @@ function showNotice({ id, title, body, warn, action, answer, hot, choices, wait,
     irreversible, approveLabel, denyLabel, expired, dismissOnAnswer,
     deadline: wait ? Date.now() + wait * 1000 : null,
     onGo: answer ? () => answer("갔음") : null,
-    onAnswer: answer ? (choice) => answer(approve || choices?.length ? choice
-      : choice === "다 했어요" ? "다 했음" : choice === "못 하겠어요" ? "못 했음" : choice) : null });
+    onAnswer: answer ? (choice) => answer(choice) : null });
 }
 // 해당 탭으로 이동시킨다. 알림만 주고 찾아가게 하면 알림의 역할을 하지 못한다.
 // 알림의 "그 탭으로" 동작. 순서가 중요하다. 그 탭이 있는 스페이스로 먼저 옮기고, 그 스페이스의
@@ -469,7 +473,7 @@ function selectSession(target, fromSpace, via) {
   tSub.innerHTML = a ? `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>` : "";
   paintStateDot(tDot, a);
   initXterm();
-  // 임베드된 herdr(같은 세션)를 이 에이전트 pane으로 이동 → 터미널 화면이 그 에이전트로 전환.
+  // 대화 보기는 선택한 pane에 직접 전송하고 터미널 보기만 herdr 포커스를 이동
   wsSend({ type: "focus", target, origin: via || "unknown" });
   if (window.innerWidth > 820) setTimeout(() => { fitTerminal(); focusSessionInput(); }, 0);
   // herdr식 연동: 에이전트를 고르면 그 에이전트의 Space도 함께 포커싱(하이라이트+스크롤).
@@ -480,6 +484,8 @@ function selectSession(target, fromSpace, via) {
   renderAgents();
   revealAgentRow(target);   // 클릭으로 고른 것도 앞뒤가 보이게 한다(목록 끝에 붙지 않도록)
   callHook("agentchat.sync"); // 채팅 보기가 켜져 있으면 새 pane 의 대화로 바꾼다
+  if (a?.workspaceId && a.tabId) lastTabBySpace[a.workspaceId] = a.tabId;
+  renderHerdrTabs();
   // 좁은 폭에서 파일·브라우저를 열면 가운데가 터미널을 덮는다(mobile-show). 에이전트를 고르는 것이
   // 터미널로 돌아가는 길이라 여기서 내린다.
   if (window.innerWidth <= 820) { $("#center").classList.remove("mobile-show"); $("#right").scrollIntoView(); $("#sidebar").classList.remove("mobile-open"); }
@@ -765,7 +771,7 @@ initProfiles({
 });
 initWebviewFactory({
   wsSend, BROWSER_MODE, BOUND_SPACE, bNote, urlInput, wvStack, isNewTab, showToast, blog,
-  acHost: window.acHost,
+  acHost: window.acHost, zoomBadge: $("#wv-zoom"),
 });
 $("#wv-profile").addEventListener("click", (e) => { e.stopPropagation(); if ($("#profile-menu")) closeProfileMenu(); else openProfileMenu(); });
 // 주소창 입력·제안 목록 연결은 browser/bookmarks.js 가 소유한다. 제안 상태가 그 모듈에 있다.
@@ -912,9 +918,9 @@ initKeymapPage({
   })), {
     id: "login-convenience",
     name: "로그인 편의 기능",
-    desc: "비밀번호 자동완성 · Chrome에서 가져오기 · 이 브라우저에서 새로 로그인한 것 저장. 끄면 셋이 모두 멈추고, 금고에 이미 있는 것도 꺼내 쓰지 않습니다(지우기는 그대로 됩니다).",
+    desc: "비밀번호 자동완성 · Chrome에서 가져오기 · 이 브라우저의 새 로그인 저장. 끄면 셋 모두 중지되고, 저장된 로그인도 사용하지 않습니다(삭제는 가능합니다).",
     on: !!loginConv.on,
-    warn: loginConv.on ? "" : "켜면 이 기기 Keychain으로 잠근 금고에 비밀번호가 모입니다. AI가 브라우저를 조작하는 동안에는 전달되지 않습니다.",
+    warn: loginConv.on ? "" : "켜면 비밀번호를 이 기기 Keychain으로 암호화해 저장합니다. AI가 브라우저를 조작하는 동안에는 전달되지 않습니다.",
   }],
   clearSiteRecords: (kind) => syncSitePermissions({ clear: kind }),
   setSecurityToggle: async (id) => {
@@ -957,7 +963,7 @@ document.addEventListener("visibilitychange", () => {
   let gone = 0; for (const k of awaySnap.keys()) if (!cur.has(k)) gone++;
   awaySnap = null; setChangedInfo(info);
   const bar = $("#changebar");
-  if (info.size || gone) { $("#changebar-text").textContent = `돌아온 사이: 변경 ${info.size}${gone ? `, 종료 ${gone}` : ""}`; bar.classList.add("show"); } else bar.classList.remove("show");
+  if (info.size || gone) { $("#changebar-text").textContent = `부재 중: 변경 ${info.size}${gone ? `, 종료 ${gone}` : ""}`; bar.classList.add("show"); } else bar.classList.remove("show");
   renderAgents();
 });
 $("#changebar-clear").addEventListener("click", () => { setChangedInfo(new Map()); $("#changebar").classList.remove("show"); renderAgents(); });
@@ -971,21 +977,24 @@ function handleWsOpen() {
   $("#conn").classList.add("on"); if (getXterm()) startPty();
   // 프로필 목록(이름만)을 알린다. AI가 "다른 계정으로 열어라"를 하려면 어떤 로그인 칸이 있는지
   // 알아야 하는데, 목록은 창의 localStorage에만 있어 서버·AI 쪽에서는 보이지 않았다. 비밀은 안 나간다.
-  if (!MEMO_MODE) try { setTimeout(() => wsSend({ type: "browser-profiles", profiles: getProfiles().map((p) => ({ id: p.id, name: p.name })) }), 200); } catch (e) {}
+  if (!MEMO_MODE) try { wsSend({ type: "browser-profiles", profiles: getProfiles().map((p) => ({ id: p.id, name: p.name })) }); } catch (e) {}
   // 이 연결이 앱 UI임을 먼저 증명한다. 지목(권한 확대)은 이 증명이 있는 연결만 보낼 수 있다.
   // 루프백이라는 것만으로는 앱과 아무 로컬 프로세스가 구별되지 않기 때문이다.
   try { reportNoticeFocus(); } catch (e) {}
-  if (!MEMO_MODE) setTimeout(reportAllBrowserTabs, 300);
+  if (!MEMO_MODE) reportAllBrowserTabs();
   // 파일/docx/sheet 탭도 브라우저 탭과 같은 이유로 재연결마다 다시 요청해야 한다. 연결이
   // 끊겼거나 막 뜬 그 틈에 연 파일은 요청 자체가 안 나가 "불러오는 중…"에 영원히 갇힌다.
-  if (!MEMO_MODE) setTimeout(retryStuckFileTabs, 300);
+  if (!MEMO_MODE) retryStuckFileTabs();
   // fs.watch 등록도 연결 객체에 묶여 서버 쪽에 있다. 재연결이면 중복전송 키를 비우고 다시 보낸다.
-  if (!MEMO_MODE) { setLastWatchKey(""); setTimeout(syncWatchDirs, 300); }
+  if (!MEMO_MODE) { setLastWatchKey(""); syncWatchDirs(); }
 }
 
 function reportAllBrowserTabs() { for (const tid of getWebviewIds()) reportTabWc(getWebview(tid), tid); reportActiveBrowserWc(); }
 
 function handleWsClose(generation) {
+  resetBrowserStateLoaded();
+  for (const id of getWebviewIds()) clearTabDialog(id);
+  renderTabDialog();
   tabRejectGenerationIo(generation);
   callHook("memo.disconnect");
   $("#conn").classList.remove("on"); $("#meta").textContent = "재연결 중…"; setPtyStarted(false);
@@ -1029,14 +1038,18 @@ function ignoreWsMessage() {}
 function handleCapsMessage(m) {
   isLocal = !!m.local;
   if (typeof m.home === "string" && m.home) hostHome = m.home; // `~/…` 경로 해석용(서버가 아는 홈)
-  renderAgents();
+  if (!BROWSER_MODE) renderAgents();
 }
 
 function handleStateMessage(m) {
       // focusStale: 서버가 이 상태를 만드는 동안 포커스 요청이 진행 중이었다. focused 값이 옛것일 수 있어
       // 선택·마지막 탭 기억을 이 방송으로 바꾸지 않는다. 다음 방송이 곧 신선한 포커스를 가져온다.
-      replaceHerdrState(m); if (m.tabs && !m.focusStale) for (const w of Object.keys(m.tabs)) { const f = (m.tabs[w] || []).find((x) => x.focused); if (f) lastTabBySpace[w] = f.tabId; } if (typeof m.local === "boolean") isLocal = m.local; renderHerdrTabs();
-      renderSpaces(); renderAgents();
+      replaceHerdrState(m);
+      if (typeof m.local === "boolean") isLocal = m.local;
+      if (BROWSER_MODE) { restoreFileTabs(); return; }
+      if (m.tabs && !m.focusStale) for (const w of Object.keys(m.tabs)) { const f = (m.tabs[w] || []).find((x) => x.focused); if (f && !(w === selectedSpaceId && callHook("agentchat.selectedTab"))) lastTabBySpace[w] = f.tabId; }
+      renderHerdrTabs();
+      renderSpaces();
       callHook("git.syncOnly"); // 스페이스·pane이 열리고 닫히면 소스 제어의 레포 목록도 따라간다(새 폴더만 물어본다)
       // 방금 만든 스페이스가 이 갱신에 들어왔으면 그때 들어간다(생성 응답이 목록보다 먼저 온다).
       if (getPendingSpaceFocus() && orderedSpaces().some((s) => s.id === getPendingSpaceFocus())) {
@@ -1046,16 +1059,22 @@ function handleStateMessage(m) {
       // 역방향 동기화: herdr에서 현재 포커스된 pane으로 우리 선택을 맞춘다(loop-safe, debounce).
       const agents = getLastAgents();
       const foc = agents.find((a) => a.focused);
-      if (foc && !BROWSER_MODE) { if (!m.focusStale) scheduleHerdrSync(foc.paneId); } // 분리창은 콘솔 포커스 동기화 안 함
+      if (foc) { if (!m.focusStale) scheduleHerdrSync(foc.paneId); }
       // 포커스 pane 이 에이전트가 아니면 위 동기화가 스페이스를 못 채움. 선택이 없거나 herdr 에서 닫힌 스페이스면
       // 탐색기·실행·메모가 빈 채로 또는 닫힌 스페이스에 남으므로 herdr 포커스 스페이스로 옮김
       else if (!BROWSER_MODE && !getSpaces().some((s) => s.id === selectedSpaceId)) { const w = getSpaces().find((x) => x.focused); if (w) switchToSpaceOf({ workspaceId: w.id }); }
       // 에이전트 아닌 pane(셸 등)에 포커스 → 대화 화면을 닫고 터미널을 보임
-      if (!foc && !BROWSER_MODE && !m.focusStale && getSpaces().some((s) => s.focused)) scheduleHerdrSync(null);
-      if (curTarget) { const a = agentByPane(curTarget); if (a) { tName.textContent = nameOf(a); tSub.innerHTML = `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>`; paintStateDot(tDot, a); } }
+      if (!foc && !m.focusStale && getSpaces().some((s) => s.focused)) scheduleHerdrSync(null);
+      const a = agentByPane(curTarget);
+      if (a) {
+        const name = nameOf(a);
+        if (tName.textContent !== name) tName.textContent = name;
+        patchHtml(tSub, `${agentMark(a.agent)}<span>${escHtml(stateLabel(a))}</span>`);
+        paintStateDot(tDot, a);
+      }
       callHook("agentchat.sync"); // 에이전트 상태(답 기다림)와 pane 목록 변화를 채팅 보기에 알린다
       const running = agents.filter((a) => a.status === "working").length;
-      $("#meta").innerHTML = `<span class="meta-count">${agents.length} · ${running}<span class="meta-run">▶</span></span>`;
+      patchHtml($("#meta"), `<span class="meta-count">${agents.length} · ${running}<span class="meta-run">▶</span></span>`);
       $("#meta").title = "";
 }
 
@@ -1071,7 +1090,7 @@ function handleFsMessage(m) {
 }
 
 function handleFsOpMessage(m) {
-      if (m.error) { showToast("파일 조작 실패", { level: "err", detail: String(m.error) }); }
+      if (m.error) { showToast("파일 작업 실패", { level: "err", detail: String(m.error) }); }
       else {
         if (m.from && m.newPath && m.op !== "copy") retargetFileTabs(m.from, m.newPath); // rename/move: 열린 탭 경로 갱신. 복사는 원본 탭 유지
         if (m.parent && (m.op === "create-file" || m.op === "create-dir")) {
@@ -1095,7 +1114,7 @@ function handleBrowserDialogMessage(m) {
         renderBmTabs(); renderTabDialog();
         // AI 가 조작 중인 탭의 질문은 AI 가 명령 결과로 받아 답함. 사용자 알림을 띄우면 하던 일이 막힘
         if (m.open && !m.ai) pushNotice({ id: `dialog-${m.wc}`, kind: "waiting",
-          title: "한 탭이 답을 기다립니다", body: String(m.message || m.kind || ""),
+          title: "응답 대기 중인 탭", body: String(m.message || m.kind || ""),
           go: { label: "그 탭으로", run: () => gotoTabById(hit) } });
         else removeNotice(`dialog-${m.wc}`);
       }
@@ -1142,7 +1161,7 @@ function handleFileMessage(m, responseIoEntry) {
         const binaryTarget = responseIoEntry && responseIoEntry.tabRef;
         try { window.acHost && acHost.revealInFinder && acHost.revealInFinder(m.path); } catch (e) {}
         if (binaryTarget) removeTabsNow([{ space: responseIoEntry.owner.space, tabId: responseIoEntry.tabId, tabRef: binaryTarget }]);
-        showToast(`뷰어로 열 수 없는 형식입니다. ${isHostWindows() ? "탐색기" : "Finder"}에서 보여줍니다`, { level: "warn" });
+        showToast(`뷰어로 열 수 없는 형식입니다. ${isHostWindows() ? "탐색기" : "Finder"}에서 표시합니다`, { level: "warn" });
         return;
       }
       // 편집 중(draft 존재)인 탭은 내용을 덮어쓰지 않는다(사용자 입력 보존). 최초 로드만 반영.
@@ -1195,7 +1214,7 @@ function handlePtyExitMessage(m) {
   ptyRetry.startedAt = 0;
   const note = m && m.reason === "herdr-missing"
     ? "[herdr 를 찾지 못했습니다. 저장소에서 ./setup 을 실행하거나 brew install herdr 로 설치하면 자동으로 연결합니다]"
-    : "[herdr 세션 detach됨, 재연결 시도…]";
+    : "[herdr 세션 연결 끊김, 재연결 중…]";
   if (getXterm() && note !== ptyRetry.note) getXterm().write(`\r\n\x1b[2m${note}\x1b[0m\r\n`);
   ptyRetry.note = note;
   const delay = ptyRetry.delay;
@@ -1208,7 +1227,7 @@ function handleControlErrorMessage(m) {
 }
 
 function handleSpaceErrorMessage(m) {
-      showToast("스페이스 조작 실패", { level: "err", detail: String(m.message || "") });
+      showToast("스페이스 작업 실패", { level: "err", detail: String(m.message || "") });
 }
 
 function handleSpaceCreatedMessage(m) {
@@ -1328,7 +1347,7 @@ function handleAiAskMessage(m) {
         body: m.text || (isApp ? "이 앱에서 사람이 직접 해야 하는 단계입니다."
                                : "이 탭에서 사람이 직접 해야 하는 단계입니다."),
         action: goTo, choices: m.choices, answer: reply, dismissOnAnswer: false });
-      if (fresh) window.acHost?.notify?.({ id: m.id, title: m.title || "Iris · 사람 차례", body: m.text || "답을 기다립니다", level: "ask" });
+      if (fresh) window.acHost?.notify?.({ id: m.id, title: m.title || "Iris · 사람이 할 일", body: m.text || "답을 기다립니다", level: "ask" });
 }
 
 function handleAiAskClosedMessage(m) {
@@ -1454,7 +1473,10 @@ function capabilityBootArgs(items) {
       // 그 판정은 reconcileBrowserMode 안에 있다. 띠만 그리면 칩은 사라지고 화면은 그대로 그
       // 페이지다.
       acHost: window.acHost, boundTab: BOUND_TAB, detachedWin: APP_PARAMS.get("win") || null,
-      redrawBrowser: () => { if (BROWSER_MODE) reconcileBrowserMode(); else renderBmTabs(); },
+      redrawBrowser: () => {
+        if (BROWSER_MODE) { reconcileBrowserMode(); reconcileDocTabs(); }
+        else renderBmTabs();
+      },
       // 뷰어 기능이 쓰는 앱 셸의 DOM·알림·판정. 기능이 직접 import 할 수 있는 것은 넘기지 않는다.
       fileview, filePathBarHtml, isFileLikeKind, showNotice,
       // 그 영역은 뷰어가 만드는 것이라 앱 셸이 미리 참조하지 않는다. 최상위에서 참조하면
@@ -1467,7 +1489,7 @@ function capabilityBootArgs(items) {
       spaceRootFor,
       getSelectedSpaceId: () => selectedSpaceId,
       getSpaces,
-      getLastAgents,
+      getLastAgents, getTabsForSpace,
       getCurTarget: terminalCurTarget,
       herdrShowsOther,
       getProfileChromeSource, autofillBlocked,
@@ -1494,9 +1516,11 @@ function capabilityBootArgs(items) {
       // 같은 메시지를 두 기능이 등록하면 나중 것이 덮어쓴다. 먼저 등록한 기능은 그 메시지를
       // 영영 못 받고 아무 말도 없다. 먼저 것을 지키고 나중 것을 거절하며 소리를 낸다.
       if (WS_DISPATCH[type]) { console.error("[capability] 이미 임자가 있는 메시지:", type, "←", id); return false; }
-      WS_DISPATCH[type] = dispatchWs(fn);
+      const handler = dispatchWs(fn);
+      WS_DISPATCH[type] = handler;
+      return () => { if (WS_DISPATCH[type] === handler) delete WS_DISPATCH[type]; };
     },
-    onError: (id, e) => { console.error("[capability]", id, e); showToast(`${id} 기능을 싣지 못했습니다`, { level: "err", detail: String(e?.message || e) }); },
+    onError: (id, e) => { console.error("[capability]", id, e); showToast(`${id} 기능을 불러오지 못했습니다`, { level: "err", detail: String(e?.message || e) }); },
   };
 }
 
@@ -1527,6 +1551,7 @@ async function enableCapabilityNow(id) {
 
 initWs({
   url: `ws://${location.host}`,
+  getAppConnectionToken: () => window.acHost?.appConnectionToken?.(),
   onOpen: handleWsOpen,
   onClose: handleWsClose,
   onBinary: handleWsBinary,

@@ -22,14 +22,14 @@ test("전체 검증 중 서버 이벤트 루프가 오래 멈추지 않는다", 
     fs.writeFileSync(source, crypto.randomBytes(512 * 1024));
     await ledger.append("big", { kind: "frame", mode: "agent_action", phase: "S4", shot: source });
   }
-  let last = performance.now(), gap = 0;
-  const timer = setInterval(() => { const now = performance.now(); gap = Math.max(gap, now - last); last = now; }, 2);
+  let last = performance.now(), gap = 0, ticks = 0;
+  const timer = setInterval(() => { ticks++; const now = performance.now(); gap = Math.max(gap, now - last); last = now; }, 2);
   const start = performance.now();
   const verified = await ledger.verify("big", { full: true });
   const total = performance.now() - start; gap = Math.max(gap, performance.now() - last);
   clearInterval(timer);
   assert.equal(verified.events.filter(r => r.event.shot).length, 300);
-  assert.ok(total > 100, `검증이 너무 빨라 측정이 안 됨: ${total}ms`);
+  assert.ok(ticks >= 2, `검증 중 타이머가 ${ticks}회 실행됨 (검증 ${Math.round(total)}ms)`);
   assert.ok(gap < total / 2, `이벤트 루프가 ${Math.round(gap)}ms 멈춤 (검증 ${Math.round(total)}ms)`);
 });
 

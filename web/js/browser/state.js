@@ -59,6 +59,7 @@ export function replaceBrowserState(state) {
   return browserState;
 }
 
+export function resetBrowserStateLoaded() { loaded = false; }
 export function isBrowserStateLoaded() { return loaded; }
 
 export function ensureBrowserStateCollections() {

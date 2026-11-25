@@ -91,12 +91,12 @@ test("옛 처리기의 응답 문구가 worker 처리기에 그대로 있다(원
   const relay = read("../native/electron/relay/index.cjs");
   for (const text of ["올릴 파일 경로가 없습니다.", "없거나 절대경로가 아닌 파일: ", "이제 파일 선택을 여는 버튼을 누르세요. 선택창 대신 이 파일이 들어갑니다.",
     "사람이 처리", "사람이 저장 위치를 고릅니다", "절대경로가 필요합니다: ", "누를 버튼 이름이 필요합니다. 먼저 nativewin으로 확인하세요.",
-    "알 수 없는 응답 \"${bad}\" — ok · cancel · off 만 가능", "Math.min(120000, Math.max(1000, Number(args.timeout) || 60000))".replace("args.", "bodyArgs.")]) {
+    "알 수 없는 응답 \"${bad}\". ok · cancel · off 만 가능", "Math.min(120000, Math.max(1000, Number(args.timeout) || 60000))".replace("args.", "bodyArgs.")]) {
     assert.equal(worker.includes(text), true, `worker: ${text}`);
   }
   for (const text of ["올릴 파일 경로가 없습니다.", "없거나 절대경로가 아닌 파일: ", "이제 파일 선택을 여는 버튼을 누르세요. 선택창 대신 이 파일이 들어갑니다.",
     "사람이 처리", "사람이 저장 위치를 고릅니다", "절대경로가 필요합니다: ", "누를 버튼 이름이 필요합니다. 먼저 nativewin으로 확인하세요.",
-    "알 수 없는 응답 \"${bad}\" — ok · cancel · off 만 가능"]) {
+    "알 수 없는 응답 \"${bad}\". ok · cancel · off 만 가능"]) {
     assert.equal(legacy.includes(text), true, `legacy: ${text}`);
   }
   assert.equal(legacy.includes("폴더를 만들 수 없습니다: "), true);
@@ -117,7 +117,7 @@ test("처리기가 쓰는 옛 원문 순서가 cdp-control.cjs 에 있다(원본
   // cdpExecRaw: 로그인 호스트 판정 → CDP 없는 실행 / 붙임 → AI 표식 → 실행 → 로그인 결과 처리
   const start = CONTROL_SOURCE.indexOf("async function cdpExecRaw(");
   inOrder(start, ["const noCdp = attachPolicy.blocked(wc.id)", "detachAiSession(wc);", "if (!CDP_FREE_CMDS.has(cmd))",
-    "const aiTicket = enterAiCommand(wc.id, cmd);", "noteLoginResult(wc, cmd, await runWithoutCdp(wc, cmd, args))",
+    "const aiTicket = await enterAiCommand(wc.id, cmd);", "noteLoginResult(wc, cmd, await runWithoutCdp(wc, cmd, args))",
     "attachPolicy.touch(wc.id);", "const send = ensureAttached(wc);", "noteLoginResult(wc, cmd, await cdpExecInner(send, wc, cmd, args, webContentsMod))"]);
   // cdpExecInner: 숨은 탭 준비 → 붙잡기 → 실행 → 트랜지션 대기 → 해제
   const inner = CONTROL_SOURCE.indexOf("async function cdpExecInner(");

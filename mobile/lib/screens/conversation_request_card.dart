@@ -34,7 +34,7 @@ class ConversationRequestCard extends StatelessWidget {
         false,
       ),
       BrowserUserRequestBody() => (
-        '사람 차례',
+        '사람이 할 일',
         body.title.isEmpty ? body.text : body.title,
         false,
       ),

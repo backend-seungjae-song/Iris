@@ -68,7 +68,7 @@ export function deliverAgentPick(a) {
   if (!getCurTarget()) { bNote.textContent = "먼저 왼쪽에서 에이전트(세션)를 선택하세요."; return; }
   const sp = orderedSpaces().find((x) => x && x.id === a.workspaceId);
   const name = a.tabLabel || (a.cwd ? String(a.cwd).split("/").pop() : a.agent);
-  const block = noticeBlock(`세션 지목 · ${name}`, [
+  const block = noticeBlock(`세션 선택 · ${name}`, [
     `주소: herdr pane ${a.paneId}`,
     `종류: ${a.agent || "?"}`,
     `상태: ${a.status || "?"}`,
@@ -80,7 +80,7 @@ export function deliverAgentPick(a) {
     // 빈 입력창의 흐린 안내 문구를 쓰다 만 글로 읽지 않게, 입력창을 판정한 뒤 보내는 명령을 준다.
     `보내기: iris-pane-send ${a.paneId} "<명령>"`,
   ]);
-  if (callHook("agentchat.paste", block)) { bNote.textContent = "세션을 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요."; return; }
+  if (callHook("agentchat.paste", block)) { bNote.textContent = "세션을 채팅 입력창에 넣었습니다. 이어서 지시를 입력하고 보내세요."; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = "세션 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
@@ -507,11 +507,11 @@ function wirePickPointer() {
 // 어느 파일 탭인지 설명을 터미널로 보낸다(cell-pick과 같은 패턴).
 function deliverDocTabPick(t) {
   if (!getCurTarget()) { bNote.textContent = "먼저 왼쪽에서 에이전트(세션)를 선택하세요."; return; }
-  const block = noticeBlock(`문서 탭 지목 · ${t.label || (t.path || "").split("/").pop()}`, [
+  const block = noticeBlock(`문서 탭 선택 · ${t.label || (t.path || "").split("/").pop()}`, [
     `종류: ${(fileKindById(t.kind) || {}).docLabel || "문서"}`,
     `경로: ${t.path}`,
   ]);
-  if (callHook("agentchat.paste", block)) { bNote.textContent = "문서 탭을 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요."; return; }
+  if (callHook("agentchat.paste", block)) { bNote.textContent = "문서 탭을 채팅 입력창에 넣었습니다. 이어서 지시를 입력하고 보내세요."; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = `문서 탭 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.`;
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
@@ -520,7 +520,7 @@ function deliverDocTabPick(t) {
 function deliverTabPick(tab) {
   if (BROWSER_MODE) {
     wsSend({ type: "pickrec.relay", kind: "tab", payload: tab });
-    bNote.textContent = "탭 지목됨 → 콘솔 세션에 고정.";
+    bNote.textContent = "탭 선택됨 → 콘솔 세션에 고정.";
     return;
   }
   deliverTabPickLocal(tab);
@@ -528,7 +528,7 @@ function deliverTabPick(tab) {
 // 북마크 지목. 탭·그룹과 달리 서버가 매길 이름이 없어(주소가 곧 이름) 문구를 여기서 만든다.
 // 분리창엔 터미널이 없으므로 콘솔로 넘긴다.
 function deliverSitePick(bm) {
-  if (BROWSER_MODE) { wsSend({ type: "pickrec.relay", kind: "site", payload: bm }); bNote.textContent = `사이트 지목됨 → 콘솔 세션에 전달.`; return; }
+  if (BROWSER_MODE) { wsSend({ type: "pickrec.relay", kind: "site", payload: bm }); bNote.textContent = `사이트 선택됨 → 콘솔 세션에 전달.`; return; }
   deliverSitePickLocal(bm);
 }
 export function deliverSitePickLocal(bm) {
@@ -536,18 +536,18 @@ export function deliverSitePickLocal(bm) {
   // 지목은 "지금 가라"가 아니라 "이 주소를 쓰라"다. 여러 개를 찍어 건네는 것이 보통이고,
   // 언제 어떻게 쓸지는 받은 쪽이 정한다.
   const block = [
-    `[사이트 지목 · 이 주소를 기억하고 활용하세요]`,
+    `[사이트 선택 · 이 주소를 기억하고 활용하세요]`,
     `${bm.title ? bm.title + "  " : ""}${bm.url}`,
   ].join("\n");
-  if (callHook("agentchat.paste", block)) { bNote.textContent = `사이트 "${bm.title || bm.url}" 지목됨.`; return; }
+  if (callHook("agentchat.paste", block)) { bNote.textContent = `사이트 "${bm.title || bm.url}" 선택됨.`; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);
-  bNote.textContent = `사이트 "${bm.title || bm.url}" 지목됨.`;
+  bNote.textContent = `사이트 "${bm.title || bm.url}" 선택됨.`;
 }
 function deliverGroupPick(g) {
   if (BROWSER_MODE) {
     wsSend({ type: "pickrec.relay", kind: "group", payload: g });
-    bNote.textContent = "그룹 지목됨 → 콘솔 세션에 전달.";
+    bNote.textContent = "그룹 선택됨 → 콘솔 세션에 전달.";
     return;
   }
   deliverGroupPickLocal(g);
@@ -558,14 +558,14 @@ export function deliverGroupPickLocal(g) {
   if (!getCurTarget()) { bNote.textContent = "먼저 왼쪽에서 에이전트(세션)를 선택하세요."; return; }
   if (!g.space) { bNote.textContent = "이 그룹의 스페이스를 알 수 없습니다."; return; }
   wsSend({ type: "browser-group-grant", pane: getCurTarget(), space: g.space, group: g.group });
-  bNote.textContent = `그룹 "${g.label}" 지목 등록 준비 중…`;
+  bNote.textContent = `그룹 "${g.label}" 선택 등록 준비 중…`;
 }
 // 지목만 보내고, 붙여넣을 문구는 서버가 대기 구분자를 돌려준 뒤에 만든다(target-pending 수신부).
 // 창이 아는 wc 숫자(@4)는 부를 수 있는 이름이 아니고 숫자라 혼동된다.
 export function deliverTabPickLocal(tab) {
   if (!getCurTarget()) { bNote.textContent = "먼저 왼쪽에서 에이전트(세션)를 선택하세요."; return; }
   wsSend({ type: "browser-target-set", pane: getCurTarget(), wc: tab.wc, tabId: tab.id || tab.tabId || null });
-  bNote.textContent = `탭 "${tab.label}" 지목 등록 준비 중…`;
+  bNote.textContent = `탭 "${tab.label}" 선택 등록 준비 중…`;
 }
 function deliverCellPick(pick) {
   deliverCellPickLocal(pick);
@@ -577,7 +577,7 @@ function deliverCellPickLocal(pick) {
     `값: ${JSON.stringify(pick.text)}`,
     `경로: ${pick.path}`,
   ]);
-  if (callHook("agentchat.paste", block)) { bNote.textContent = `표 셀 ${pick.addr}을 채팅 입력창에 붙였습니다.`; return; }
+  if (callHook("agentchat.paste", block)) { bNote.textContent = `표 셀 ${pick.addr}을 채팅 입력창에 넣었습니다.`; return; }
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   bNote.textContent = `표 셀 ${pick.addr} 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.`;
   if (getXterm()) setTimeout(() => getXterm().focus(), 0);

@@ -375,15 +375,15 @@ function unverifiedOutsideLedger(run, hasLedger) {
   const un = (run && Array.isArray(run.unverified) ? run.unverified : [])
     .filter((x) => x && String(x.what || "").trim());
   if (!un.length) return null;
-  return `원장이 있는 회차는 못 밟은 것도 줄로 선다 — unverified ${un.length}건.\n`
+  return `원장이 있는 회차는 확인하지 못한 것도 줄로 기록한다. unverified ${un.length}건.\n`
     + un.slice(0, 8).map((x) => `  ${String(x.what).slice(0, 60)}`).join("\n")
     + (un.length > 8 ? `\n  … 외 ${un.length - 8}건` : "")
     + "\n\n글로 옆에 적으면 그 항목은 집계에도 목록 대조에도 안 들어가고, 다음 회차가\n"
-    + "이어받을 것도 없다. 사유만 적으면 무제한으로 통과하므로 그 자리가 가장 싼 길이 된다.\n\n"
-    + "각 항목마다 줄을 세우고 못 밟은 사유와 함께 닫는다.\n"
+    + "이어받을 것도 없다. 사유만 적으면 제한 없이 통과하므로 확인하지 않고 넘기는 방법이 된다.\n\n"
+    + "항목마다 줄을 선언하고 확인하지 못한 사유와 함께 닫는다.\n"
     + '  browser_row { action:"declare", row:{ id:"N-7", what:"…", given:"…", basis:"spec", paths:["정상"] } }\n'
     + '  browser_row { action:"close", row:"N-7", path:"정상", color:"gray", note:"…" }\n'
-    + "gray·blue는 장면 없이 닫힌다 — 사유가 그 자리에 남고 지면이 그것을 센다.";
+    + "gray·blue는 장면 없이 닫힌다. 사유가 그 줄에 남고 지면이 그 수를 센다.";
 }
 
 function coverGaps(agreed, steps) {
@@ -685,7 +685,7 @@ function picksBlock(o) {
       <b>${PICK_NUM[k] || k + 1}</b><span class="do">${esc(x.pick)}</span>
       <dl><div><dt>고르면</dt><dd>${esc(x.then)}</dd></div>
       ${x.cost ? `<div><dt>대신</dt><dd>${esc(x.cost)}</dd></div>` : ""}</dl></div>`).join("")}</div>
-    ${o.lean ? `<p class="lean"><b>밟은 사람 생각</b> ${esc(o.lean)}</p>` : ""}</div>`;
+    ${o.lean ? `<p class="lean"><b>확인한 사람 생각</b> ${esc(o.lean)}</p>` : ""}</div>`;
 }
 
 function noteCard(dir, nt) {
@@ -714,7 +714,7 @@ function noteCard(dir, nt) {
             <dl><div><dt>고르면</dt><dd>${esc(o.then)}</dd></div>
             ${o.cost ? `<div><dt>대신</dt><dd>${esc(o.cost)}</dd></div>` : ""}</dl></div>`).join("")}</div>`
         : `<p class="from">갈래 없음 — 간단한 결정</p>`}
-      ${nt.lean ? `<p class="lean"><b>밟은 사람 생각</b> ${esc(nt.lean)}</p>` : ""}</div>
+      ${nt.lean ? `<p class="lean"><b>확인한 사람 생각</b> ${esc(nt.lean)}</p>` : ""}</div>
   </section>`;
 }
 
@@ -789,7 +789,7 @@ function ledgerCard(dir, r, i) {
           ln.same ? ` · 안 변한 장면 ${ln.same}장` : ""}${
           shown.length !== kept.length ? ` · ${shown.length - kept.length}장은 사라짐` : ""} · 판정 ${ln.receipts.length}${
           lp.length > 1 ? ` · 주소 ${lp.length}가지` : ""}</span></h3>
-      ${stale ? `<p class="lane-warn">장면 ${stale}장이 장부 시각보다 뒤에 쓰인 파일<br>촬영 시점 불일치<br>증거 아님</p>` : ""}
+      ${stale ? `<p class="lane-warn">장면 ${stale}장이 기록 시각보다 뒤에 쓰인 파일<br>촬영 시점 불일치<br>증거 아님</p>` : ""}
       ${(ln.voids || []).length
         ? `<p class="lane-warn">무효로 돌린 판정 ${ln.voids.length}건<br>${
             ln.voids.map((v) => `${esc(v.receipt)}${v.expected ? ` · ${esc(String(v.expected))}` : ""}${
@@ -810,7 +810,7 @@ function ledgerCard(dir, r, i) {
       ${picksBlock(ln)}
       ${stage.html ? `<div class="proof">${stage.html}</div>`
         : `<p class="noproof">${stale ? "장면 파일 덮임. 남아 있지 않음"
-          : ln.color ? "장면 없음" : "밟지 않음"}</p>`}
+          : ln.color ? "장면 없음" : "확인하지 않음"}</p>`}
       ${rcs ? `<dl class="qalist">${rcs}</dl>` : ""}${
         (ln.aside || []).length ? `<p class="lane-aside">증거 아님으로 표시한 장면 ${
           ln.aside.length}장<br>${esc(ln.aside[0].why || "")}</p>` : ""}</section>`;
@@ -1017,8 +1017,8 @@ function buildReportHeld({ title, summary, steps, out, kind, runId, target, setu
   const resumeBlock = (!handoff && (res.from))
     ? `<section class="req sum resumed"><dl class="qalist">
        ${rk("이어받은 회차", String(res.from) + (res.at ? ` (${String(res.at).slice(0, 16).replace("T", " ")})` : ""))}
-       ${rk("이번에 다시 밟지 않은 단계", res.carried.length ? `${res.carried.length}개 — 그때 확인된 그대로다` : "없음")}
-       ${rk("이번에 밟은 단계", String((steps || []).length) + "개")}
+       ${rk("이번에 다시 실행하지 않은 단계", res.carried.length ? `${res.carried.length}개 — 그때 확인된 그대로다` : "없음")}
+       ${rk("이번에 실행한 단계", String((steps || []).length) + "개")}
        ${res.missing ? rk("이어받지 못함", res.missing) : ""}</dl></section>`
     : "";
   const runBlock = (!handoff && (R.intent || R.wiring || R.entity || R.scope || R.teardown || R.started))
@@ -1137,9 +1137,9 @@ function buildReportHeld({ title, summary, steps, out, kind, runId, target, setu
   const missShown = missKept.filter((m) => m.show).length;
   const missHeld = missKept.filter((m) => m.p && !m.show).length;
   const missingBlock = (!handoff && missing.length)
-    ? `<h2 class="sec">보고서에 안 실린 확인 ${missing.length}건</h2>
+    ? `<h2 class="sec">보고서에 포함되지 않은 확인 ${missing.length}건</h2>
        <p class="lede">본문에 인용되지 않은 판정<br>장면은 판정 시점 기준${
-         missHeld ? `<br>통과한 ${missHeld}건의 장면은 지면 무게 때문에 안 실림<br>회차 폴더(${esc(path.join(dir, "shots"))})에 miss 번호로 남아 있음.` : ""}</p>
+         missHeld ? `<br>통과한 ${missHeld}건의 장면은 지면 크기 때문에 넣지 않음<br>회차 폴더(${esc(path.join(dir, "shots"))})에 miss 번호로 남아 있음.` : ""}</p>
        <div class="misses">${missKept.map(({ r, p: mp, show }) => `<figure class="miss${r.pass ? "" : " bad"}">
          ${show ? `<img src="${dataUri(mp)}" alt="" loading="lazy">`
               : mp ? `<div class="gone">장면은 회차 폴더에 있음</div>`
@@ -1182,7 +1182,7 @@ function buildReportHeld({ title, summary, steps, out, kind, runId, target, setu
             } ${esc(it.id)}</dt><dd>${esc(it.text)}${
             it.was ? `<span class="said"> — 그때: ${esc(it.was)}</span>` : ""}${
             it.at ? `<span class="said"> — ${esc(it.at)}</span>` : ""}${
-            it.unused ? ` <span class="chip red">부르는 자리 없음</span>` : ""}${
+            it.unused ? ` <span class="chip red">호출부 없음</span>` : ""}${
             mine.length ? ` <span class="said">→ ${mine.map((r) => `<a href="#q${
               led.rows.indexOf(r) + 1}">${esc(r.id)}</a>`).join(" · ")}에서 봤다</span>`
               : ` <span class="mid">이번 회차가 안 봤다</span>`}${
@@ -1199,9 +1199,9 @@ function buildReportHeld({ title, summary, steps, out, kind, runId, target, setu
           : `<p class="verdict ok">${L.items.length}가지를 다 봄</p>`;
         return `<h2 class="sec">${esc(L.name)}</h2>
         <p class="lede">이번 회차가 따른 목록<br>${L.from
-          ? `항목을 손으로 적지 않고 <b>${esc(L.from.source)}</b>에서 <b>${esc(L.from.pick)}</b>로 떠 옴 — 코드에 있는 자리가 곧 목록${
-              L.from.usedIn ? `<br>부르는 자리는 <b>${esc(L.from.usedIn)}</b>에서 파일 ${L.from.scanned || 0}개를 훑어 셈${
-                L.from.capped ? ` · 상한 ${L.from.capped}개에 걸려 덜 훑은 결과` : ""}` : ""}`
+          ? `항목을 손으로 적지 않고 <b>${esc(L.from.source)}</b>에서 <b>${esc(L.from.pick)}</b>로 추출함. 코드에 있는 위치가 곧 목록${
+              L.from.usedIn ? `<br>호출부는 <b>${esc(L.from.usedIn)}</b>에서 파일 ${L.from.scanned || 0}개를 검색해 셈${
+                L.from.capped ? ` · 상한 ${L.from.capped}개까지만 검색한 결과` : ""}` : ""}`
           : "원문 없이 여기서 확인 가능"}${
           L.source && !L.from ? ` 출처: ${esc(L.source)}` : ""}</p>
         ${head}
@@ -1254,7 +1254,7 @@ function buildReportHeld({ title, summary, steps, out, kind, runId, target, setu
   // 사람은 그것이 자기 것인 줄 모른다.
   const ledNotes = led && led.notes.length
     ? `<h2 class="sec">정해야 할 것 ${led.notes.length}</h2>
-       <p class="lede">고칠 코드가 없는 발견<br>결함 아님. 정해야 할 자리</p>
+       <p class="lede">고칠 코드가 없는 발견<br>결함 아님. 결정이 필요한 항목</p>
        ${led.notes.map((nt) => noteCard(dir, nt)).join("")}`
     : "";
   const html = `<!doctype html><meta charset="utf-8"><title>${esc(title || "확인 보고서")}</title>

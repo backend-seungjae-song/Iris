@@ -25,6 +25,7 @@
 | `setup` | 최초 설치 | 저장소를 받은 직후 `./setup` 실행 |
 | `bin/graph.mjs` | 고아 파일·간선·진입점 조회 | `node bin/graph.mjs` |
 | `bin/importers.mjs` | 지정한 파일의 호출 파일 목록 조회 | `node bin/importers.mjs <파일>`. 계약 헤더에 기재된 조사 명령 |
+| `server/paseo-ui/managed-host.mjs` | Paseo 런타임의 빈 저장소와 내장 플러그인 확인 | `node server/paseo-ui/managed-host.mjs --check-runtime <런타임 절대 경로>` |
 | `scripts/probe/fs-tree.mjs` | 파일 트리 응답 확인 | `node scripts/probe/fs-tree.mjs <경로>` |
 | `scripts/probe/space-binding.mjs` | 스페이스 키 해석 결과 확인 | `node scripts/probe/space-binding.mjs <dev> <ino>` |
 | `scripts/probe/window-raise.mjs` | 창 활성화 확인 | `node scripts/probe/window-raise.mjs` |

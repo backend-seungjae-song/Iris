@@ -243,6 +243,53 @@ test("자식 기동 호출 위치: 첫 기동과 spawnVerified 뿐", () => {
   assert.equal(calls, 2, "검증 없는 기동 경로 추가 방지");
 });
 
+test("reload는 자식 종료와 잠금 해제를 기다린 뒤 재기동하고 그동안 reloading을 유지", async () => {
+  const host = new ServerHost({ app: fakeApp, port: 1, stateDir: "/tmp/ac-reload-state", onLog: () => {} });
+  const child = { pid: 7 };
+  let stopObserved = false;
+  let spawned = false;
+  host.owned = true;
+  host.child = child;
+  host.stopChild = async (candidate) => {
+    assert.equal(candidate, child);
+    stopObserved = host.reloading;
+    return true;
+  };
+  host.awaitLockRelease = async () => {
+    assert.equal(host.reloading, true);
+    return true;
+  };
+  host.spawnVerified = () => { spawned = true; };
+
+  assert.equal(await host.reload("server/index.js"), true);
+  assert.equal(stopObserved, true, "자식 종료 중 재로드 상태 유지");
+  assert.equal(spawned, true, "자식 종료·잠금 해제 뒤 재기동");
+  assert.equal(host.reloading, false, "재기동 판단 뒤 재로드 상태 해제");
+});
+
+test("stopChild는 이미 종료한 자식을 즉시 성공 처리하고 기본 대기는 4초", async () => {
+  const src = fs.readFileSync(new URL("../native/electron/server-host.cjs", import.meta.url), "utf8");
+  assert.match(src, /stopChild\(child, timeoutMs = 4000\)/);
+  const host = new ServerHost({ app: fakeApp, port: 1, stateDir: "/tmp/ac-stop-state", onLog: () => {} });
+  const child = { exitCode: 0, signalCode: null, once() { throw new Error("종료 이벤트를 기다리면 안 됨"); } };
+  assert.equal(await host.stopChild(child), true);
+});
+
+test("macOS stop은 같은 자식에 대한 동시 호출을 하나의 promise로 합친다", () => {
+  const host = new ServerHost({ app: fakeApp, port: 1, stateDir: "/tmp/ac-stop-idempotent", onLog: () => {} });
+  const child = { pid: 8 };
+  let calls = 0;
+  let resolveStop;
+  host.owned = true;
+  host.child = child;
+  host.stopChild = () => { calls += 1; return new Promise((resolve) => { resolveStop = resolve; }); };
+  const first = host.stop();
+  const second = host.stop();
+  assert.equal(first, second);
+  assert.equal(calls, 1);
+  resolveStop(true);
+});
+
 test("이전 버전 소스 자식: REMOTE·HOST 미전달, 정책 불일치 후 재기동 없음", async () => {
   // IRIS_SERVER_ROOT 가 가리키는 흉내 서버. 받은 환경과 기동 횟수를 기록, netPolicy 없는 healthz
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ac-old-root-"));
@@ -362,6 +409,17 @@ test("자식이 이미 있으면 또 띄우지 않는다", async () => {
     await new Promise((r) => setTimeout(r, 400));
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
+});
+
+test("구 자식의 늦은 exit는 새 자식 참조를 덮어쓰지 않는다", () => {
+  const host = new ServerHost({ app: fakeApp, port: 4271, stateDir: "/tmp/ac-stale-child", onLog: () => {} });
+  const oldChild = { pid: 1 };
+  const newChild = { pid: 2 };
+  host.child = newChild;
+  host.owned = true;
+  host.onChildExit(0, null, oldChild.pid, oldChild);
+  assert.equal(host.child, newChild);
+  assert.equal(host.owned, true);
 });
 
 test("붙어 있던 서버가 사라지면 앱이 이어서 띄운다", async () => {

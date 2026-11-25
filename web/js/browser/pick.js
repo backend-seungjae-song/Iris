@@ -366,9 +366,9 @@ export function deliverPickLocal(p) {
   // 쓰려면 필드가 살아 있어야 한다(선택자·소스 파일·속성).
   try { wsSend({ type: "ai-pick", pane: curTarget, tabId: pickedTab || null, pick: p }); } catch (e) {}
   if (needsGrant) {
-    bNote.textContent = "요소 지목 등록 준비 중…";
+    bNote.textContent = "요소 선택 등록 준비 중…";
   } else if (callHook("agentchat.paste", pickBlock(p))) {
-    bNote.textContent = "요소를 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요.";
+    bNote.textContent = "요소를 채팅 입력창에 넣었습니다. 이어서 지시를 입력하고 보내세요.";
   } else {
     wsSend({ type: "pty.input", data: "\x1b[200~" + pickBlock(p) + "\x1b[201~" });
     bNote.textContent = "요소 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.";
@@ -383,11 +383,11 @@ export function completePendingPick(message) {
   clearTimeout(pending.timer);
   pendingPickBlocks.delete(message.request);
   if (!message.ok || !message.delimiter) {
-    bNote.textContent = `요소 지목 준비 실패: ${message.error || "알 수 없는 오류"}`;
+    bNote.textContent = `요소 선택 준비 실패: ${message.error || "알 수 없는 오류"}`;
     return true;
   }
   const block = pickBlock(pending.pick, message.delimiter);
-  bNote.textContent = "채팅 입력에 요소 지목을 추가했습니다. 보내면 이 세션 권한에 등록됩니다.";
+  bNote.textContent = "채팅 입력에 요소 선택을 추가했습니다. 보내면 이 세션 권한에 등록됩니다.";
   if (callHook("agentchat.paste", block)) return true;
   wsSend({ type: "pty.input", data: "\x1b[200~" + block + "\x1b[201~" });
   const xterm = getXterm();

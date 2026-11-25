@@ -49,7 +49,7 @@ import {
   getTabSpaces, setActiveTab, setCenterSpace, isTabVisible,
 } from "./tab-store.js";
 import { applyExternalTextToModel, getMonacoModels, transferFilePane, renderFileViewBody } from "./text-editor.js";
-import { setHtml } from "../core/set-html.js";
+import { patchHtml, tabKey } from "../core/patch-html.js";
 
 let $, esc, wsSend, showToast, BROWSER_MODE, isFileLikeKind, acHost;
 let tabstrip, centerEmpty, fileview, browserview;
@@ -213,9 +213,16 @@ export function startTabRename(nameEl, cur, onCommit) {
   if (!nameEl || nameEl.__renaming) return; nameEl.__renaming = true;
   const inp = document.createElement("input");
   inp.className = "ctab-rename-in"; inp.value = cur || ""; inp.maxLength = 60;
+  const chip = nameEl.closest(".ctab, .tgroup");
+  if (chip) chip.dataset.inlineEdit = "";
   nameEl.replaceWith(inp); inp.focus(); inp.select();
   let done = false;
-  const finish = (commit) => { if (done) return; done = true; onCommit(commit ? inp.value.trim() : null); };
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    if (chip) delete chip.dataset.inlineEdit;
+    onCommit(commit ? inp.value.trim() : null);
+  };
   inp.addEventListener("keydown", (ev) => { ev.stopPropagation();
     if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
     else if (ev.key === "Escape") { ev.preventDefault(); finish(false); } });
@@ -239,13 +246,13 @@ const KIND_PICKS = [["file", "파일"], ["browser", "브라우저"]];
 function renderKindBar(kindBar, docked, tabs, group) {
   if (!kindBar) return;
   kindBar.hidden = !docked;
-  if (!docked) { kindBar.innerHTML = ""; return; }
-  kindBar.innerHTML = KIND_PICKS.map(([key, name]) => {
+  if (!docked) { patchHtml(kindBar, ""); return; }
+  patchHtml(kindBar, KIND_PICKS.map(([key, name]) => {
     const count = tabs.filter((t) => tabGroup(t) === key).length;
     const on = key === group;
     return `<button type="button" class="tab-kind${on ? " on" : ""}" data-kind-pick="${key}" aria-label="${name}" aria-pressed="${on}"${count ? "" : " disabled"}`
       + ` title="${count ? `${name} 탭만 보기` : `열린 ${name} 탭 없음`}">${TAB_KIND[key]}<span>${name}</span></button>`;
-  }).join("");
+  }).join(""));
 }
 
 export function renderTabs() {
@@ -275,7 +282,7 @@ export function renderTabs() {
     renderKindBar(row.kinds, docked, tabs, group);
     const tabstrip = row.strip;
     callHook("split.stripReady", tabstrip, index);
-    setHtml(tabstrip, tabs.filter((t) => !group || tabGroup(t) === group).map((t) => {
+    patchHtml(tabstrip, tabs.filter((t) => !group || tabGroup(t) === group).map((t) => {
       const d = isTabDirty(t); // 텍스트·표 어느 쪽이든 안 저장된 편집은 탭에서 바로 보여야 한다
       const label = (t.kind === "browser" && bmName(t.id)) || t.label;
       // 지금 조작 중인 탭만 빛나고 ●가 붙는다. 조작이 끝나면 둘 다 사라진다.
@@ -283,7 +290,7 @@ export function renderTabs() {
       const ai = busy.length ? `<span class="cai" title="${esc(busy.join(", "))} 세션이 지금 이 탭을 조작 중">●${busy.length > 1 ? busy.length : ""}</span>` : "";
       const lead = t.kind === "browser" ? TAB_KIND.browser : TAB_KIND.file;
       return `<div class="ctab${t.id === act ? " active" : ""}${d ? " dirty" : ""}${busy.length ? " ai-held" : ""}" data-tab="${esc(t.id)}">${lead}${d ? '<span class="cdirty" title="저장 안 됨"></span>' : ""}${ai}<span class="cname">${esc(label)}</span>${t.kind === "browser" ? keepAwakeMark(bmKeepAwake(t.id)) : ""}<button class="cclose" data-close="${esc(t.id)}" aria-label="탭 닫기">${TAB_CLOSE}</button></div>`;
-    }).join(""));
+    }).join(""), tabKey);
     revealActiveTab(tabstrip);
   }
   syncAiGlow();
@@ -375,7 +382,7 @@ export function requestFileContent(path) {
 export function retryStuckFileTabs() {
   for (const sp of getTabSpaces()) {
     for (const t of getTabs(sp)) {
-      if (isFileLikeKind(t.kind) && tabNeedsContent(t.path, t)) requestFileContent(t.path, "open", sp, t.id);
+      if (!t._contentInFlight && isFileLikeKind(t.kind) && tabNeedsContent(t.path, t)) requestFileContent(t.path, "open", sp, t.id);
     }
   }
 }

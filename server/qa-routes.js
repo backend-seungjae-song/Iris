@@ -112,7 +112,7 @@ function derive(events, fromSeq, toSeq) {
 }
 
 export function createQaRoutes({ ledger, executor, dir, revisionOf = qaRevision } = {}) {
-  if (!ledger || typeof executor !== "function") fail("QA 장부와 경로 실행기가 필요합니다.");
+  if (!ledger || typeof executor !== "function") fail("QA 기록과 경로 실행기가 필요합니다.");
   const root = dir || artifactDir("qa");
   const indexPath = path.join(root, "validated-routes.json");
   const currentRevisionMatches = saved => qaRevisionMatches(saved, revisionOf());
@@ -131,14 +131,20 @@ export function createQaRoutes({ ledger, executor, dir, revisionOf = qaRevision 
     fs.writeFileSync(tmp, JSON.stringify(list, null, 2) + "\n", { flag: "wx" });
     fs.renameSync(tmp, indexPath);
   };
+  let indexWrite = Promise.resolve();
+  const withIndexWrite = (task) => {
+    const next = indexWrite.then(task, task);
+    indexWrite = next.catch(() => {});
+    return next;
+  };
   const checked = async (record) => {
     const verified = await ledger.verify(record.sourceRunId);
     const saved = verified.events.find((e) => e.seq === record.savedSeq)?.event;
     if (!saved || saved.kind !== "route_saved" || saved.name !== record.name || saved.fromSeq !== record.fromSeq
       || saved.toSeq !== record.toSeq || saved.digest !== record.digest || (saved.revision || null) !== (record.revision || null))
-      fail("저장 경로의 장부 근거가 맞지 않습니다.");
+      fail("저장 경로의 기록 근거가 맞지 않습니다.");
     const steps = derive(verified.events, record.fromSeq, record.toSeq);
-    if (digest(steps) !== record.digest) fail("저장 경로가 장부에서 나온 단계와 다릅니다.");
+    if (digest(steps) !== record.digest) fail("저장 경로가 기록에서 나온 단계와 다릅니다.");
     return steps;
   };
   const missesOf = async (record) => {
@@ -157,14 +163,16 @@ export function createQaRoutes({ ledger, executor, dir, revisionOf = qaRevision 
     const steps = derive(verified.events, fromSeq, toSeq);
     revision = revisionOf();
     const stepDigest = digest(steps);
-    const marker = await ledger.append(runId, { kind: "route_saved", mode: "route_replay", name,
-      fromSeq, toSeq, digest: stepDigest, revision });
-    const record = { name, sourceRunId: runId, fromSeq, toSeq, savedSeq: marker.seq,
-      digest: stepDigest, target: target || null, revision: revision || null, misses: 0, stale: false };
-    const list = readIndex().filter((r) => r.name !== name);
-    list.push(record);
-    writeIndex(list);
-    return { name, steps, sourceRunId: runId, target: record.target, revision: record.revision };
+    return withIndexWrite(async () => {
+      const marker = await ledger.append(runId, { kind: "route_saved", mode: "route_replay", name,
+        fromSeq, toSeq, digest: stepDigest, revision });
+      const record = { name, sourceRunId: runId, fromSeq, toSeq, savedSeq: marker.seq,
+        digest: stepDigest, target: target || null, revision: revision || null, misses: 0, stale: false };
+      const list = readIndex().filter((r) => r.name !== name);
+      list.push(record);
+      writeIndex(list);
+      return { name, steps, sourceRunId: runId, target: record.target, revision: record.revision };
+    });
   };
   const list = async () => {
     const records = readIndex();
@@ -208,16 +216,11 @@ export function createQaRoutes({ ledger, executor, dir, revisionOf = qaRevision 
         reason });
       if (!pass) {
         await ledger.append(record.sourceRunId, { kind: "route_replay", mode: "route_replay", route: name, pass: false, revision });
-        record.misses = await missesOf(record);
-        record.stale = record.misses >= 2;
-        writeIndex(records);
-        return { ok: false, step: i + 1, stale: record.stale, error: "대상 또는 도착 화면 불일치" };
+        const stale = await missesOf(record) >= 2;
+        return { ok: false, step: i + 1, stale, error: "대상 또는 도착 화면 불일치" };
       }
     }
     await ledger.append(record.sourceRunId, { kind: "route_replay", mode: "route_replay", route: name, pass: true, revision });
-    record.misses = 0;
-    record.stale = false;
-    writeIndex(records);
     return { ok: true, steps: steps.length, revalidated: revalidationRequired, revision };
   };
   return { save, list, replay };

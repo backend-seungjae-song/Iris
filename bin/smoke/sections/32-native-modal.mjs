@@ -40,7 +40,7 @@ check("확인 창이 탭 안에서 뜨고 네/아니오를 고를 수 있다", (
     && /function renderTabDialog/.test(webview)
     && /data-ans="ok">네</.test(webview) && /data-ans="cancel">아니오</.test(webview)
     && /browser-dialog-answer/.test(webview) && /browser-dialog-answer/.test(allServer)
-    && /이 탭이 답을 기다립니다/.test(browserTabs);              // 어느 탭이 기다리는지 목록에서 보인다
+    && /응답 대기 중/.test(browserTabs);              // 어느 탭이 기다리는지 목록에서 보인다
 });
 check("떠 있는 확인 창을 제어로 닫을 수 있다", () =>
   /async dialog\(send, wc, args\)/.test(cdpCmdNativeSource) && /Page\.handleJavaScriptDialog/.test(cdpCmdNativeSource)
@@ -460,7 +460,7 @@ check("보관 블록은 우리 표시로 구분되고 하나만 지울 수 있�
 check("북마크도 요소 선택으로 지목된다", () => {
   return /function pickBmkAt/.test(pickHost)
     && /const bm = pickBmkAt\(e\.target\);/.test(pickHost)
-    && /\[사이트 지목 · 이 주소를 기억하고 활용하세요\]/.test(pickHost)
+    && /\[사이트 선택 · 이 주소를 기억하고 활용하세요\]/.test(pickHost)
     && !/여기로 이동하세요/.test(pickHost)     // 지목은 "지금 가라"가 아니다
     && /!pickBmkAt\(e\.target\)/.test(pickHost)               // 지목 중엔 그냥 이동하지 않는다
     && /\.picking-tabs \.bmk\.pick-hover/.test(css("25-pick-record")) // 무엇을 고르는지 보인다
@@ -521,7 +521,7 @@ check("열린 사이트와 저장된 전체를 나눠 보여준다", () =>
   && /지금 열려 있는 사이트/.test(autofillAllowlist) && /저장된 로그인 전체/.test(autofillAllowlist)
   && /openNoCred/.test(autofillAllowlist)                                     // 열려 있는데 저장이 없는 곳도 알린다
   && /ac-ai-login-sources/.test(aiLoginPolicySource)
-  && /아직 안 가져온 Chrome 계정 \$\{gap\}개/.test(autofillAllowlist)
+  && /가져오지 않은 Chrome 계정 \$\{gap\}개/.test(autofillAllowlist)
   && /data-goacct="1"/.test(autofillAllowlist));
 // 프로필 식별 방식이 이 경고의 정확도를 정한다. 이름은 사용자가 바꾸고 서로 겹칠 수 있어
 // 식별자가 못 되고, 로그인한 계정(gaia_id·이메일)이 키다. 파티션 이름에 Chrome 프로필 id가

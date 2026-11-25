@@ -51,3 +51,9 @@ test("정상 main frame 요청은 origin과 객체 동일성을 모두 통과한
   const allowed = contents();
   assert.equal(isTrustedMainFrame({ sender: allowed, senderFrame: allowed.mainFrame }, APP_URL, allowed), true);
 });
+
+test("opaque origin은 앱 창을 인증할 수 없다", () => {
+  const sender = contents();
+  sender.mainFrame.url = "data:text/plain,local";
+  assert.equal(isTrustedMainFrame({ sender, senderFrame: sender.mainFrame }, "about:blank", sender), false);
+});

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { promptList, terminalSelection, joinFragments } from "./terminal.js";
+import { promptList, terminalSelection, joinFragments, SCROLL_HINT } from "./terminal.js";
 
 const OPTION_LINE = /^\s*(?:(?:[›❯]\s*)?\d+[.)]|[›❯●○])\s+\S/u;
 
@@ -138,7 +138,9 @@ function promptContext(lines, end) {
   const review = tabAt >= 0 ? reviewOf(block.slice(tabAt + 1)) : null;
   if (review) return { ...review, text: block.join("\n"), steps };
   // Codex: 구분선 없이 이어진 기록 위쪽을 헤더 줄에서 자름
-  if (!boxed) {
+  // Claude 승인 상자는 짧은 화면에서 위 구분선이 잘려도 ╌ 선이 남아 Codex 로 보지 않음(헤더 위 도구 입력이 내용)
+  const claudeBox = block.some(line => /^\s*[╌┄]{8,}\s*$/u.test(line));
+  if (!boxed && !claudeBox) {
     let headerAt = -1;
     block.forEach((line, i) => { if (HEADER.test(line)) headerAt = i; });
     if (headerAt >= 0) {
@@ -243,7 +245,10 @@ export function extractPrompt(frame, fallback = '') {
     o.checked = /[xX✔✓☑☒*●]/u.test(m[1]);
     o.text = o.text.replace(m[1], "").replace(/\s{2,}/g, " ").trim();
   });
-  const multiSelect = hasBoxes || /(?:multi.?select|select (?:all|multiple)|space to (?:select|toggle)|복수|여러 개)/i.test(text);
+  // 안내 문구는 선택지 바로 위 질문 문단·선택지·아래 안내 줄에서만 찾음. 승인할 명령·글 본문의 낱말("여러 개")로
+  // 여러 개 고르기로 보면 카드가 만들어지지 않음
+  const hintText = [question, ...lines.slice(options[0].row - 1)].join("\n");
+  const multiSelect = hasBoxes || /(?:multi.?select|select (?:all|multiple)|space to (?:select|toggle)|복수|여러 개)/i.test(hintText);
   const free = /(?:\bother\b|type (?:your|something|an? (?:answer|response))|직접 입력|기타)/i;
   const roled = options.map(o => ({ ...o, selectable: !free.test(o.text),
     role: free.test(o.text) ? "text" : CHAT.test(cleanOption(o.text)) ? "chat" : optionRole(o.text) }));
@@ -252,6 +257,15 @@ export function extractPrompt(frame, fallback = '') {
   return { question, title: context.title, detail: context.detail, ...(context.steps || {}), variant,
     options: roled, selectedRow: options.find(o => terminalSelection(frame.text, o.row) === 0).row,
     multiSelect, hash: frame.hash, columns: frame.columns, rows: frame.rows };
+}
+
+// 승인 상자에서 위로 잘린 줄 수. Claude 가 목록 아래에 "↑ N more lines" 로 알림(잘린 줄은 화면에 없음)
+// - 폰 원격 화면 본문(projection 계약)에는 넣지 않아 extractPrompt 결과와 따로 셈
+export function promptCutLines(frame, p) {
+  if (!p?.options?.length || typeof frame?.text !== "string") return 0;
+  const last = Math.max(...p.options.map(o => o.row));
+  const hint = frame.text.split(/\r?\n/).slice(last).map(line => line.trim()).find(line => SCROLL_HINT.test(line) && line.startsWith("↑"));
+  return hint ? Number(hint.match(/\d+/)[0]) : 0;
 }
 
 // 도구 이름·대상 훅을 붙여도 되는 승인 화면. 폴더 신뢰·질문·제출 확인에 낡은 훅이 붙는 것을 막는다

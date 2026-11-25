@@ -70,7 +70,7 @@ class _IrisStatusGlyphState extends State<IrisStatusGlyph>
       label: switch (widget.status) {
         'working' => '작업 중',
         'done' => '완료',
-        'blocked' => '멈춤',
+        'blocked' => '답 필요',
         'question' => '질문',
         _ => '대기',
       },

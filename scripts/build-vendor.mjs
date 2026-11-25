@@ -29,6 +29,8 @@ function pkgRoot(name) {
 }
 
 const FILES = [
+  ["morphdom", "dist/morphdom-esm.js", "morphdom.js"],
+  ["morphdom", "LICENSE", "morphdom.LICENSE"],
   ["@xterm/xterm", "lib/xterm.js", "xterm.js"],
   ["@xterm/xterm", "css/xterm.css", "xterm.css"],
   ["@xterm/addon-fit", "lib/addon-fit.js", "addon-fit.js"],

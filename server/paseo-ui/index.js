@@ -1,4 +1,4 @@
-// Paseo 대화 화면(UI 코드만) 빌드 관리. Paseo 데몬은 실행하지 않음
+// Paseo 릴리스의 원본 모듈을 Iris 대화 화면에 포함
 //
 // 소유 범위
 //   stateHome()/paseo-ui 아래 빌드 결과·상태 파일, 빌드 프로세스, GET /paseo-ui/* 정적 제공
@@ -21,6 +21,7 @@
 //
 // 영향 범위
 //   server/agent-chat.js 가 상태를 창에 알리고, web/js/agentchat/boot.js 가 /paseo-ui/ 를 iframe 으로 띄움
+import { nativeSessionProviders, newTerminalArgv } from "../agent-launch.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +37,9 @@ const require = createRequire(import.meta.url);
 const { stateHome } = require("../state-home.cjs");
 
 const REPO = "https://github.com/getpaseo/paseo";
+const NATIVE_COMMANDS = fileURLToPath(new URL("./native-commands.mjs", import.meta.url));
+const EMBEDDED_RELEASE = fileURLToPath(new URL("./embedded-release.mjs", import.meta.url));
+const CATALOG = fileURLToPath(new URL("./managed-provider-catalog.js", import.meta.url));
 const ENTRY = fileURLToPath(new URL("./entry/iris-chat-entry.tsx", import.meta.url));
 // entry 폴더 밖에서 빌드에 복사하는 Iris 파일 [원본, 빌드 안 이름]. 같은 규칙을 터미널과 대화 화면이 함께 씀
 const SHARED_FILES = [[fileURLToPath(new URL("../../web/js/panel/url-token.js", import.meta.url)), "iris-url-token.js"]];
@@ -56,6 +60,8 @@ const RECIPE = (() => {
   const h = createHash("sha256");
   for (const name of entryFiles()) h.update(name).update("\0").update(fs.readFileSync(path.join(path.dirname(ENTRY), name))).update("\0");
   for (const [from, name] of SHARED_FILES) h.update(name).update("\0").update(fs.readFileSync(from)).update("\0");
+  h.update(fs.readFileSync(NATIVE_COMMANDS));
+  h.update(fs.readFileSync(EMBEDDED_RELEASE)).update(fs.readFileSync(CATALOG));
   h.update(fs.readFileSync(METRO_CONFIG)).update("\0");
   h.update(JSON.stringify({ WORKSPACES, BUILD_SCRIPTS, prepare: String(prepareApp) }));
   return h.digest("hex").slice(0, 12);
@@ -82,10 +88,78 @@ export function initPaseoUi(ctx = {}) {
   }
 }
 
+function terminalProviders() {
+  const providers = nativeSessionProviders();
+  if (!status.build || !paths) return providers;
+  try {
+    const names = JSON.parse(fs.readFileSync(path.join(buildDir(status.build), "terminal-commands.json"), "utf8"));
+    for (const id of names) {
+      if (typeof id === "string" && /^[a-z][a-z0-9-]*$/.test(id) && !providers.some(p => p.id === id)) {
+        providers.push({ id, label: id });
+      }
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return providers;
+}
+
+export function sessionTerminalArgv(id) {
+  return newTerminalArgv(id) || (terminalProviders().some(p => p.id === id) ? [id] : null);
+}
+
+function embeddedDirectory(build) {
+  if (!paths || !parseBuildName(build)) return null;
+  return path.join(paths.root, "embedded", build);
+}
+
+const catalogs = new Map();
+function providerAliases(providers, commands, overrides) {
+  const ids = new Set(providers.map(({ id }) => id));
+  const aliases = new Map();
+  for (const { id, label, herdrId } of providers) {
+    const argv = Array.isArray(overrides[id]?.command) ? overrides[id].command : [];
+    const npmPackage = argv[0] === "npx" && argv[1] === "-y"
+      ? /^(?:@[\w.-]+\/)?([\w.-]+)(?:@[^/]+)?$/.exec(argv[2])?.[1] : null;
+    for (const name of [herdrId, label?.toLowerCase().replace(/\s+/g, ""), commands[id]?.resume?.[0], npmPackage ?? argv?.[0]]) {
+      if (!name || !/^[a-z][a-z0-9-]*$/.test(name) || ids.has(name) || ["npx", "uvx", "node", "npm", "pnpm", "bun", "bunx", "python", "python3"].includes(name)) continue;
+      aliases.set(name, aliases.has(name) && aliases.get(name) !== id ? null : id);
+    }
+  }
+  return Object.fromEntries([...aliases].filter(([, id]) => id));
+}
+
+export function embeddedRelease(build) {
+  const dir = embeddedDirectory(build);
+  if (!dir) return null;
+  if (catalogs.has(dir)) return catalogs.get(dir);
+  try {
+    const providers = JSON.parse(fs.readFileSync(path.join(dir, "providers.json"), "utf8"));
+    const commands = JSON.parse(fs.readFileSync(path.join(dir, "native-handoff-commands.json"), "utf8"));
+    const overrideFile = path.join(dir, "provider-overrides.json");
+    const overrides = fs.existsSync(overrideFile) ? JSON.parse(fs.readFileSync(overrideFile, "utf8")) : {};
+    const release = { build, dir, providers, commands, aliases: providerAliases(providers, commands, overrides) };
+    catalogs.set(dir, release);
+    return release;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export function currentEmbeddedProvider(id) {
+  if (!status.build) return null;
+  const release = embeddedRelease(buildName(status.build.version, status.build.recipe));
+  return release?.providers.some(provider => provider.id === id) ? release : null;
+}
+
 export function paseoUiStatus() {
   const name = status.build ? buildName(status.build.version, status.build.recipe) : null;
+  const providers = terminalProviders();
+  const release = name && embeddedRelease(name);
+  const chatProviders = release?.providers || providers;
   return { phase: status.phase, version: status.build?.version || null, build: name, update: status.update || null,
-    message: status.message || "", url: status.phase === "ready" && name ? `/paseo-ui/?b=${name}` : null };
+    providers, chatProviderAliases: release?.aliases ?? {}, chatProviders: chatProviders.map(({ id }) => id), message: status.message || "", url: status.phase === "ready" && name ? `/paseo-ui/?b=${name}` : null };
 }
 
 // 대화 보기를 열 때 부름. 빌드가 없으면 첫 빌드(실패 뒤 기다리는 시간 무시), 있으면 확인 기한만 봄
@@ -125,9 +199,12 @@ export function stopPaseoUi() {
 
 export function handlePaseoUiStatic(req, res) {
   if (!isLoopbackRequest(req)) { res.writeHead(403).end(); return true; }
-  const cur = status.phase === "ready" ? status.build : readState().current;
+  const url = new URL(req.url, "http://x");
+  const pinned = /^\/paseo-ui\/build\/([^/]+)\/(.*)$/.exec(url.pathname);
+  if (pinned && !parseBuildName(pinned[1])) { res.writeHead(404).end(); return true; }
+  const cur = pinned ? parseBuildName(pinned[1]) : status.phase === "ready" ? status.build : readState().current;
   if (!cur) { res.writeHead(404).end("Paseo 화면이 아직 준비되지 않았습니다"); return true; }
-  const rel = staticTarget(new URL(req.url, "http://x").pathname);
+  const rel = staticTarget(pinned ? "/paseo-ui/" + pinned[2] : url.pathname);
   if (!rel) { res.writeHead(400).end(); return true; }
   const dir = buildDir(cur);
   const file = path.join(dir, rel);
@@ -200,17 +277,29 @@ async function build(want, state) {
   if (!npm) throw new Error("npm을 찾지 못해 Paseo 화면을 빌드할 수 없습니다(Node.js 설치 필요)");
   const src = path.join(paths.root, `src-${name}.partial-${process.pid}`);
   const out = path.join(paths.builds, `${name}.partial-${process.pid}`);
+  const embedded = embeddedDirectory(name);
+  const staged = embedded + `.partial-${process.pid}`;
   log(`Paseo ${name} 빌드 시작`);
   try {
     await step(findGit(), ["clone", "--depth", "1", "--branch", `v${version}`, "--quiet", REPO, src], paths.root, npm.dir);
     await step(npm.bin, ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", ...WORKSPACES.map((w) => `--workspace=${w}`)], src, npm.dir);
     for (const script of BUILD_SCRIPTS) await step(npm.bin, ["run", script], src, npm.dir);
-    prepareApp(path.join(src, "packages", "app"));
+    prepareApp(path.join(src, "packages", "app"), name);
     const app = path.join(src, "packages", "app");
     await step(npm.bin, ["exec", "--", "expo", "export", "--platform", "web", "--output-dir", out], app, npm.dir);
     if (!fs.existsSync(path.join(out, "index.html"))) throw new Error("빌드 결과에 index.html 이 없습니다");
-    fs.rmSync(buildDir(want), { recursive: true, force: true });
-    fs.renameSync(out, buildDir(want));
+    const node = findBin(process.platform === "win32" ? "node.exe" : "node");
+    if (!node) throw new Error("터미널 명령 목록을 만들 Node.js를 찾지 못했습니다");
+    await step(node.bin, [NATIVE_COMMANDS, src, path.join(out, "terminal-commands.json")], src, node.dir);
+    if (!fs.existsSync(embedded)) {
+      fs.mkdirSync(staged, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(staged, "package.json"), JSON.stringify({ private: true }));
+      await step(npm.bin, ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--save-exact", `@getpaseo/server@${version}`], staged, npm.dir);
+      const { findHerdrBin } = await import("../pty.js");
+      await step(node.bin, [EMBEDDED_RELEASE, src, staged, findHerdrBin()], staged, node.dir);
+      fs.renameSync(staged, embedded);
+    }
+    if (!fs.existsSync(buildDir(want))) fs.renameSync(out, buildDir(want));
     const next = promote(readState(), want);
     writeState(next);
     prune([next.current, next.previous]);
@@ -220,9 +309,24 @@ async function build(want, state) {
     if (!stopped) writeState(recordFailure(readState(), want, Date.now()));
     throw e;
   } finally {
+    fs.rmSync(staged, { recursive: true, force: true });
     fs.rmSync(src, { recursive: true, force: true });
     fs.rmSync(out, { recursive: true, force: true });
   }
+}
+
+export function releasedRuntime(build, root = stateHome()) {
+  if (typeof build === "string") build = parseBuildName(build);
+  if (!build) return null;
+  const name = buildName(build.version, build.recipe);
+  const base = path.join(root, "paseo-ui");
+  try {
+    const { runtime } = JSON.parse(fs.readFileSync(path.join(base, "releases", name + ".json"), "utf8"));
+    if (parseBuildName(runtime)?.version !== build.version) return null;
+    const dir = path.join(base, "runtimes", runtime);
+    const providers = JSON.parse(fs.readFileSync(path.join(dir, "providers.json"), "utf8"));
+    return { dir, providers };
+  } catch { return null; }
 }
 
 // 빌드용 소스에 Iris 파일만 더함. Paseo 소스 코드는 그대로
@@ -230,7 +334,7 @@ async function build(want, state) {
 // - Metro: 원래 설정을 metro.config.paseo.cjs 로 옮기고 감싸는 설정을 넣음
 // - 주소: 결과물을 /paseo-ui/ 아래에서 제공하려고 app.config.js 의 experiments 에 baseUrl 한 줄
 //   (그 자리가 정확히 한 곳이 아니면 빌드 실패 → 이전 빌드 유지)
-function prepareApp(app) {
+function prepareApp(app, name) {
   // 진입 파일과 그 옆 파일(iris-shim.ts 등). metro 설정은 아래에서 따로 넣음
   for (const name of entryFiles()) fs.copyFileSync(path.join(path.dirname(ENTRY), name), path.join(app, name));
   for (const [from, name] of SHARED_FILES) fs.copyFileSync(from, path.join(app, name));
@@ -243,7 +347,7 @@ function prepareApp(app) {
   const configFile = path.join(app, "app.config.js");
   const text = fs.readFileSync(configFile, "utf8");
   if (text.split("experiments: {").length !== 2) throw new Error("Paseo app.config.js 의 experiments 위치를 찾지 못했습니다");
-  fs.writeFileSync(configFile, text.replace("experiments: {", `experiments: {\n      baseUrl: "/paseo-ui",`));
+  fs.writeFileSync(configFile, text.replace("experiments: {", `experiments: {\n      baseUrl: "/paseo-ui/build/${name}",`));
 }
 
 // 빌드에 복사하는 entry 폴더 파일 이름(정렬). Metro 설정은 제외
@@ -272,17 +376,17 @@ function prune(keep) {
   let list = [];
   try { list = fs.readdirSync(paths.builds); } catch { return; }
   for (const name of list) {
-    if (parseBuildName(name) && !names.includes(name)) fs.rmSync(path.join(paths.builds, name), { recursive: true, force: true });
+    if (parseBuildName(name) && !names.includes(name) && !fs.existsSync(path.join(paths.root, "pinned", name))) fs.rmSync(path.join(paths.builds, name), { recursive: true, force: true });
   }
 }
 
 // 이전 실행이 남긴 .partial 폴더. 상태 폴더는 server.lock 을 잡은 서버 하나만 쓰므로 시작 때 남은 것은 모두 지난 실행 것
 function removeLeftovers() {
-  for (const dir of [paths.root, paths.builds]) {
+  for (const dir of [paths.root, paths.builds, path.join(paths.root, "embedded"), path.join(paths.root, "runtimes")]) {
     let names = [];
     try { names = fs.readdirSync(dir); } catch { continue; }
     for (const name of names) {
-      if (/\.partial-\d+$/.test(name)) fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+      if (/\.partial-[0-9A-Za-z]+$/.test(name)) fs.rmSync(path.join(dir, name), { recursive: true, force: true });
     }
   }
 }

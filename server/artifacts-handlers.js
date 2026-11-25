@@ -165,7 +165,7 @@ function previewWire(rawPath) {
   const out = (extra) => ({ type: "artifacts-preview", path: asked, ...extra });
   if (!path.isAbsolute(asked)) return out({ error: "절대 경로가 아닙니다" });
   const real = insideArtifacts(asked);
-  if (!real) return out({ error: "부산물 폴더 안의 파일이 아닙니다" });
+  if (!real) return out({ error: "생성 파일 폴더 안의 파일이 아닙니다" });
   let stat;
   try { stat = fs.statSync(real); } catch { return out({ error: "파일이 없습니다" }); }
   const name = path.basename(real);

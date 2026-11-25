@@ -164,6 +164,11 @@ class ServerHost {
     this.sourceWatch = null; // 개발 환경에서만 실행된다
     // 앱 UI 증명 값. 이 앱이 띄운 서버에는 파일 없이 파이프로만 전달: 같은 사용자의 다른 프로세스가 읽지 못하게
     this.uiToken = crypto.randomBytes(32).toString("hex");
+    this.appConnectionToken = crypto.randomBytes(32).toString("hex");
+  }
+
+  currentAppConnectionToken() {
+    return this.owned && this.child ? this.appConnectionToken : "";
   }
 
   // 렌더러에 줄 UI 증명 값. 붙기만 한 서버는 그 서버가 만든 파일 값
@@ -237,7 +242,7 @@ class ServerHost {
       // 준비 대기 중 예약된 backoff 재기동도 중단
       this.halted = true;
       this.owned = false;
-      try { dead && requestStop(dead); } catch {}
+      await this.stopChild(dead);
       return { attached: false, health: null, policyMismatch: policyMismatch(health) };
     }
     this.log(`서버를 띄웠습니다 — pid ${health.pid}, ${health.stateDir}`);
@@ -318,13 +323,24 @@ class ServerHost {
     if (!child) return false;
     this.reloading = true;
     this.log(`server/${rel ? " " + rel : ""} 가 바뀌었습니다 — 서버 자식만 다시 띄웁니다.`);
-    try { requestStop(child); } catch {}
-    await this.awaitLockRelease();
-    this.reloading = false;
-    if (this.stopping) return false;
-    this.spawnVerified();
-    if (this.sourceWatch) this.sourceWatch.noteReloaded();
-    return true;
+    try {
+      const stopped = await this.stopChild(child);
+      if (!stopped) {
+        this.log(`서버 자식 종료를 확인하지 못해 재시작하지 않습니다 — ${path.join(this.stateDir, "server.log")}`);
+        return false;
+      }
+      const released = await this.awaitLockRelease();
+      if (this.stopping) return false;
+      if (!released) {
+        this.log(`server.lock 해제 대기 시간이 초과되어 재시작하지 않습니다 — ${path.join(this.stateDir, "server.lock")}`);
+        return false;
+      }
+      this.spawnVerified();
+      if (this.sourceWatch) this.sourceWatch.noteReloaded();
+      return true;
+    } finally {
+      this.reloading = false;
+    }
   }
 
   // 이전 자식의 SIGTERM 핸들러가 잠금을 해제하고 종료할 때까지 기다린다. 무한히 기다리지는
@@ -340,6 +356,30 @@ class ServerHost {
     return false;
   }
 
+  stopChild(child, timeoutMs = 4000) {
+    if (!child) return Promise.resolve(true);
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let done = false;
+      let timer;
+      const finish = (stopped) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        child.removeListener?.("exit", onExit);
+        resolve(stopped);
+      };
+      const onExit = () => finish(true);
+      child.once?.("exit", onExit);
+      timer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch {}
+        setTimeout(() => finish(false), 1000).unref?.();
+      }, timeoutMs);
+      timer.unref?.();
+      try { requestStop(child); } catch { finish(false); }
+    });
+  }
+
   spawnOnce() {
     // 이미 자식이 있으면 다시 실행하지 않는다. 감시 tick과 backoff 재시작이 겹치면 자식이 둘이
     // 되고, this.child는 하나만 가리키므로 나머지 하나가 추적에서 빠진다. 앱을 종료해도 남는
@@ -353,6 +393,7 @@ class ServerHost {
       return;
     }
     const env = { ...process.env, ...childEnv({ port: this.port, stateDir: this.stateDir }) };
+    env.IRIS_APP_CONNECTION_TOKEN = this.appConnectionToken;
     env.IRIS_MAIN_PID = String(process.pid);
     env.IRIS_SERVER_ROOT = root;
     env.IRIS_APP_PATH = resolveAppPath({ isPackaged: this.app.isPackaged, root });
@@ -390,13 +431,14 @@ class ServerHost {
     // 기록하지 않으면 재시도 예산이 동작하지 않아, 앱이 서버 없이 대기 상태로 남는다.
     child.on("error", (e) => {
       this.log(`서버를 띄우지 못했습니다: ${e && e.message}${win ? `, 자식 pid ${child.pid ?? "?"}` : ""}`);
-      if (this.child === child) this.onChildExit(null, "spawn-error", child.pid);
+      if (this.child === child) this.onChildExit(null, "spawn-error", child.pid, child);
     });
-    child.on("exit", (code, signal) => this.onChildExit(code, signal, child.pid));
+    child.on("exit", (code, signal) => this.onChildExit(code, signal, child.pid, child));
     this.log(`${runtime.asNode ? "Electron(node 모드)" : runtime.bin}로 ${entry} 기동 — 포트 ${this.port}${win ? `, 자식 pid ${child.pid ?? "?"}` : ""}`);
   }
 
-  onChildExit(code, signal, pid = this.child?.pid) {
+  onChildExit(code, signal, pid = this.child?.pid, exitedChild = null) {
+    if (exitedChild && this.child !== exitedChild) return;
     if (process.platform === "win32") this.log(`서버 자식 종료 — pid ${pid ?? "?"}, code ${code}, signal ${signal || "-"}`, this.stopping);
     this.child = null;
     if (this.stopping || !this.owned) return;
@@ -436,7 +478,7 @@ class ServerHost {
       if (this.watchTimer) { clearInterval(this.watchTimer); this.watchTimer = null; }
       this.owned = false;
       this.child = null;
-      try { requestStop(child); } catch {}
+      void this.stopChild(child);
     })();
   }
 
@@ -451,19 +493,22 @@ class ServerHost {
     if (this.sourceWatch) { this.sourceWatch.stop(); this.sourceWatch = null; }
     const child = this.child;
     this.child = null;
-    try { child && requestStop(child); } catch {}
+    void this.stopChild(child);
     try { this.onPolicyMismatch(health); } catch (e) { this.log(`정책 불일치 통지 실패: ${e && e.message}`); }
   }
 
   // 앱 종료 시. 이 앱이 실행한 서버만 종료한다. 붙기만 한 서버는 다른 소유자의 것이다.
   stop() {
-    if (process.platform === "win32" && this.stopPromise) return this.stopPromise;
+    if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
     if (this.watchTimer) { clearInterval(this.watchTimer); this.watchTimer = null; }
     if (this.sourceWatch) { this.sourceWatch.stop(); this.sourceWatch = null; }
     const child = this.child;
-    this.child = null;
-    if (!child || !this.owned) return;
+    if (!child || !this.owned) {
+      this.child = null;
+      this.stopPromise = Promise.resolve();
+      return this.stopPromise;
+    }
     if (process.platform === "win32") {
       this.stopPromise = new Promise((resolve) => {
         let timer;
@@ -488,8 +533,8 @@ class ServerHost {
       return this.stopPromise;
     }
     // 먼저 SIGTERM 을 보낸다. 서버의 핸들러가 잠금을 해제하고 종료한다.
-    try { requestStop(child); } catch {}
-    setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 3000).unref?.();
+    this.stopPromise = this.stopChild(child);
+    return this.stopPromise;
   }
 
   // Windows 부모 종료 전 서버 저장·잠금 해제 대기

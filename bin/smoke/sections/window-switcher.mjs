@@ -30,7 +30,7 @@ export default async function run() {
       { id: "features", label: "편의 기능" },
       { id: "windows", label: "창 전환" },
       { id: "links", label: "링크 열기" },
-      { id: "artifacts", label: "부산물" },
+      { id: "artifacts", label: "생성 파일" },
       { id: "security", label: "보안" },
     ];
     if (JSON.stringify(sections) !== JSON.stringify(expected)) {

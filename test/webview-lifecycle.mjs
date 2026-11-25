@@ -96,10 +96,11 @@ function fixture(overrides = {}) {
 
 function popupFixture() {
   const primerCalls = [];
+  const primerFns = [];
   const popupCalls = [];
   const documentNavigations = [];
   const f = fixture({
-    registerSessionPrimer: (id, parent) => primerCalls.push([id, typeof parent]),
+    registerSessionPrimer: (id, parent, child) => { primerCalls.push([id, typeof parent]); primerFns.push([id, parent, child]); },
     registerPopup: (id, contents) => popupCalls.push(["register", id, contents.id]),
     unregisterPopup: (id) => popupCalls.push(["unregister", id]),
     noteDocumentNavigation: (id) => documentNavigations.push(id),
@@ -126,6 +127,7 @@ function popupFixture() {
   };
   f.emit("did-create-window", childWindow);
   return { ...f, contents, primerCalls, popupCalls, documentNavigations,
+    primerFns,
     emitContents: (name, ...args) => { for (const fn of contentsHandlers[name] || []) fn(...args); },
     emitWindow: (name, ...args) => { for (const fn of windowHandlers[name] || []) fn(...args); } };
 }
@@ -210,6 +212,16 @@ test("등록된 사이트 팝업도 CDP 세대를 발급하고 닫힐 때 해제
 
   assert.deepEqual(f.popupCalls[0], ["register", "popup:u1", 52]);
   assert.deepEqual(f.primerCalls.find(([id]) => id === 52), [52, "function"]);
+  const parent = f.primerFns.find(([id]) => id === 52);
+  const commands = [];
+  const debuggerApi = { sendCommand: (method, params, sid) => { commands.push([method, params, sid]); return Promise.resolve(); } };
+  parent[1](f.contents, debuggerApi);
+  assert.deepEqual(commands.map(([method]) => method), [
+    "Page.addScriptToEvaluateOnNewDocument", "Page.addScriptToEvaluateOnNewDocument",
+    "Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach", "Page.enable",
+  ]);
+  parent[2](debuggerApi, "child-session");
+  assert.ok(commands.some(([, , sid]) => sid === "child-session"));
   f.emitContents("destroyed");
   assert.deepEqual(f.primerCalls.at(-1), [52, "object"]);
 });

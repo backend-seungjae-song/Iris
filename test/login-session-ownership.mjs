@@ -31,7 +31,7 @@ test("인증 헬퍼는 연결된 실제 Chrome 프로필을 일반 창으로만 
   const active = sliceBetween(source, "async function runChromeAuth", "module.exports", "Chrome 인증");
   assert.match(profile, /--profile-directory=/);
   assert.match(profile, /--new-window/);
-  assert.match(profile, /"about:blank"/);
+  assert.match(profile, /about:blank#iris-/);
   assert.match(profile, /set URL of active tab of window id/);
   assert.doesNotMatch(profile, /--remote-debugging|--user-data-dir/);
   assert.match(active, /listChromeProfiles\(\).*runProfileHandoff/s);
@@ -118,4 +118,50 @@ test("Chrome import 장부는 파티션의 최신 연결을 고른다", () => {
   const registry = fs.readFileSync(path.join(root, "native/electron/chrome-import-registry.cjs"), "utf8");
   assert.match(registry, /Object\.values\(chromeImports \|\| \{\}\)/);
   assert.match(registry, /sort\(\(a, b\) => Number\(b\.at \|\| 0\) - Number\(a\.at \|\| 0\)\)/);
+});
+
+test("인증 창을 열 때마다 고유한 빈 페이지 주소를 만들고 이동 직전에도 확인한다", () => {
+  const source = fs.readFileSync(path.join(root, "native/electron/chrome-auth.cjs"), "utf8");
+  assert.match(source, /about:blank#iris-\$\{crypto\.randomUUID\(\)\}/);
+  assert.match(source, /if URL of active tab of window id \$\{windowId\} is \$\{appleScriptString\(marker\)\}/);
+  assert.doesNotMatch(source, /eval\(atob\(/);
+});
+
+test("연결된 프로필이 바뀌거나 사라지면 다른 브라우저 계정으로 보내지 않는다", async () => {
+  const { createChromeHandoffIpc } = require("../native/electron/chrome-handoff-ipc.cjs");
+  const handlers = new Map(), opened = [];
+  let recorded = { cid: "chrome:Profile 2" };
+  createChromeHandoffIpc({
+    ipcMain: { on() {}, handle: (name, handler) => handlers.set(name, handler) },
+    shell: { openExternal: async url => opened.push(url) }, isTrustedSender: event => event.trusted,
+    isProfilePartition: partition => partition === "persist:acprof:one",
+    chromeImportRegistry: { latestForPartition: () => recorded }, lookupProfile: async () => null,
+  });
+  const request = { url: "https://example.com/", partition: "persist:acprof:one", requireProfile: true, source: "chrome:Default" };
+  const open = (changes = {}, trusted = true) => handlers.get("ac-open-in-chrome")({ trusted }, { ...request, ...changes });
+  assert.equal((await open()).ok, false);
+  recorded = null;
+  assert.equal((await open()).ok, false);
+  assert.equal((await open({ requireProfile: false }, false)).ok, false);
+  assert.equal((await open({ requireProfile: false, partition: "unknown" })).ok, false);
+  assert.equal((await open({ requireProfile: false, url: "file:///tmp/example" })).ok, false);
+  assert.deepEqual(opened, []);
+  assert.equal((await open({ requireProfile: false, source: "" })).ok, true);
+  assert.deepEqual(opened, [request.url]);
+});
+
+test("프로필 폴더만 있어도 같은 계정에서 페이지를 열 수 있다", async t => {
+  const { existingBrowserProfile } = require("../native/electron/chrome-auth.cjs");
+  const home = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "iris-browser-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  for (const [platform, directory] of [
+    ["darwin", "Library/Application Support/Google/Chrome/Default"],
+    ["win32", "Google/Chrome/User Data/Default"],
+  ]) {
+    fs.mkdirSync(path.join(home, directory), { recursive: true });
+    const options = { platform, home, local: home };
+    assert.deepEqual(await existingBrowserProfile("chrome:Default", options), { browser: { id: "chrome" }, profile: "Default" });
+    assert.equal(await existingBrowserProfile("chrome:Profile 2", options), null);
+    assert.equal(await existingBrowserProfile("chrome:../Default", options), null);
+  }
 });

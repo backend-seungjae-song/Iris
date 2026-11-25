@@ -18,7 +18,7 @@
 
 import { provide } from "../core/hooks.js";
 import { clearHistory, markAllRead, pendingCount, reconcileNotifications, unreadCount } from "./model.js";
-import { setHtml } from "../core/set-html.js";
+import { patchHtml } from "../core/patch-html.js";
 
 const BELL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9Z"/><path d="M10 21h4"/></svg>';
 const STORE_KEY = "iris.notifications.v1";
@@ -57,7 +57,7 @@ function ensurePanel() {
   panel = document.createElement("section");
   panel.className = "notifications-panel"; panel.hidden = true;
   panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "알림");
-  panel.innerHTML = `<header class="notifications-head"><strong>알림 <span class="notifications-count"></span></strong><div class="notifications-actions"><button type="button" class="cc-btn cc-btn-txt" data-action="read">모두 읽음</button><button type="button" class="cc-btn cc-btn-txt" data-action="clear">지난 알림 지우기</button></div><button type="button" class="cc-btn cc-btn-txt cc-btn-icon notifications-close" aria-label="알림 닫기">×</button></header>
+  panel.innerHTML = `<header class="notifications-head"><strong>알림 <span class="notifications-count"></span></strong><div class="notifications-actions"><button type="button" class="cc-btn cc-btn-txt" data-action="read">모두 읽음</button><button type="button" class="cc-btn cc-btn-txt" data-action="clear">지난 알림 삭제</button></div><button type="button" class="cc-btn cc-btn-txt cc-btn-icon notifications-close" aria-label="알림 닫기">×</button></header>
     <div class="notifications-filters" role="group" aria-label="알림 필터"><div class="cc-seg"><button type="button" data-filter="all">전체 <span class="notifications-all-count"></span></button><button type="button" data-filter="pending">입력 대기 <span class="notifications-pending-count"></span></button></div></div>
     <div class="notifications-list"></div>
     <footer class="notifications-foot">누르면 해당 에이전트로 이동합니다</footer>`;
@@ -92,7 +92,7 @@ function ensurePanel() {
 
 function timeLabel(at) {
   const min = Math.max(0, Math.floor((Date.now() - at) / 60000));
-  if (min < 1) return "지금";
+  if (min < 1) return "방금";
   if (min < 60) return `${min}분 전`;
   const hour = Math.floor(min / 60);
   if (hour < 24) return `${hour}시간 전`;
@@ -121,8 +121,8 @@ function render() {
   const spaces = new Map(ctx.orderedSpaces().map((space) => [space.id, space.label || space.id]));
   const records = state.records.filter((record) => filter === "all" || record.pending);
   const list = panel.querySelector(".notifications-list");
-  setHtml(list, records.length ? records.map((record) => `<button type="button" class="notifications-item${record.read ? "" : " unread"}" data-id="${ctx.esc(record.id)}"><span class="dot ${dotFor(record)}"></span><span class="notifications-item-main"><strong>${titleFor(record)}</strong><small>${ctx.esc(spaces.get(record.workspaceId) || record.workspaceId)} · ${ctx.esc(record.agentName)} · <em>${record.pending ? "입력 대기" : "지난 알림"}</em></small></span><time>${timeLabel(record.at)}</time></button>`).join("")
-    : `<div class="notifications-empty">${filter === "pending" ? "입력을 기다리는 에이전트가 없습니다" : "알림이 없습니다"}</div>`);
+  patchHtml(list, records.length ? records.map((record) => `<button type="button" class="notifications-item${record.read ? "" : " unread"}" data-id="${ctx.esc(record.id)}"><span class="dot ${dotFor(record)}"></span><span class="notifications-item-main"><strong>${titleFor(record)}</strong><small>${ctx.esc(spaces.get(record.workspaceId) || record.workspaceId)} · ${ctx.esc(record.agentName)} · <em>${record.pending ? "입력 대기" : "지난 알림"}</em></small></span><time>${timeLabel(record.at)}</time></button>`).join("")
+    : `<div class="notifications-empty">${filter === "pending" ? "입력을 기다리는 에이전트가 없습니다" : "알림이 없습니다"}</div>`, (node) => node.dataset.id);
 }
 
 function closePanel() {

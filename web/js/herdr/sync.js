@@ -64,6 +64,7 @@ function setOther(on) {
 export function scheduleHerdrSync(paneId) {
   clearTimeout(herdrSyncTimer);
   herdrSyncTimer = null;
+  if (callHook("agentchat.selectedTab")) return;
   if (paneId && paneId === getCurTarget()) { herdrSyncPane = null; setOther(false); followFocus(); return; }
   if (!paneId && herdrOnOther) { herdrSyncPane = null; followFocus(); return; }
   herdrSyncPane = paneId || OTHER;
@@ -74,6 +75,7 @@ export function scheduleHerdrSync(paneId) {
 
 function applyHerdrFocus(paneId) {
   if (!paneId || paneId === getCurTarget()) return;
+  if (callHook("agentchat.selectedTab")) return;
   if (Date.now() - lastUserSelect < 1500) { scheduleHerdrSync(paneId === OTHER ? null : paneId); return; } // 사용자 선택 우선(쿨다운), 끝나면 다시 판정
   if (paneId === OTHER) { setOther(true); followFocus(); return; }
   const a = agentByPane(paneId);

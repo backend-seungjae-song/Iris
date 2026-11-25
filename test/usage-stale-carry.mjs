@@ -80,3 +80,46 @@ test("opencode 쿠키는 값만 붙여 넣어도 이름을 갖춘다", () => {
   assert.equal(normalizeOpencodeCookie("auth=zz; other=1"), "auth=zz; other=1");
   assert.equal(normalizeOpencodeCookie("  "), "");
 });
+
+test("큰 사용량 응답을 해석하는 동안 다른 요청을 처리하고 직속 필드만 읽는다", async t => {
+  const { fetchAllUsage, PROVIDERS } = await import("../server/usage.js");
+  const raw = "rollingUsage:$R[28]={nested:{usagePercent:95},usagePercent:25,resetInSec:60}," +
+    "{}".repeat(150000) + ",weeklyUsage:{usagePercent:35,resetInSec:100}";
+  let yielded = false;
+  t.mock.method(globalThis, "fetch", async () => ({
+    ok: true,
+    text: async () => { setImmediate(() => { yielded = true; }); return raw; },
+  }));
+  const skip = Object.fromEntries(PROVIDERS.filter(id => id !== "opencode-go").map(id => [id, Date.now() + 60000]));
+  const results = await fetchAllUsage({ opencodeCookie: "auth=fixture", opencodeWorkspace: "wk_test" }, skip);
+  const usage = results.find(result => result.provider === "opencode-go");
+  assert.equal(usage.session.usedPercent, 25);
+  assert.equal(yielded, true);
+});
+
+test("Gemini와 Grok의 두 번째 요청에도 인증 만료와 재시도 시각을 적용한다", async t => {
+  const { fetchAllUsage, PROVIDERS } = await import("../server/usage.js");
+  const fs = (await import("node:fs")).default;
+  t.mock.method(fs, "readFileSync", name => {
+    if (name.endsWith("oauth_creds.json")) return JSON.stringify({ access_token: "fixture" });
+    if (name.endsWith("auth.json")) return JSON.stringify({ fixture: { key: "fixture" } });
+    throw new Error("예상하지 못한 파일");
+  });
+  let status = 401;
+  t.mock.method(globalThis, "fetch", async url => {
+    if (url.includes("loadCodeAssist")) return Response.json({ cloudaicompanionProject: "sample" });
+    if (url.includes("format=credits")) return Response.json({});
+    return new Response(null, { status, headers: { "retry-after": "20" } });
+  });
+  const providers = ["gemini", "grok"];
+  const skip = Object.fromEntries(PROVIDERS.filter(id => !providers.includes(id)).map(id => [id, Date.now() + 60000]));
+  for (status of [401, 429]) {
+    const before = Date.now();
+    const results = await fetchAllUsage({}, skip);
+    for (const provider of providers) {
+      const usage = results.find(row => row.provider === provider);
+      assert.equal(usage.failureKind, status === 401 ? "stale-token" : "rate-limited");
+      if (status === 429) assert.ok(usage.retryAt >= before + 20000 && usage.retryAt <= Date.now() + 20000);
+    }
+  }
+});

@@ -20,6 +20,19 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 260));
 }
 
+test("손상된 space-keys.json은 읽기 전에 UUID 백업을 남긴다", async (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-space-key-corrupt-"));
+  const broken = "{\"w-broken\":";
+  fs.writeFileSync(path.join(stateDir, "space-keys.json"), broken, { mode: 0o600 });
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+
+  const keys = await fresh(stateDir, "corrupt");
+  const backups = fs.readdirSync(stateDir).filter((name) => /^space-keys\.json\.corrupt-[0-9a-f-]+$/.test(name));
+  assert.deepEqual(keys.allKeys(), {});
+  assert.equal(backups.length, 1);
+  assert.equal(fs.readFileSync(path.join(stateDir, backups[0]), "utf8"), broken);
+});
+
 test("생성 폴더에서 다른 폴더 객체로 이동하면 identity가 바인딩을 바꾼다", async (t) => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-space-key-requested-"));
   const createdAt = fs.mkdtempSync(path.join(os.tmpdir(), "iris-created-at-"));

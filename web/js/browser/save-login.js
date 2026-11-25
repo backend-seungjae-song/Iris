@@ -102,8 +102,8 @@ export async function offerSaveLogin(cap, tabId, partition) {
   const site = String(cap.origin).replace(/^https?:\/\//, "");
   askBar(
     verdict === "update"
-      ? `${site} 의 ${cap.username} 비밀번호가 바뀌었습니다. 금고를 새 것으로 바꿀까요?`
-      : `${site} 의 ${cap.username} 로그인을 금고에 저장할까요?`,
+      ? `${site} 의 ${cap.username} 비밀번호가 바뀌었습니다. 저장된 로그인을 새 비밀번호로 바꿀까요?`
+      : `${site} 의 ${cap.username} 로그인을 저장할까요?`,
     verdict === "update" ? "바꾸기" : "저장",
     async () => {
       try {
@@ -111,7 +111,7 @@ export async function offerSaveLogin(cap, tabId, partition) {
           origin: cap.origin, url: cap.url || cap.origin,
           username: cap.username, password: cap.password,
         });
-        if (r && r.ok) showToast(verdict === "update" ? "비밀번호를 바꿨습니다." : "금고에 저장했습니다.", { level: "ok" });
+        if (r && r.ok) showToast(verdict === "update" ? "비밀번호를 바꿨습니다." : "로그인을 저장했습니다.", { level: "ok" });
         else showToast("저장하지 못했습니다.", { level: "err" });
       } catch { showToast("저장하지 못했습니다.", { level: "err" }); }
     },

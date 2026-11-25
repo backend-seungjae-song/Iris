@@ -50,10 +50,10 @@ test("끊긴 동안 누른 답은 알림을 닫지 않고 다시 연결한 뒤 �
   await page.click(".iris-notice-actions button");
   assert.equal(await page.evaluate(() => notices.hasNotice("ask-offline")), true);
   assert.equal(await page.evaluate(() => sent.some((m) => m.type === "ai-ask-answer")), false);
-  assert.equal(await page.evaluate(() => handlers.wsSend({ type: "ai-ask-answer", id: "ask-offline", answer: "다 했음" })), false);
+  assert.equal(await page.evaluate(() => handlers.wsSend({ type: "ai-ask-answer", id: "ask-offline", answer: "완료" })), false);
   await page.evaluate(() => { socket.readyState = 1; });
   await page.click(".iris-notice-actions button");
-  assert.equal(await page.evaluate(() => sent.at(-1).answer), "다 했음");
+  assert.equal(await page.evaluate(() => sent.at(-1).answer), "완료");
   assert.equal(await page.evaluate(() => notices.hasNotice("ask-offline")), true, "서버가 수신을 확인하기 전에는 닫지 않는다");
   await page.evaluate(() => handlers.handleAiAskClosedMessage({ id: "ask-offline" }));
   assert.equal(await page.evaluate(() => notices.hasNotice("ask-offline")), false);
@@ -97,7 +97,7 @@ test("일반 알림의 답은 즉시 닫고 전송 예외가 발생한 서버 �
   });
   await page.click(".iris-notice-actions button");
   assert.equal(await page.evaluate(() => notices.hasNotice("failed-send")), true);
-  assert.equal(await page.evaluate(() => handlers.wsSend({ type: "ai-ask-answer", id: "failed-send", answer: "다 했음" })), false);
+  assert.equal(await page.evaluate(() => handlers.wsSend({ type: "ai-ask-answer", id: "failed-send", answer: "완료" })), false);
 }));
 
 test("서버 인증 응답에는 재전송할 질문 id의 전체 목록을 포함한다", () => {

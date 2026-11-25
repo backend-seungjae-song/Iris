@@ -4,10 +4,15 @@ import path from "node:path";
 import * as archive from "./archive.js";
 import { attachAgentLineage, watchAgentLineage } from "./agent-lineage.js";
 import { attachQuestionState } from "./agent-question.js";
+import { attachAgySessions, prewarmAgyScan } from "./agy-session.js";
 import { attachCodexSessions, prewarmCodexScan } from "./codex-session.js";
 import { focusChangedSince, focusMark } from "./focus-epoch.js";
 import { CONFIG_DIR as HERDR_CONFIG_DIR } from "./herdr-session.cjs";
-import { buildMonitorState } from "./join.js";
+import { includeEmbeddedPanes, liveEmbeddedPane } from "./paseo-ui/embedded-pane.js";
+import { currentEmbeddedProvider } from "./paseo-ui/index.js";
+import { codexTerminalTitleIdentity, discoverSharedCodexForPane, reapSharedCodex, selectSharedCodexThread, sharedCodexPane } from "./paseo-ui/codex-shared-daemon.mjs";
+import { liveManagedPane } from "./paseo-ui/managed-pane.js";
+import { agentKind, buildMonitorState } from "./join.js";
 import * as spaceKey from "./space-key.js";
 
 // Herdr에서 workspace 후보 snapshot을 만들고 재계산 이벤트를 모으는 runtime owner.
@@ -38,6 +43,7 @@ let broadcast;
 let debounceTimer = null;
 let resubTimer = null;
 let lineageWatcher = null;
+let codexCleanupTimer;
 let lineageDebounceTimer = null;
 // 직전 build 가 본 workspace id. 다음 build 가 agent·workspace 목록을 기다리지 않고 tab.list 를 같은 왕복에 보낸다.
 let knownWorkspaceIds = [];
@@ -92,8 +98,7 @@ export function buildSpaceRecoveryEvidence(workspaces = []) {
 // Spaces(워크스페이스) 목록 + 각 Space의 대표 폴더(cwd). 좌상 사이드바용.
 // knownList: 호출자가 agent.list 와 함께 이미 받은 workspace.list. 없으면 여기서 묻는다.
 export async function buildWorkspaces(agents, knownList = null) {
-  let list = [];
-  try { list = knownList || await herdr.workspaceList(); } catch {}
+  const list = knownList ?? await herdr.workspaceList();
   const folderByWs = new Map();
   for (const a of agents) {
     if (a.workspace_id && a.cwd && !folderByWs.has(a.workspace_id)) folderByWs.set(a.workspace_id, a.cwd);
@@ -156,41 +161,106 @@ export async function buildWorkspaces(agents, knownList = null) {
   };
 }
 
+async function discoverNativeCodexPane(agent, raw) {
+  if (typeof herdr?.call !== "function" || !agent?.terminalId || !raw?.pane_id) return { attempted: false, binding: null };
+  let processInfo;
+  try {
+    processInfo = await herdr.call("pane.process_info", { pane_id: raw.pane_id });
+  } catch {
+    return { attempted: false, binding: null };
+  }
+  const title = raw.terminal_title_stripped || raw.terminal_title;
+  const diagnostic = {};
+  const binding = await discoverSharedCodexForPane({
+    terminalId: raw.terminal_id || agent.terminalId,
+    cwd: raw.cwd || agent.cwd,
+    threadId: raw.agent_session?.kind === "id" ? raw.agent_session.value : null,
+    rawTitle: title,
+    processInfo,
+    paneId: raw.pane_id,
+    workspaceId: raw.workspace_id,
+    diagnostic,
+  });
+  return { attempted: true, binding, title, status: diagnostic.status };
+}
+
 // 관제 상태 재계산의 build 단계. 파일 I/O가 있으므로 runtime-state의 재진입 guard가 이 함수를 부른다.
 export async function buildWorkspaceSnapshot() {
   // herdr 는 호출 하나에 약 100ms 걸리고 서로 독립인 호출은 동시에 끝난다. agent·workspace 목록과
   // 직전 회차가 알던 workspace 의 tab 목록을 한 왕복에 묻고, 새로 생긴 workspace 의 tab 목록만 한 번 더 묻는다.
   // 포커스 요청과 겹쳤는지는 시작 시점의 표로 판정한다.
   const mark = focusMark();
-  const earlyTabs = new Map(knownWorkspaceIds.map((w) => [w, herdr.tabList(w).catch(() => null)]));
+  const earlyTabs = new Map(knownWorkspaceIds.map((w) => [w, Promise.allSettled([herdr.tabList(w)])]));
   prewarmCodexScan();
-  const [agents, workspaceList] = await Promise.all([herdr.agentList(), herdr.workspaceList().catch(() => [])]);
+  prewarmAgyScan();
+  const [agents, workspaceList] = await Promise.all([herdr.agentList().then(agents => includeEmbeddedPanes(agents, herdr)), herdr.workspaceList()]);
   // 원자적 재계산: 완전히 병합한 뒤에만 runtime snapshot에 대입한다. 대입을 먼저 하면
   // tab.list I/O를 기다리는 동안 새 연결이 tabLabel 미병합 상태를 캡처하는 레이스가 생긴다.
-  const nextState = buildMonitorState(agents);
+  const managed = new Map();
+  for (const a of agents) {
+    try {
+      const embedded = liveEmbeddedPane(a);
+      const record = embedded ? { ...embedded, embedded: true } : liveManagedPane(a);
+      if (record) managed.set(a.pane_id, record);
+    } catch (error) {
+      console.warn(`[paseo] ${a.pane_id}: ${error.message}`);
+      managed.set(a.pane_id, { provider: a.agent, agentId: null });
+    }
+  }
+  const legacy = buildMonitorState(agents.filter((a) => !managed.has(a.pane_id)));
+  const byPane = new Map(legacy.map((a) => [a.paneId, a]));
+  const nextState = agents.map((a) => {
+    const record = managed.get(a.pane_id);
+    if (!record) return byPane.get(a.pane_id);
+    return { ...(record.embedded ? { embeddedProvider: record.provider, embeddedNative: !!record.native, embeddedTerminalPhase: a.embeddedTerminalPhase } : { managedProvider: record.provider }), agent: record.provider, status: a.agent_status,
+      cwd: a.cwd, workspaceId: a.workspace_id, paneId: a.pane_id, terminalId: a.terminal_id || null,
+      focused: !!a.focused, sessionUuid: record.agentId, transcriptFile: null, cross: null, subagents: [] };
+  });
   // 탭 목록(#8 라벨 + 탭이동): 워크스페이스별 tab.list → 라벨 맵 + 전체 탭 목록(세션 없는 탭 포함).
   // 에이전트 없는 워크스페이스도 포함해야 세션 미활성 탭까지 순환·포커스 가능.
   const tabLabel = new Map();
   const tabsByWorkspace = {};
   const allWsIds = [...new Set([...workspaceList.map((w) => w.workspace_id), ...agents.map((a) => a.workspace_id)].filter(Boolean))];
   const fetchTabs = async (w) => {
-    try {
-      const tabs = await (earlyTabs.get(w) ?? herdr.tabList(w));
-      if (!tabs) return;
-      tabsByWorkspace[w] = tabs.map((t) => ({ tabId: t.tab_id, number: t.number, label: t.label || "", focused: !!t.focused, agentStatus: t.agent_status || null, paneCount: t.pane_count || 0 }));
-      for (const t of tabs) tabLabel.set(t.tab_id, t.label);
-    } catch {}
+    const [early] = await (earlyTabs.get(w) ?? []);
+    if (early?.status === "rejected") throw early.reason;
+    const tabs = early ? early.value : await herdr.tabList(w);
+    tabsByWorkspace[w] = tabs.map((t) => ({ tabId: t.tab_id, number: t.number, label: t.label || "", focused: !!t.focused, agentStatus: t.agent_status || null, paneCount: t.pane_count || 0 }));
+    for (const t of tabs) tabLabel.set(t.tab_id, t.label);
   };
-  const [, { workspaces, migrations }] = await Promise.all([
+  const [, , { workspaces, migrations }] = await Promise.all([
     // codex 세션 키는 herdr가 제공하지 않으므로 프로세스에서 찾아 채운다. 이 값을 채워야
     // 화면에서 codex도 접을 수 있는 세션으로 표시된다(codex-session.js 주석 참조).
-    attachCodexSessions(nextState, herdr, agents),
+    attachCodexSessions(legacy, herdr, agents),
+    attachAgySessions(legacy, herdr, agents),
     buildWorkspaces(agents, workspaceList),
     Promise.all(allWsIds.map(fetchTabs)),
   ]);
+  const codex = currentEmbeddedProvider("codex");
+  const rawByPane = new Map(agents.map(a => [a.pane_id, a]));
+  await Promise.all(legacy.filter(a => agentKind(a.agent) === "codex" && a.terminalId).map(async agent => {
+    const raw = rawByPane.get(agent.paneId);
+    const discovered = await discoverNativeCodexPane(agent, raw);
+    if (discovered.attempted) {
+      if (discovered.binding?.threadId) {
+        Object.assign(agent, { sessionUuid: discovered.binding.threadId, sessionFile: null, transcriptFile: null });
+        if (codex) Object.assign(agent, { embeddedProvider: "codex", sharedCodex: true });
+      } else if (discovered.status === "ambiguous") {
+        // Herdr의 stale ID나 같은 cwd의 legacy rollout으로 다른 pane 대화를 열지 않음
+        Object.assign(agent, { sessionUuid: null, sessionFile: null, transcriptFile: null });
+      }
+      return;
+    }
+    if (!codex) return;
+    const binding = await sharedCodexPane(agent.terminalId);
+    if (binding?.ownerManaged === false || !binding?.threadId) return;
+    const title = raw?.terminal_title_stripped || raw?.terminal_title;
+    const thread = codexTerminalTitleIdentity(title) ? await selectSharedCodexThread(binding, title) : binding.threadId;
+    if (thread) Object.assign(agent, { sessionUuid: thread, embeddedProvider: "codex", sharedCodex: true, sessionFile: null, transcriptFile: null });
+  }));
   knownWorkspaceIds = allWsIds;
   // codex 기록 파일까지 채운 뒤, 답을 끝낸 에이전트가 질문을 남겼는지 붙인다(status 는 그대로 둔다).
-  attachQuestionState(nextState);
+  attachQuestionState(legacy);
   // 부모 세션 UUID까지 검증할 수 있도록 codex 키를 채운 다음, launcher가 남긴 명시적
   // receipt를 현재 pane/terminal snapshot과 대조해 유효한 관계만 붙인다.
   attachAgentLineage(nextState, agents);
@@ -253,5 +323,8 @@ export function startWorkspaceRuntime() {
   // agent.start 응답 뒤 launcher가 receipt를 쓰므로 pane 이벤트의 150ms 재계산보다 늦을 수 있다.
   // 소켓별 lineage 디렉터리 metadata 변화를 보고 한 번 더 계산해 그 순서 경쟁을 닫는다.
   if (!lineageWatcher) lineageWatcher = watchAgentLineage(handleLineageChange);
+  codexCleanupTimer ??= setInterval(() => {
+    void reapSharedCodex().catch(error => console.warn("Codex 종료 상태 확인 실패", error.message));
+  }, 60_000).unref();
   herdr.connect();
 }

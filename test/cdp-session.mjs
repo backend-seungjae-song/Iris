@@ -241,6 +241,21 @@ test("destroy는 child primer와 frame origin 장부까지 버린다", () => {
   assert.deepEqual(f.origins, [["https://one.example"], ["https://one.example"]]);
 });
 
+test("session primer 해제는 document와 debugger 세대를 버려 같은 WebContents ID 재등록을 초기화한다", () => {
+  const f = fixture();
+  f.session.registerSessionPrimer(f.wc.id, () => {}, (_childDbg, sid) => f.childPrimers.push(sid));
+  f.session.registerSessionPrimer(f.wc.id, null);
+  f.session.registerSessionPrimer(f.wc.id, () => {}, (_childDbg, sid) => f.childPrimers.push(sid));
+
+  assert.deepEqual(f.generations.at(-1), {
+    type: "browser-target-generation",
+    wc: f.wc.id,
+    documentGeneration: 1,
+    debuggerGeneration: 0,
+    reason: "connect",
+  });
+});
+
 test("실행기 재등록은 이미 알려진 frame origin과 열린 dialog 전체 상태를 다시 보낸다", () => {
   const f = fixture();
   f.session.primeSession(f.wc);

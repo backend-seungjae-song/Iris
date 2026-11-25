@@ -172,12 +172,12 @@ export function createQaLedger({ anchor, dir, activity } = {}) {
     const { folder, journal } = paths(runId);
     const anchorHead = await anchorData({ op: "read", runId });
     let stat;
-    try { stat = fs.statSync(journal); } catch { fail("QA 장부 파일이 없습니다."); }
+    try { stat = fs.statSync(journal); } catch { fail("QA 기록 파일이 없습니다."); }
     // 다른 파일·줄어든 파일·크기 그대로 다시 쓴 파일은 처음부터 확인
     if (base && (base.ino !== stat.ino || stat.size < base.size || (stat.size === base.size && stat.mtimeMs !== base.mtimeMs))) base = null;
     let raw;
-    try { raw = readTail(journal, base ? base.size : 0, stat.size); } catch { fail("QA 장부 파일이 없습니다."); }
-    if (raw && !raw.endsWith("\n")) fail("QA 장부 마지막 줄이 잘렸습니다.");
+    try { raw = readTail(journal, base ? base.size : 0, stat.size); } catch { fail("QA 기록 파일이 없습니다."); }
+    if (raw && !raw.endsWith("\n")) fail("QA 기록 마지막 줄이 잘렸습니다.");
     let head = base ? base.head : hash(`iris-qa/v1:${runId}`), seq = base ? base.seq : 0;
     const events = base ? base.events.slice() : [];
     // 20ms 마다 이벤트 루프에 양보. 사진 900MB 회차를 한 번에 확인하면 서버가 25초 넘게 멈춰
@@ -187,11 +187,11 @@ export function createQaLedger({ anchor, dir, activity } = {}) {
       if (!line) continue;
       if (performance.now() - slice > 20) { await new Promise(resolve => setImmediate(resolve)); slice = performance.now(); }
       let rec;
-      try { rec = JSON.parse(line); } catch { fail("QA 장부 줄을 읽지 못했습니다."); }
+      try { rec = JSON.parse(line); } catch { fail("QA 기록 줄을 읽지 못했습니다."); }
       if (rec.seq !== seq + 1 || rec.prevHash !== head || !rec.event || typeof rec.event !== "object")
-        fail("QA 장부 순번 또는 이전 해시가 변조됐습니다.");
+        fail("QA 기록 순번 또는 이전 해시가 변조됐습니다.");
       const expected = hash(JSON.stringify({ seq: rec.seq, prevHash: rec.prevHash, event: rec.event }));
-      if (rec.hash !== expected) fail("QA 장부 해시가 변조됐습니다.");
+      if (rec.hash !== expected) fail("QA 기록 해시가 변조됐습니다.");
       if (rec.event.shot && photos) {
         const shot = path.resolve(folder, rec.event.shot);
         if (!shot.startsWith(path.join(folder, "shots") + path.sep)) fail("QA 사진 경로가 잘못됐습니다.");
@@ -205,7 +205,7 @@ export function createQaLedger({ anchor, dir, activity } = {}) {
       }
       head = rec.hash; seq = rec.seq; events.push(rec);
     }
-    if (anchorHead.hash !== head || anchorHead.seq !== seq) fail("QA 머리 해시가 장부와 다릅니다.");
+    if (anchorHead.hash !== head || anchorHead.seq !== seq) fail("QA 머리 해시가 기록과 다릅니다.");
     if (!retain) return { runId, head, seq, events };
     checked.set(runId, { ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, head, seq, events });
     return { runId, head, seq, events: events.slice() };
@@ -250,7 +250,7 @@ export function createQaLedger({ anchor, dir, activity } = {}) {
     const build = captureQaBuild(plan?.build);
     const { folder, journal } = paths(runId);
     fs.mkdirSync(root, { recursive: true });
-    if (fs.existsSync(folder)) fail("이미 장부가 있는 QA 회차입니다.");
+    if (fs.existsSync(folder)) fail("이미 기록이 있는 QA 회차입니다.");
     const head = hash(`iris-qa/v1:${runId}`);
     await anchorData({ op: "begin", runId, hash: head, seq: 0 });
     fs.mkdirSync(folder);

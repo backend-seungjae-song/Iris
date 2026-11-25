@@ -1,0 +1,20 @@
+   │ AND labels = alpha
+   │ AND labels = beta
+   │ AND labels = gamma
+   │ AND labels = delta
+   │ AND labels = epsilon
+   │ AND labels = zeta
+   │ AND labels = eta
+   │ AND labels = theta
+   │ ORDER BY created DESC
+ limit: 1
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ About the jira — Search Issues Tool:
+ │ Search Jira issues using JQL (Jira Query Language).
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for jira — Search Issues commands in ~/proj/…
+   3. No
+ ↑ 8 more lines
+ Esc to cancel · Tab to amend

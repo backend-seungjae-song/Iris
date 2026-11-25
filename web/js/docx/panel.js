@@ -134,7 +134,7 @@ async function renderDocxContent(t) {
       const parseError = typeof editor.snapshot === "function" ? editor.snapshot().parseError : null;
       if (!parseError) return false;
       cleanupDocxRender(t);
-      t.docxError = "이 문서는 열기 어렵습니다.";
+      t.docxError = "이 문서를 열 수 없습니다.";
       renderFileView(t, { expectedOwner: t, expectedToken: docxRenderToken });
       return true;
     };
@@ -171,7 +171,7 @@ async function renderDocxContent(t) {
     if (t.docxGeneration !== docxGeneration) return;
     if (t.docxRenderToken !== docxRenderToken) return;
     if (t !== getRenderedFileOwner() || docxRenderToken !== getRenderedFileToken()) return;
-    t.docxError = "이 문서는 열기 어렵습니다.";
+    t.docxError = "이 문서를 열 수 없습니다.";
     renderFileView(t, { expectedOwner: t, expectedToken: docxRenderToken });
   }
 }

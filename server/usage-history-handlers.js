@@ -107,7 +107,7 @@ function scan(force) {
     child = null;
     scanning = false;
     progress = null;
-    if (code !== 0 && !error) error = `훑개가 ${code} 로 끝났습니다`;
+    if (code !== 0 && !error) error = `집계 프로세스가 코드 ${code}로 종료됐습니다`;
     announce();
   });
   child.on("error", (err) => { error = String((err && err.message) || err).slice(0, 300); });

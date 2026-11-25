@@ -27,7 +27,7 @@ test('워크트리 터미널과 세션은 지정 폴더로 이동하고 실행�
       paneRead: async () => ({ text: '$ ' }),
       paneSendText: async (...args) => calls.push(['send', ...args]),
     } });
-    handleTab({ _local: true, send: message => assert.fail(message) }, { type: 'tab.create', workspaceId: 'owner', cwd, launch });
+    handleTab({ readyState: 1, _local: true, send: message => assert.fail(message) }, { type: 'tab.create', workspaceId: 'owner', cwd, launch, chatOnly: true });
     await completed;
     assert.deepEqual(calls[0], ['create', 'owner']);
     const command = shellCommand(['cd', '--', cwd]);
@@ -44,10 +44,10 @@ test('없는 경로·잘못된 경로와 원격 생성은 탭을 만들기 전�
   initWorkspaceHandlers({ herdr: { tabCreate: () => { created++; return Promise.resolve({}); } } });
   for (const cwd of ['', 'relative', root + '/missing', root + '\ncommand', 123]) {
     const errors = [];
-    handleTab({ _local: true, send: message => errors.push(JSON.parse(message)) }, { type: 'tab.create', cwd });
+    handleTab({ readyState: 1, _local: true, send: message => errors.push(JSON.parse(message)) }, { type: 'tab.create', cwd });
     assert.equal(errors[0]?.type, 'control-error');
   }
-  handleTab({ _local: false, send() {} }, { type: 'tab.create', cwd: root });
+  handleTab({ readyState: 1, _local: false, send() {} }, { type: 'tab.create', cwd: root });
   assert.equal(created, 0);
 });
 
@@ -63,7 +63,7 @@ test('생성 직후 pane 정보가 늦게 오면 새 탭만 찾아 실행하고 
       paneRead:async()=>({text:'$ '}),
       paneSendText:async(...args)=>calls.push(args),
     }});
-    handleTab({_local:true,send:message=>errors.push(JSON.parse(message))},{type:'tab.create',workspaceId:'owner',cwd:root});
+    handleTab({readyState:1,_local:true,send:message=>errors.push(JSON.parse(message))},{type:'tab.create',workspaceId:'owner',cwd:root});
     await done;
     if(appears){ assert.equal(reads,2);assert.equal(calls[0][0],'new-pane');assert.equal(errors.length,0); }
     else { assert.equal(reads,10);assert.equal(calls.length,0);assert.match(errors[0].message,/새 탭의 터미널/); }

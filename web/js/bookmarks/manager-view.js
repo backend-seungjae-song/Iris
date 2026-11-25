@@ -118,11 +118,11 @@ export function sectionsMarkup(sections, ctx = {}) {
         ? `<input class="bkm-rename" data-bkm-rename="${esc(k)}" value="${esc(r.title)}" maxlength="60" aria-label="북마크 이름">`
         : `<button class="bkm-title" data-bkm-edit="${esc(k)}" title="눌러서 이름 바꾸기">${esc(r.title)}</button>`;
       return folderHead + `<div class="bkm-row${sel.has(k) ? " on" : ""}${r.folder ? " in-folder" : ""}${ctx.fresh === k ? " bkm-fresh" : ""}" data-bkm-row="${esc(k)}">
-        <label class="bkm-ck" title="고르기"><input type="checkbox" data-bkm-sel="${esc(k)}"${sel.has(k) ? " checked" : ""} aria-label="${esc(r.title)} 고르기"><span class="bkm-box"><svg class="i" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></span></label>
+        <label class="bkm-ck" title="선택"><input type="checkbox" data-bkm-sel="${esc(k)}"${sel.has(k) ? " checked" : ""} aria-label="${esc(r.title)} 선택"><span class="bkm-box"><svg class="i" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></span></label>
         <span class="bkm-av" aria-hidden="true">${esc(initialOf(r))}</span>
         <div class="bkm-tx">${title}<span class="bkm-url" title="${esc(r.url)}">${esc(r.url.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</span></div>
         <span class="bkm-acct" data-bkm-acct="${esc(k)}"></span>
-        <button class="bkm-del" data-bkm-del="${esc(k)}" title="지우기" aria-label="${esc(r.title)} 지우기"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
+        <button class="bkm-del" data-bkm-del="${esc(k)}" title="삭제" aria-label="${esc(r.title)} 삭제"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
       </div>`;
     }).join("");
     return `<section class="bkm-sec" data-bkm-sec="${esc(s.key)}">

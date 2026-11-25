@@ -14,7 +14,11 @@ function processAlive(pid) {
 export function processStartedAt(pid) {
   if (!Number.isInteger(pid) || pid < 1) return null;
   try {
-    const value = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    const windows = process.platform === "win32";
+    const args = windows ? ["-NoProfile", "-NonInteractive", "-Command",
+      `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToString("o")`]
+      : ["-o", "lstart=", "-p", String(pid)];
+    const value = execFileSync(windows ? "powershell.exe" : "ps", args, {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000,
     }).trim();
     return value || null;

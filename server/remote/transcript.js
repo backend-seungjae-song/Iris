@@ -7,6 +7,7 @@ import { imageFromRecord, readForward, readTailWindow } from "../agent-chat-tran
 import stateHomeModule from "../state-home.cjs";
 import { mediaImage, mediaText, resolveMediaImage } from "./media-links.js";
 import { projectItem, projectTranscriptAppend } from "./projection.js";
+import { isActualEmbedded } from "./agents.js";
 
 const { stateHome } = stateHomeModule;
 const PAGE_ITEMS = 50;
@@ -179,6 +180,7 @@ export function createTranscriptService(options = {}) {
   function target(agentRef) {
     const agent = agents.resolve(agentRef);
     if (!agent) return null;
+    if (isActualEmbedded(agent.source) || agent.source?.managedProvider) return null;
     const candidate = agent.kind === "claude" ? agent.source.transcriptFile
       : agent.kind === "codex" ? agent.source.sessionFile : null;
     const file = candidate ? real(candidate) : null;

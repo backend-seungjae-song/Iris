@@ -32,7 +32,7 @@ import {
 import { getDiscardedWebview, getWebview } from "./webview-store.js";
 import {
   authoritativeAiProtection, isLiveSpaceKey, scheduleWebviewThrottling,
-  discardWebview, sleepDeadSpaceWebviews, syncQaWebviewPlacement, wakeWebview,
+  discardWebview, sleepDeadSpaceWebviews, syncAiBehindPlacement, wakeWebview,
 } from "./webview.js";
 import { addTab, ensureTabSpace, getTabs, getTabSpaces } from "../center/tab-store.js";
 import { callHook } from "../core/hooks.js";
@@ -186,7 +186,7 @@ export function applyBrowserState(st) {
   reconcileDocTabs();                                         // 분리창: docx/sheet 탭을 자체 에디터로 동기화
   if (typeof reconcileConsoleDock === "function") reconcileConsoleDock(); // 콘솔: 도킹 상태 반영(슬라이스 4)
   reconcileAiTabs();                                          // 에이전트 탭은 보고 있지 않아도 살려 둔다
-  syncQaWebviewPlacement();
+  syncAiBehindPlacement();
   syncDockedTabLabels();                                       // 콘솔 도킹 브라우저 탭 라벨을 서버 name/title에 맞춤
   // 지금 화면에 그려지는 탭이 무엇인지 서버에 다시 알린다. 재접속 직후 한 번만 보내면 그 시점엔
   // 아직 이 상태(sbState)가 오지 않아 활성 탭을 몰라 건너뛴다. 서버는 그 뒤로 "보이는 탭 없음"으로

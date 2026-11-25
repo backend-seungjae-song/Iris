@@ -58,7 +58,7 @@ function createCertificateTrust({ appUrl, fetchImpl = fetch }) {
       p = askHuman(wc && wc.id,
         `이 로컬 서버의 인증서를 발급한 곳을 확인할 수 없습니다.\n\n`
         + `주소: https://${host}\n지문: ${fp}\n\n`
-        + `직접 띄운 개발 서버가 맞으면 계속하세요. 아니면 취소하세요.`)
+        + `직접 실행한 개발 서버가 맞으면 계속하세요. 아니면 취소하세요.`)
         .then((ok) => { certDecisions.set(key, ok); certAsking.delete(key); return ok; },
               () => { certAsking.delete(key); return false; });
       certAsking.set(key, p);

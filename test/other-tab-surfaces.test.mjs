@@ -19,7 +19,7 @@ const pendingDialogTabId = ({ active, dialogs, shown = [], behind = [], hiddenSt
   (id) => ({
     getClientRects: () => (shown.includes(id) || behind.includes(id) || held.includes(id) ? [{}] : []),
     dataset: held.includes(id) ? { acHeld: " " } : {},
-    classList: { contains: (c) => (c === "qa-owned" ? behind.includes(id) : c === "active" ? shown.includes(id) : false) },
+    classList: { contains: (c) => (c === "ai-behind" ? behind.includes(id) : c === "active" ? shown.includes(id) : false) },
     closest: (sel) => (hiddenStack && /\[hidden\]/.test(sel) ? {} : null),
   }), dialogs);
 

@@ -870,7 +870,7 @@ function stageCookieRows(liveCookiesPath, cookies, { preserveTargetBound = false
       statements.push(`INSERT OR REPLACE INTO cookies (${colList}) VALUES (${values});`);
     }
     statements.push("COMMIT;", "PRAGMA wal_checkpoint(TRUNCATE);", "PRAGMA quick_check;");
-    const checked = execFileSync("/usr/bin/sqlite3", [staging], {
+    const checked = execFileSync("/usr/bin/sqlite3", ["-bail", staging], {
       input: statements.join("\n"), encoding: "utf8", maxBuffer: SQLITE_MAX_BUFFER,
     }).trim().split(/\s+/).pop();
     if (checked !== "ok") throw new Error("스테이징 Cookies DB 무결성 검사 실패");
@@ -1108,7 +1108,7 @@ function thrownReason(e) { return { message: String(e && e.message || e).slice(0
 
 // 지정 프로필의 쿠키 중 대상 파티션에 없는 것만 넣음
 async function importCookiesFromChrome(profileEntry, targetPartition) {
-  if (process.platform !== "darwin") return { error: "Chrome 직접 임포트는 macOS만 지원합니다." };
+  if (process.platform !== "darwin") return { error: "Chrome에서 가져오기는 macOS만 지원합니다." };
   const part = (typeof targetPartition === "string" && isProfilePartition(targetPartition)) ? targetPartition : "persist:acbrowser";
   const sess = session.fromPartition(part);
 

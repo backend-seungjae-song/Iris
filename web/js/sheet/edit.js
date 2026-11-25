@@ -108,7 +108,7 @@ export function svPaint(t) {
   svFillHandle(t);
   const stat = $("#sv-stat");
   if (stat) stat.textContent = one ? "" :
-    `고른 칸 ${cells}개 · 값 있는 칸 ${n}개` + (nums ? ` · 합계 ${Math.round(sum * 1e6) / 1e6} · 평균 ${Math.round(sum / nums * 1e4) / 1e4}` : "");
+    `선택한 셀 ${cells}개 · 값 있는 셀 ${n}개` + (nums ? ` · 합계 ${Math.round(sum * 1e6) / 1e6} · 평균 ${Math.round(sum / nums * 1e4) / 1e4}` : "");
 }
 
 // 고른 칸이 화면 밖이면 그 칸이 있는 조각을 움직인다.

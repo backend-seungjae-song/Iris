@@ -25,6 +25,8 @@
 //   디스크에 기록되지 않은 채 사라져, 다음 실행에서 로그인이 풀린 상태로 나타난다.
 //   현재 목록 확인: node bin/importers.mjs native/electron/storage-lifecycle.cjs
 
+const STORAGE_FLUSH_TIMEOUT_MS = 2500;
+
 function createStorageLifecycle({ forEachHardened, flushPartition, isReady, quit, wait, log }) {
   // Chromium의 persist 파티션이 세션 정본이다. 별도 쿠키 사본을 복원하면 서버가 갱신한 상태를
   // 되돌릴 수 있으므로, 알려진 모든 프로필의 원본 저장소만 flush한다.
@@ -53,7 +55,7 @@ function createStorageLifecycle({ forEachHardened, flushPartition, isReady, quit
     event.preventDefault();
     if (storageQuitInFlight) return;
     storageQuitInFlight = true;
-    const timeout = wait(2500);
+    const timeout = wait(STORAGE_FLUSH_TIMEOUT_MS);
     Promise.race([flush(), timeout]).finally(() => {
       storageQuitReady = true;
       quit();
@@ -63,4 +65,4 @@ function createStorageLifecycle({ forEachHardened, flushPartition, isReady, quit
   return { flush, handleBeforeQuit };
 }
 
-module.exports = { createStorageLifecycle };
+module.exports = { createStorageLifecycle, STORAGE_FLUSH_TIMEOUT_MS };

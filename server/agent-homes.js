@@ -14,6 +14,11 @@ export function codexHome(...parts) {
   return path.join(root, ...parts);
 }
 
+export function agyHome(...parts) {
+  const root = process.env.AGY_HOME || path.join(os.homedir(), ".gemini", "antigravity-cli");
+  return path.join(root, ...parts);
+}
+
 // 작업 폴더의 Claude Code 프로젝트 설정(.claude). 홈과 달리 위치를 바꾸는 환경 변수가 없음
 export function projectClaudeDir(cwd, ...parts) {
   return path.join(cwd, ".claude", ...parts);

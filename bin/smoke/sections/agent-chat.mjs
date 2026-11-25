@@ -93,7 +93,7 @@ export default async function run() {
     const src = read("server/agent-chat.js");
     const fields = new Set([...src.matchAll(/\bmsg\.(\w+)/g)].map((m) => m[1]));
     if (!fields.size) throw new Error("msg 칸을 하나도 세지 못했다");
-    const extra = [...fields].filter((f) => !["type", "key", "paneId", "agentId", "text", "id", "build", "reason", "query", "promptId", "row", "modeId", "taskId", "from", "answers", "dismiss", "missing", "tries"].includes(f));
+    const extra = [...fields].filter((f) => !["type", "key", "paneId", "agentId", "text", "id", "build", "reason", "query", "promptId", "row", "modeId", "taskId", "from", "answers", "dismiss", "missing", "tries", "socketId", "event", "clientNamespace", "session", "action", "data", "cols", "rows"].includes(f));
     if (extra.length) throw new Error(`창에서 받는 칸: ${extra.join(", ")}`);
     return true;
   });

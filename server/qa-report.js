@@ -336,7 +336,7 @@ export async function createQaReport(ledger, runId, { handoff = false, steps: pr
     overview = {...overview,scope:typeof overview.scope === "string" ? [overview.scope] : overview.scope || []};
     const rowIds = new Set((checked.state?.rows || []).map(row=>row.id));
     for(const feature of overview.features || []) {
-      if(feature.cases.some(id=>!rowIds.has(id))) throw new Error("overview의 케이스가 현재 장부에 없습니다.");
+      if(feature.cases.some(id=>!rowIds.has(id))) throw new Error("overview의 케이스가 현재 기록에 없습니다.");
       if(!feature.cases.length && !feature.why?.trim()) throw new Error("케이스가 없는 기능에는 이유가 필요합니다.");
     }
     if(overview.cases) overview.cases = readCaseEvidence(normalizeOverviewCases(overview.cases, rowIds));

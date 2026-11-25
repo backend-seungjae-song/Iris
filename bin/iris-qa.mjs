@@ -15,7 +15,7 @@ const RUNLESS = ["run_begin", "summary", "catalog", "catalog_revise"];
 const port = irisPort();
 const title = {
   run_resume:"검증된 회차의 소유권과 활성 항목 복구", tabs:"회차 웹 탭 목록", tab:"회차 웹 탭 선택", close_tab:"회차 웹 탭 닫기. 항목 실행 중에는 거부. 회차가 끝나면 사용자가 볼 최종 산출물 탭만 남김",
-  run_begin: "QA 회차 시작. plan.build.repo로 시작·종료 git 상태와 앱 반응 목록 조회. 소비 코드가 다른 저장소에도 있으면 plan.build.related에 그 저장소 절대 경로 목록. risks·listRationale 필수. charter.unattended는 묻지 않고 바로 무인 진행, approvals.logins/bulkFill은 미리 승인할 작업, investigationLimitMin 기본 10분", run_end: "QA 회차 종료. session.defects는 입력하지 않으며 qa_defect 기록으로 서버가 채움", report: "검증된 장부로 회차 보고서를 만들어 Iris 탭에 엶. overview.cases [{id, title, flow(화면 > 행동 > 결과), result, checks}]는 사람용 케이스. checks [{kind, text, pass, evidence:[{file, caption}]}]는 기기 효과로 남지 않는 확인(디자인 대조·화면 크기·접근성)과 증거 사진이고 kind는 기능·CMS → 앱 반영·디자인·화면 크기·접근성·수정 확인. scenes [{sha256, caption 또는 hide:true}]는 사진 설명 바꾸기·빼기. text [{from, to}]는 그 케이스 기록의 글 고치기, overview.text는 보고서 전체 글 고치기(커밋 해시·소스 경로 같은 개발 흔적 정리), overview.notes [{id, hide:true}]는 결정 카드 빼기. 적용되지 않은 규칙이 있으면 보고서를 만들지 않고 그 글이 있는 곳을 알림. overview가 크면 같은 내용의 JSON 파일 경로를 overviewFile로",
+  run_begin: "QA 회차 시작. plan.build.repo로 시작·종료 git 상태와 앱 반응 목록 조회. 소비 코드가 다른 저장소에도 있으면 plan.build.related에 그 저장소 절대 경로 목록. risks·listRationale 필수. charter.unattended는 묻지 않고 바로 무인 진행, approvals.logins/bulkFill은 미리 승인할 작업, investigationLimitMin 기본 10분", run_end: "QA 회차 종료. session.defects는 입력하지 않으며 qa_defect 기록으로 서버가 채움", report: "검증된 기록으로 회차 보고서를 만들어 Iris 탭에 엶. overview.cases [{id, title, flow(화면 > 행동 > 결과), result, checks}]는 사람용 케이스. checks [{kind, text, pass, evidence:[{file, caption}]}]는 기기 효과로 남지 않는 확인(디자인 대조·화면 크기·접근성)과 증거 사진이고 kind는 기능·CMS → 앱 반영·디자인·화면 크기·접근성·수정 확인. scenes [{sha256, caption 또는 hide:true}]는 사진 설명 바꾸기·빼기. text [{from, to}]는 그 케이스 기록의 글 고치기, overview.text는 보고서 전체 글 고치기(커밋 해시·소스 경로 같은 개발 흔적 정리), overview.notes [{id, hide:true}]는 결정 카드 빼기. 적용되지 않은 규칙이 있으면 보고서를 만들지 않고 그 글이 있는 곳을 알림. overview가 크면 같은 내용의 JSON 파일 경로를 overviewFile로",
   row: "확인 항목 선언(declare)·시작(open)·종료(close)·결정 기록(note)·판정 무효(void). declare는 risk·oracle·dataChanging·mustNotChange 필수이고, 데이터를 바꾸면 consumers(file:line 또는 미확인+attempts)와 rerun{mode:setup·generated·human,reason}도 필수. retestOf {run,defect}는 수정 뒤 재확인 연결. close의 note·sceneJudgment와 void why는 사람용 보고서에 그대로 나가므로 화면에서 본 것만 씀(명령 이름·회차 번호·코드 이야기 제외). void는 receipt(조작·실패 장면·판정 seq)와 why로 잘못 기록된 판정 하나를 무효로 함. 진행할 수 없는 항목은 qa_review decisions로 넘김", expect: "화면 조건 판정. 실패 시 다음 입력 전에 화면과 오류 상태 자동 보존",
   play: "확인 항목 하나의 steps를 LLM 호출 없이 연속 실행. 단계마다 target(role+name 또는 text)을 그 순간 찾아 실제 입력하고 expect를 판정. 첫 실패나 모르는 가림에서 항목을 닫고 남은 단계는 실행하지 않음. 열린 항목이 없으면 row(경로가 여럿이면 path)를 열고 실행하고, 직전 실행이 막힘으로 닫은 항목은 row 없이 다시 엶. rerun.mode가 setup이면 시작 상태 단계에 setup:true, generated면 입력값과 기대에 {{unique}}. 첫 실행 전 qa_list_review 필수. 수정 뒤에는 retestOf:{run,defect}로 다시 실행",
   list_review: "첫 qa_play 전 QA 목록 검토. 인자 없이 부르면 위험별 항목·중복 후보·소비자 미확인·경로/근거 분포를 돌려줌. review에 row별 information, 중복별 merge/split·reason, distribution·missingRisks를 기록. duplicates.merge는 rows 첫 항목이 대표. 목록이 바뀌면 바뀐 row만 다시 검토",
@@ -24,8 +24,8 @@ const title = {
   fix: "diagnosis:{source:file:line,reason} 필수. failureSeq는 빼면 결함 기록에서 채움. testReason·cleanupReason은 단언 변경·다른 파일 수정 이유. 시도 상한 2회. qa_defect 순번·수정 commit·summary 기록. 회차 저장소 또는 plan.build.related 저장소에서, 시작 때와 다른 현재 브랜치에 포함된 커밋만 허용. 수정 후 qa_row declare.retestOf {run,defect}로 재확인 연결",
   catalog: "repo 앱의 반응 목록(연관·무관·방해·배경 반응)과 삭제 기록 조회",
   catalog_revise: "사람이 요청한 반응 목록 수정. key 항목을 class·condition·action·expect로 고치거나 remove:true로 삭제. source·cause 필수. 사람 승인은 이 세션 대화에서 받고, 승인받으면 userApproved:true로 다시 부름. 무인 실행 중·같은 앱 회차 진행 중에는 거부",
-  summary: "여러 회차(runIds)를 묶은 보고서를 엶. title을 주면 qa_report와 같은 사람용 보고서 한 장으로 만들고 같은 항목은 마지막 판정만 케이스로 보임. overview는 qa_report와 같고 cases[].id는 항목 ID 또는 \"회차ID:항목ID\". 다른 ID로 다시 선언한 항목은 replaces [{from, to, why}]로 앞 항목을 대신함. runJson(무인 실행기의 run.json)을 주면 verify.json도 함께 보고. 변조된 장부는 빼고 판정·고침은 사람 확인 전으로 표시. overview가 크면 overviewFile",
-  defect: "결함 하나 기록. 단계·실패 장면·오류·환경은 서버 장부에서 첨부. reproducible을 빼면 같은 기대의 실패·통과 판정 수로 계산(재현됨은 실패 판정이 두 번 이상일 때만 허용). 연결할 실패 판정은 기본으로 같은 항목의 마지막 실패이며 failureSeq로 직접 고르거나, 관찰·비교로 찾아 실패 판정이 없으면 noFailure:true",
+  summary: "여러 회차(runIds)를 묶은 보고서를 엶. title을 주면 qa_report와 같은 사람용 보고서 한 장으로 만들고 같은 항목은 마지막 판정만 케이스로 보임. overview는 qa_report와 같고 cases[].id는 항목 ID 또는 \"회차ID:항목ID\". 다른 ID로 다시 선언한 항목은 replaces [{from, to, why}]로 앞 항목을 대신함. runJson(무인 실행기의 run.json)을 주면 verify.json도 함께 보고. 변조된 기록은 빼고 판정·고침은 사람 확인 전으로 표시. overview가 크면 overviewFile",
+  defect: "결함 하나 기록. 단계·실패 장면·오류·환경은 서버 기록에서 첨부. reproducible을 빼면 같은 기대의 실패·통과 판정 수로 계산(재현됨은 실패 판정이 두 번 이상일 때만 허용). 연결할 실패 판정은 기본으로 같은 항목의 마지막 실패이며 failureSeq로 직접 고르거나, 관찰·비교로 찾아 실패 판정이 없으면 noFailure:true",
   note: "진행 중 세션 메모: 관찰·아이디어·막힘·질문. 결정 기록은 qa_row note 사용",
   charter: "진행 중 charter 변경. 변경 이유와 원래·수정 charter를 함께 보존", blocked: "진행 불가 사유 기록",
   route_save: "검증된 구간을 경로로 저장", route_list: "저장된 경로 조회", route_replay: "저장된 경로를 실제 입력으로 재생",
@@ -58,7 +58,7 @@ export function clientSchema(schema) {
 
 const toolOf = (cmd) => ({
   name: `qa_${cmd}`,
-  description: (title[cmd] || ({handoff:"절차와 기준 이미지 안내서",diff:"장부의 두 장면 비교",shot_sizes:"화면 크기별 촬영",bulk_fill:"준비 화면 대량 기입",
+  description: (title[cmd] || ({handoff:"절차와 기준 이미지 안내서",diff:"기록의 두 장면 비교",shot_sizes:"화면 크기별 촬영",bulk_fill:"준비 화면 대량 기입",
     app_targets:"Iris 에뮬레이터 기기 목록",app_target:"기기 연결·선택",app_snapshot:"기기 화면 읽기",app_screenshot:"기기 화면 촬영",app_observe:"기기 화면과 오류 관찰",
     app_expect:"기기 화면 조건 판정",app_picks:"사람이 기기 화면에서 고른 요소 조회"})[cmd] || cmd)
     + (QA_COMMAND_SCHEMAS[cmd].required.includes("expect") ? ". expect(effects·oracle) 필수, 기대 밖 반응은 qa_unexpected로 판단" : ""),
@@ -128,7 +128,7 @@ export async function callQa(name, input, { session = resolveSession, request = 
   const key = run ? keys.get(run) : undefined;
   const payload = JSON.stringify({ cmd, args, session: owner, ...(run ? { run } : {}), ...(key ? { key } : {}) });
   const result = await new Promise((resolve) => {
-    const req = request({ host: "127.0.0.1", port, path: "/qa-cmd", method: "POST",
+    const req = request({ host: "127.0.0.1", port, path: "/qa-cmd", method: "POST", signal: AbortSignal.timeout(35 * 60_000),
       headers: { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } }, (res) => {
       let body = "", ended = false;
       res.on("data", (chunk) => { body += chunk; });
@@ -156,16 +156,21 @@ const ok = (id, result) => send({ jsonrpc: "2.0", id, result });
 const err = (id, code, message) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
 export function startQaMcp() {
+  process.stdout.on("error", error => {
+  if (error.code === "EPIPE") process.exit(0);
+  throw error;
+});
   const rl = readline.createInterface({ input: process.stdin });
   let active = 0, closing = false;
   const finish = () => { if (closing && active === 0) process.stdout.write("", () => process.exit(0)); };
   rl.on("line", async (line) => {
     let msg;
     try { msg = JSON.parse(line); } catch { return; }
-    const { id, method, params } = msg;
+    if (!msg || typeof msg !== "object" || Array.isArray(msg)) return err(null, -32600, "JSON-RPC 객체가 필요합니다");
+  const { id, method, params } = msg;
     if (method === "initialize") return ok(id, { protocolVersion: params?.protocolVersion || "2025-06-18",
       capabilities: { tools: {} }, serverInfo: { name: "iris-qa", version: "1.0.0" },
-      instructions: "QA 회차는 qa_run_begin으로 열고, 반환된 run을 모든 후속 명령에 넣습니다. 계획에 등록한 주소는 qa_open_entry로만 엽니다. 판정과 보고서는 서버 장부에서 생성합니다. 회차가 끝나면 사용자가 볼 최종 산출물 탭만 남기고 중간에 쓴 탭은 qa_close_tab으로 닫습니다. 사람에게 물을 일은 이 세션 대화에서 묻습니다(브라우저·폰 알림 없음). 페이지 확인 창이 뜨면 명령 결과에 내용이 오니 qa_dialog로 답합니다." });
+      instructions: "QA 회차는 qa_run_begin으로 열고, 반환된 run을 모든 후속 명령에 넣습니다. 계획에 등록한 주소는 qa_open_entry로만 엽니다. 판정과 보고서는 서버 기록에서 생성합니다. 회차가 끝나면 사용자가 볼 최종 산출물 탭만 남기고 중간에 쓴 탭은 qa_close_tab으로 닫습니다. 사람에게 물을 일은 이 세션 대화에서 묻습니다(브라우저·폰 알림 없음). 페이지 확인 창이 뜨면 명령 결과에 내용이 오니 qa_dialog로 답합니다." });
     if (method === "notifications/initialized" || method === "notifications/cancelled") return;
     if (method === "ping") return ok(id, {});
     if (method === "tools/list") return ok(id, { tools: QA_TOOLS });

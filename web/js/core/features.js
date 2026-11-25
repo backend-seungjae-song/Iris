@@ -64,7 +64,7 @@ export function featureHidden() {
 export function featurePendingRestart() { return new Set(pendingRestart); }
 // 설정을 바꿀 수 없는 이유. 비어 있으면 바꿀 수 있다.
 export function featureLockNote() {
-  if (loadError) return shortcutLabel("기능 상태를 읽지 못해 선택 기능을 싣지 않았습니다. ⌘⇧R 로 다시 읽어 주세요");
+  if (loadError) return shortcutLabel("기능 상태를 읽지 못해 선택 기능을 불러오지 않았습니다. ⌘⇧R 로 새로고침해 주세요");
   return state.local ? "" : "원격 창에서는 기능 설정을 바꿀 수 없습니다";
 }
 function write(change) {
@@ -91,16 +91,16 @@ function write(change) {
 // 서버·네이티브 짝이 있는 기능은 부팅 때 조립되므로 켜고 끄는 반영이 앱 재시작이다.
 export function featureNeedsRestart(id) {
   const cap = CAPABILITIES.find((c) => c.id === id);
-  if (cap?.alwaysIn?.includes("memo")) return false;   // 서버 쪽이 항상 켜져 있어 렌더러만 다시 로드하면 된다
+  if (cap?.alwaysIn?.length) return false;   // 서버 쪽이 항상 켜져 있어 렌더러만 다시 로드하면 된다
   return !!(cap?.server?.length || cap?.native);
 }
 
 export function featureRestartNote(id) {
   const cap = CAPABILITIES.find((c) => c.id === id);
-  if (cap?.alwaysIn?.includes("memo")) return "본 창에서만 빠집니다. 메모 창과 메모 서버는 유지됩니다";
+  if (cap?.disableNote) return cap.disableNote;
   return featureNeedsRestart(id)
-    ? "앱을 다시 시작하면 서버·네이티브에서도 빠집니다"
-    : shortcutLabel("⌘⇧R 로 다시 읽으면 빠집니다");
+    ? "앱을 다시 시작하면 서버·네이티브에서도 꺼집니다"
+    : shortcutLabel("⌘⇧R 로 새로고침하면 꺼집니다");
 }
 
 export function featureEnableNote(id) {

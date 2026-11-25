@@ -26,6 +26,7 @@ function navigationSettled(wc, timeout = 10000) {
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
+      wc.removeListener("destroyed", done);
       wc.removeListener("did-navigate", done);
       wc.removeListener("did-navigate-in-page", inPage);
       wc.removeListener("did-fail-load", failed);
@@ -34,6 +35,7 @@ function navigationSettled(wc, timeout = 10000) {
     const inPage = (_event, _url, isMainFrame) => { if (isMainFrame !== false) done(); };
     const failed = (_event, _code, _description, _url, isMainFrame) => { if (isMainFrame !== false) done(); };
     const timer = setTimeout(done, timeout);
+    wc.once("destroyed", done);
     wc.on("did-navigate", done);
     wc.on("did-navigate-in-page", inPage);
     wc.on("did-fail-load", failed);
@@ -629,7 +631,14 @@ function createElectronRelay(deps) {
         if (!/^[A-Za-z0-9._:-]{1,100}$/.test(id) || rec.subscriptions.has(id)) throw error("INVALID_REQUEST", "subscriptionId가 없거나 이미 사용 중입니다.");
         const sub = { id, wcId: wc.id, methods: new Set(Array.isArray(args.methods) ? args.methods.map(String) : []),
           eventSeq: 0, pendingCount: 0, pendingBytes: 0, scoped: args.scoped === true };
-        sub.unsubscribe = deps.observation.subscribeEvents((...event) => subscriptionEvent(rec, sub, ...event));
+        const unsubscribe = deps.observation.subscribeEvents((...event) => subscriptionEvent(rec, sub, ...event));
+        const destroyed = () => {
+          sub.unsubscribe();
+          rec.subscriptions.delete(id);
+          for (const scope of rec.commandScopes.values()) scope.subscriptions.delete(id);
+        };
+        sub.unsubscribe = () => { wc.removeListener?.("destroyed", destroyed); unsubscribe(); };
+        wc.once?.("destroyed", destroyed);
         rec.subscriptions.set(id, sub);
         // scoped: 이 명령 단위가 닫힐 때 구독을 거둠 (QA 입력 수신 기록처럼 명령 하나보다 오래 살 필요가 없는 구독)
         if (args.scoped === true) commandScope(rec, request.commandId).subscriptions.add(id);
@@ -725,7 +734,7 @@ function createElectronRelay(deps) {
       }
       case "focus.state": return deps.focus.state(wc);
       case "focus.prepare": {
-        const state = await deps.focus.prepare(wc);
+        const state = await deps.focus.prepare(wc, args.action);
         if (state === "borrowed" || state === "claimed") {
           rec.focus.add(wc.id);
           commandScope(rec, request.commandId).focus.add(wc.id);
@@ -742,12 +751,13 @@ function createElectronRelay(deps) {
         const ticket = `${rec.generation}/${rec.nextTicket++}`;
         rec.ai.set(ticket, actual);
         commandScope(rec, request.commandId).tickets.add(ticket);
+        if (deps.ai.armed) await deps.ai.armed(actual);   // 뒤에 깐 탭의 포커스 보호가 켜진 뒤에 첫 명령이 나감
         return { ticket };
       }
       case "ai.leave": {
         const ticket = String(args.ticket || "");
         if (!rec.ai.has(ticket)) throw error("NOT_FOUND", "AI ticket을 찾지 못했습니다.");
-        deps.ai.leave(rec.ai.get(ticket)); rec.ai.delete(ticket);
+        await deps.ai.leave(rec.ai.get(ticket)); rec.ai.delete(ticket);
         rec.commandScopes.get(request.commandId)?.tickets.delete(ticket);
         return { left: true };
       }

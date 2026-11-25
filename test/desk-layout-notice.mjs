@@ -70,7 +70,7 @@ function fakeElectron() {
 test("가운데 알림은 커서가 있는 모니터 가운데, 모든 앱 위, 포커스·마우스를 가져가지 않는다", async () => {
   const { BrowserWindow, screen, made } = fakeElectron();
   const hud = createHud({ BrowserWindow, screen });
-  await hud.show({ kind: "ok", title: "창 레이아웃 저장함", sub: "모니터 1대 · 창 1개" });
+  await hud.show({ kind: "ok", title: "창 레이아웃 저장 완료", sub: "모니터 1대 · 창 1개" });
   const win = made[0];
   assert.deepEqual(win.bounds, { x: -1920 + 860, y: 440, width: 200, height: 200 });
   assert.equal(win.options.focusable, false);
@@ -79,7 +79,7 @@ test("가운데 알림은 커서가 있는 모니터 가운데, 모든 앱 위, 
   assert.deepEqual(win.calls.find((c) => c[0] === "ignore"), ["ignore", true]);
   assert.ok(win.calls.some((c) => c[0] === "showInactive"));
   assert.ok(!win.calls.some((c) => c[0] === "show"), "show() 는 Iris 를 앞으로 가져옴");
-  assert.match(win.calls.find((c) => c[0] === "js")[1], /render\(\{"kind":"ok","title":"창 레이아웃 저장함","sub":"모니터 1대 · 창 1개"/);
+  assert.match(win.calls.find((c) => c[0] === "js")[1], /render\(\{"kind":"ok","title":"창 레이아웃 저장 완료","sub":"모니터 1대 · 창 1개"/);
   assert.equal(hud.owns(win), true);
   hud.hide();
   await new Promise((r) => setTimeout(r, 260));
@@ -93,7 +93,7 @@ test("가운데 알림이 있으면 단축키 저장·복원 결과를 거기로
   const hud = { show: (s) => shown.push(s), owns: () => false };
   const host = createHost({ stateDir, screen, mac, selfPid: -1, hud, notice: (m) => sent.push(m) });
   await host.saveNow("shortcut");
-  assert.deepEqual(shown, [{ kind: "ok", title: "창 레이아웃 저장함", sub: "모니터 1대 · 창 1개" }]);
+  assert.deepEqual(shown, [{ kind: "ok", title: "창 레이아웃 저장 완료", sub: "모니터 1대 · 창 1개" }]);
   assert.deepEqual(sent, [], "Iris 알림 목록에는 보내지 않는다");
 
   shown.length = 0;

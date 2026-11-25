@@ -115,11 +115,12 @@ test("C6 설정 화면은 같은 내용이면 다시 그리지 않고 다시 그
     document.querySelector("#km-body").appendChild(document.createElement("i"));   // 같은 내용 건너뛰기를 막아 다시 그리게 함
     km.renderKeymapPage();
     const after = document.querySelector(".km-scroll");
-    return { at, skipped, rebuilt: after.__mark !== 1, scroll: after.scrollTop };
+    return { at, skipped, stable: after === sc, repaired: !document.querySelector("#km-body > i"), scroll: after.scrollTop };
   }), `<style>.km-scroll{height:150px;overflow:auto}</style><div id="km-panel"><div id="km-body"></div></div>`);
   assert.ok(r.at > 0, "스크롤 가능한 길이");
   assert.equal(r.skipped, true, "같은 내용이면 DOM 유지");
-  assert.equal(r.rebuilt, true);
+  assert.equal(r.stable, true);
+  assert.equal(r.repaired, true);
   assert.equal(r.scroll, r.at, "다시 그려도 위치 유지");
 });
 
@@ -157,6 +158,6 @@ test("C14 복원 진행 메시지가 와도 돌던 스피너를 다시 만들지
     return { same: now.__mark === 1, text: document.querySelector(".ar-busy-t").textContent, width: document.querySelector(".ar-busy-bar i").style.width };
   }), `<div id="ar-busy"></div><div id="ar-count"></div><div id="ar-list"></div><div id="ar-detail"></div>`);
   assert.equal(r.same, true, "스피너 노드 유지");
-  assert.match(r.text, /2\/3 — b/);
+  assert.match(r.text, /2\/3 · b/);
   assert.equal(r.width, "33%");
 });

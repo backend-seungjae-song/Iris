@@ -198,7 +198,7 @@ export function svToolbar(t, act, el) {
     case "undo": svUndo(t, false); return true;
     case "redo": svUndo(t, true); return true;
     case "print": window.print(); return true;
-    case "painter": t._svBrush = Object.assign({}, svCurStyle(t)); showToast("서식을 복사했습니다. 붙일 곳을 고르고 서식 붙여넣기를 누르세요", { level: "ok", near: "action" }); return true;
+    case "painter": t._svBrush = Object.assign({}, svCurStyle(t)); showToast("서식을 복사했습니다. 붙여넣을 셀을 선택하고 서식 붙여넣기를 누르세요", { level: "ok", near: "action" }); return true;
     case "painter-paste": if (t._svBrush) svFormat(t, (st) => { for (const k of Object.keys(st)) delete st[k]; Object.assign(st, t._svBrush); }); return true;
     case "nf-won": svFormat(t, (st) => { st.nf = "₩#,##0"; }); return true;
     case "nf-pct": svFormat(t, (st) => { st.nf = "0.00%"; }); return true;
@@ -251,7 +251,7 @@ export function svToolbar(t, act, el) {
     case "rtl-cell": svFormat(t, (st) => { if (st.dir === "rtl") delete st.dir; else st.dir = "rtl"; }); return true;
     case "hide-menu": t._svHideMenu = !t._svHideMenu; renderSheetView(t); return true;
     case "a11y": t._svA11y = !t._svA11y; renderSheetView(t); showToast(t._svA11y ? "고대비 모드 켜짐" : "고대비 모드 꺼짐", { level: "info" }); return true;
-    case "chart": showToast("차트는 아직 이 앱에 없습니다. 실제 차트를 저장 파일(xlsx)에 남기려면 별도 작업이 필요합니다.", { level: "warn" }); return true;
+    case "chart": showToast("차트는 아직 지원하지 않습니다.", { level: "warn" }); return true;
     case "filter-clear": svFilterClear(t); return true;
     case "filter-view": svFilterMenu(t, el); return true;
   }
@@ -312,7 +312,7 @@ export function svMenuAct(t, menu, item) {
     });
     return;
   }
-  if (n === "그룹") { showToast("행/열 그룹(개요)은 아직 이 앱에 없습니다. 접기/펼치기 상태까지 저장하는 별도 작업이 필요합니다.", { level: "warn" }); return; }
+  if (n === "그룹") { showToast("행/열 그룹(개요)은 아직 지원하지 않습니다.", { level: "warn" }); return; }
   if (n === "숨겨진 시트") {
     const hidden = (t.sheet.sheets || []).filter((s) => s.hidden);
     if (!hidden.length) { showToast("숨겨진 시트가 없습니다.", { level: "warn" }); return; }
@@ -353,10 +353,10 @@ export function svMenuAct(t, menu, item) {
     return;
   }
   if (n === "메모") { svInsertNote(t); return; }
-  if (n === "그림") { showToast("벡터 드로잉 편집기 자체가 필요해 이 앱에는 아직 없습니다.", { level: "warn" }); return; }
-  if (n === "표 생성" || n === "표로 변환") { showToast("구조화된 표(필터·줄무늬 서식)는 이 그리드에 별도 렌더링이 필요해 아직 없습니다.", { level: "warn" }); return; }
-  if (n === "차트") { showToast("차트는 아직 이 앱에 없습니다. 실제 차트를 저장 파일(xlsx)에 남기려면 별도 작업이 필요합니다.", { level: "warn" }); return; }
-  if (n === "피봇 테이블") { showToast("피봇 테이블은 별도의 큰 하위 기능이라 아직 이 앱에 없습니다.", { level: "warn" }); return; }
+  if (n === "그림") { showToast("그림은 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "표 생성" || n === "표로 변환") { showToast("구조화된 표(필터·줄무늬 서식)는 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "차트") { showToast("차트는 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "피봇 테이블") { showToast("피봇 테이블은 아직 지원하지 않습니다.", { level: "warn" }); return; }
   if (n === "텍스트") {
     svMenuAt(anchor, svList([["굵게", "fmt-bold"], ["기울임", "fmt-ital"], ["취소선", "fmt-strk"]]), (v) => svToolbar(t, v, anchor));
     return;
@@ -376,8 +376,8 @@ export function svMenuAct(t, menu, item) {
     svFormat(t, (st, sh, r) => { if ((r - base) % 2 === 1) st.bg = "#f3f3f3"; else delete st.bg; });
     return;
   }
-  if (n === "조건부 서식") { showToast("조건부 서식 규칙은 이 파일에 있으면 그대로 읽고 적용합니다. 새 규칙을 만드는 도구는 별도 작업이 필요합니다.", { level: "warn" }); return; }
-  if (n === "테마") { showToast("스프레드시트 테마 전환은 이 앱의 고정 팔레트 구조상 별도 작업이 필요합니다.", { level: "warn" }); return; }
+  if (n === "조건부 서식") { showToast("파일에 있는 조건부 서식 규칙은 그대로 적용합니다. 새 규칙 만들기는 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "테마") { showToast("테마 전환은 아직 지원하지 않습니다.", { level: "warn" }); return; }
   if (n === "시트 정렬") {
     const sh = svSheet(t);
     const items = [];
@@ -397,7 +397,7 @@ export function svMenuAct(t, menu, item) {
   if (n === "범위 임의로 섞기") { const s = svNorm(t._svSel); svShuffleRange(t, s.r1, s.r2, s.c1, s.c2); return; }
   if (n === "열 통계") { svColumnStats(t); return; }
   if (n === "데이터 확인") {
-    askText("데이터 확인 — 허용 값 목록", "", "쉼표로 구분(예: 진행중,완료,보류)").then((raw) => {
+    askText("데이터 확인: 허용 값 목록", "", "쉼표로 구분(예: 진행중,완료,보류)").then((raw) => {
       if (raw == null) return;
       const values = raw.split(",").map((x) => x.trim()).filter(Boolean);
       if (!values.length) { showToast("값을 하나 이상 입력하세요.", { level: "warn" }); return; }
@@ -417,10 +417,10 @@ export function svMenuAct(t, menu, item) {
     });
     return;
   }
-  if (n === "슬라이서 추가") { showToast("슬라이서는 차트·피봇 테이블이 있어야 의미가 있는데 이 앱엔 아직 없습니다.", { level: "warn" }); return; }
-  if (n === "최적화 문제 풀이") { showToast("선형계획법 solver는 별도의 큰 하위 기능이라 아직 이 앱에 없습니다.", { level: "warn" }); return; }
-  if (n === "이름이 지정된 함수") { showToast("사용자 정의 함수는 이 앱의 수식 엔진 확장이 필요해 아직 없습니다.", { level: "warn" }); return; }
-  if (n === "데이터 추출") { showToast("데이터 추출은 정렬·필터·중복 삭제로 이미 다루는 것과 겹쳐 이 스코프에서는 보류합니다.", { level: "info" }); return; }
+  if (n === "슬라이서 추가") { showToast("슬라이서는 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "최적화 문제 풀이") { showToast("최적화 문제 풀이는 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "이름이 지정된 함수") { showToast("사용자 정의 함수는 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "데이터 추출") { showToast("데이터 추출은 지원하지 않습니다. 정렬·필터·중복 삭제를 사용하세요.", { level: "info" }); return; }
   if (n === "열기") { openFilePalette(); return; }
   if (n === "새 문서") {
     const dir = pathDirname(t.path);
@@ -470,12 +470,12 @@ export function svMenuAct(t, menu, item) {
   }
   if (n === "세부정보") {
     const sh = svSheet(t);
-    showToast(`${t.path} — 시트 ${t.sheet.sheets.length}개, 현재 시트 ${sh.rows}행×${sh.colsCount}열`, { level: "info" });
+    showToast(`${t.path} · 시트 ${t.sheet.sheets.length}개, 현재 시트 ${sh.rows}행×${sh.colsCount}열`, { level: "info" });
     return;
   }
-  if (n === "설정") { showToast("지역화·반복 계산 등 설정 항목이 이 계산 엔진에 아직 반영되지 않습니다.", { level: "warn" }); return; }
-  if (n === "가져오기") { showToast("다른 형식을 시트로 병합하는 규칙까지 다루려면 별도 설계가 필요해 아직 없습니다.", { level: "warn" }); return; }
-  showToast("아직 안 옮긴 기능입니다: " + n, { level: "warn" });
+  if (n === "설정") { showToast("지역화·반복 계산 등 설정은 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  if (n === "가져오기") { showToast("가져오기는 아직 지원하지 않습니다.", { level: "warn" }); return; }
+  showToast("아직 지원하지 않는 기능입니다: " + n, { level: "warn" });
 }
 
 // 필터: 고른 칸의 열에서 값을 하나 골라 그 값과 일치하는 행만 강조한다. 진짜 구글 시트처럼
@@ -658,7 +658,7 @@ function svSortRange(t, r1, r2, c1, c2, byCol, asc) {
     return asc ? c : -c;
   });
   svReorderRows(t, r1, r2, c1, c2, idx);
-  showToast("정렬했습니다. 값만 옮기며, 서식은 자리에 남고 수식 참조는 다시 쓰지 않습니다.", { level: "warn" });
+  showToast("정렬했습니다. 값만 옮기며, 서식은 원래 셀에 남고 수식 참조는 수정하지 않습니다.", { level: "warn" });
 }
 function svShuffleRange(t, r1, r2, c1, c2) {
   if (r2 <= r1) { showToast("섞을 행이 2개 이상이어야 합니다.", { level: "info" }); return; }
@@ -684,7 +684,7 @@ function svColumnStats(t) {
   const sum = nums.reduce((a, b) => a + b, 0);
   const avg = nums.length ? sum / nums.length : 0;
   const items = [
-    ["개수(값 있음)", countA], ["숫자 개수", nums.length], ["빈 칸", blanks],
+    ["개수(값 있음)", countA], ["숫자 개수", nums.length], ["빈 셀", blanks],
     ["합계", nums.length ? sum : "—"], ["평균", nums.length ? Math.round(avg * 10000) / 10000 : "—"],
     ["최소", nums.length ? Math.min.apply(null, nums) : "—"], ["최대", nums.length ? Math.max.apply(null, nums) : "—"],
   ];
@@ -742,7 +742,7 @@ export function svListNamedRanges(t, anchor) {
   const names = (t.sheet && t.sheet.definedNames) || [];
   if (!names.length) { showToast("등록된 이름 범위가 없습니다.", { level: "warn" }); return; }
   const items = [];
-  names.forEach((nm) => (nm.ranges || []).forEach((range) => items.push([`${nm.name} — ${range} (삭제)`, JSON.stringify({ name: nm.name, range: range.split("!").pop() })])));
+  names.forEach((nm) => (nm.ranges || []).forEach((range) => items.push([`${nm.name} · ${range} (삭제)`, JSON.stringify({ name: nm.name, range: range.split("!").pop() })])));
   svMenuAt(anchor, svList(items), async (v) => {
     const { name, range } = JSON.parse(v);
     const sh = svSheet(t);
@@ -761,7 +761,7 @@ async function svInsertNote(t) {
   if (isSheetTabDirty(t)) { showToast("저장하지 않은 편집이 있습니다. 먼저 저장한 뒤 다시 시도하세요", { level: "warn" }); return; }
   const r = t._svSel.r1, c = t._svSel.c1;
   const cur = (sh.note && sh.note[r + "," + c]) || "";
-  const text = await askText("메모", cur, "이 칸에 대한 메모");
+  const text = await askText("메모", cur, "이 셀에 대한 메모");
   if (text == null) return;
   try {
     const saved = await sendTabIo({ type: "sheet.write", path: t.path, edits: [{ sheet: sh.name, note: { r, c, text: text.trim() } }], space: getCenterSpace(), tabId: t.id, reason: "note" });

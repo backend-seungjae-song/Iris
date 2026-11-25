@@ -193,7 +193,7 @@ export function renderSheetViewBody(t) {
   }
   if (!t.sheet) { fileview.innerHTML = `<div class="fv-bar"><span class="fv-name">${name}</span>${pathBar}</div><div class="fv-loading">불러오는 중…</div>`; return; }
   const sh = svSheet(t);
-  if (!sh) { fileview.innerHTML = `<div class="fv-bar"><span class="fv-name">${name}</span>${pathBar}</div><div class="sv-msg">보여줄 시트가 없습니다.</div>`; return; }
+  if (!sh) { fileview.innerHTML = `<div class="fv-bar"><span class="fv-name">${name}</span>${pathBar}</div><div class="sv-msg">표시할 시트가 없습니다.</div>`; return; }
 
   if (!t._svCalced) { svRecalc(t); t._svCalced = true; }
   t._svMerge = mergeMap(sh.merges);
@@ -260,7 +260,7 @@ export function renderSheetViewBody(t) {
     + `<button data-sv="find-next" title="다음 (Enter)">↓</button>`
     + `<button data-sv="find-close" title="닫기 (Esc)">✕</button></div>`;
 
-  const cutNote = sh.cut ? `<div class="sv-cut">파일이 커서 일부만 보여줍니다. 전부 보려면 ${isHostWindows() ? "탐색기" : "Finder"}에서 여세요.</div>` : "";
+  const cutNote = sh.cut ? `<div class="sv-cut">파일이 커서 일부만 표시합니다. 전체를 보려면 ${isHostWindows() ? "탐색기" : "Finder"}에서 여세요.</div>` : "";
   const N = svRenderCols(sh);
   // 스크롤 채움 막대의 크기 = 전체 내용 크기(구글 시트가 그렇게 싣는다). sh.col은 실데이터
   // 열까지만 채워져 있다. slice(0,N)은 배열 길이를 넘지 못해 꼬리 열(svRenderCols)의 기본 폭이

@@ -201,6 +201,132 @@ test("일반 worker 명령에는 공통 30초 응답 상한을 두지 않는다"
   assert.doesNotMatch(ipc, /timeoutMs\s*=\s*30000/);
 });
 
+test("Windows에서는 current.json 교체 뒤 디렉터리 fsync를 호출하지 않는다", () => {
+  const source = fs.readFileSync(path.join(root, "server/mcp-worker/supervisor.js"), "utf8");
+  assert.match(source, /if \(process\.platform !== "win32"\) \{\s*const directory = fs\.openSync\(path\.dirname\(file\), "r"\);[\s\S]*?fs\.fsyncSync\(directory\);/);
+});
+
+test("동시에 같은 QA 회차를 쓰는 요청은 마지막 요청이 끝날 때까지 binding을 유지한다", async () => {
+  const stateDir = fs.mkdtempSync(path.join(scratch, "supervisor-run-binding-"));
+  const identityAuthority = createHostIdentityAuthority();
+  identityAuthority.allowSession("session-a");
+  const waiting = [];
+  let pid = 9200;
+  const spawnWorker = (_entry, options) => {
+    const child = new EventEmitter();
+    child.pid = ++pid;
+    child.connected = true;
+    child.send = (message, callback) => {
+      callback?.();
+      const reply = (ok = true) => queueMicrotask(() => child.emit("message", { protocol: 1,
+        workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: `${message.type}.result`,
+        requestId: message.requestId, ok,
+        output: message.command === "run_resume" ? { ok: true, data: { runId: "run-a", runKey: "key-b" } } : { ok: true } }));
+      if (message.type === "worker.authorized") queueMicrotask(() => child.emit("message", { protocol: 1,
+        workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: "worker.ready", pid: child.pid,
+        deployId: options.env.IRIS_MCP_WORKER_DEPLOY_ID }));
+      else if (message.type === "worker.accept") reply();
+      else if (message.type === "worker.request") waiting.push(() => reply());
+      else if (message.type === "worker.stopAccepting" || message.type === "worker.drain") reply();
+      else if (message.type === "worker.shutdown") { reply(); queueMicrotask(() => child.emit("exit", 0, null)); }
+    };
+    queueMicrotask(() => child.emit("message", { protocol: 1, workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION,
+      type: "worker.hello", pid: child.pid, deployId: options.env.IRIS_MCP_WORKER_DEPLOY_ID,
+      token: options.env.IRIS_MCP_WORKER_TOKEN }));
+    return child;
+  };
+  const supervisor = createMcpWorkerSupervisor({ stateDir, spawnWorker, maxRestarts: 0,
+    identityAuthority, hostDispatcher: () => ({ dispatch: async () => ({}) }), log: { info() {} } });
+  try {
+    await supervisor.start();
+    const input = { session: "session-a", run: "run-a", key: "key-a" };
+    const first = supervisor.request("qa", "row", {}, input);
+    await new Promise(resolve => setImmediate(resolve));
+    await assert.rejects(
+      supervisor.request("qa", "row", {}, { ...input, key: "key-b" }),
+      error => error.code === "KEY_DENIED",
+    );
+    assert.equal(waiting.length, 1, "다른 key는 worker 요청으로 전달되기 전에 거절해야 한다");
+    const second = supervisor.request("qa", "row", {}, input);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(identityAuthority.bindingFor("run-a"), "두 요청이 끝나기 전에는 회차 binding이 있어야 한다");
+    assert.equal(waiting.length, 2);
+    waiting.shift()();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(identityAuthority.bindingFor("run-a"), "첫 요청이 끝나도 두 번째 요청이 사용하는 binding은 남아야 한다");
+    waiting.shift()();
+    await Promise.all([first, second]);
+    assert.ok(identityAuthority.bindingFor("run-a"), "성공한 요청 뒤에는 다음 요청을 위한 binding이 남아야 한다");
+    identityAuthority.releaseRun(input);
+    identityAuthority.rotateRunKey = () => { throw Object.assign(new Error("회차 key 검증 실패"), { code: "ROTATE_FAILED" }); };
+    const failedRotation = supervisor.request("qa", "run_resume", {}, input);
+    await new Promise(resolve => setImmediate(resolve));
+    waiting.shift()();
+    await assert.rejects(failedRotation, error => error.code === "ROTATE_FAILED");
+    assert.equal(identityAuthority.bindingFor("run-a"), null, "rotateRunKey 실패 뒤 임시 binding을 정리해야 한다");
+  } finally {
+    await supervisor.shutdown();
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("종료 중 host 유휴 대기와 worker drain은 종료 예산 안에서 강제 회수한다", async (t) => {
+  const stateDir = fs.mkdtempSync(path.join(scratch, "supervisor-shutdown-budget-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  let pid = 9400;
+  let retired = 0;
+  let released = 0;
+  const spawnWorker = (_entry, options) => {
+    const child = new EventEmitter();
+    child.pid = ++pid;
+    child.connected = true;
+    child.disconnect = () => {
+      child.connected = false;
+      queueMicrotask(() => child.emit("exit", 0, null));
+    };
+    child.kill = () => {
+      child.connected = false;
+      queueMicrotask(() => child.emit("exit", null, "SIGKILL"));
+      return true;
+    };
+    child.send = (message, callback) => {
+      callback?.();
+      const reply = () => queueMicrotask(() => child.emit("message", { protocol: 1,
+        workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: `${message.type}.result`,
+        requestId: message.requestId, ok: true, output: {} }));
+      if (message.type === "worker.authorized") queueMicrotask(() => child.emit("message", { protocol: 1,
+        workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: "worker.ready", pid: child.pid,
+        deployId: options.env.IRIS_MCP_WORKER_DEPLOY_ID }));
+      if (["worker.accept", "worker.stopAccepting", "worker.drain"].includes(message.type)) reply();
+      // shutdown 응답은 일부러 생략해 stopInstance의 남은 예산과 강제 회수를 확인
+    };
+    queueMicrotask(() => child.emit("message", { protocol: 1,
+      workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: "worker.hello", pid: child.pid,
+      deployId: options.env.IRIS_MCP_WORKER_DEPLOY_ID, token: options.env.IRIS_MCP_WORKER_TOKEN }));
+    return child;
+  };
+  const supervisor = createMcpWorkerSupervisor({
+    stateDir,
+    spawnWorker,
+    maxRestarts: 0,
+    shutdownTimeoutMs: 30,
+    releaseHostGeneration: () => { released++; },
+    identityAuthority: createHostIdentityAuthority(),
+    hostDispatcher: () => ({
+      dispatch: async () => ({}),
+      waitForIdle: () => new Promise(() => {}),
+      retire: () => { retired++; },
+    }),
+    log: { info() {} },
+  });
+  await supervisor.start();
+  const startedAt = Date.now();
+  await supervisor.shutdown();
+  assert.ok(Date.now() - startedAt < 500, "종료가 host 유휴 대기에 매달리지 않아야 한다");
+  assert.equal(retired, 1);
+  assert.equal(released, 1);
+});
+
 test("앱 재시작은 살아 있는 이전 worker의 잠금 반환을 기다린다", async (t) => {
   const stateDir = fs.mkdtempSync(path.join(scratch, "supervisor-lock-wait-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
@@ -238,6 +364,81 @@ test("앱 재시작은 살아 있는 이전 worker의 잠금 반환을 기다린
   await starting;
   assert.equal(spawns, 1);
   await supervisor.shutdown();
+});
+
+test("종료 중 start·activate·recover는 새 worker를 만들지 않는다", async (t) => {
+  for (const operationName of ["start", "activate", "recover"]) {
+    const stateDir = fs.mkdtempSync(path.join(scratch, `supervisor-stopping-${operationName}-`));
+    t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+    const lock = path.join(stateDir, "mcp-worker", "worker.lock");
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, workerGeneration: "old:1" }));
+    fs.mkdirSync(path.join(stateDir, "mcp-worker", "one"), { recursive: true });
+    let spawns = 0;
+    const supervisor = createMcpWorkerSupervisor({
+      stateDir,
+      bundleId: "bundle",
+      workerLockPollMs: 1,
+      workerLockWaitMs: 100,
+      spawnWorker: () => {
+        spawns++;
+        throw Object.assign(new Error("종료 중 spawn하면 안 됩니다."), { code: "EARLY_SPAWN" });
+      },
+      verify: directory => ({ manifest: { deployId: path.basename(directory), bundle: { id: "bundle" }, protocol: { worker: 1 } },
+        complete: { manifestSha256: `sha-${path.basename(directory)}` } }),
+      identityAuthority: createHostIdentityAuthority(),
+      hostDispatcher: () => ({ dispatch: async () => ({}) }),
+      log: { info() {} },
+    });
+    const operation = operationName === "start"
+      ? supervisor.start()
+      : operationName === "activate"
+        ? supervisor.activate({ deployId: "one" })
+        : supervisor.activate({ deployId: "one", recover: true });
+    await new Promise(resolve => setImmediate(resolve));
+    await supervisor.shutdown();
+    fs.unlinkSync(lock);
+    await assert.rejects(operation, error => error.code === "SHUTTING_DOWN");
+    assert.equal(spawns, 0, `${operationName}은 종료 뒤 spawn하지 않아야 한다`);
+  }
+});
+
+test("spawn 직후 종료가 시작되면 준비 중인 worker도 종료한다", async (t) => {
+  const stateDir = fs.mkdtempSync(path.join(scratch, "supervisor-stopping-spawned-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  let supervisor;
+  let child;
+  let disconnects = 0;
+  const spawnWorker = (_entry, options) => {
+    child = new EventEmitter();
+    child.pid = 9601;
+    child.connected = true;
+    child.disconnect = () => {
+      disconnects++;
+      child.connected = false;
+      queueMicrotask(() => child.emit("exit", 0, null));
+    };
+    child.send = (message, callback) => {
+      callback?.();
+      if (message.type === "worker.authorized") queueMicrotask(() => child.emit("message", { protocol: 1,
+        workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: "worker.ready", pid: child.pid,
+        deployId: options.env.IRIS_MCP_WORKER_DEPLOY_ID }));
+      if (message.type === "worker.accept") queueMicrotask(() => child.emit("message", { protocol: 1,
+        workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: "worker.accept.result",
+        requestId: message.requestId, ok: true, output: {} }));
+    };
+    queueMicrotask(() => child.emit("message", { protocol: 1,
+      workerGeneration: options.env.IRIS_MCP_WORKER_GENERATION, type: "worker.hello", pid: child.pid,
+      deployId: options.env.IRIS_MCP_WORKER_DEPLOY_ID, token: options.env.IRIS_MCP_WORKER_TOKEN }));
+    queueMicrotask(() => supervisor.shutdown());
+    return child;
+  };
+  supervisor = createMcpWorkerSupervisor({ stateDir, spawnWorker, maxRestarts: 0,
+    identityAuthority: createHostIdentityAuthority(), hostDispatcher: () => ({ dispatch: async () => ({}) }),
+    log: { info() {} } });
+  await assert.rejects(supervisor.start(), error => ["SHUTTING_DOWN", "WORKER_EXIT"].includes(error.code));
+  assert.equal(disconnects, 1);
+  assert.equal(supervisor.status().state, "failed");
 });
 
 test("살아 있는 pid 잠금 대기는 상한 뒤 실패한다", async (t) => {

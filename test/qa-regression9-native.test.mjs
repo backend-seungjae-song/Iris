@@ -104,7 +104,7 @@ test('hidden viewport pin skips tabs with an explicit QA viewport', () => {
     deviceEmulation: { hasExplicitDevice: () => false, viewportFor: () => viewport },
   });
   const { createHiddenViewport } = require('../native/electron/cdp-hidden-viewport.cjs');
-  const hiddenViewport = createHiddenViewport({ isTabShown: () => false, shownStateKnown: () => true, hasExplicitDevice,
+  const hiddenViewport = createHiddenViewport({ isTabShown: () => false, isBehindTab: () => false, shownStateKnown: () => true, hasExplicitDevice,
     navigationEpoch: () => 0, now: () => 0, isDisabled: () => false });
   const calls = [];
   const send = async (method) => { calls.push(method); };

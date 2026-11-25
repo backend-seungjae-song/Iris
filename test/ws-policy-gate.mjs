@@ -17,12 +17,13 @@ globalThis.WebSocket = FakeWs;
 const realSetInterval = globalThis.setInterval;
 globalThis.setInterval = (fn, ms) => { const t = realSetInterval(fn, ms); t.unref?.(); return t; };
 let seq = 0;
-async function setup() {
+async function setup(getAppConnectionToken) {
   FakeWs.all = [];
   const ws = await import(`../web/js/core/ws.js?case=${++seq}`);
   const log = { open: [], dispatched: [], mismatch: [] };
   ws.initWs({
     url: "ws://127.0.0.1:1/",
+    getAppConnectionToken,
     onOpen: (g) => log.open.push(g),
     onClose: () => {},
     onBinary: () => {},
@@ -35,6 +36,15 @@ async function setup() {
 test("창과 서버의 정책 값 일치", async () => {
   const ws = await import(`../web/js/core/ws.js?case=${++seq}`);
   assert.equal(ws.EXPECTED_NET_POLICY, envMod.NET_POLICY);
+});
+
+test("앱 화면은 서버 정책을 확인한 뒤 다른 메시지보다 먼저 연결을 인증한다", async () => {
+  const { ws, sock } = await setup(() => "fixture");
+  sock.open();
+  assert.deepEqual(sock.sent, []);
+  sock.recv({ type: "caps", local: true, netPolicy: envMod.NET_POLICY });
+  ws.wsSend({ type: "browser-tab-wc", tabId: "test-tab", wc: 7 });
+  assert.deepEqual(sock.sent.map((data) => JSON.parse(data).type), ["app-auth", "browser-tab-wc"]);
 });
 
 test("정상 caps 이후에만 연결 완료·전달·전송", async () => {
@@ -70,3 +80,28 @@ for (const [name, first] of [
     assert.equal(FakeWs.all.length, 1, "재연결 시도 없음");
   });
 }
+
+test("확인된 소켓의 잘못된 JSON은 다음 상태 수신에 영향을 주지 않는다", async () => {
+  const { log, sock } = await setup();
+  sock.open();
+  sock.recv({ type: "caps", netPolicy: envMod.NET_POLICY });
+  sock.recv("{");
+  sock.recv({ type: "state" });
+  assert.deepEqual(log.dispatched, ["caps", "state"]);
+});
+
+test("재초기화된 소켓은 이전 세대의 수신을 처리하지 않는다", async () => {
+  const { ws, log, sock } = await setup();
+  sock.open();
+  sock.recv({ type: "caps", netPolicy: envMod.NET_POLICY });
+  const old = sock;
+  ws.initWs({
+    url: "ws://127.0.0.1:1/",
+    onOpen: (generation) => log.open.push(generation),
+    onClose: () => {},
+    onBinary: () => {},
+    dispatch: { state: (m) => log.dispatched.push(m.type) },
+  });
+  old.recv({ type: "state" });
+  assert.deepEqual(log.dispatched, ["caps"]);
+});

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { claudeHome, codexHome } from "./agent-homes.js";
+import { agyHome, claudeHome, codexHome } from "./agent-homes.js";
 import stateHomeModule from "./state-home.cjs";
 
 const { stateHome } = stateHomeModule;
@@ -21,6 +21,7 @@ function roots(options = {}) {
   return {
     claude: real(options.claudeRoot || claudeHome("projects")),
     codex: real(options.codexRoot || codexHome("sessions")),
+    agy: real(options.agyRoot || agyHome("brain")),
     state: real(options.stateDir || stateHome()),
   };
 }
@@ -30,7 +31,7 @@ export function sessionPathRoots(options = {}) { return roots(options); }
 
 // file 은 이미 realpath 가 확정된 일반 파일. 루트 안인지만 본다.
 export function validateResolvedAgentSessionPath(agent, file, options = {}) {
-  if (!["claude", "codex"].includes(agent) || typeof file !== "string") return null;
+  if (!["claude", "codex", "agy"].includes(agent) || typeof file !== "string") return null;
   const allowed = roots(options);
   return inside(allowed[agent], file) && !inside(allowed.state, file) ? file : null;
 }
@@ -94,6 +95,11 @@ export function sessionIdsFromTranscriptTail(file) {
 
 function belongsToSession(agent, file, sessionId) {
   const lowerId = sessionId.toLowerCase();
+  if (agent === "agy") {
+    const parts = file.split(path.sep).map((s) => s.toLowerCase());
+    return parts.at(-4) === lowerId && parts.at(-3) === ".system_generated" && parts.at(-2) === "logs"
+      && ["transcript.jsonl", "transcript_full.jsonl"].includes(parts.at(-1));
+  }
   const stem = path.basename(file, ".jsonl").toLowerCase();
   if (agent === "codex") return stem.endsWith(`-${lowerId}`);
   return stem === lowerId || sessionIdsFromTranscriptTail(file).has(sessionId);
@@ -105,7 +111,7 @@ export function reportAgentSessionPath(input, options = {}) {
   const sessionId = String(input?.sessionId || "");
   if (!paneId || !sessionId || sessionId.length > 512 || /[\x00-\x1f\x7f]/.test(sessionId)) return null;
   const key = `${agent}\0${paneId}`;
-  if (["claude", "codex"].includes(agent)) reports.delete(key);
+  if (["claude", "codex", "agy"].includes(agent)) reports.delete(key);
   const file = validateAgentSessionPath(agent, input?.transcriptPath, options);
   if (!file || !belongsToSession(agent, file, sessionId)) return null;
   const record = { paneId, agent, sessionId, file };

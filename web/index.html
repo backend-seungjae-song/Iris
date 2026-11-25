@@ -57,6 +57,7 @@
 <link rel="stylesheet" href="/css/42-page-translate.css" />
 <link rel="stylesheet" href="/css/43-center-split.css">
 <link rel="stylesheet" href="/css/44-bookmark-manager.css">
+<link rel="stylesheet" href="/css/45-form-history.css">
 </head>
 <body>
 <div class="titlebar"></div>
@@ -70,7 +71,7 @@
     <button class="rail-ico" data-rail="autofill" title="AI 자동완성 로그인 허용 목록"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15.5" cy="8.5" r="4.5"/><path d="M12.3 11.7 4 20"/><path d="M6.5 17.5 9 20"/></svg></span><span class="rl">로그인</span></button>
     <button class="rail-ico" data-rail="memo" title="스페이스 메모 · 아카이브 (Ctrl/⌘⇧S로 오늘 자 보관)"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6.5"/><path d="m17.5 3.5 3 3L13 14l-3.5.5.5-3.5z"/></svg></span><span class="rl">메모</span></button>
     <button class="rail-ico" data-rail="archive" title="보관한 세션을 복원합니다"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1"/><path d="M5 8.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V8.5"/><path d="M10 13h4"/></svg></span><span class="rl">보관</span></button>
-    <button class="rail-ico" data-rail="usage" title="사용량 상세·이력: 여태 쓴 토큰과 계정 상태"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg></span><span class="rl">사용량</span></button>
+    <button class="rail-ico" data-rail="usage" title="사용량 상세·이력: 누적 토큰과 계정 상태"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg></span><span class="rl">사용량</span></button>
     <button class="rail-ico" data-rail="emulator" title="모바일 에뮬레이터: iOS 시뮬레이터·Android 기기"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg></span><span class="rl">모바일</span></button>
     <button class="rail-ico" data-rail="remote" title="휴대폰 원격 제어"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 6v5c0 4.4-2.8 8.2-7 10-4.2-1.8-7-5.6-7-10V6z"/><path d="M9 12h6"/></svg></span><span class="rl">원격</span></button>
     <button class="rail-ico" data-rail="keymap" title="설정: 단축키, 보안"><span class="ri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9h6v6H9z"/><path d="M9 9V6a3 3 0 1 0-3 3h3z"/><path d="M15 9h3a3 3 0 1 0-3-3v3z"/><path d="M15 15v3a3 3 0 1 0 3-3h-3z"/><path d="M9 15H6a3 3 0 1 0 3 3v-3z"/></svg></span><span class="rl">설정</span></button>
@@ -118,7 +119,7 @@
       <div class="center-empty cc-empty" id="center-empty">
         <div class="cc-empty-box">
           <div class="cc-empty-title" id="center-empty-title">열린 탭이 없습니다</div>
-          <div class="cc-empty-desc">파일이나 브라우저를 열면 여기에 탭으로 쌓입니다.</div>
+          <div class="cc-empty-desc">파일이나 브라우저를 열면 여기에 탭으로 추가됩니다.</div>
           <div class="cc-empty-actions">
             <button class="cc-empty-action" type="button" data-empty-act="file-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>파일 검색<span class="center-empty-keys" data-empty-key="file-search"></span></button>
             <button class="cc-empty-action" type="button" data-empty-act="browser"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>브라우저 탭 열기</button>
@@ -144,9 +145,10 @@
           <div class="ub-tools">
             <button class="chip" id="wv-profile" title="이 탭의 구글 프로필(탭마다 다른 로그인)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg><span>기본</span></button>
             <button class="ico" id="wv-closed" title="최근 닫은 탭 (⌘⇧T 는 맨 위 하나)" aria-label="최근 닫은 탭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 8v4.5l3 2"/></svg></button>
-            <button class="ico" id="wv-sketch" title="이 페이지 전체를 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다" aria-label="화면 스케치"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4L8 20H4v-4z"/></svg></button>
+            <button class="ico" id="wv-sketch" title="이 페이지 전체를 캡처해 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다" aria-label="화면 스케치"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4L8 20H4v-4z"/></svg></button>
             <span class="ub-sep"></span>
             <button class="ico" id="wv-size" title="이 탭의 화면 크기(반응형 확인)" aria-label="화면 크기"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg></button>
+            <span id="wv-zoom" title="페이지 확대 배율" hidden></span>
             <button class="ico" id="wv-detach" title="이 브라우저를 별도 창으로 분리(분리 창에서 ⌘⇧O로 다시 도킹)" aria-label="별도 창으로 분리"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="14" height="14" rx="2"/><path d="M13 3h8v8"/><path d="m21 3-9 9"/></svg></button>
             <button class="ico" id="wv-dock" title="이 브라우저를 콘솔에 도킹(⌘⇧O)" aria-label="콘솔에 도킹"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m16 8-7 7"/><path d="M9 10v5h5"/></svg></button>
             <button class="ico" id="wv-devtools" title="개발자 도구 (F12)" aria-label="개발자 도구"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg></button>
@@ -195,12 +197,12 @@
   </section>
 
   <section class="right" id="right">
-    <div class="changebar" id="changebar"><span id="changebar-text"></span><button id="changebar-clear">지움</button></div>
+    <div class="changebar" id="changebar"><span id="changebar-text"></span><button id="changebar-clear">지우기</button></div>
     <div class="right-head">
       <button class="sidebar-toggle" id="browser-open" title="브라우저 열기"></button>
       <button class="sidebar-toggle" id="shared-browser-open" title="공유 브라우저 창: 스페이스와 무관하게 유지됩니다"></button>
-      <button class="sidebar-toggle" id="crop-toggle" title="herdr 사이드바 가리기(콘솔에서만)"></button>
-      <span class="sess"><span class="dot idle" id="t-dot" role="img" aria-label="비활성화" title="비활성화"></span><span class="t-name" id="t-name">세션 미선택</span><span class="t-sub" id="t-sub"></span></span>
+      <button class="sidebar-toggle" id="crop-toggle" title="herdr 사이드바 숨기기(콘솔에서만)"></button>
+      <span class="sess"><span class="dot idle" id="t-dot" role="img" aria-label="대기 중" title="대기 중"></span><span class="t-name" id="t-name">세션 미선택</span><span class="t-sub" id="t-sub"></span></span>
       <button class="collapse-btn" id="right-collapse" title="접기"></button>
     </div>
     <div class="htabs" id="htabs" hidden></div>

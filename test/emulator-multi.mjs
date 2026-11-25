@@ -34,7 +34,7 @@ window.ready=true;
 async function returnViaPanel(page, device) {
  const index = device === 'one' ? 0 : 1;
  // 분리 직후 패널의 위치 값은 새로 고침해야 '외부 창'이 됨
- await page.evaluate(() => document.querySelector('.emu-ib[title="새로 고침"]').click());
+ await page.evaluate(() => document.querySelector('.emu-ib[title="새로고침"]').click());
  await page.waitForFunction(i => document.querySelectorAll('.emu-dp-placement .cc-dd-value')[i]?.textContent === '외부 창', {}, index);
  // 기기 패널은 레일 화면을 나가면 숨겨져 메뉴가 화면에 안 보임. 열고 항목 클릭 이벤트를 보냄
  await page.evaluate(i => document.querySelectorAll('.emu-dp-placement .cc-dd-trigger')[i].click(), index);
@@ -160,7 +160,7 @@ test('두 기기의 탭·열·외부 창 전환은 실행을 종료하지 않는
   assert.equal(await page.evaluate(()=>document.querySelectorAll('.emu-tab-host').length),0,'닫은 외부 창이 화면으로 되돌아왔다');
   assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c.method==='emulator.shutdown')),[], '외부 창 닫기가 기기를 껐다');
   // 삭제 취소는 열린 화면을 유지하고 삭제 성공은 해당 외부 창과 저장된 화면만 제거한다.
-  await page.evaluate(async()=>{feature.screen.enter();await document.querySelector('.emu-ib[title="새로 고침"]').click();});
+  await page.evaluate(async()=>{feature.screen.enter();await document.querySelector('.emu-ib[title="새로고침"]').click();});
   await page.waitForSelector('[data-device="one"] .emu-dp-row');
   await page.evaluate(()=>document.querySelector('[data-device="one"] .emu-dp-row').click());
   await page.waitForFunction(()=>document.querySelector('.emu-tab-host'));

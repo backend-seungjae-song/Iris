@@ -402,7 +402,7 @@ export function initSheetEvents(deps) {
     e.clipboardData.setData("text/plain", txt);
     e.preventDefault();
     const s = svNorm(t._svSel);
-    showToast(s.r1 === s.r2 && s.c1 === s.c2 ? "칸 내용 복사됨" : `${(s.r2 - s.r1 + 1)}줄 × ${(s.c2 - s.c1 + 1)}칸 복사됨`,
+    showToast(s.r1 === s.r2 && s.c1 === s.c2 ? "셀 내용 복사됨" : `${(s.r2 - s.r1 + 1)}행 × ${(s.c2 - s.c1 + 1)}열 복사됨`,
       { level: "ok", near: document.querySelector("#sv-grid td.sv-sel") || "action" });
   });
   document.addEventListener("cut", (e) => {
@@ -434,7 +434,7 @@ export function initSheetEvents(deps) {
     svApply(t, ch);
     t._svSel = { r1: s.r1, c1: s.c1, r2: Math.min(sh.rows, s.r1 + rows.length - 1), c2: Math.min(sh.colsCount, s.c1 + rows[0].length - 1) };
     svPaint(t);
-    showToast(`${rows.length}줄 붙여넣음`, { level: "ok" });
+    showToast(`${rows.length}행 붙여넣음`, { level: "ok" });
   });
   
   

@@ -93,7 +93,7 @@ tell application "System Events"
 end tell
 return outp`;
   const r = await osa(script);
-  if (!r.ok) return { ok: false, error: "접근성 접근 실패 — 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 허용해야 합니다. (" + r.error + ")" };
+  if (!r.ok) return { ok: false, error: "접근성 접근 실패. 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 허용해야 합니다. (" + r.error + ")" };
   if (r.out === "NOPROC") return { ok: false, error: "앱 프로세스를 찾지 못했습니다." };
   const rows = r.out.split(AX_ROW).map((s) => s.trim()).filter(Boolean).map((row) => {
     const [kind, name, buttons, texts] = row.split(AX_SEP);
@@ -107,7 +107,7 @@ return outp`;
   return {
     ok: true, windows: rows, blocking,
     note: blocking.length
-      ? "시트가 떠 있습니다 — 사람이 누를 때까지 그 창의 조작이 막힙니다. nativeclick 으로 버튼을 누르세요."
+      ? "시트가 열려 있습니다. 사람이 누를 때까지 그 창의 조작이 막힙니다. nativeclick 으로 버튼을 누르세요."
       : "지금 막고 있는 네이티브 시트는 없습니다.",
   };
 }
@@ -145,7 +145,7 @@ async function axClick(button) {
 end tell
 return "NOTFOUND"`;
   const r = await osa(script);
-  if (!r.ok) return { ok: false, error: "접근성 접근 실패 — " + r.error };
+  if (!r.ok) return { ok: false, error: "접근성 접근 실패: " + r.error };
   if (r.out === "NOPROC") return { ok: false, error: "앱 프로세스를 찾지 못했습니다." };
   if (r.out === "NOTFOUND") return { ok: false, error: `"${button}" 버튼을 찾지 못했습니다. nativewin으로 이름을 확인하세요.` };
   return { ok: true, clicked: button, where: r.out };

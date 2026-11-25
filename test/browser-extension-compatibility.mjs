@@ -75,6 +75,17 @@ test("worker restarts register IPC once and discard old navigation subscriptions
   assert.equal(f.session.serviceWorkers.listenerCount("running-status-changed"), 0);
 });
 
+test("확장 manifest는 이벤트마다 디스크에서 다시 읽지 않는다", async (t) => {
+  let reads = 0;
+  const f = fixture(t, [], [], { readManifestImpl: (directory) => {
+    reads += 1;
+    return JSON.parse(readFileSync(path.join(directory, "manifest.json"), "utf8"));
+  } });
+  await f.invoke("commands.getAll", {});
+  await f.invoke("commands.getAll", {});
+  assert.equal(reads, 1);
+});
+
 test("HTTP workers, unselected copies, and absent permissions cannot use extension IPC", async (t) => {
   const f = fixture(t, []);
   await assert.rejects(f.invoke("subscribe", { token: "1", name: "webNavigation.onCommitted" }), /권한/);

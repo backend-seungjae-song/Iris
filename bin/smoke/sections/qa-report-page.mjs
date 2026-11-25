@@ -154,7 +154,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     const p = path.join(tmp, "miss.html");
     buildReport({ title: "표본2", steps, out: p, runId: "smoke-miss" });
     const g = readFileSync(p, "utf8");
-    return g.includes("보고서에 안 실린 확인") && g.includes(rD.id);
+    return g.includes("보고서에 포함되지 않은 확인") && g.includes(rD.id);
   });
   // 찍어 놓고 싣지 않은 장면은 상태 폴더의 정리(60장·7일)로 삭제된다. 글줄만 남기면 증거가
   // 사라진 뒤 "확인했다"는 문장만 남는다.
@@ -273,7 +273,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     return files.length === 1 && readFileSync(path.join(out2.store, "derived", files[0])).equals(png) && g.includes(rP.id) && g.includes(rF.id)
       && /class="miss bad">\s*<img src="data:image/.test(g)
       && /class="miss">\s*<div class="gone">장면은 회차 폴더에 있음/.test(g)
-      && /지면 무게 때문에 안 실림/.test(g);
+      && /지면 크기 때문에 넣지 않음/.test(g);
   });
   // 이 배열은 MCP 프로세스가 실행되는 동안 계속 쌓인다. 회차 경계가 없으면 다른 회차의 증거가
   // 이 보고서의 "안 실린 확인"으로 실린다(확인 결과: 14단계 회차에 영수증 195건·38시간치).
@@ -459,7 +459,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
     const out = path.join(tmp, "ledstale.html");
     buildReport({ title: "덮임", runId: "ledstale", out, kind: "proof" });
     const html = readFileSync(devOf(out), "utf8");
-    const verdict = /장부 시각보다 뒤에/.test(html) && /촬영 시점 불일치/.test(html) && /증거 아님/.test(html)
+    const verdict = /기록 시각보다 뒤에/.test(html) && /촬영 시점 불일치/.test(html) && /증거 아님/.test(html)
       && /장면 파일 덮임/.test(html);
     rmSync(home, { recursive: true, force: true });
     return verdict;
@@ -617,7 +617,7 @@ console.log("\n[10h2] 보고서 렌더 결과");
       && /<h2 class="sec">앞 회차 지적<\/h2>/.test(html)            // 목록 둘이 다 표시된다
       && /3가지 중 1가지를 봄 · 안 본 것 2가지: listingRejected · tradeSettled/.test(html)
       && /1가지를 다 봄|1가지 중 0가지를 봄/.test(html)
-      && /notifier\.ts/.test(html) && /코드에 있는 자리가 곧 목록/.test(html)   // 어디서 떠 왔는가
+      && /notifier\.ts/.test(html) && /코드에 있는 위치가 곧 목록/.test(html)   // 어디서 떠 왔는가
       && /notifier\.ts:2/.test(html);                                // 항목마다 그 자리
     rmSync(home, { recursive: true, force: true });
     return verdict;

@@ -2,6 +2,7 @@
 // 등록된 팝업이 visibleTabsFor를 통과해 실제 목록에 뜨는지는 보지 않는다. 여기서는
 // 격리된 서버 모듈의 실제 WebSocket 핸들러와 /browser-cmd 요청 핸들러를 끝까지 지난다.
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import http from "node:http";
@@ -23,7 +24,7 @@ async function waitFor(predicate, { timeout = 10_000, interval = 20 } = {}) {
   throw new Error("조건을 기다리다 시간 초과");
 }
 
-async function makeFixture(t) {
+async function makeFixture(t, appToken) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "iris-popup-access-"));
   const home = path.join(root, "home"), stateDir = path.join(root, "state");
   const folders = { X: path.join(root, "workspace-x"), Y: path.join(root, "workspace-y") };
@@ -33,6 +34,7 @@ async function makeFixture(t) {
   process.env.IRIS_PORT = "42919";
   process.env.PORT = "42919";
   process.env.REMOTE = "";
+  process.env.IRIS_APP_CONNECTION_TOKEN = appToken;
 
   const agents = [
     { agent: "codex", agent_status: "idle", cwd: folders.X, workspace_id: "X", pane_id: "A", focused: true },
@@ -141,7 +143,10 @@ async function makeFixture(t) {
 }
 
 test("팝업은 연 세션만 목록·지정으로 제어하고 종료하면 권한도 사라진다", { timeout: 30_000 }, async (t) => {
-  const { stateDir, browserCmd, sendWs, sendWsAndFind } = await makeFixture(t);
+  const appToken = randomBytes(32).toString("hex");
+  const { stateDir, browserCmd, sendWs, sendWsAndFind } = await makeFixture(t, appToken);
+  const { hasTab } = await import("../server/browser-runtime.js");
+  assert.equal(Object.hasOwn(process.env, "IRIS_APP_CONNECTION_TOKEN"), false);
 
   await t.test("1. A/B는 X, C는 Y에 묶인 독립 세션이다", async () => {
     const [a, b, c] = await Promise.all(["A", "B", "C"].map((session) => browserCmd("tabs", session)));
@@ -160,7 +165,12 @@ test("팝업은 연 세션만 목록·지정으로 제어하고 종료하면 권
     { op: "tab.open", space: "X", id: "picked-tab-two", url: "https://two.test", group: "picked-two" },
   ]) sendWs({ type: "browser-sync", mutation });
 
-  sendWs({ type: "browser-tab-wc", wc: 101, tabId: "opener-a", space: "X", url: "https://a.test", win: "console" });
+  const opener = { type: "browser-tab-wc", wc: 101, tabId: "opener-a", space: "X", url: "https://a.test", win: "console" };
+  sendWs(opener);
+  assert.equal(hasTab(opener.tabId), false);
+  sendWs({ type: "app-auth", token: appToken });
+  sendWs(opener);
+  assert.equal(hasTab(opener.tabId), true);
   sendWs({ type: "browser-tab-wc", wc: 102, tabId: "opener-human", space: "X", url: "https://human.test", win: "console" });
   sendWs({ type: "browser-tab-wc", wc: 103, tabId: "picked-tab-one", space: "X", url: "https://one.test", win: "console" });
   sendWs({ type: "browser-tab-wc", wc: 104, tabId: "picked-tab-two", space: "X", url: "https://two.test", win: "console" });

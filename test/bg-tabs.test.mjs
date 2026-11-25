@@ -175,3 +175,35 @@ test("save 는 페이지 작업 결과를 조각으로 읽어 새 파일로 쓰�
   await assert.rejects(() => tabs.save({ tabId: "bg:none", jobId: "j3", file: path.join(dir, "n.json") }), /닫혔습니다/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("페이지 결과가 읽는 도중 사라지면 부분 파일을 삭제한다", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bg-save-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { tabs, log } = makeTabs();
+  const { tabId } = await tabs.open({ url: "https://example.com", partition: "persist:acbrowser" });
+  const file = path.join(dir, "result");
+  const chunks = [3, "a", ""];
+  log.guests[0].executeJavaScript = async () => {
+    if (!chunks.length) throw new Error("빈 조각 이후 재시도");
+    return chunks.shift();
+  };
+  await assert.rejects(tabs.save({ tabId, jobId: "j1", file }), /결과가 변경/);
+  assert.equal(fs.existsSync(file), false);
+});
+
+test("파일 쓰기와 정리가 함께 실패해도 쓰기 오류를 돌려준다", async () => {
+  const cause = new Error("쓰기 실패");
+  const cleanup = [];
+  const { tabs, log } = makeTabs({}, { fs: { promises: {
+    mkdir: async () => {},
+    open: async () => ({
+      writeFile: async () => { throw cause; },
+      close: async () => { cleanup.push("close"); throw new Error("닫기 실패"); },
+    }),
+    unlink: async () => { cleanup.push("unlink"); throw new Error("삭제 실패"); },
+  } } });
+  const { tabId } = await tabs.open({ url: "https://example.com", partition: "persist:acbrowser" });
+  log.guests[0].vmCtx.__irisJobs = { j1: { state: "done", text: "x" } };
+  await assert.rejects(tabs.save({ tabId, jobId: "j1", file: path.join(os.tmpdir(), "result") }), e => e === cause);
+  assert.deepEqual(cleanup, ["close", "unlink"]);
+});

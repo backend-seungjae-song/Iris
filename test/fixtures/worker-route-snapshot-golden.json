@@ -87,7 +87,7 @@
         "shown": 10,
         "bytes": 238,
         "frames": 2,
-        "humanHint": "사람만 할 수 있는 자리다(결제 창). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. 답을 받은 뒤 화면을 다시 확인하고 이어 간다."
+        "humanHint": "사람만 할 수 있는 단계다(결제 창). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. 답을 받은 뒤 화면을 다시 확인하고 계속한다."
       }
     },
     "refs": [
@@ -169,7 +169,7 @@
         "url": "https://example.test/list",
         "title": "긴 목록",
         "refCount": 68,
-        "snapshot": "heading \"구역 0\"\n[@e1] button \"항목 1\"\n[@e2] button \"항목 2\"\n[@e3] button \"항목 3\"\n[@e4] button \"항목 4\"\n[@e5] button \"항목 6\"\n[@e6] button \"항목 7\"\n[@e7] button \"항목 8\"\n[@e8] button \"항목 9\"\nheading \"구역 10\"\n[@e9] button \"항목 11\"\n[@e10] button \"항목 12\"\n[@e11] button \"항목 13\"\n[@e12] button \"항목 14\"\n[@e13] button \"항목 15\"\n[@e14] button \"항목 16\"\n[@e15] button \"항목 17\"\n[@e16] button \"항목 18\"\n[@e17] button \"항목 19\"\nheading \"구역 20\"\n[@e18] button \"항목 21\"\n[@e19] button \"항목 22\"\n[@e20] button \"항목 23\"\n[@e21] button \"항목 24\"\n[@e22] button \"항목 26\"\n[@e23] button \"항목 27\"\n[@e24] button \"항목 28\"\n[@e25] button \"항목 29\"\n\n[잘린 구간의 경고·상태·제목 5개]\n  heading \"구역 30\"\n  heading \"구역 40\"\n  heading \"구역 50\"\n  heading \"구역 60\"\n  heading \"구역 70\"\n\n[700바이트에서 끊었다. 이어 보려면 cursor=28 — 또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]",
+        "snapshot": "heading \"구역 0\"\n[@e1] button \"항목 1\"\n[@e2] button \"항목 2\"\n[@e3] button \"항목 3\"\n[@e4] button \"항목 4\"\n[@e5] button \"항목 6\"\n[@e6] button \"항목 7\"\n[@e7] button \"항목 8\"\n[@e8] button \"항목 9\"\nheading \"구역 10\"\n[@e9] button \"항목 11\"\n[@e10] button \"항목 12\"\n[@e11] button \"항목 13\"\n[@e12] button \"항목 14\"\n[@e13] button \"항목 15\"\n[@e14] button \"항목 16\"\n[@e15] button \"항목 17\"\n[@e16] button \"항목 18\"\n[@e17] button \"항목 19\"\nheading \"구역 20\"\n[@e18] button \"항목 21\"\n[@e19] button \"항목 22\"\n[@e20] button \"항목 23\"\n[@e21] button \"항목 24\"\n[@e22] button \"항목 26\"\n[@e23] button \"항목 27\"\n[@e24] button \"항목 28\"\n[@e25] button \"항목 29\"\n\n[잘린 구간의 경고·상태·제목 5개]\n  heading \"구역 30\"\n  heading \"구역 40\"\n  heading \"구역 50\"\n  heading \"구역 60\"\n  heading \"구역 70\"\n\n[700바이트에서 잘랐다. 이어서 보려면 cursor=28. 또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]",
         "lines": 76,
         "shown": 28,
         "bytes": 1000,
@@ -417,7 +417,7 @@
         "url": "https://example.test/list",
         "title": "긴 목록",
         "refCount": 68,
-        "snapshot": "[@e18] button \"항목 21\"\n[@e19] button \"항목 22\"\n[@e20] button \"항목 23\"\n[@e21] button \"항목 24\"\n[@e22] button \"항목 26\"\n[@e23] button \"항목 27\"\n[@e24] button \"항목 28\"\n[@e25] button \"항목 29\"\nheading \"구역 30\"\n[@e26] button \"항목 31\"\n[@e27] button \"항목 32\"\n[@e28] button \"항목 33\"\n[@e29] button \"항목 34\"\n[@e30] button \"항목 35\"\n[@e31] button \"항목 36\"\n[@e32] button \"항목 37\"\n[@e33] button \"항목 38\"\n[@e34] button \"항목 39\"\nheading \"구역 40\"\n[@e35] button \"항목 41\"\n[@e36] button \"항목 42\"\n[@e37] button \"항목 43\"\n[@e38] button \"항목 44\"\n[@e39] button \"항목 46\"\n[@e40] button \"항목 47\"\n[@e41] button \"항목 48\"\n[@e42] button \"항목 49\"\n\n[잘린 구간의 경고·상태·제목 3개]\n  heading \"구역 50\"\n  heading \"구역 60\"\n  heading \"구역 70\"\n\n[700바이트에서 끊었다. 이어 보려면 cursor=47 — 또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]",
+        "snapshot": "[@e18] button \"항목 21\"\n[@e19] button \"항목 22\"\n[@e20] button \"항목 23\"\n[@e21] button \"항목 24\"\n[@e22] button \"항목 26\"\n[@e23] button \"항목 27\"\n[@e24] button \"항목 28\"\n[@e25] button \"항목 29\"\nheading \"구역 30\"\n[@e26] button \"항목 31\"\n[@e27] button \"항목 32\"\n[@e28] button \"항목 33\"\n[@e29] button \"항목 34\"\n[@e30] button \"항목 35\"\n[@e31] button \"항목 36\"\n[@e32] button \"항목 37\"\n[@e33] button \"항목 38\"\n[@e34] button \"항목 39\"\nheading \"구역 40\"\n[@e35] button \"항목 41\"\n[@e36] button \"항목 42\"\n[@e37] button \"항목 43\"\n[@e38] button \"항목 44\"\n[@e39] button \"항목 46\"\n[@e40] button \"항목 47\"\n[@e41] button \"항목 48\"\n[@e42] button \"항목 49\"\n\n[잘린 구간의 경고·상태·제목 3개]\n  heading \"구역 50\"\n  heading \"구역 60\"\n  heading \"구역 70\"\n\n[700바이트에서 잘랐다. 이어서 보려면 cursor=47. 또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]",
         "lines": 76,
         "shown": 27,
         "bytes": 954,
@@ -712,8 +712,8 @@
         "lines": 8,
         "shown": 8,
         "bytes": 180,
-        "loginHint": "로그인 칸 있음(https://example.test) — 사람에게 넘기기 전에 login 먼저. 허용된 계정이 없으면 그때 사람 차례.",
-        "humanHint": "사람만 할 수 있는 자리다(인증번호 입력 · 캡차). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. 답을 받은 뒤 화면을 다시 확인하고 이어 간다."
+        "loginHint": "로그인 칸 있음(https://example.test). 사람에게 넘기기 전에 login 먼저. 허용된 계정이 없으면 그때 사람에게 넘긴다.",
+        "humanHint": "사람만 할 수 있는 단계다(인증번호 입력 · 캡차). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. 답을 받은 뒤 화면을 다시 확인하고 계속한다."
       }
     },
     "refs": [

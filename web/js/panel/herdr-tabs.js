@@ -19,7 +19,10 @@
 //   main 의 state 수신, core/keynav 의 ⌥←→ 탭 순환과 cmd+t, panel/terminal 의 세로 crop.
 //   현재 목록 확인: node bin/importers.mjs web/js/panel/herdr-tabs.js
 
+import { patchHtml, tabKey } from "../core/patch-html.js";
+import { sessionLaunchOptions } from "../herdr/session-providers.js";
 import { getSpaces, getTabsForSpace } from "../herdr/state.js";
+import { callHook } from "../core/hooks.js";
 import { icon } from "../core/glyphs.js";
 import { STATE_LABEL, agentState } from "../core/agent-state.js";
 import { askText, showCtx } from "../explorer/context-menu.js";
@@ -105,9 +108,10 @@ export function renderHerdrTabs() {
   if (!strip) return;
   const space = currentSpace();
   const tabs = space ? orderedTabs(space) : [];
-  if (!tabs.length) { strip.hidden = true; strip.innerHTML = ""; lastMarkup = ""; syncLayout(); return; }
+  if (!tabs.length) { strip.hidden = true; if (lastMarkup) patchHtml(strip, ""); lastMarkup = ""; lastFocused = null; syncLayout(); return; }
   strip.hidden = false;
   const meta = readMeta();
+  const focused = callHook("agentchat.selectedTab") || tabs.find((t) => t.focused)?.tabId || null;
   const items = tabs.map((t, i) => {
     const m = meta[t.tabId] || {};
     const num = String(t.number ?? i + 1);
@@ -118,7 +122,7 @@ export function renderHerdrTabs() {
     // 에이전트가 도는 창만 상태 점을 단다. 그냥 셸 창은 herdr 이 "unknown" 을 주고 점이 없다.
     const st = agentState(t.agentStatus, t.question);
     const dot = t.agentStatus && t.agentStatus !== "unknown" ? `<span class="dot dotst ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span>` : "";
-    return `<button class="htab${t.focused ? " on" : ""}${m.pin ? " pinned" : ""}" data-tab="${esc(t.tabId)}"`
+    return `<button class="htab${t.tabId === focused ? " on" : ""}${m.pin ? " pinned" : ""}" data-tab="${esc(t.tabId)}"`
       + `${tint ? ` style="--htab-tint:${tint}"` : ""} title="${esc(label)}">`
       + (m.pin ? `<span class="htab-pin">${icon("pin", 10)}</span>` : "")
       + dot
@@ -127,18 +131,14 @@ export function renderHerdrTabs() {
       + `</button>`;
   }).join("");
   const add = getIsLocal()
-    ? `<button class="htab-add" data-add="1" title="새 탭: 눌러서 무엇을 띄울지 고릅니다">${icon("plus", 12)}</button>`
+    ? `<button class="htab-add" data-add="1" title="새 탭: 눌러서 열 항목을 선택합니다">${icon("plus", 12)}</button>`
     : "";
   const markup = `<div class="htab-scroll">${items}</div>${add}`;
   // 상태 방송마다 불림. 같으면 그대로 두고, 바뀌어도 사람이 넘긴 가로 위치는 유지
   // - 다시 그릴 때마다 선택 탭으로 되돌아가던 결함(2026-11-07)
   if (markup === lastMarkup && strip.querySelector(".htab-scroll")) { syncLayout(); return; }
-  const left = strip.querySelector(".htab-scroll")?.scrollLeft || 0;
-  strip.innerHTML = markup; lastMarkup = markup;
-  const box = strip.querySelector(".htab-scroll");
-  if (box) box.scrollLeft = left;
+  patchHtml(strip, markup, tabKey); lastMarkup = markup;
   // 지금 보고 있는 탭이 바뀌었을 때만 밀려 나간 그 탭을 끌어옴. 보이지 않는 탭이 활성이면 위치를 알 수 없음
-  const focused = tabs.find((t) => t.focused)?.tabId || null;
   if (focused !== lastFocused) strip.querySelector(".htab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   lastFocused = focused;
   strip.querySelector(".htab-scroll")?.addEventListener("scroll", markOverflow, { passive: true });
@@ -216,12 +216,9 @@ export function openCreateMenu(x, y, spaceId) {
 
 // 스페이스 메뉴도 같은 항목을 쓴다. 새 탭을 여는 경로가 둘인데 선택지가 다르면 안 된다.
 export function createItems(space) {
-  const make = (launch, name) => wsSend({ type: "tab.create", workspaceId: space, name, launch });
-  return [
-    { label: "새 Claude 세션", act: () => make("claude", "claude") },
-    { label: "새 Codex 세션", act: () => make("codex", "codex") },
-    { label: "새 터미널", act: () => wsSend({ type: "tab.create", workspaceId: space }) },
-  ];
+  return sessionLaunchOptions().map(([launch, label]) => ({
+    label, act: () => wsSend({ type: "tab.create", workspaceId: space, ...(launch ? { launch, name: launch } : {}) }),
+  }));
 }
 
 function onContext(e) {
@@ -240,7 +237,7 @@ function onContext(e) {
       const v = await askText("탭 이름", cur?.label || "");
       if (v !== null && v !== "") wsSend({ type: "tab.rename", tabId, label: v });
     } },
-    { label: m.pin ? "고정 풀기" : "고정", act: () => setMeta(tabId, { pin: !m.pin }) },
+    { label: m.pin ? "고정 해제" : "고정", act: () => setMeta(tabId, { pin: !m.pin }) },
     { label: "색", swatches: COLORS.map((c) => ({
       label: c.label, color: c.pal, on: (m.color || "") === c.id,
       act: () => setMeta(tabId, { color: c.id }),

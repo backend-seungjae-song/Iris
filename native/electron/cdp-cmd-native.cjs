@@ -45,7 +45,7 @@ function createNativeCommands({
     async dialog(send, wc, args) {
       const accept = String(args.answer || "cancel") !== "cancel";
       const asked = observation.dialogOpen(wc.id);
-      if (!asked) return { ok: true, none: true, note: "떠 있는 확인 창이 없습니다." };
+      if (!asked) return { ok: true, none: true, note: "열린 확인 창이 없습니다." };
       await send("Page.handleJavaScriptDialog", {
         accept, ...(asked.type === "prompt" && args.text != null ? { promptText: String(args.text) } : {}),
       });
@@ -63,7 +63,7 @@ function createNativeCommands({
       if (!raw || raw === "off") { plan.queue = []; plan.mode = null; arm(null); return { ok: true, mode: "off", note: "사람이 처리" }; }
       const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
       const bad = parts.find((s) => s !== "ok" && s !== "cancel");
-      if (bad) return { error: `알 수 없는 응답 "${bad}" — ok · cancel · off 만 가능` };
+      if (bad) return { error: `알 수 없는 응답 "${bad}". ok · cancel · off 만 가능` };
       if (parts.length === 1) { plan.queue = []; plan.mode = parts[0]; arm({ mode: parts[0] }); return { ok: true, mode: parts[0] }; }
       plan.queue = parts; plan.mode = null;   // 큐가 비면 다시 사람이 처리한다. 예정에 없던 대화상자는 멈춰서 드러나는 게 낫다
       arm({ queue: parts });

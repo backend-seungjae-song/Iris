@@ -23,7 +23,7 @@ export function chatFor(paneMode, defaultView, isChild) {
 export const CHAT_SETTINGS_URL = "/paseo-ui/?panel=chat-settings";
 
 // 설정 화면 분류 모델(devtool/settings-view.js featureSectionPane 이 그림)
-// - 표시 설정은 Paseo 설정 화면(ChatSection)을 그대로 띄움. 항목·기본값은 Paseo 가 정함
+// - 표시 설정은 같은 출처 iframe 이 Iris 설정 줄로 그림. 항목·기본값·저장은 Paseo 채팅 설정과 같음
 export function settingsSection(defaultView, frameHeight = 0) {
   return {
     id: "agentchat",
@@ -31,13 +31,13 @@ export function settingsSection(defaultView, frameHeight = 0) {
     rows: [{
       key: "defaultView",
       label: "기본 화면",
-      desc: "Claude Code나 Codex 세션을 열면 이 화면으로 보입니다. 세션 위의 전환 단추로 바꾼 세션은 다음에도 바꾼 화면으로 열립니다.",
+      desc: "Claude Code나 Codex 세션을 열면 이 화면으로 표시합니다. 세션 위의 전환 버튼으로 바꾼 세션은 다음에도 바꾼 화면으로 열립니다.",
       value: parseDefaultView(defaultView),
       options: VIEW_OPTIONS,
     }, {
       key: "paseoChat",
-      label: "대화 표시",
-      desc: "대화 화면에 무엇을 펼쳐 보일지 정합니다. 바꾸면 열린 대화 화면에 바로 반영됩니다.",
+      label: "대화 목록",
+      desc: "대화 화면에 펼쳐서 표시할 항목을 정합니다. 바꾸면 열린 대화 화면에 바로 반영됩니다.",
       frame: CHAT_SETTINGS_URL,
       height: frameHeight,
     }],

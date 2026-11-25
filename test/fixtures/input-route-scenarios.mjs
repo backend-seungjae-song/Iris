@@ -114,7 +114,7 @@ export const SCENARIOS = [
     page: () => pageOf({ evaluate: () => value({ ok: true, via: "페이지 안 입력" }) }) },
   { name: "type-cross-frame", cmd: "type", args: { text: "안녕" }, frames: ["frame-1", "frame-2"], env: { ...shownEnv, owns: false },
     page: () => pageOf({ evaluate: (expr, sid) => (expr.includes("crossFrame") || expr.includes("insertText") ? (sid ? value({ ok: true, via: "페이지 안 입력" }) : value({ ok: false, crossFrame: true })) : value(sid === "frame-2")) }) },
-  { name: "type-no-cursor", cmd: "type", args: { text: "x" }, env: { ...shownEnv, owns: false }, page: () => pageOf({ evaluate: () => value({ ok: false, why: "커서가 어디에도 없습니다" }) }) },
+  { name: "type-no-cursor", cmd: "type", args: { text: "x" }, env: { ...shownEnv, owns: false }, page: () => pageOf({ evaluate: () => value({ ok: false, why: "포커스된 요소가 없습니다" }) }) },
   { name: "key-enter", cmd: "key", args: { key: "Enter" }, env: shownEnv, page: () => pageOf({ evaluate: () => value(JSON.stringify({ did: "폼 보냄", prevented: false, on: "INPUT" })) }) },
   { name: "key-bad-name", cmd: "key", args: { key: "Hyper+X+Y" }, env: shownEnv, page: () => pageOf() },
   { name: "select-ref", cmd: "select", args: { ref: "@e1", value: "KR" }, refs: ref1, env: shownEnv, page: () => pageOf({ callFn: callFnValue({ ok: true, selected: "한국", value: "KR" }) }) },
@@ -132,9 +132,9 @@ export const SCENARIOS = [
   { name: "bulkfill-hidden-tab", cmd: "bulkfill", args: { values: ["가"] }, env: hiddenEnv, page: () => pageOf() },
   { name: "bulkfill-bad-advance", cmd: "bulkfill", args: { values: ["가"], advance: "Escape" }, env: shownEnv, page: () => pageOf() },
   { name: "bulkfill-stops-secret", cmd: "bulkfill", args: { values: ["가", "hunter2-pw", "다"] }, env: { ...shownEnv, secret: "hunter2-pw" },
-    page: () => pageOf({ evaluate: (() => { let ones = 0; return (expr) => (expr.includes("innerText") ? value("본문") : ++ones < 2 ? value({ ok: true, via: "입력칸" }) : value({ ok: false, why: "커서가 어디에도 없습니다" })); })() }) },
+    page: () => pageOf({ evaluate: (() => { let ones = 0; return (expr) => (expr.includes("innerText") ? value("본문") : ++ones < 2 ? value({ ok: true, via: "입력칸" }) : value({ ok: false, why: "포커스된 요소가 없습니다" })); })() }) },
   { name: "bulkfill-stops", cmd: "bulkfill", args: { values: ["가", "나", "다"] }, env: shownEnv,
-    page: () => pageOf({ evaluate: (() => { let ones = 0; return (expr) => (expr.includes("innerText") ? value("본문") : ++ones < 2 ? value({ ok: true, via: "입력칸" }) : value({ ok: false, why: "커서가 어디에도 없습니다" })); })() }) },
+    page: () => pageOf({ evaluate: (() => { let ones = 0; return (expr) => (expr.includes("innerText") ? value("본문") : ++ones < 2 ? value({ ok: true, via: "입력칸" }) : value({ ok: false, why: "포커스된 요소가 없습니다" })); })() }) },
 ];
 
 // 메인 redactSecrets 대역: 저장된 비밀 문자열을 가림
@@ -259,7 +259,7 @@ export function createWorkerRun(scenario, { legacyResponse = null, blockAt = nul
   async function baseCommand(command, args) {
     switch (command) {
       case "cdp.attach":
-        if (env.blockedHost) return fail(legacyResponse?.error || "로그인 호스트에서는 CDP 를 붙이지 않아 실행할 수 없습니다.", "cdp_blocked");
+        if (env.blockedHost) return fail(legacyResponse?.error || "로그인 호스트에서는 CDP 를 연결하지 않아 실행할 수 없습니다.", "cdp_blocked");
         return done({ documentGeneration: TOKEN.documentGeneration, debuggerGeneration: TOKEN.debuggerGeneration });
       case "ai.enter": effects.push(["ai.enter"]); return done({ ticket: "t1" });
       case "ai.leave": effects.push(["ai.leave"]); return done({ left: true });

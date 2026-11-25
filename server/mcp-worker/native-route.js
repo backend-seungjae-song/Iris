@@ -36,7 +36,7 @@ async function execute(cmd, args, base) {
     // 지금 떠 있는 확인 창을 닫음 · 브라우저 층 명령이라 페이지가 멈춰 있어도 동작
     async dialog(bodyArgs) {
       const done = await step("dialog.answer", { answer: bodyArgs.answer, text: bodyArgs.text });
-      if (done.none) return { ok: true, none: true, note: "떠 있는 확인 창이 없습니다." };
+      if (done.none) return { ok: true, none: true, note: "열린 확인 창이 없습니다." };
       return { ok: true, answered: done.answered, kind: done.kind, message: done.message };
     },
     async dialoginfo() {
@@ -53,7 +53,7 @@ async function execute(cmd, args, base) {
       }
       const parts = raw.split(",").map((item) => item.trim()).filter(Boolean);
       const bad = parts.find((item) => item !== "ok" && item !== "cancel");
-      if (bad) return { error: `알 수 없는 응답 "${bad}" — ok · cancel · off 만 가능` };
+      if (bad) return { error: `알 수 없는 응답 "${bad}". ok · cancel · off 만 가능` };
       if (parts.length === 1) {
         await step("dialog.plan", { plan: { mode: parts[0] }, text });
         return { ok: true, mode: parts[0] };

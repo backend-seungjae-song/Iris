@@ -92,6 +92,14 @@ export function cleanEnv() {
   return env;
 }
 
+export function attachChatTerminal(terminalId, cols, rows) {
+  const bin = runnableHerdrBin();
+  if (!bin) throw new Error("Herdr 실행 파일을 찾을 수 없습니다");
+  return pty.spawn(bin, ["--session", SESSION, "terminal", "attach", terminalId], {
+    name: "xterm-256color", cols, rows, env: cleanEnv(), encoding: null,
+  });
+}
+
 export class PtyManager {
   constructor() {
     this.sessions = new Map(); // ws → { proc }

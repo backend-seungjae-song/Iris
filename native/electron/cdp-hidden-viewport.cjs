@@ -43,6 +43,7 @@ const NEEDS_VIEW = new Set(["click", "dblclick", "hover", "fill", "type", "key",
 
 function createHiddenViewport({
   isTabShown,
+  isBehindTab,
   shownStateKnown,
   hasExplicitDevice,
   navigationEpoch,
@@ -86,7 +87,8 @@ function createHiddenViewport({
     try {
       if (isDisabled()) return false;
       if (!shownStateKnown()) return false;
-      if (isTabShown(id) || hasExplicitDevice(id)) return false;
+      // 뒤에 깔린 탭은 이미 패널 크기로 그려져 대체 크기가 필요 없다
+      if (isTabShown(id) || isBehindTab(id) || hasExplicitDevice(id)) return false;
       const want = autoViewport.get(id) || lastSeenViewport || VP_FALLBACK;
       // 방금 붙은 게스트는 브라우저 탭이 아닐 수 있다. 장부는 탭만 알아서 그 밖의 webview 는
       // 늘 안 보이는 탭으로 읽히고, 탭이 아니어서 다시 보이는 순간이 오지 않으므로 한 번 적용된
@@ -96,7 +98,7 @@ function createHiddenViewport({
       // 이 보정이 실제로 다루는 것은 그릴 표면이 없어 0 이 된 게스트다. 그것만 본다.
       if (opts && opts.onlyIfCollapsed) {
         const epoch = epochOf(id);
-        const stillHidden = () => epochOf(id) === epoch && !isTabShown(id) && !hasExplicitDevice(id);
+        const stillHidden = () => epochOf(id) === epoch && !isTabShown(id) && !isBehindTab(id) && !hasExplicitDevice(id);
         send("Runtime.evaluate", { expression: "[innerWidth,innerHeight]", returnByValue: true })
           .then((result) => {
             if (!stillHidden()) return;
@@ -148,6 +150,8 @@ function createHiddenViewport({
         .catch(() => { focusEmulated.delete(focusKey); });
     }
     if (hasExplicitDevice(id) && !autoViewport.has(id)) return;
+    // 크기 대체·기준 크기 기록 모두 건너뜀(패널 크기로 이미 그려지고 기준은 보이는 탭 보고가 정함)
+    if (isBehindTab(id)) return;
     const at = now();
     if (at - (vpChecked.get(id) || 0) < 1000) return;
     vpChecked.set(id, at);

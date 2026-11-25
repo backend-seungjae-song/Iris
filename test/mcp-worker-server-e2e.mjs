@@ -350,7 +350,7 @@ fi
               ? { id: "background-e2e", reactionId: "background-e2e", candidates: [], unexpected: [], scenes: [] }
               : message.cmd === "qa-reaction-end"
                 ? { id: "background-e2e", reactionId: "background-e2e", candidates: [], unexpected: [], scenes: [] }
-            : message.cmd === "dialog" ? { none: true, note: "떠 있는 확인 창이 없습니다." } : {};
+            : message.cmd === "dialog" ? { none: true, note: "열린 확인 창이 없습니다." } : {};
         send({ type: "cdp-result", id: message.id, ok: true, data });
         if (["qa-observe", "observe"].includes(message.cmd) && openDialogAfterQaObserve?.wc === message.wc) {
           const dialog = openDialogAfterQaObserve;
@@ -634,7 +634,7 @@ fi
   assert.equal(Object.hasOwn(electronError, "sent"), false);
   assert.equal(relayAttempts.get("text:electron-error"), 1);
   const dialogNone = (await request("POST", "/browser-cmd", { cmd: "dialog", session: "A", args: { tab: "tab-a", answer: "cancel" } })).body;
-  assert.deepEqual(dialogNone.data, { none: true, note: "떠 있는 확인 창이 없습니다." });
+  assert.deepEqual(dialogNone.data, { none: true, note: "열린 확인 창이 없습니다." });
   const trace = (await request("POST", "/browser-cmd", { cmd: "trace", session: "A", args: {} })).body;
   assert.equal(trace.ok, true);
   assert.ok(trace.data.count >= 1);

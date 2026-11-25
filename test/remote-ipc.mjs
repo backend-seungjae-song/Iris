@@ -502,6 +502,7 @@ test("hello 불일치와 게이트웨이 판정 필드 주입과 IPC 크기 초�
       await Promise.resolve();
     }
     child.emit("message", bad);
+    child.emit("exit", 1);
     assert.equal(child.kills, 1, bad.type);
     assert.equal(harness.host.status().restartScheduled, true, bad.type);
     harness.host.stop();
@@ -516,6 +517,7 @@ test("게이트웨이가 보고한 수신 주소와 포트는 설정과 같아�
   child.emit("message", { type: "hello", v: REMOTE_RPC_VERSION, serverInstance: SERVER_INSTANCE });
   await Promise.resolve();
   child.emit("message", { type: "listening", address: "100.64.1.2", port: 4293, certHash: CERT_HASH });
+  child.emit("exit", 1);
   assert.equal(child.kills, 1);
   assert.equal(harness.host.status().restartScheduled, true);
   harness.host.stop();
@@ -546,6 +548,7 @@ test("자식 send 콜백 오류는 게이트웨이 재기동을 예약한다", a
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(child.kills, 1);
+  child.emit("exit", 1);
   assert.equal(harness.host.status().restartScheduled, true);
   harness.host.stop();
 });

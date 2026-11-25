@@ -180,7 +180,7 @@ function receive(message) {
     if (latestStatus.get(pending.key) !== message.requestId) return;
     latestStatus.delete(pending.key);
     const record = message.ok ? { pr: message.pr, at: Date.now() }
-      : { error: message.error || { code: "unknown", message: "PR을 읽지 못했습니다." }, at: Date.now() };
+      : { error: message.error || { code: "unknown", message: "PR을 불러오지 못했습니다." }, at: Date.now() };
     cache.set(pending.key, record);
     if (pending.tab) {
       if (message.ok) { pending.tab.pr = message.pr; pending.tab.error = ""; }
@@ -190,12 +190,12 @@ function receive(message) {
     }
     paintBranch();
   } else if (pending.kind === "log") {
-    pending.tab.logs.set(pending.runId, message.ok ? { text: message.log } : { error: message.error?.message || "로그를 읽지 못했습니다." });
+    pending.tab.logs.set(pending.runId, message.ok ? { text: message.log } : { error: message.error?.message || "로그를 불러오지 못했습니다." });
     redraw(pending.tab);
   } else if (pending.kind === "diff") {
     callHook("git.openPatchDiff", { ...pending.target, activate: false,
       patch: message.ok ? message.patch : null,
-      error: message.ok ? "" : message.error?.message || "변경 내용을 읽지 못했습니다." });
+      error: message.ok ? "" : message.error?.message || "변경 내용을 불러오지 못했습니다." });
   } else if (pending.kind === "draft") {
     pending.tab.draftPending = false;
     pending.tab.notice = message.ok ? "입력창에 넣었습니다. 확인한 뒤 Enter를 누르세요."

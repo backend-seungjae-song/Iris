@@ -13,9 +13,9 @@ function fixture() {
   identity.applyHardening(f.sess);
   return f;
 }
-test('ordinary browsing declares the actual Electron runtime without the Iris mobile-detector token', () => {
+test('ordinary browsing uses the bundled Chromium version in its Chrome-compatible user agent', () => {
   const ua = identity.cleanUserAgent(native);
-  assert.match(ua, /Electron\/43\.2\.0/);
+  assert.doesNotMatch(ua, /Electron\/43\.2\.0/);
   assert.match(ua, /Chrome\/150\.0\.7871\.129/);
   assert.doesNotMatch(ua, /Iris\//);
 });

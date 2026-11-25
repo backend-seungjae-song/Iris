@@ -81,7 +81,7 @@ const RESETS = {
     outcomes: {
       ...COMMON_OUTCOMES,
       already_used: "이미 처리된 요청",
-      not_limited: "한도에 걸리지 않아 차감 안 됨",
+      not_limited: "한도에 도달하지 않아 차감 안 됨",
       cooldown: "잠시 뒤 다시 시도",
       ineligible: "이 계정은 사용할 수 없음",
       unavailable: "지금 사용할 수 없음",
@@ -441,7 +441,7 @@ function creditRow(provider) {
       if (!state.busy) return;
       state.busy = false;
       // 결과 문구(note)로 두면 버튼이 그려지지 않아 다시 누를 수 없다. 버튼 옆 안내로 둔다.
-      state.hint = "답이 없음 · 다시 누르면 같은 요청으로 확인";
+      state.hint = "응답 없음 · 다시 누르면 같은 요청으로 확인";
       draw();
     }, RESET_WAIT_MS);
   });
@@ -512,7 +512,7 @@ function drawPanel() {
   const foot = el("div", "usg-foot");
   foot.appendChild(el("span", "usg-lbl", "% 표시"));
   foot.appendChild(segmented(
-    [{ value: "used", label: "쓴 양" }, { value: "remaining", label: "남은 양" }],
+    [{ value: "used", label: "사용량" }, { value: "remaining", label: "잔여량" }],
     prefs.display, (display) => setPref({ display }),
   ));
   box.appendChild(foot);

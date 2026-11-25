@@ -752,7 +752,7 @@ test("사람 차례는 첫 답 뒤 같은 알림에 새 ref를 만들지 않고 
   callbacks[0]();
   assert.deepEqual(store.list(), []);
   assert.equal(await store.answer(first.ref, { choice: "unable" }), "already-answered");
-  assert.deepEqual(delivered, ["다 했음"]);
+  assert.deepEqual(delivered, ["완료"]);
   features.close();
   store.close();
 });

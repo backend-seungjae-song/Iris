@@ -280,7 +280,7 @@ function buildPane(container, opts, vendor) {
   // 앱이 기기보다 늦게 뜨는 경우가 많아, 숨겨져 있는 동안에는 15초마다 다시 찾는다
   const vpTimer = setInterval(() => { if (vpBox.hidden && vp.device) void refreshViewport(); }, 15000);
   if (opts.onSketch) {
-    const tbSketch = tbButton("스케치", "sketch", shortcutLabel("지금 앱 화면을 찍어 그 위에 그립니다(⌘⇧D). 그린 그림을 채팅으로 보냅니다"));
+    const tbSketch = tbButton("스케치", "sketch", shortcutLabel("현재 앱 화면을 캡처해 그 위에 그립니다(⌘⇧D). 그림은 채팅으로 보냅니다"));
     tbSketch.addEventListener("click", () => { opts.onSketch(); });
     toolbar.append(tbSketch);
   }
@@ -805,7 +805,7 @@ function buildPane(container, opts, vendor) {
     if (!isLiveNow()) { screenSurface.removeAttribute("aria-label"); screenSurface.removeAttribute("role"); screenSurface.removeAttribute("tabindex"); return; }
     screenSurface.setAttribute("role", "application");
     screenSurface.setAttribute("tabindex", "0");
-    screenSurface.setAttribute("aria-label", keyboardCaptureActive ? "에뮬레이터 화면, 키보드 캡처 중. Escape 를 누르면 풀립니다." : "에뮬레이터 화면");
+    screenSurface.setAttribute("aria-label", keyboardCaptureActive ? "에뮬레이터 화면, 키보드 캡처 중. Escape 를 누르면 해제됩니다." : "에뮬레이터 화면");
   }
   screenSurface.addEventListener("blur", () => setCaptureActive(false));
   screenSurface.addEventListener("keydown", (event) => {
@@ -838,7 +838,7 @@ function buildPane(container, opts, vendor) {
   });
   function showPasteResult(result) {
     if (result.status !== "rejected" || result.reason === "empty") return;
-    const msg = result.reason === "too-large" ? "붙여넣기 내용이 에뮬레이터 키보드 입력으로 쓰기엔 너무 큽니다."
+    const msg = result.reason === "too-large" ? "붙여넣을 내용이 에뮬레이터 키보드로 입력하기에 너무 깁니다."
       : result.reason === "unsupported-text" ? "에뮬레이터 키보드 붙여넣기는 미국 키보드 문자만 지원합니다."
       : "기기가 준비되지 않아 에뮬레이터 키보드 붙여넣기에 실패했습니다.";
     opts.onPasteError ? opts.onPasteError(msg) : console.warn("[emulator]", msg);
@@ -948,7 +948,7 @@ function buildPane(container, opts, vendor) {
     let activeStreamId = null;
     let currentFrameUrl = null;
     let firstFrameTimer = setTimeout(() => {
-      if (!currentFrameUrl) { frameStreamState = { error: "스트림에서 화면이 오지 않습니다." }; handleStreamError(); }
+      if (!currentFrameUrl) { frameStreamState = { error: "스트림에서 화면을 받지 못했습니다." }; handleStreamError(); }
     }, FIRST_FRAME_TIMEOUT_MS);
     const clearTimer = () => { if (firstFrameTimer) { clearTimeout(firstFrameTimer); firstFrameTimer = null; } };
     const revoke = () => { if (currentFrameUrl) { URL.revokeObjectURL(currentFrameUrl); currentFrameUrl = null; } };
@@ -1012,7 +1012,7 @@ function buildPane(container, opts, vendor) {
       },
       error: (err) => fatal(err.message),
     });
-    let firstFrameTimeout = setTimeout(() => fatal("Android 비디오 스트림에서 화면이 오지 않습니다."), VIDEO_FIRST_FRAME_TIMEOUT_MS);
+    let firstFrameTimeout = setTimeout(() => fatal("Android 비디오 스트림에서 화면을 받지 못했습니다."), VIDEO_FIRST_FRAME_TIMEOUT_MS);
     function clearFirstFrameTimeout() { if (firstFrameTimeout) { clearTimeout(firstFrameTimeout); firstFrameTimeout = null; } }
     function stopStream() { if (activeStreamId) { void host.stopVideoStream?.({ streamId: activeStreamId }); activeStreamId = null; } }
     function cleanup() {
@@ -1225,7 +1225,7 @@ function buildPane(container, opts, vendor) {
       button.disabled = !view.isLive || state.loading;
     }
     if (view.isLive) {
-      tbPrimaryLabel.textContent = "종료"; tbPrimary.setAttribute("aria-label", "종료"); tbPrimary.title = "기기와의 연결을 끊고 끕니다";
+      tbPrimaryLabel.textContent = "종료"; tbPrimary.setAttribute("aria-label", "종료"); tbPrimary.title = "기기 연결을 끊고 종료합니다";
       tbPrimary.classList.add("emu-btn-danger"); tbPrimary.classList.remove("emu-btn-pri");
       tbPrimary.disabled = state.loading;
     } else {

@@ -164,7 +164,7 @@ function selectLines(entries, lines, o) {
       skippedKeep.slice(0, 40).map((x) => "  " + x).join("\n"));
   }
   if (cursor != null) {
-    parts.push(`\n\n[${budget}바이트에서 끊었다. 이어 보려면 cursor=${cursor} — ` +
+    parts.push(`\n\n[${budget}바이트에서 잘랐다. 이어서 보려면 cursor=${cursor}. ` +
       `또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]`);
   }
   text += parts.join("");

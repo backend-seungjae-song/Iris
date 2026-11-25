@@ -38,6 +38,8 @@ const ENV_DENY = new Set([
   "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "TERM", "TERM_PROGRAM", "SHLVL", "_", "PWD", "OLDPWD",
   "IRIS_AGENT_RUN_ACTIVE",
 ]);
+const SECRET_ENV = /(?:^|_)(?:API[_-]?KEY|ACCESS[_-]?KEY|AUTHORIZATION|AUTH(?:[_-]?(?:KEY|TOKEN|SECRET))|CREDENTIALS?|PASSWORD|PASSWD|PRIVATE[_-]?KEY|SECRET|TOKEN)$/i;
+const secretEnvKey = (key) => SECRET_ENV.test(key) || /^AWS_/i.test(key);
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 // 팬을 열었을 때 이 창이 무엇인지 먼저 밝히는 줄. 한 줄에 한 사실만 둔다.
 const BANNER = ["배치 잡", "입력 불가", "완료 시 자동 닫힘"];
@@ -68,13 +70,25 @@ function herdrJson(bin, argv) {
   });
 }
 
-function readStdin() {
+function readStdin(signal) {
   return new Promise((resolve) => {
     if (process.stdin.isTTY) return resolve("");
     const chunks = [];
+    let settled = false;
+    const onAbort = () => {
+      process.stdin.pause();
+      finish(Buffer.concat(chunks).toString("utf8"));
+    };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     process.stdin.on("data", (c) => chunks.push(c));
-    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    process.stdin.on("error", () => resolve(""));
+    process.stdin.on("end", () => finish(Buffer.concat(chunks).toString("utf8")));
+    process.stdin.on("error", () => finish(""));
   });
 }
 
@@ -114,21 +128,57 @@ function runtimeOf(argv0) {
 function envFile(env) {
   const lines = [];
   for (const [key, value] of Object.entries(env)) {
-    if (ENV_DENY.has(key) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    if (ENV_DENY.has(key) || secretEnvKey(key) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
     lines.push(`${key}=${quote(value)}`);
   }
   return lines.join("\n") + "\n";
 }
 
+function secretEnvFor(env) {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => secretEnvKey(key)));
+}
+
+function secretEnvRunnerSource() {
+  return [
+    'const fs = require("node:fs");',
+    'const { spawn } = require("node:child_process");',
+    'const [secretFile, command, ...args] = process.argv.slice(1);',
+    'let received = {};',
+    'try { received = JSON.parse(fs.readFileSync(secretFile, "utf8")); }',
+    'catch { process.exit(126); }',
+    'finally { try { fs.unlinkSync(secretFile); } catch {} }',
+    'const child = spawn(command, args, { env: { ...process.env, ...received }, stdio: "inherit" });',
+    'child.on("error", () => process.exit(127));',
+    'child.on("exit", (code, signal) => signal ? process.kill(process.pid, signal) : process.exit(code ?? 1));',
+  ].join("\n");
+}
+
+function writeSecretEnvFile(secretEnv, dir) {
+  if (!Object.keys(secretEnv).length) return null;
+  const file = path.join(dir, "secret-env.json");
+  fs.writeFileSync(file, JSON.stringify(secretEnv), { mode: 0o600 });
+  return file;
+}
+
+function readSecretEnvFile(file) {
+  if (!file) return {};
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); }
+  finally { try { fs.unlinkSync(file); } catch {} }
+}
+
 // 팬 안에서 돌 스크립트. 화면에는 그대로 흐르게 두고 같은 바이트를 파일로도 남긴다.
 // stdout·stderr를 합치지 않는다. 부르는 쪽이 둘을 구분해 판정한다.
-function paneScript(dir, argv, cwd) {
+function paneScript(dir, argv, cwd, secretFile = null) {
+  const command = secretFile
+    ? `${quote(process.execPath)} -e ${quote(secretEnvRunnerSource())} ${quote(secretFile)} ${argv.map(quote).join(" ")}`
+    : `"\${ARGS[@]}"`;
   return [
     "#!/bin/bash",
     `cd ${quote(cwd)} || exit 127`,
     "set -a",
     `. ${quote(path.join(dir, "env.sh"))}`,
     "set +a",
+    `rm -f -- ${quote(path.join(dir, "env.sh"))}`,
     "export IRIS_AGENT_RUN_ACTIVE=1",
     // 이 팬은 대화형 세션과 화면이 다르다. `codex exec` 는 비대화형이라 채팅 화면을 그리지 않고,
     // 아래 리다이렉트가 색까지 없앤다. 그것을 모르면 "왜 이 창만 평문인가"로 읽힌다.
@@ -137,8 +187,8 @@ function paneScript(dir, argv, cwd) {
     // 마커·session id 파싱이 이 배너를 산출로 읽는다.
     ...BANNER.map((line) => `printf '\\033[2m%s\\033[0m\\n' ${quote(line)}`),
     "printf '\\n'",
-    `ARGS=(${argv.map(quote).join(" ")})`,
-    `"\${ARGS[@]}" < ${quote(path.join(dir, "in.txt"))} \\`,
+    ...(secretFile ? [] : [`ARGS=(${argv.map(quote).join(" ")})`]),
+    `${command} < ${quote(path.join(dir, "in.txt"))} \\`,
     `  > >(tee ${quote(path.join(dir, "out.log"))}) \\`,
     `  2> >(tee ${quote(path.join(dir, "err.log"))} >&2)`,
     "status=$?",
@@ -182,6 +232,40 @@ function tailer(file, sink) {
   };
 }
 
+function createLaunchOwner() {
+  return {
+    abortController: new AbortController(), cancelled: false, committed: false,
+    cleanupQueue: Promise.resolve(), herdrBin: null, dir: null, tabId: null,
+    child: null, lineageFile: null, runtime: null, secretEnvFile: null,
+  };
+}
+
+function assertLaunchActive(owner) {
+  if (owner?.cancelled) throw new Error("iris-agent-run: 시작이 취소되었습니다");
+}
+
+function cleanupOwned(owner, { closeTab = true } = {}) {
+  if (!owner) return Promise.resolve();
+  owner.cleanupQueue = owner.cleanupQueue.then(async () => {
+    const { herdrBin, child, tabId, lineageFile, dir, runtime, secretEnvFile } = owner;
+    owner.child = null; owner.tabId = null; owner.lineageFile = null; owner.dir = null;
+    owner.secretEnvFile = null;
+    if (secretEnvFile) { try { fs.rmSync(secretEnvFile, { force: true }); } catch {} }
+    if (herdrBin && child?.pane_id) {
+      try { await herdrJson(herdrBin, ["pane", "release-agent", child.pane_id, "--source", "iris-agent-run", "--agent", runtime]); } catch {}
+    }
+    if (lineageFile) { try { fs.rmSync(lineageFile, { force: true }); } catch {} }
+    if (closeTab && herdrBin && tabId) {
+      try { await herdrJson(herdrBin, ["tab", "close", tabId]); } catch {}
+    }
+    if (dir) {
+      for (const name of ["env.sh", "run.json", "secret-env.json"]) fs.rmSync(path.join(dir, name), { force: true });
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  });
+  return owner.cleanupQueue;
+}
+
 async function paneAlive(bin, paneId) {
   try {
     await herdrJson(bin, ["pane", "get", paneId]);
@@ -191,7 +275,7 @@ async function paneAlive(bin, paneId) {
   }
 }
 
-async function launch(options, argv) {
+async function launch(options, argv, owner = createLaunchOwner()) {
   const env = process.env;
   const herdrBin = executable("herdr", env);
   const socketPath = herdrSession().socket;
@@ -202,6 +286,8 @@ async function launch(options, argv) {
   if (path.resolve(env.HERDR_SOCKET_PATH) !== path.resolve(socketPath)) return null;
   // 이미 자식 팬 안이면 또 감싸지 않는다.
   if (env.IRIS_AGENT_RUN_ACTIVE === "1") return null;
+  owner.herdrBin = herdrBin;
+  owner.runtime = runtime;
 
   let parent;
   try {
@@ -210,6 +296,7 @@ async function launch(options, argv) {
   } catch {
     return null;
   }
+  assertLaunchActive(owner);
   if (!parent?.pane_id || !parent.terminal_id || !parent.workspace_id) return null;
 
   const cwd = path.resolve(options.cwd || process.cwd());
@@ -218,14 +305,19 @@ async function launch(options, argv) {
   const reason = REASONS.has(options.reason) ? options.reason : "independent-work";
 
   const dir = path.join(artifactDir("agent-run"), sha(socketPath), `${Date.now().toString(36)}-${crypto.randomBytes(5).toString("hex")}`);
+  owner.dir = dir;
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(dir, "in.txt"), await readStdin(), { mode: 0o600 });
+  const input = await readStdin(owner.abortController.signal);
+  assertLaunchActive(owner);
+  fs.writeFileSync(path.join(dir, "in.txt"), input, { mode: 0o600 });
+  const secretEnvFile = writeSecretEnvFile(secretEnvFor(env), dir);
+  owner.secretEnvFile = secretEnvFile;
   if (process.platform !== "win32") fs.writeFileSync(path.join(dir, "env.sh"), envFile(env), { mode: 0o600 });
   const script = path.join(dir, process.platform === "win32" ? "run.json" : "run.sh");
   if (process.platform === "win32") {
-    const childEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !ENV_DENY.has(key)));
-    fs.writeFileSync(script, JSON.stringify({ dir, argv, cwd, env: childEnv }), { mode: 0o600 });
-  } else fs.writeFileSync(script, paneScript(dir, argv, cwd), { mode: 0o700 });
+    const childEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !ENV_DENY.has(key) && !secretEnvKey(key)));
+    fs.writeFileSync(script, JSON.stringify({ dir, argv, cwd, env: childEnv, secretFile: secretEnvFile }), { mode: 0o600 });
+  } else fs.writeFileSync(script, paneScript(dir, argv, cwd, secretEnvFile), { mode: 0o700 });
   fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify({
     version: 1, label, reason, runtime, cwd, argv,
     parent: { paneId: parent.pane_id, terminalId: parent.terminal_id },
@@ -236,14 +328,18 @@ async function launch(options, argv) {
   const created = await herdrJson(herdrBin, ["tab", "create", "--workspace", parent.workspace_id, "--cwd", cwd, "--label", label, "--no-focus"]);
   const tabId = created?.tab?.tab_id;
   if (!tabId) throw new Error("herdr did not return a tab id");
+  owner.tabId = tabId;
+  owner.committed = true;
+  if (owner.cancelled) { await cleanupOwned(owner); throw new Error("iris-agent-run: 시작이 취소되었습니다"); }
   // herdr 0.9의 agent start는 지원 목록에 있는 대화형 에이전트만 띄우므로 스크립트를 실행할 수 없다.
   // 탭과 함께 생긴 셸 팬에서 스크립트를 실행한다.
   const child = created?.root_pane;
+  owner.child = child;
   try {
     if (!child?.pane_id || !child.terminal_id) throw new Error("herdr did not return the tab's pane");
     await herdrJson(herdrBin, ["pane", "run", child.pane_id, paneCommand(script)]);
   } catch (error) {
-    try { await herdrJson(herdrBin, ["tab", "close", tabId]); } catch {}
+    await cleanupOwned(owner);
     throw error;
   }
 
@@ -269,8 +365,10 @@ async function launch(options, argv) {
     // 팬은 이미 돌고 있다. 트리에서 부모 아래로 못 붙는 것이 일을 멈출 이유는 아니다.
     process.stderr.write(`iris-agent-run: lineage 등록 실패 — ${error.message}\n`);
   }
+  owner.lineageFile = lineageFile;
+  if (owner.cancelled) { await cleanupOwned(owner); throw new Error("iris-agent-run: 시작이 취소되었습니다"); }
 
-  return { herdrBin, dir, child, tabId, lineageFile, runtime };
+  return { herdrBin, dir, child, tabId, lineageFile, runtime, secretEnvFile };
 }
 
 async function waitForExit(session) {
@@ -308,7 +406,7 @@ async function waitForExit(session) {
 }
 
 // herdr 는 표식을 단 런타임 이름이 같아야 해제한다. 다르면 성공으로 응답하고 "working" 을 그대로 남긴다(확인).
-async function finish(session, keep, herdr = herdrJson) {
+async function finish(session, keep, herdr = herdrJson, { closeTab = process.platform === "win32" && !keep } = {}) {
   try {
     await herdr(session.herdrBin, ["pane", "release-agent", session.child.pane_id,
       "--source", "iris-agent-run", "--agent", session.runtime]);
@@ -318,9 +416,11 @@ async function finish(session, keep, herdr = herdrJson) {
   if (session.lineageFile) {
     try { fs.rmSync(session.lineageFile, { force: true }); } catch {}
   }
-  if (process.platform === "win32" && !keep) {
+  if (closeTab) {
     try { await herdr(session.herdrBin, ["tab", "close", session.tabId]); } catch {}
   }
+  if (session.secretEnvFile) { try { fs.rmSync(session.secretEnvFile, { force: true }); } catch {} }
+  for (const name of ["env.sh", "run.json", "secret-env.json"]) fs.rmSync(path.join(session.dir, name), { force: true });
   if (keep) return;
   // 로그는 진단에 쓰이므로 성공한 회차만 지운다. 남기는 경로는 --keep이 소유한다.
   try { fs.rmSync(session.dir, { recursive: true, force: true }); } catch {}
@@ -328,9 +428,11 @@ async function finish(session, keep, herdr = herdrJson) {
 
 // Windows 배치 입출력 바이트 보존
 async function windowsWorker(file) {
-  const { dir, argv, cwd, env } = JSON.parse(fs.readFileSync(file, "utf8"));
+  const { dir, argv, cwd, env, secretFile } = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.unlinkSync(file);
   if (!Array.isArray(argv) || !argv.length || !argv.every((arg) => typeof arg === "string")) throw new Error("invalid worker argv");
-  const childEnv = { ...process.env, ...env, IRIS_AGENT_RUN_ACTIVE: "1" };
+  const secretEnv = readSecretEnvFile(secretFile);
+  const childEnv = { ...process.env, ...env, ...secretEnv, IRIS_AGENT_RUN_ACTIVE: "1" };
   for (const key of ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_SESSION"]) {
     if (process.env[key]) childEnv[key] = process.env[key];
   }
@@ -367,21 +469,59 @@ async function main() {
   if (!argv.length) throw new Error("Put the command after --");
   if (values.runtime && !RUNTIMES.has(values.runtime)) throw new Error("--runtime must be codex or claude");
 
+  const owner = createLaunchOwner();
+  let stopping = false;
+  let launchPromise;
+  let stopPromise = null;
+  const stopOnSignal = (signal) => {
+    if (stopPromise) return stopPromise;
+    stopping = true;
+    owner.cancelled = true;
+    owner.abortController.abort();
+    stopPromise = (async () => {
+      if (launchPromise) await Promise.allSettled([launchPromise]);
+      await cleanupOwned(owner);
+      process.exit(128 + (signal === "SIGTERM" ? 15 : 2));
+    })();
+    return stopPromise;
+  };
+  const onSigint = () => { stopOnSignal("SIGINT").catch(() => process.exit(130)); };
+  const onSigterm = () => { stopOnSignal("SIGTERM").catch(() => process.exit(143)); };
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
+
   let session = null;
   try {
-    session = await launch(values, argv);
+    launchPromise = launch(values, argv, owner);
+    session = await launchPromise;
   } catch (error) {
+    await cleanupOwned(owner);
+    if (stopping) return;
+    process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
     process.stderr.write(`iris-agent-run: 자식 팬을 만들지 못했다 — ${error.message}\n`);
+    process.exitCode = 1;
+    return;
   }
-  if (!session) return passthrough(argv);
+  if (stopping) return stopPromise;
+  if (!session) {
+    process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+    return passthrough(argv);
+  }
 
   const code = await waitForExit(session);
-  await finish(session, values.keep || code !== 0);
+  if (stopping) return stopPromise;
+  if (!stopping) {
+    process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+    await finish(session, values.keep || code !== 0);
+  }
   process.exit(code);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
 }
 
-export { paneScript, paneCommand, quote, envFile, runtimeOf, finish, ENV_DENY, BANNER };
+export { paneScript, paneCommand, quote, envFile, runtimeOf, finish, ENV_DENY, BANNER, SECRET_ENV };

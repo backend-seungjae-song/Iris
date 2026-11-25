@@ -271,7 +271,7 @@ function looksLikeProfileKey(name, id) {
 // withPasswords는 기본 거짓이다. 쿠키를 가져오면서 저장된 비밀번호까지 복호화하지 않는다.
 // 계정 화면의 체크칸을 켠 경우에만 참으로 넘어온다.
 export async function importChromeToProfile(cid, label, withPasswords = false) {
-  if (!window.acHost || !acHost.importChromeProfile) return { error: "가져오기 불가(네이티브 아님)" };
+  if (!window.acHost || !acHost.importChromeProfile) return { error: "설치한 Iris 앱에서만 가져올 수 있습니다" };
   const target = profileForChromeImport(cid, label);
   if (target.unknown) return { error: "계정 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요." };
   // 레코드를 먼저 저장한다. 저장 전 partitionFor를 부르면 해석 경로가 이 id를 "모르는 참조"로 본다.
@@ -357,7 +357,7 @@ export function openProfileMenu() {
         const res = await importChromeToProfile(cid, label);
         if (res && res.error) { bNote.textContent = "가져오기 실패: " + res.error; }
         else {
-          bNote.textContent = `가져오기 완료: ${profileName(res.profileId)} (쿠키 ${(res && res.imported) || 0}개 추가, 이미 있던 ${(res && res.kept) || 0}개는 그대로)`;
+          bNote.textContent = `가져오기 완료: ${profileName(res.profileId)} (쿠키 ${(res && res.imported) || 0}개 추가, 기존 ${(res && res.kept) || 0}개 유지)`;
           closeProfileMenu(); setTabProfile(id, res.profileId); return;
         }
       } catch (err) { bNote.textContent = "가져오기 오류: " + (err && err.message || err); }

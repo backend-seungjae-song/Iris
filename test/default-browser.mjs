@@ -158,7 +158,7 @@ test("설정 화면 링크 열기: Iris 미등록·조회 중·오류·이름 es
     choices: [{ id: "a", name: "<b>A</b>", path: "/A.app", self: false }] } });
   assert.match(unreg, /다시 설치하면/);
   assert.match(unreg, /&lt;b&gt;A&lt;\/b&gt;/);
-  assert.match(settingsMarkup({ section: "links", links: { loading: true } }), /읽는 중/);
+  assert.match(settingsMarkup({ section: "links", links: { loading: true } }), /불러오는 중/);
   assert.match(settingsMarkup({ section: "links", links: { ok: false, error: "실패함" } }), /실패함/);
   assert.match(settingsMarkup({ section: "links", links: { ok: true, requested: true, choices: [] } }), /확인 창/);
 });

@@ -1,6 +1,7 @@
 // 서버 메모리 진단. 주기 기록과 신호로 받는 프로파일
 //
-// 주기 기록: 1분마다 diagnostics/server-memory.jsonl 에 memoryUsage·V8 힙 공간별 용량과 사용량
+// 주기 기록: 1분마다 diagnostics/server-memory.jsonl 에 memoryUsage·V8 힙 공간별 용량과 사용량,
+// host 에 앱 본체·iOS 화면 도우미·스왑(host-watch.js). 앱 본체가 멈춰도 서버는 계속 기록
 // 프로파일: SIGUSR2 수신 시, 또는 RSS 가 600MB 를 넘으면(6시간에 1회) 120초 동안 할당 프로파일(회수된 객체 포함)과
 // CPU 프로파일 저장. 종류별 최근 8개만 유지
 // 정상 RSS 83~177MB, 수정 전 누수 때 2.6GB
@@ -10,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import v8 from "node:v8";
 import inspector from "node:inspector";
+import { watchHost } from "./host-watch.js";
 
 const SAMPLE_INTERVAL_MS = 60000;
 const PROFILE_MS = 120000;
@@ -43,7 +45,7 @@ function prune(dir, pattern) {
 }
 
 export function startMemoryDiagnostics({ dir, log = console.log, setIntervalFn = setInterval,
-  sampleFn = memorySample, nowMs = Date.now, setTimeoutFn = setTimeout } = {}) {
+  sampleFn = memorySample, nowMs = Date.now, setTimeoutFn = setTimeout, hostFn = watchHost } = {}) {
   const file = path.join(dir, "server-memory.jsonl");
   let profiling = false;
   let lastAutoProfile = -Infinity;
@@ -51,6 +53,8 @@ export function startMemoryDiagnostics({ dir, log = console.log, setIntervalFn =
   function sample() {
     try {
       const row = sampleFn();
+      try { row.host = hostFn(); } catch {}
+      for (const h of row.host?.killedHelpers || []) log(`[diag] ${h.name} ${h.pid} ${h.rssMB}MB 상한 초과 종료: ${h.result}`);
       fs.mkdirSync(dir, { recursive: true });
       try { if (fs.statSync(file).size >= MAX_FILE_BYTES) fs.renameSync(file, `${file}.1`); } catch {}
       fs.appendFileSync(file, `${JSON.stringify(row)}\n`);

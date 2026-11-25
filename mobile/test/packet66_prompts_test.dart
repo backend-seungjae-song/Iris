@@ -189,7 +189,7 @@ void main() {
     expect(wire.sent.where((m) => m['type'] == 'terminal.select'), isEmpty);
     await tester.tap(find.text('예'));
     await tester.pumpAndSettle();
-    expect(find.text('화면이 바뀌었습니다. 새로 고침하세요.'), findsOneWidget);
+    expect(find.text('화면이 바뀌었습니다. 새로고침하세요.'), findsOneWidget);
     expect(
       wire.sent.where((m) => m['type'] == 'terminal.select').single['hash'],
       hash,

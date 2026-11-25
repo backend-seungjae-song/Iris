@@ -14,7 +14,7 @@ const page = (miss) => (cmd, args) => {
   return { ok: true, data: {} };
 };
 const NOT_FOUND = { ok: false, error: '선택자에 맞는 요소가 없습니다: button:has-text("저장")' };
-const EXPIRED = { ok: false, error: "페이지가 이동되어 ref가 만료됐습니다 — 재-snapshot 필요." };
+const EXPIRED = { ok: false, error: "페이지가 이동되어 ref가 만료됐습니다. snapshot을 다시 실행하세요." };
 
 test("선택자에 든 문구로 좁힌 후보를 붙이고 누르지 않는다", async () => {
   await withMcp(page(NOT_FOUND), async (callTool, seen) => {

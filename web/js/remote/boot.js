@@ -70,7 +70,7 @@ export const panelHtml = `
           <span class="remote-setting-label"><strong>접속 PIN</strong><span id="remote-pin-status">설정됨</span></span>
         </summary>
         <div class="remote-setting-body">
-          <p class="remote-pin-detail">PIN 기한이 지난 뒤 다시 연결할 때 입력할 숫자 6자리 이상을 정하세요.</p>
+          <p class="remote-pin-detail">PIN 기한이 지난 뒤 다시 연결할 때 입력할 숫자 6자리 이상을 설정하세요.</p>
           <div id="remote-pin-slot">
             <form class="remote-pin-form" id="remote-pin-form">
               <label for="remote-pin">새 PIN</label>
@@ -83,7 +83,7 @@ export const panelHtml = `
           <div class="remote-pin-idle">
             <span class="remote-field-label" id="remote-pin-idle-label">PIN 다시 확인</span>
             <div id="remote-pin-idle"></div>
-            <p>폰 화면을 사용하는 동안 기한이 갱신됩니다. 다른 앱에서 돌아오면 기한 안에서 자동으로 다시 연결합니다.</p>
+            <p>휴대폰 화면을 사용하는 동안 기한이 갱신됩니다. 다른 앱에서 돌아오면 기한 안에서 자동으로 다시 연결합니다.</p>
           </div>
         </div>
       </details>
@@ -119,8 +119,8 @@ function openRemoteScreen() {
 function notifyPausedForPin() {
   if (pinPauseNoticeShown) return;
   pinPauseNoticeShown = true;
-  const title = "휴대폰 원격 제어가 멈췄습니다";
-  const body = "접속 PIN을 정하면 다시 켜집니다.";
+  const title = "휴대폰 원격 제어가 중지되었습니다";
+  const body = "접속 PIN을 설정하면 다시 켜집니다.";
   ctx.showNotice?.({
     id: PIN_PAUSED_NOTICE_ID,
     title,
@@ -354,7 +354,7 @@ function renderQuestion(card, request) {
       else {
         const labels = control.choices.filter((input) => input.checked).map((input) => input.value);
         if (labels.length === 0 || (!control.question.multiSelect && labels.length !== 1)) {
-          feedback = "각 질문의 선택지 또는 직접 입력을 채우세요.";
+          feedback = "질문마다 선택지를 고르거나 직접 입력하세요.";
           renderFeedback();
           return;
         }
@@ -461,7 +461,7 @@ function tailscaleView(value) {
     "not-installed": value.canInstall
       ? { tone: "off", title: "Tailscale 없음", detail: "원격 연결에 Tailscale이 필요합니다. Homebrew로 설치합니다.", action: "install", label: "설치" }
       : { tone: "off", title: "Tailscale 없음", detail: "tailscale.com에서 Tailscale을 설치하세요." },
-    "daemon-off": { tone: "off", title: "Tailscale 꺼짐", detail: isHostWindows() ? "켜면 Windows 관리자 권한을 요청합니다." : "켜면 macOS 관리자 암호를 한 번 묻습니다.", action: "start", label: "켜기" },
+    "daemon-off": { tone: "off", title: "Tailscale 꺼짐", detail: isHostWindows() ? "켜면 Windows 관리자 권한을 요청합니다." : "켜면 macOS 관리자 암호를 한 번 요청합니다.", action: "start", label: "켜기" },
     "needs-login": value.authUrl && openedLoginUrl === value.authUrl
       ? { tone: "wait", title: "로그인 대기", detail: "Iris 탭에서 Tailscale 로그인을 마치세요.", action: "reopen", label: "로그인 화면 다시 열기" }
       : value.loginPending
@@ -517,10 +517,10 @@ function guideSteps() {
       title: "휴대폰 등록",
       done: devices.length > 0,
       detail: pairing
-        ? "휴대폰 Iris Remote 앱에서 ‘QR 코드 스캔’을 누르고 아래 QR을 찍으세요. 휴대폰에 뜬 6자리 숫자를 아래에 입력하면 끝납니다."
+        ? "휴대폰 Iris Remote 앱에서 ‘QR 코드 스캔’을 누르고 아래 QR을 스캔하세요. 휴대폰에 표시된 6자리 숫자를 아래에 입력하면 등록됩니다."
         : online.length > 0
-          ? "휴대폰에서 Iris Remote 앱을 연 뒤 아래 ‘기기 추가’를 눌러 QR을 띄우세요."
-          : `먼저 휴대폰에 Tailscale을 설치하고 이 컴퓨터와 같은 계정${tailnet ? `(${tailnet})` : ""}으로 로그인하세요. 아래 QR을 휴대폰 카메라로 찍으면 설치 화면이 열립니다. 그다음 휴대폰에서 Iris Remote 앱을 열고 ‘기기 추가’를 눌러 QR을 띄우세요.`,
+          ? "휴대폰에서 Iris Remote 앱을 연 뒤 아래 ‘기기 추가’를 눌러 QR을 표시하세요."
+          : `먼저 휴대폰에 Tailscale을 설치하고 이 컴퓨터와 같은 계정${tailnet ? `(${tailnet})` : ""}으로 로그인하세요. 아래 QR을 휴대폰 카메라로 스캔하면 설치 화면이 열립니다. 그다음 휴대폰에서 Iris Remote 앱을 열고 ‘기기 추가’를 눌러 QR을 표시하세요.`,
       qr: !pairing && online.length === 0 ? tailscale?.phoneInstallQr : null,
       action: pairing ? null : { kind: "pair", label: "기기 추가" },
     },

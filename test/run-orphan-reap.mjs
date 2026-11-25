@@ -57,7 +57,7 @@ test("시작 시각을 확인할 수 없으면 손대지 않는다", async (t) =
 
 test("서버는 내려가기 전에 실행 목록을 지금 상태로 남긴다", () => {
   const src = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
-  const fn = sliceBetween(src, "function flushPendingState()", "for (const sig of", "종료 시 상태 비우기");
+  const fn = sliceBetween(src, "function flushPendingState()", 'process.on("exit"', "종료 시 상태 비우기");
   const table = fs.readFileSync(new URL("../server/capabilities.js", import.meta.url), "utf8");
   assert.ok(/for \(const persist of exitCapabilities\).*persist\(\)/.test(fn)
     && /onExit: \(callback\) => exitCapabilities.push\(callback\)/.test(src)

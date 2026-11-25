@@ -121,8 +121,8 @@ async function execute(cmd, args, base) {
       // 그림이 나와야 키가 도달함 · 보이는 탭인지보다 먼저 창 상태를 따짐 (순서가 바뀌면 검사가 우회됨)
       if (wantsKeys && state?.paint && !state.paint.ok) {
         throw codedError("window_not_drawing",
-          `이 탭을 담은 창이 ${state.paint.why} 상태라 화면을 그리지 않습니다 — ${cmd} 를 보내도 도달하지 않습니다.`
-          + " 창을 띄워 달라고 사람에게 부탁하고 다시 하세요(browser_ask_user).");
+          `이 탭이 있는 창이 ${state.paint.why} 상태라 화면을 그리지 않습니다. ${cmd} 를 보내도 전달되지 않습니다.`
+          + " 사람에게 창을 열어 달라고 요청한 뒤 다시 하세요(browser_ask_user).");
       }
       if ((wantsKeys || wantsFrames) && !shown) {
         try { held = (await rawCall("hold.capture", { on: true })).data?.held === true; }

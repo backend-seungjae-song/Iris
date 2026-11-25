@@ -440,7 +440,7 @@ function renderStage() {
       ? "이 스페이스의 기기 화면은 별도 창에 있습니다. 그 창을 닫으면 여기로 돌아옵니다."
       : waiting
         ? (waiting.home == null ? "이 스페이스에 에이전트가 연 기기가 있습니다." : "이 스페이스에 열린 기기 화면이 있습니다.")
-        : "왼쪽 목록에서 기기를 누르면 여기에 화면이 뜹니다. 작업 화면으로 돌아가면 세로 열에 붙습니다.";
+        : "왼쪽 목록에서 기기를 누르면 여기에 화면이 열립니다. 작업 화면으로 돌아가면 세로 열에 표시됩니다.";
   }
   const show = stageEmpty.querySelector(".emu-stage-show");
   if (show) show.hidden = !waiting || !!away;
@@ -458,7 +458,7 @@ function mountStage() {
   stageHost.hidden = true;
   stageEmpty = document.createElement("div");
   stageEmpty.className = "emu-stage-empty";
-  stageEmpty.innerHTML = '<div class="emu-stage-empty-box"><div class="emu-stage-title">여기에 띄운 기기 화면이 없습니다</div><div class="emu-stage-desc"></div>'
+  stageEmpty.innerHTML = '<div class="emu-stage-empty-box"><div class="emu-stage-title">여기에 연 기기 화면이 없습니다</div><div class="emu-stage-desc"></div>'
     + '<button type="button" class="emu-btn emu-btn-pri emu-stage-show" hidden>여기서 보기</button></div>';
   stageEmpty.querySelector(".emu-stage-show").addEventListener("click", () => {
     const sp = targetSpace();
@@ -631,7 +631,7 @@ function openForAgent(space, want, timeoutMs, options = {}) {
 function capacityFailure(gate, limit) {
   return { ok: false, code: "capacity", running: gate.running,
     error: gate.reason === "disk" ? "디스크 여유가 부족해 기기를 추가하거나 켜지 않습니다."
-      : `동시에 켤 수 있는 기기 수(${limit}대)에 닿았습니다.` };
+      : `동시에 켤 수 있는 기기 수(${limit}대)에 도달했습니다.` };
 }
 
 async function openAllocatedForAgent(sp, owner, own, want, timeoutMs, { additional, limit, diskOk, reservedDevices = [] }) {
@@ -726,7 +726,7 @@ async function openForAgentRequest(space, want, timeoutMs, { owner = null, limit
         return { ok: false, code: "capacity", running: gate.running,
           error: gate.reason === "disk"
             ? `디스크 여유가 부족해 기기를 더 켜지 않습니다(켜진 기기 ${gate.running}대).`
-            : `이 컴퓨터에서 동시에 켤 수 있는 기기 수(${limit}대)에 닿았습니다(켜진 기기 ${gate.running}대). 끝난 세션의 기기를 이 세션에 지목하세요.` };
+            : `이 컴퓨터에서 동시에 켤 수 있는 기기 수(${limit}대)에 도달했습니다(켜진 기기 ${gate.running}대). 끝난 세션의 기기를 이 세션에 지정하세요.` };
       }
     }
   }
@@ -755,7 +755,7 @@ async function openForAgentRequest(space, want, timeoutMs, { owner = null, limit
   const away = device ? findDeviceEntry(device) : detachedEntryOf(sp);
   if (away?.detached) {
     const d = entryDevice(away);
-    if (!d.udid) return { ok: false, error: "이 스페이스의 에뮬레이터는 분리 창에 있고 기기가 붙어 있지 않습니다. 그 창에서 기기를 켜세요." };
+    if (!d.udid) return { ok: false, error: "이 스페이스의 에뮬레이터는 분리 창에 있고 기기가 연결되어 있지 않습니다. 그 창에서 기기를 켜세요." };
     if (device && !matchesDevice(d, device)) return { ok: false, error: `이 스페이스의 에뮬레이터는 분리 창에서 ${d.name || d.udid} 를 보고 있습니다. 기기를 바꾸려면 그 창에서 바꾸세요.` };
     const failed = away.running ? await reconnectDetached(away, d.udid, timeoutMs) : null;
     if (failed) return failed;
@@ -775,7 +775,7 @@ async function openForAgentRequest(space, want, timeoutMs, { owner = null, limit
     ctx.renderTabs();
   }
   if (!entry) entry = mountEntry(tab, sp, false);
-  if (!entry) return { ok: false, error: "에뮬레이터 화면을 붙일 자리가 없습니다." };
+  if (!entry) return { ok: false, error: "에뮬레이터 화면을 표시할 영역이 없습니다." };
   renderStage();
   return waitAgentDevice(sp, tab, entry, device, timeoutMs);
 }
@@ -824,7 +824,7 @@ async function openOwnedForAgent(sp, owner, entry, device, auto, timeoutMs, addi
     ctx.renderTabs();
   }
   if (!entry) entry = mountEntry(tab, sp, false);
-  if (!entry) return { ok: false, error: "에뮬레이터 화면을 붙일 자리가 없습니다." };
+  if (!entry) return { ok: false, error: "에뮬레이터 화면을 표시할 영역이 없습니다." };
   renderStage();
   if (device && !entryDevice(entry).attached) agentBooting.set(tab.id, device.udid);
   try {
@@ -882,7 +882,7 @@ async function onAsk(m) {
       reply(r && r.ok ? { ok: true, data: r } : { ok: false, error: (r && r.error) || "화면 비율을 바꾸지 못했습니다." });
       return;
     }
-    reply({ ok: false, error: "모르는 요청: " + m.kind });
+    reply({ ok: false, error: "알 수 없는 요청: " + m.kind });
   } catch (e) { reply({ ok: false, error: String((e && e.message) || e) }); }
 }
 
@@ -1051,8 +1051,8 @@ async function designateDevice(tabId, pickedDevice = null) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pendingDesignations.delete(request);
-      ctx.showToast?.("기기 지목 준비가 시간 안에 끝나지 않았습니다", { level: "warn" });
-      resolve("기기 지목 준비가 시간 안에 끝나지 않았습니다");
+      ctx.showToast?.("기기 지정 준비가 시간 안에 끝나지 않았습니다", { level: "warn" });
+      resolve("기기 지정 준비가 시간 안에 끝나지 않았습니다");
     }, 5000);
     pendingDesignations.set(request, { resolve, timer, pane });
     ctx.wsSend?.({ type: "emulator.target-pending", request, pane, udid, persistentId: persistentDeviceId(entry, udid),
@@ -1067,8 +1067,8 @@ function finishDeviceDesignation(message) {
   pendingDesignations.delete(message.request);
   if (!message.ok || !message.delimiter) {
     const detail = String(message.error || "알 수 없는 오류");
-    ctx.showToast?.("기기 지목을 준비하지 못했습니다", { level: "err", detail });
-    pending.resolve(`기기 지목 준비 실패: ${detail}`);
+    ctx.showToast?.("기기 지정을 준비하지 못했습니다", { level: "err", detail });
+    pending.resolve(`기기 지정 준비 실패: ${detail}`);
     return;
   }
   if (ctx.getCurTarget?.() !== pending.pane) {
@@ -1078,7 +1078,7 @@ function finishDeviceDesignation(message) {
     return;
   }
   const name = message.name || message.udid;
-  const block = noticeBlock("에뮬레이터 지목", [
+  const block = noticeBlock("에뮬레이터 지정", [
     `등록 구분자: ${message.delimiter}`,
     `기기: ${name} (${message.udid})`,
     message.platform ? `플랫폼: ${message.platform}` : null,

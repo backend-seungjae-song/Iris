@@ -58,7 +58,7 @@ test("request.answer 처리는 저장소의 한 번 답 결과를 그대로 투�
 test("브라우저 사람 차례 답은 두 선택지만 받고 먼저 온 답 하나만 전달한다", async () => {
   const store = createRequestStore({ randomBytes: randomSequence(), setTimer: () => ({ unref() {} }), clearTimer() {} });
   const request = store.add({ agent: AGENT, kind: "browser-user", createdAt: 1, expiresAt: Date.now() + 60_000,
-    body: { title: "사람 차례", text: "로그인을 마쳐 주세요.", choices: ["다 했음", "못 하겠음"] } },
+    body: { title: "사람이 할 일", text: "로그인을 마쳐 주세요.", choices: ["완료", "할 수 없음"] } },
   async () => "delivered");
   const answer = createRequestAnswerOperation({ requests: store });
   assert.equal(isRemoteRequest({ type: "request.answer", rid: "b1", request: request.ref,

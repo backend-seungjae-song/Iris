@@ -3,6 +3,8 @@
 // 실행기(앱 메인 프로세스)의 소켓은 무응답 25초나 오류로 혼자 다시 붙는다. 끊길 때 서버는 탭 목록을 비우는데
 // 창(렌더러) 소켓은 그대로라 탭 보고가 다시 오지 않으면 "브라우저 탭을 먼저 열어주세요"로 지목이 거절된다.
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +13,8 @@ import test from "node:test";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-executor-reconnect-"));
 process.env.IRIS_STATE_DIR = dir;
 const handlers = await import("../server/browser-message-handlers.js");
+const { attachWs, initWsTransport } = await import("../server/ws-transport.js");
+const { isLoopbackRequest } = await import("../server/http-handler.js");
 const browserRuntime = await import("../server/browser-runtime.js");
 
 browserRuntime.initBrowserRuntime({ broadcast: () => {}, getHerdr: () => null, relayToOneConsole: () => {} });
@@ -64,4 +68,83 @@ test("다른 앱이 거절되면 재보고를 요청하지 않는다", () => {
 test("창은 재보고 요청을 받으면 열린 탭을 모두 다시 보고한다", () => {
   const main = fs.readFileSync(new URL("../web/js/main.js", import.meta.url), "utf8");
   assert.match(main, /"browser-tabs-resync": dispatchWs\([^\n]*reportAllBrowserTabs\(\)/);
+});
+
+function connectFixture(appToken) {
+  const wss = new EventEmitter();
+  initWsTransport({ wss, isLocalRequest: isLoopbackRequest });
+  handlers.initBrowserMessageHandlers({ broadcast() {}, broadcastLocal() {}, appToken });
+  attachWs({
+    initialState() {},
+    dispatch(ws, message) {
+      if (message.type === "browser-sync") handlers.handleBrowserSync(ws, message);
+      else handlers.handleBrowserMessage(ws, message);
+    },
+    onClose: browserRuntime.disconnectCdpExecutor,
+  });
+  return (remoteAddress = "127.0.0.1") => {
+    const ws = Object.assign(new EventEmitter(), { readyState: 1, send() {} });
+    wss.emit("connection", ws, { socket: { remoteAddress }, headers: {} });
+    return {
+      send: (message) => ws.emit("message", Buffer.from(JSON.stringify(message))),
+      close: () => ws.emit("close"),
+    };
+  };
+}
+
+test("앱이 띄운 서버에서는 인증한 루프백 연결만 탭을 등록·갱신·해제한다", () => {
+  const token = randomBytes(32).toString("hex");
+  const connect = connectFixture(token);
+  const other = connect();
+  const app = connect();
+  const remote = connect("192.0.2.5");
+  const tab = { type: "browser-tab-wc", tabId: "tab-auth", wc: 11, space: "test" };
+  const gone = { type: "browser-tab-gone", tabId: tab.tabId };
+  const active = { type: "browser-active-wc", wc: tab.wc, tabId: tab.tabId, space: tab.space };
+  const close = { type: "browser-sync", mutation: { op: "tab.close", space: tab.space, id: tab.tabId } };
+
+  other.send(tab);
+  assert.equal(browserRuntime.hasTab(tab.tabId), false);
+  other.send({ type: "app-auth", token: randomBytes(32).toString("hex") });
+  other.send(tab);
+  remote.send({ type: "app-auth", token });
+  remote.send(tab);
+  assert.equal(browserRuntime.hasTab(tab.tabId), false);
+  app.send({ type: "app-auth", token });
+  app.send(tab);
+  assert.equal(browserRuntime.tabMeta(tab.tabId).wc, 11);
+  other.send({ type: "browser-frame-origins", wc: tab.wc, origins: ["https://spoof.test"] });
+  other.send({ type: "browser-dialog-open", wc: tab.wc, kind: "confirm", message: "spoof" });
+  assert.deepEqual(browserRuntime.metaOfWc(tab.wc).frameOrigins, undefined);
+  assert.equal(browserRuntime.metaOfWc(tab.wc).dialog, undefined);
+  app.send({ type: "browser-frame-origins", wc: tab.wc, origins: ["https://app.test"] });
+  app.send({ type: "browser-dialog-open", wc: tab.wc, kind: "confirm", message: "real" });
+  assert.deepEqual(browserRuntime.metaOfWc(tab.wc).frameOrigins, ["https://app.test"]);
+  assert.equal(browserRuntime.metaOfWc(tab.wc).dialog.kind, "confirm");
+
+  other.send({ ...tab, wc: 22 });
+  other.send(active);
+  assert.equal(browserRuntime.tabIsShowing(tab.space, tab.tabId), false);
+  app.send(active);
+  assert.equal(browserRuntime.tabIsShowing(tab.space, tab.tabId), true);
+  other.send(gone);
+  other.send(close);
+  other.send({ type: "cdp-executor-register", pid: 42 });
+  assert.equal(browserRuntime.cdpExecutorInfo(), null);
+  other.close();
+  assert.equal(browserRuntime.tabMeta(tab.tabId).wc, 11);
+  app.send({ ...tab, wc: 33 });
+  assert.equal(browserRuntime.tabMeta(tab.tabId).wc, 33);
+  app.send(gone);
+  assert.equal(browserRuntime.hasTab(tab.tabId), false);
+});
+
+test("토큰 없이 띄운 서버는 기존 루프백 탭 보고를 받는다", () => {
+  const connect = connectFixture();
+  const local = connect();
+  const tab = { type: "browser-tab-wc", tabId: "tab-dev", wc: 12 };
+  local.send(tab);
+  assert.equal(browserRuntime.tabMeta(tab.tabId).wc, 12);
+  local.send({ type: "browser-tab-gone", tabId: tab.tabId });
+  assert.equal(browserRuntime.hasTab(tab.tabId), false);
 });

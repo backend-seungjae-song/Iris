@@ -220,7 +220,7 @@ function mwReceiveSnapshot(message) {
     mwDoc = doc; mwRev = serverRev; mwBaseText = String(doc.text || ""); mwPending = null;
     mwLiveText = null; mwOwnsLive = false;
     mwConflict = { server: doc, draft: localText }; mwWriteDraft(localText);
-    mwAlert("다른 창의 편집과 겹쳤습니다. 현재 초안과 최신본을 모두 보존했습니다.", { conflict: true });
+    mwAlert("다른 창의 편집과 충돌했습니다. 현재 초안과 최신본을 모두 보존했습니다.", { conflict: true });
     return;
   }
   mwApplyServer(doc);
@@ -274,7 +274,7 @@ export function handleMemoWindowMessage(message) {
     mwPending = null; mwDoc = current; mwRev = Number.isInteger(current.rev) ? current.rev : mwRev;
     mwLiveText = null; mwOwnsLive = false;
     mwBaseText = String(current.text || ""); mwConflict = { server: current, draft }; mwWriteDraft(draft); mwSetDirty(true);
-    mwAlert("다른 창의 편집과 겹쳤습니다. 현재 초안과 최신본을 모두 보존했습니다.", { conflict: true });
+    mwAlert("다른 창의 편집과 충돌했습니다. 현재 초안과 최신본을 모두 보존했습니다.", { conflict: true });
     return true;
   }
   if (message.type === "memo.note.archived") {
@@ -374,7 +374,7 @@ export function initMemoWindow() {
     if (!mwConflict || !mwModel) return;
     const serverText = String(mwConflict.server?.text || ""), draft = String(mwConflict.draft || "");
     mwRev = Number.isInteger(mwConflict.server?.rev) ? mwConflict.server.rev : mwRev; mwBaseText = serverText;
-    const merged = serverText === draft ? serverText : serverText.replace(/\s+$/, "") + "\n\n---\n\n## 겹친 편집 초안\n\n" + draft;
+    const merged = serverText === draft ? serverText : serverText.replace(/\s+$/, "") + "\n\n---\n\n## 충돌한 편집 초안\n\n" + draft;
     mwConflict = null; mwSetValue(merged); mwSetDirty(merged !== serverText); mwWriteDraft(merged); mwAlert(""); mwScheduleSave(20);
   });
   $("#mw-use-server").addEventListener("click", () => {
@@ -382,7 +382,7 @@ export function initMemoWindow() {
     mwWriteDraft(mwConflict.draft); mwRev = Number.isInteger(mwConflict.server?.rev) ? mwConflict.server.rev : mwRev;
     mwBaseText = String(mwConflict.server?.text || ""); mwSetValue(mwBaseText); mwSetDirty(false);
     $("#mw-use-server").hidden = true; $("#mw-keep-both").textContent = "초안 합치기";
-    mwAlert("최신본을 표시 중입니다. 겹친 초안도 이 창에 보관되어 있습니다.", { conflict: true });
+    mwAlert("최신본을 표시 중입니다. 충돌한 초안도 이 창에 보관되어 있습니다.", { conflict: true });
     $("#mw-use-server").hidden = true;
   });
   addEventListener("blur", () => mwFlush());

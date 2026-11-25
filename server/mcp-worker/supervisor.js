@@ -12,6 +12,7 @@ import { processStartedAt, workerLockOwnerAlive } from "./worker-lock.js";
 const PROTOCOL = 1;
 const START_TIMEOUT_MS = 5000;
 const STOP_TIMEOUT_MS = 5000;
+const SHUTDOWN_TIMEOUT_MS = 2000;
 const REQUEST_WAIT_MS = 2000;
 const RESTART_BACKOFF_MS = [100, 500, 1000];
 const SUBSCRIPTION_ID_RE = /^[A-Za-z0-9._:-]{1,100}$/;
@@ -31,8 +32,10 @@ function atomicWriteJson(file, value) {
     fs.fsyncSync(descriptor);
   } finally { fs.closeSync(descriptor); }
   fs.renameSync(temporary, file);
-  const directory = fs.openSync(path.dirname(file), "r");
-  try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+  if (process.platform !== "win32") {
+    const directory = fs.openSync(path.dirname(file), "r");
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+  }
 }
 
 function readJson(file) {
@@ -77,6 +80,7 @@ export function createMcpWorkerSupervisor({
   workerLockPollMs = 50,
   workerLockWaitMs = 35000,
   requestWaitMs = REQUEST_WAIT_MS,
+  shutdownTimeoutMs = SHUTDOWN_TIMEOUT_MS,
   isProcessAlive = processAlive,
   getProcessStartedAt = processStartedAt,
 } = {}) {
@@ -87,6 +91,8 @@ export function createMcpWorkerSupervisor({
   const workerLockFile = path.join(deployRoot, "worker.lock");
   const bootId = crypto.randomBytes(8).toString("hex");
   const pending = new Map();
+  const startingInstances = new Set();
+  const spawnOperations = new Set();
   // 응답을 기다리는 요청이 있는 동안만 IPC 채널 ref · 평소 unref 는 공용 서버 종료를 막지 않기 위함
   function syncChannelRef(instance) {
     const channel = instance?.child?.channel;
@@ -113,12 +119,22 @@ export function createMcpWorkerSupervisor({
   let retryAt = 0;
   let relayRecovery = null;
   const pendingRelayRetires = new Map();
+  const requestRunBindings = new Map();
 
   const delay = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
-  const waitBounded = async (promise, timeoutMs) => {
+  function assertRunning() {
+    if (stopping) throw codedError("SHUTTING_DOWN", "worker supervisor가 종료 중입니다.");
+  }
+  const waitBounded = async (promise, timeoutMs, { keepAlive = false } = {}) => {
     let timer = null;
     try {
-      await Promise.race([promise, new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); timer.unref?.(); })]);
+      return await Promise.race([
+        Promise.resolve(promise).then(() => true),
+        new Promise(resolve => {
+          timer = setTimeout(() => resolve(false), timeoutMs);
+          if (!keepAlive) timer.unref?.();
+        }),
+      ]);
     } finally { if (timer) clearTimeout(timer); }
   };
 
@@ -127,6 +143,7 @@ export function createMcpWorkerSupervisor({
     let observedOwner = null;
     let observedStartedAt = null;
     while (fs.existsSync(workerLockFile)) {
+      assertRunning();
       let owner = null;
       try { owner = readJson(workerLockFile); } catch {}
       const ownerKey = JSON.stringify([owner?.pid, owner?.workerGeneration, owner?.processStartedAt, owner?.leaseId]);
@@ -138,6 +155,7 @@ export function createMcpWorkerSupervisor({
       if (Date.now() >= deadline) throw codedError("LOCK_TIMEOUT", "이전 worker 잠금 반환 대기 시간이 초과됐습니다.");
       await delay(workerLockPollMs);
     }
+    assertRunning();
   }
 
   function reclaimExitedWorkerLock(instance) {
@@ -170,28 +188,28 @@ export function createMcpWorkerSupervisor({
     throw codedError("RESOURCE_RELEASE_FAILED", "worker 프로세스 종료 뒤 잠금이 반환되지 않았습니다.");
   }
 
-  async function terminateFailedSpawn(instance) {
+  async function terminateFailedSpawn(instance, timeoutMs = STOP_TIMEOUT_MS) {
     if (!instance || instance.exited) {
       if (instance) reclaimExitedWorkerLock(instance);
       return;
     }
     try { if (instance.child.connected) instance.child.disconnect?.(); } catch {}
-    try { await waitForExitAndLock(instance, STOP_TIMEOUT_MS); return; }
+    try { await waitForExitAndLock(instance, timeoutMs); return; }
     catch {}
     try { instance.child.kill?.("SIGKILL"); } catch {}
-    await waitForExitAndLock(instance, STOP_TIMEOUT_MS);
+    await waitForExitAndLock(instance, timeoutMs);
   }
 
-  async function terminateChild(instance) {
+  async function terminateChild(instance, timeoutMs = STOP_TIMEOUT_MS) {
     if (!instance || instance.exited) {
       if (instance) reclaimExitedWorkerLock(instance);
       return;
     }
     try { instance.child.kill?.("SIGTERM"); } catch {}
-    try { await waitForExitAndLock(instance, STOP_TIMEOUT_MS); return; }
+    try { await waitForExitAndLock(instance, timeoutMs); return; }
     catch {}
     try { instance.child.kill?.("SIGKILL"); } catch {}
-    await waitForExitAndLock(instance, STOP_TIMEOUT_MS);
+    await waitForExitAndLock(instance, timeoutMs);
   }
 
   const status = () => current ? {
@@ -278,14 +296,14 @@ export function createMcpWorkerSupervisor({
       bundleId, workerProtocol: PROTOCOL, activatedAt: new Date().toISOString() });
   }
 
-  function workerRequest(instance, type, extra = {}, timeoutMs = STOP_TIMEOUT_MS) {
+  function workerRequest(instance, type, extra = {}, timeoutMs = STOP_TIMEOUT_MS, { keepAlive = false } = {}) {
     const requestId = `${type}:${crypto.randomUUID()}`;
     return new Promise((resolve, reject) => {
       const timer = Number.isFinite(timeoutMs) ? setTimeout(() => {
         dropPending(requestId);
         reject(codedError("TIMEOUT", `${type} 응답 시간이 초과됐습니다.`));
       }, timeoutMs) : null;
-      timer?.unref?.();
+      if (!keepAlive) timer?.unref?.();
       pending.set(requestId, { instance, resolve, reject, timer });
       syncChannelRef(instance);
       instance.child.send({ protocol: PROTOCOL, workerGeneration: instance.generation, type, requestId, ...extra }, error => {
@@ -307,8 +325,10 @@ export function createMcpWorkerSupervisor({
     return true;
   }
 
-  async function spawn(selected, { accept = true, takeover = false } = {}) {
+  async function spawnInstance(selected, { accept = true, takeover = false } = {}) {
+    assertRunning();
     await waitForWorkerLockRelease();
+    assertRunning();
     const generation = `${bootId}:${++sequence}`;
     const token = crypto.randomBytes(32).toString("hex");
     const child = spawnWorker(selected.entry, {
@@ -325,15 +345,21 @@ export function createMcpWorkerSupervisor({
     });
     const instance = { ...selected, child, generation, token, state: "starting", startedAt: new Date().toISOString(), active: null,
       exited: false, registered: false, hostFinished: false, relaySubscriptions: new Map() };
-    const dispatcher = hostDispatcher(generation, child);
-    instance.dispatcher = dispatcher;
-    let hello = false;
     child.on("exit", (code, signal) => {
       instance.exited = true;
       instance.exitCode = code;
       instance.exitSignal = signal;
       if (instance.registered) onExit(instance, code, signal);
     });
+    startingInstances.add(instance);
+    if (stopping) {
+      await terminateFailedSpawn(instance, 100).catch(() => {});
+      startingInstances.delete(instance);
+      throw codedError("SHUTTING_DOWN", "worker supervisor가 종료 중입니다.");
+    }
+    const dispatcher = hostDispatcher(generation, child);
+    instance.dispatcher = dispatcher;
+    let hello = false;
     const ready = new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(codedError("TIMEOUT", "worker 기동 확인 시간이 초과됐습니다.")), START_TIMEOUT_MS);
       timer.unref?.();
@@ -387,15 +413,32 @@ export function createMcpWorkerSupervisor({
         error.cleanupError = cleanupError;
       });
       throw error;
+    } finally {
+      startingInstances.delete(instance);
+    }
+  }
+
+  async function spawn(selected, options = {}) {
+    let resolveDone;
+    const done = new Promise(resolve => { resolveDone = resolve; });
+    spawnOperations.add(done);
+    try { return await spawnInstance(selected, options); }
+    finally {
+      spawnOperations.delete(done);
+      resolveDone();
     }
   }
 
   async function spawnWithRetries(selected, { attempts = maxRestarts, primaryError = null, takeover = false } = {}) {
     let lastError = null;
     for (let attempt = 0; attempt <= attempts; attempt++) {
+      assertRunning();
       if (attempt) await delay(restartBackoffMs[Math.min(attempt - 1, restartBackoffMs.length - 1)] || 0);
       try { return await spawn(selected, { takeover }); }
-      catch (error) { lastError = error; }
+      catch (error) {
+        lastError = error;
+        if (stopping) throw error;
+      }
     }
     if (primaryError && lastError) {
       primaryError.details = { ...(primaryError.details || {}), rollbackError: String(lastError.message || lastError) };
@@ -497,44 +540,50 @@ export function createMcpWorkerSupervisor({
     return true;
   }
 
-  async function finishHostGeneration(instance, { force = false } = {}) {
+  async function finishHostGeneration(instance, { force = false, timeoutMs = STOP_TIMEOUT_MS } = {}) {
     if (!instance || instance.hostFinished) return;
     const release = () => releaseHostGeneration(instance.generation);
     if (force) instance.dispatcher?.retire?.(release);
     const idle = instance.dispatcher?.waitForIdle?.();
-    if (idle && force) {
-      await waitBounded(idle, STOP_TIMEOUT_MS);
-    } else if (idle) await idle;
+    if (idle) await waitBounded(idle, timeoutMs, { keepAlive: true });
     if (!force) instance.dispatcher?.retire?.(release);
     release();
     instance.hostFinished = true;
   }
 
-  async function stopInstance(instance, { stopObservations = false, retire = true } = {}) {
+  async function stopInstance(instance, { stopObservations = false, retire = true,
+    timeoutMs = STOP_TIMEOUT_MS, forceTimeoutMs = timeoutMs } = {}) {
     let hostFinished = false;
     let relayRetired = false;
+    const deadline = Date.now() + timeoutMs;
+    const remaining = () => Math.max(1, deadline - Date.now());
+    const boundedRequest = (type, extra = {}) => {
+      const budget = remaining();
+      return workerRequest(instance, type, { ...extra, timeoutMs: budget }, budget, { keepAlive: true });
+    };
     try {
       instance.state = "draining";
-      await workerRequest(instance, "worker.stopAccepting");
-      try { await workerRequest(instance, "worker.drain", { timeoutMs: 30000 }, 31000); }
+      await boundedRequest("worker.stopAccepting");
+      try { await boundedRequest("worker.drain"); }
       catch (error) {
         if (error.code !== "BUSY" || !stopObservations) throw error;
-        await workerRequest(instance, "worker.stopObservations");
-        await workerRequest(instance, "worker.drain", { timeoutMs: 30000 }, 31000);
+        await boundedRequest("worker.stopObservations");
+        await boundedRequest("worker.drain");
       }
-      await finishHostGeneration(instance);
+      await finishHostGeneration(instance, { timeoutMs: remaining() });
       hostFinished = true;
       if (retire) {
-        await retireRelayGeneration(instance.generation);
+        const retired = await waitBounded(retireRelayGeneration(instance.generation), remaining(), { keepAlive: true });
+        if (!retired) throw codedError("TIMEOUT", "Electron worker 세대 회수 시간이 초과됐습니다.");
         relayRetired = true;
       }
       instance.state = "stopping";
-      await workerRequest(instance, "worker.shutdown");
-      await waitForExitAndLock(instance);
+      await boundedRequest("worker.shutdown");
+      await waitForExitAndLock(instance, remaining());
     } catch (error) {
       error.details = { ...(error.details || {}), hostFinished, relayRetired };
-      if (retire && (relayRetired || hostFinished)) {
-        try { await terminateFailedSpawn(instance); }
+      if (stopping || (retire && (relayRetired || hostFinished))) {
+        try { await terminateFailedSpawn(instance, forceTimeoutMs); }
         catch (cleanupError) {
           error.details.cleanupError = String(cleanupError.message || cleanupError);
         }
@@ -545,6 +594,15 @@ export function createMcpWorkerSupervisor({
         }
       }
       throw error;
+    }
+  }
+
+  async function stopStartedDuringShutdown(instance) {
+    if (!instance) return;
+    try {
+      await stopInstance(instance, { stopObservations: true, timeoutMs: shutdownTimeoutMs, forceTimeoutMs: 100 });
+    } catch {
+      await terminateFailedSpawn(instance, 100).catch(() => {});
     }
   }
 
@@ -566,6 +624,7 @@ export function createMcpWorkerSupervisor({
 
   async function recoverPendingRestart(selected = null) {
     if (!pendingRestart) return false;
+    if (stopping) return false;
     if (recovery) return recovery;
     const task = pendingRestart;
     if (selected) task.selected = selected;
@@ -576,11 +635,17 @@ export function createMcpWorkerSupervisor({
         await finishHostGeneration(task.instance, { force: true });
         task.hostFinished = true;
       }
-      current = await spawnWithRetries(task.selected || task.instance, {
+      assertRunning();
+      const next = await spawnWithRetries(task.selected || task.instance, {
         attempts: Math.max(0, maxRestarts - 1),
         primaryError: task.primaryError,
         takeover: true,
       });
+      if (stopping) {
+        await stopStartedDuringShutdown(next);
+        throw codedError("SHUTTING_DOWN", "worker supervisor가 종료 중입니다.");
+      }
+      current = next;
       pendingRestart = null;
       retryDeployment = null;
       retryAt = 0;
@@ -624,11 +689,17 @@ export function createMcpWorkerSupervisor({
   }
 
   async function start() {
+    assertRunning();
     if (current) return status();
     const selected = startupDeployment();
     log.info?.(`[mcp-worker] ${selected.deployId} 실행: ${selected.reason || "검증된 current.json"}`);
     try {
-      current = await spawnWithRetries(selected, { attempts: Math.max(0, maxRestarts - 1) });
+      const next = await spawnWithRetries(selected, { attempts: Math.max(0, maxRestarts - 1) });
+      if (stopping) {
+        await stopStartedDuringShutdown(next);
+        throw codedError("SHUTTING_DOWN", "worker supervisor가 종료 중입니다.");
+      }
+      current = next;
       retryDeployment = null;
       retryAt = 0;
       failure = null;
@@ -646,7 +717,17 @@ export function createMcpWorkerSupervisor({
     if (pendingRestart && Date.now() >= retryAt) await recoverPendingRestart();
     if (!current && retryDeployment && Date.now() >= retryAt && !recovery) {
       recovery = spawnWithRetries(retryDeployment, { attempts: Math.max(0, maxRestarts - 1) })
-        .then(instance => { current = instance; retryDeployment = null; retryAt = 0; failure = null; return true; })
+        .then(async instance => {
+          if (stopping) {
+            await stopStartedDuringShutdown(instance);
+            throw codedError("SHUTTING_DOWN", "worker supervisor가 종료 중입니다.");
+          }
+          current = instance;
+          retryDeployment = null;
+          retryAt = 0;
+          failure = null;
+          return true;
+        })
         .catch(error => { failure = String(error.message || error); retryAt = Date.now() + (restartBackoffMs.at(-1) || 1000); return false; })
         .finally(() => { recovery = null; });
       await recovery;
@@ -658,22 +739,59 @@ export function createMcpWorkerSupervisor({
     return current;
   }
 
+  function acquireRequestRun(identity) {
+    if (!identityAuthority || !identity?.run || !identity?.key) return false;
+    const key = `${identity.session}\u0000${identity.run}`;
+    const assertKey = () => {
+      if (typeof identityAuthority.assertRunKey === "function") identityAuthority.assertRunKey(identity);
+      else identityAuthority.authorize(identity, ["run", "key"]);
+    };
+    const existing = requestRunBindings.get(key);
+    if (existing) {
+      assertKey();
+      existing.count++;
+      return true;
+    }
+    const binding = identityAuthority.bindingFor(identity.run);
+    if (binding) assertKey();
+    const ephemeral = !binding;
+    if (ephemeral) identityAuthority.bindRun(identity);
+    requestRunBindings.set(key, { count: 1, ephemeral, identity: { session: identity.session, run: identity.run } });
+    return true;
+  }
+
+  function releaseRequestRun(identity, { preserveBinding = false } = {}) {
+    if (!identity?.run) return;
+    const key = `${identity.session}\u0000${identity.run}`;
+    const lease = requestRunBindings.get(key);
+    if (!lease) return;
+    lease.count--;
+    if (preserveBinding) lease.ephemeral = false;
+    if (lease.count > 0) return;
+    requestRunBindings.delete(key);
+    if (lease.ephemeral) identityAuthority?.releaseRun(lease.identity);
+  }
+
   async function request(channel, command, args, identity) {
     const instance = await waitForCurrent();
     if (identity.session) identityAuthority?.allowSession(identity.session);
-    const previousBinding = identity.run ? identityAuthority?.bindingFor(identity.run) : null;
-    const boundForRequest = Boolean(identity.run && identity.key && !previousBinding);
-    if (boundForRequest) {
-      identityAuthority?.bindRun(identity);
-    }
     const commandId = `${instance.generation}/${crypto.randomUUID()}`;
+    const retainedRun = acquireRequestRun(identity);
+    let releasedRun = false;
+    let requestSucceeded = false;
+    const releaseRequest = () => {
+      if (releasedRun) return;
+      releasedRun = true;
+      if (retainedRun) releaseRequestRun(identity, { preserveBinding: requestSucceeded });
+    };
+    const previousBinding = identity.run ? identityAuthority?.bindingFor(identity.run) : null;
     const candidate = channel === "qa" && command === "run_resume" && identity.run && !identity.key
       && (!previousBinding || previousBinding.session === identity.session);
     // MCP 재연결 뒤 새 stdio 는 key 가 없음. 같은 세션의 명시적 run_resume 에만 이번 요청용 임시 key 발급
     const requestIdentity = candidate && !identity.key ? { ...identity, key: crypto.randomUUID() } : identity;
     if (candidate) identityAuthority?.allowCandidate({ commandId, ...requestIdentity });
     try {
-      const output = await workerRequest(instance, "worker.request", { channel, command, args, identity: requestIdentity, commandId }, null);
+      const output = await workerRequest(instance, "worker.request", { channel, command, args, identity: requestIdentity, commandId }, 34 * 60_000);
       const data = output?.data || output;
       if (output?.ok !== false && channel === "qa" && command === "run_begin" && data?.runId && data?.runKey) {
         identityAuthority?.bindRun({ session: identity.session, run: data.runId, key: data.runKey });
@@ -681,12 +799,10 @@ export function createMcpWorkerSupervisor({
       if (output?.ok !== false && channel === "qa" && command === "run_resume" && data?.runId && data?.runKey) {
         identityAuthority?.rotateRunKey({ session: identity.session, run: data.runId, key: data.runKey });
       }
-      if (output?.ok === false && boundForRequest) identityAuthority?.releaseRun(identity);
+      requestSucceeded = output?.ok !== false;
       return output;
-    } catch (error) {
-      if (boundForRequest) identityAuthority?.releaseRun(identity);
-      throw error;
     } finally {
+      releaseRequest();
       if (candidate) identityAuthority?.clearCandidate(commandId);
     }
   }
@@ -713,9 +829,11 @@ export function createMcpWorkerSupervisor({
   }
 
   async function activate({ deployId, expectPrevId, stopObservations = false, recover = false } = {}) {
+    assertRunning();
     if (activation) throw codedError("DEPLOYMENT_BUSY", "다른 worker 활성화가 진행 중입니다.");
     activation = withDeploymentLock({ stateDir, owner: "mcp-worker-activate" }, async () => {
       try {
+        assertRunning();
         if (recover) {
           const selected = deployId ? deployment(deployId) : startupDeployment();
           if (recovery) {
@@ -737,6 +855,7 @@ export function createMcpWorkerSupervisor({
           retryAt = 0;
           const task = pendingRestart;
           const recovered = await recoverPendingRestart(selected);
+          assertRunning();
           if (!recovered || !current || current.state !== "accepting") {
             throw task.error || codedError("WORKER_UNAVAILABLE", failure || "worker 강제 복구에 실패했습니다.");
           }
@@ -770,6 +889,7 @@ export function createMcpWorkerSupervisor({
             throw error;
           }
         }
+        assertRunning();
         current = null;
         let next;
         try { next = await spawn(selected); }
@@ -782,6 +902,10 @@ export function createMcpWorkerSupervisor({
             }
           }
           throw error;
+        }
+        if (stopping) {
+          await stopStartedDuringShutdown(next);
+          throw codedError("SHUTTING_DOWN", "worker supervisor가 종료 중입니다.");
         }
         if (expectPrevId != null && activationPreviousId(previous) !== expectPrevId) {
           await stopInstance(next);
@@ -823,7 +947,22 @@ export function createMcpWorkerSupervisor({
     stopping = true;
     const instance = current;
     current = null;
-    if (instance) await stopInstance(instance).catch(() => {});
+    for (const starting of startingInstances) {
+      await terminateFailedSpawn(starting, 100).catch(error => {
+        failure = String(error.message || error);
+      });
+    }
+    if (instance) {
+      try {
+        await stopInstance(instance, { stopObservations: true, timeoutMs: shutdownTimeoutMs, forceTimeoutMs: 100 });
+      } catch (error) {
+        failure = String(error.message || error);
+      }
+    }
+    const inFlightSpawns = [...spawnOperations];
+    if (inFlightSpawns.length) {
+      await waitBounded(Promise.allSettled(inFlightSpawns), shutdownTimeoutMs, { keepAlive: true });
+    }
   }
 
   async function reloadSource() {

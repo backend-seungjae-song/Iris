@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
+import { WebSocketServer } from "ws";
 
 // 업로드 시험용 요청 객체(이벤트를 내보내고 resume 을 받음)
 const await_events = () => class extends EventEmitter { resume() {} };
@@ -12,7 +14,7 @@ import {
   codexToolItem, completeEnd, decodeLine, isNoiseMessage, readForward, readTailWindow,
 } from "../server/agent-chat-transcript.js";
 import {
-  handleAgentChat, handleAgentChatFile, handleAgentChatImage, handleAgentChatUpload, imageFromRecord, initAgentChat, inputChunks,
+  handleAgentChat, handleAgentChatFile, handleAgentChatImage, handleAgentChatUpload, imageFromRecord, initAgentChat, inputChunks, stopAgentChat,
   ANSWER_SETTLE_MS, cardChoices, isAnsweredLeftover, subagentRelayText, optionLabel, promptIdOf, readRecords, resolveSubagentFile, uploadName,
   noFileFrame, claudeSessionFromProcess,
 } from "../server/agent-chat.js";
@@ -21,13 +23,23 @@ import {
   recordFailure, rollback, staticTarget,
 } from "../server/paseo-ui/plan.js";
 import { childEnv } from "../server/paseo-ui/index.js";
-import { claudeBuiltins, cliBuiltinCommands, listCommands, parseFrontmatter, rankPaths, resetClaudeBuiltinsForTest, suggestFiles } from "../server/agent-chat-tools.js";
+import { claudeBuiltins, claudeInitializeCommand, claudeInitializeEnv, cliBuiltinCommands, cliExecutable, cliSpawnInvocation, cliSpawnOptions, listCommands, parseFrontmatter, rankPaths, resetClaudeBuiltinsForTest, suggestFiles } from "../server/agent-chat-tools.js";
 import { parseContext } from "../server/paseo-ui/entry/iris-contexts-model.js";
 import { attachmentTag, attachmentText, contextTag, cutToken, describeAttachment, dropAttachment, dropImage, expandText, findTokens, imageTag, insertAtCaret, isLongPaste, reglue, removedTokens, shrinkTag, tokenLabel, tokensToDelete } from "../server/paseo-ui/entry/iris-inline-tokens.js";
 import { codeForCopy } from "../server/paseo-ui/entry/iris-code-copy.js";
 import { openableUrl, splitUrlTail } from "../server/paseo-ui/entry/iris-link-tail.js";
 import { terminalUrlToken } from "../web/js/panel/url-token.js";
-import { claudeFooter, claudeMeta, codexConfiguredModel, codexMeta, codexModeId, codexModelsFromCache } from "../server/agent-chat-meta.js";
+import { claudeFooter, claudeMeta, codexConfiguredModel, codexFooter, codexMeta, codexModeId, codexModelsFromCache } from "../server/agent-chat-meta.js";
+
+test("Codex 입력줄 아래의 모델 표시 이름과 effort를 현재 카탈로그 ID로 읽는다", () => {
+  const models = [{ id: "gpt-6.1-terra", label: "GPT-6.1 Terra", thinkingOptions: [{ id: "high" }] }];
+  const footer = "  GPT-6.1 Terra high · ~/project · 작업";
+  assert.deepEqual(codexFooter("› Ask Codex to do anything\n\n" + footer, models),
+    { model: models[0].id, effort: "high" });
+  assert.equal(codexFooter(footer + "\n› 다른 입력", models), null);
+  assert.equal(codexFooter("› 입력\n" + footer, models), null);
+  assert.equal(codexFooter("› 입력\n\n  Unknown high · ~/project", models), null);
+});
 
 const line = (o) => JSON.stringify(o);
 const TS = "2000-01-01T00:00:00.000Z";
@@ -568,6 +580,12 @@ test("요소 선택 블록 머리 줄에서 칩의 종류·요약을 뽑는다",
   assert.equal(parseContext("⟦Iris⟧ 브라우저 그룹 지목\n등록 구분자: z\n그룹: 작업 (g1) · 스페이스 s").summary, "작업");
   assert.equal(parseContext("⟦Iris⟧ 에뮬레이터 지목\n기기: iPhone 17 (UDID)").summary, "iPhone 17");
   assert.equal(parseContext("⟦Iris⟧ 표 셀 선택 · B3\n셀: B3").kind, "cell");
+  assert.deepEqual(parseContext("⟦Iris⟧ 세션 선택 · 빌드\n보내기: iris-pane-send w1:p2"), { kind: "session", label: "세션", summary: "빌드" });
+  assert.deepEqual(parseContext("⟦Iris⟧ 문서 탭 선택 · 계획.md\n경로: /p/계획.md"), { kind: "doc", label: "문서 탭", summary: "계획.md" });
+  assert.deepEqual(parseContext("⟦Iris⟧ 브라우저 탭 선택\n등록 구분자: z\n탭: @work-tab  주문"), { kind: "tab", label: "브라우저 탭", summary: "@work-tab 주문" });
+  assert.deepEqual(parseContext("⟦Iris⟧ 브라우저 그룹 선택\n등록 구분자: z\n그룹: 작업 (g1) · 스페이스 s"), { kind: "group", label: "탭 그룹", summary: "작업" });
+  assert.deepEqual(parseContext("⟦Iris⟧ 에뮬레이터 지정\n기기: iPhone 17 (UDID)"), { kind: "device", label: "기기", summary: "iPhone 17" });
+  assert.deepEqual(parseContext("[사이트 선택 · 이 주소를 기억하고 활용하세요]\n주문  http://a.test/"), { kind: "site", label: "사이트", summary: "주문 http://a.test/" });
   // 모르는 형식도 칩으로. 긴 요약은 40자에서 자름
   const other = parseContext("x".repeat(80));
   assert.equal(other.kind, "other");
@@ -824,8 +842,8 @@ test("설치 전 초안의 칩 글자: 번호가 어긋나도 이름으로 찾�
 test("대화 선택 블록: 칩 종류 대화, 요약은 내용 첫 줄·이미지 파일 이름", async () => {
   const { chatPickBlock } = await import("../web/js/agentchat/chat-pick.js");
   const { parseContext } = await import("../server/paseo-ui/entry/iris-contexts-model.js");
-  const text = chatPickBlock({ pid: "c1", where: "iris", kind: "에이전트 답 · 문단", text: "첫 줄\n둘째", image: "" });
-  assert.equal(text, "⟦Iris⟧ 대화 선택 #c1 · iris\n종류: 에이전트 답 · 문단\n내용:\n첫 줄\n둘째\n⟦/Iris⟧");
+  const text = chatPickBlock({ pid: "c1", where: "iris", kind: "에이전트 답변 · 문단", text: "첫 줄\n둘째", image: "" });
+  assert.equal(text, "⟦Iris⟧ 대화 선택 #c1 · iris\n종류: 에이전트 답변 · 문단\n내용:\n첫 줄\n둘째\n⟦/Iris⟧");
   assert.deepEqual(parseContext(text), { kind: "chat", label: "대화", summary: "첫 줄" });
   assert.equal(parseContext(chatPickBlock({ pid: "c2", kind: "에이전트 답 · 이미지", text: "", image: "/s/a.png" })).summary, "a.png");
   assert.equal(parseContext(chatPickBlock({ pid: "c3", kind: "도구", text: "", image: "" })).summary, "도구");
@@ -876,9 +894,13 @@ test("질문 카드: 버튼 id 는 순서로 매기고 답은 순서로 찾음",
   assert.equal(answerIndex(options, { behavior: "allow" }), 0);
   assert.equal(answerIndex(options, { selectedActionId: "option-9" }), null);
   assert.equal(answerIndex([], { behavior: "deny" }), null);
+  assert.equal(answerIndex(options, {}), null);
+  assert.equal(answerIndex(options, { selectedActionId: "future-option", behavior: "allow" }), null);
+  assert.equal(answerIndex(options, { selectedActionId: "option-1", behavior: "deny" }), null);
+  assert.equal(answerIndex([{ role: "allowAlways" }], { behavior: "allow" }), null);
 });
 
-test("설정 화면: 대화 표시 줄은 Paseo 채팅 설정 화면을 iframe 으로 띄움", async () => {
+test("설정 화면: 대화 목록 줄은 대화 표시 설정 화면을 iframe 으로 띄움", async () => {
   const { settingsSection, CHAT_SETTINGS_URL } = await import("../web/js/agentchat/view-pref.js");
   const { settingsMarkup } = await import("../web/js/devtool/settings-view.js");
   const html = settingsMarkup({ section: "agentchat", featureSections: [settingsSection("chat", 259)] });
@@ -996,6 +1018,56 @@ test("짝을 못 찾은 보내는 중 말풍선 판정", async () => {
   assert.deepEqual(staleSends(s, { ...base, now: 20000 }), ["a", "b"]);
 });
 
+test("보낸 글과 기록 행 짝짓기: 글자가 달라도 보낸 뒤 새로 생긴 행과 짝을 짓는다", async () => {
+  const { pairSends } = await import("../server/paseo-ui/entry/iris-pending-sends.js");
+  const row = (key, text, ts = 10_000) => ({ key, user: true, text, ts });
+  const send = (id, text, extra = {}) => ({ id, agent: "A", text, seen: new Set(["old"]), lastKey: "old", at: 9_000, ...extra });
+  const pairs = (rows, sends, known = new Map()) => Object.fromEntries(pairSends(rows, sends, "A", known));
+
+  assert.deepEqual(pairs([row("old", "안녕"), row("r1", "안녕")], [send("s1", "안녕")]), { r1: "s1" }, "같은 글");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "첫 줄\n\n둘째   줄")], [send("s1", "첫 줄 둘째 줄")]), { r1: "s1" }, "공백·줄바꿈 차이");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "[Image #1] 이거 봐")], [send("s1", "/tmp/iris-state/agentchat-uploads/a1.png 이거 봐")]), { r1: "s1" },
+    "Claude Code 가 이미지 경로를 [Image #n] 으로 바꿔 저장");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "앞부분…")], [send("s1", "앞부분 뒤에 더 긴 글")]), { r1: "s1" }, "기록이 길어 잘린 행");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "기록에서 달라진 글")], [send("s1", "보낸 글")]), { r1: "s1" },
+    "글자로 짝이 없어도 보낸 뒤 처음 생긴 사용자 행과 짝");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "B"), row("r2", "A")], [send("s1", "A"), send("s2", "B")]), { r2: "s1", r1: "s2" },
+    "글자가 같은 짝을 순서보다 먼저");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "다른 글"), row("r2", "또 다른 글")], [send("s1", "가"), send("s2", "나")]), { r1: "s1", r2: "s2" },
+    "글자 짝이 없으면 보낸 순서대로");
+  assert.deepEqual(pairs([row("old", "안녕"), row("r1", "안녕")], [send("s1", "안녕", { seen: new Set(["old", "r1"]), lastKey: "r1" })]), {},
+    "보내기 전에 있던 행과는 짝짓지 않음");
+  assert.deepEqual(pairs([row("x1", "예전 글", 1_000)], [send("s1", "새 글", { seen: new Set(), lastKey: null })]), {},
+    "다른 대화에서 보내 기준 행이 없을 때 보내기 전 시각의 행과는 순서로 짝짓지 않음");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "안녕")], [send("s1", "안녕", { agent: "B" })]), {}, "다른 대화로 보낸 글");
+  assert.deepEqual(pairs([row("old", "x"), row("r1", "안녕")], [send("s1", "안녕")], new Map([["r1", "s0"]])), {}, "이미 짝지은 행");
+});
+
+test("대화 화면 링크: 경로 없는 파일 이름은 링크가 아니고 우클릭 복사는 전체 경로", async () => {
+  const { isBareFileName, linkCopyTarget } = await import("../server/paseo-ui/entry/iris-path-links.js");
+  for (const name of ["report.md", "notes.md", "main.js:12", "README", "a.test.mjs"]) assert.equal(isBareFileName(name), true, name);
+  for (const p of ["web/js/main.js", "/Users/x/a.md", "~/a.md", "./a.md", "C:\\a\\b.md", "https://example.com/a.md", "file:///a.md", ""]) assert.equal(isBareFileName(p), false, p);
+
+  assert.deepEqual(linkCopyTarget("https://example.com/docs", "/w"), { kind: "url", text: "https://example.com/docs" });
+  assert.deepEqual(linkCopyTarget("web/js/main.js:12", "/w/proj/"), { kind: "path", text: "/w/proj/web/js/main.js" }, "상대 경로는 작업 폴더 기준, 줄 번호는 뺌");
+  assert.deepEqual(linkCopyTarget("/Users/x/proj/web/js", "/w"), { kind: "path", text: "/Users/x/proj/web/js" });
+  assert.deepEqual(linkCopyTarget("~/a.md:3:4", "/w"), { kind: "path", text: "~/a.md" });
+  assert.deepEqual(linkCopyTarget("file:///Users/x/a%20b.md", "/w"), { kind: "path", text: "/Users/x/a b.md" });
+  assert.deepEqual(linkCopyTarget("server/paseo-ui/", ""), { kind: "path", text: "server/paseo-ui/" }, "작업 폴더를 모르면 그대로");
+  assert.equal(linkCopyTarget("", "/w"), null);
+});
+
+test("질문 미리보기: 선 그리기 시안만 칸 맞춤 대상, 넓은 글자는 2칸", async () => {
+  const { isTextArt, artCells } = await import("../server/paseo-ui/entry/iris-preview-art.js");
+  assert.equal(isTextArt("┌─ 화면 ─┐\n│ 글 │\n└───┘"), true);
+  assert.equal(isTextArt("+------+\n| 입력 |\n+------+"), true, "ASCII 상자");
+  assert.equal(isTextArt("짧은 설명 글입니다. 줄바꿈해도 됩니다."), false, "일반 글은 그대로 줄바꿈");
+  assert.equal(isTextArt("const a = 1;\nreturn a | b;"), false, "코드의 | 하나는 시안 아님");
+  assert.deepEqual(artCells("a한╌─"), [{ text: "a", cells: 0 }, { text: "한", cells: 2 }, { text: "╌", cells: 1 }, { text: "─", cells: 1 }]);
+  assert.deepEqual(artCells("ab ｃ"), [{ text: "ab ", cells: 0 }, { text: "ｃ", cells: 2 }], "ASCII 는 묶고 전각은 2칸");
+  assert.deepEqual(artCells("😀"), [{ text: "😀", cells: 2 }], "서로게이트 쌍은 한 글자");
+});
+
 test("pane 의 Claude 세션 id 는 프로세스 기록에서 읽는다(/clear 뒤 herdr 의 이전 id 대신)", () => {
   const info = { process_info: { foreground_process_group_id: 71712, foreground_processes: [{ pid: 9 }, { pid: 71712, argv0: "claude" }] } };
   const recs = { 71712: { pid: 71712, sessionId: "f41a9ed0-a0cc-4289-b6b6-f5b791c2e844" } };
@@ -1057,6 +1129,57 @@ test("Claude 내장 명령은 CLI 초기화 응답에서 받고, CLI 목록에 �
   assert.equal(await claudeBuiltins({ run: fail, now: Date.now() + 61_000 }), null);
   assert.equal(runs, 3);
   resetClaudeBuiltinsForTest();
+});
+
+test("Claude 명령 초기화는 설치된 실행 파일을 찾고 중첩·Electron 환경을 제거한다", () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "iris-claude-bin-"));
+  const claude = path.join(bin, "claude");
+  try {
+    fs.writeFileSync(claude, "#!/bin/sh\n");
+    fs.chmodSync(claude, 0o755);
+    const source = { PATH: bin, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", HERDR_PANE_ID: "p", ELECTRON_RUN_AS_NODE: "1", IRIS_PORT: "4291", HOME: "/tmp" };
+    const env = claudeInitializeEnv(source);
+    assert.equal(env.CLAUDECODE, undefined);
+    assert.equal(env.CLAUDE_CODE_SESSION_ID, undefined);
+    assert.equal(env.HERDR_PANE_ID, undefined);
+    assert.equal(env.ELECTRON_RUN_AS_NODE, undefined);
+    assert.equal(env.IRIS_PORT, undefined);
+    assert.equal(env.HOME, "/tmp");
+    assert.equal(claudeInitializeCommand(source), claude);
+  } finally { fs.rmSync(bin, { recursive: true, force: true }); }
+});
+
+test("cliExecutable은 macOS Dock 경로와 Windows 실행 확장자를 찾는다", () => {
+  const dock = fs.mkdtempSync(path.join(os.tmpdir(), "iris-cli-dock-"));
+  const windows = fs.mkdtempSync(path.join(os.tmpdir(), "iris-cli-windows-"));
+  try {
+    const mac = path.join(dock, "iris-test-cli");
+    fs.writeFileSync(mac, "#!/bin/sh\n");
+    fs.chmodSync(mac, 0o755);
+    assert.equal(cliExecutable("iris-test-cli", { PATH: "" }, { platform: "darwin", extraDirs: [dock] }), mac);
+
+    const cmd = path.join(windows, "iris-test-cli.cmd");
+    fs.writeFileSync(cmd, "@echo off\r\n");
+    assert.equal(cliExecutable("iris-test-cli", { PATH: windows }, { platform: "win32" }), cmd);
+
+    const programFiles = path.join(windows, "Program Files");
+    fs.mkdirSync(programFiles);
+    const claudeCmd = path.join(programFiles, "claude.cmd");
+    fs.writeFileSync(claudeCmd, "@echo off\r\n");
+    assert.equal(claudeInitializeCommand({ PATH: programFiles }, { platform: "win32" }), claudeCmd);
+    assert.deepEqual(cliSpawnOptions(claudeCmd, { platform: "win32" }), { shell: true });
+    assert.deepEqual(cliSpawnOptions(claudeCmd, { platform: "darwin" }), {});
+    const args = ["-p", "--safe-mode"];
+    assert.deepEqual(cliSpawnInvocation(claudeCmd, args, { platform: "win32" }), {
+      command: `"${claudeCmd}"`, args, options: { shell: true },
+    });
+    const exe = path.join(programFiles, "claude.exe");
+    fs.writeFileSync(exe, "binary fixture");
+    assert.deepEqual(cliSpawnInvocation(exe, args, { platform: "win32" }), { command: exe, args, options: {} });
+  } finally {
+    fs.rmSync(dock, { recursive: true, force: true });
+    fs.rmSync(windows, { recursive: true, force: true });
+  }
 });
 
 test("대화 분기: Paseo 가 새 초안에 넣은 채팅 기록 첨부를 찾고 /branch 를 알아본다", async () => {
@@ -1133,4 +1256,84 @@ test("권한 질문 id 는 자동 차단 카운트다운이 줄어도 그대로�
     assert.doesNotMatch(pa.detail, /automatically block|unattended session/);
     assert.match(pa.detail, /Dangerous rm operation not ruled out/);
   }
+});
+
+test("같은 pane에서 다른 대화를 재개한 뒤에는 이전 구독의 입력을 보내지 않는다", async (t) => {
+  const { replace, snapshot } = await import("../server/runtime-state.js");
+  const before = snapshot();
+  const agent = { agent: "codex", sessionUuid: "old", paneId: "test:p1", terminalId: "terminal" };
+  replace({ state: [agent] });
+  const sent = [];
+  initAgentChat({ paseoUi: false, herdr: {
+    paneGet: async () => ({ agent: "codex", terminal_id: "terminal", agent_session: { kind: "id", value: "new" } }),
+    paneSendText: async (_, text) => sent.push(text),
+  } });
+  let done;
+  const result = new Promise(resolve => { done = resolve; });
+  const ws = { _local: true, readyState: 1, send(raw) {
+    const message = JSON.parse(raw);
+    if (message.type === "agentchat.sent") done(message);
+  } };
+  t.after(() => { handleAgentChat(ws, { type: "agentchat.close", key: "old" }); replace(before); });
+  handleAgentChat(ws, { type: "agentchat.open", key: "old", paneId: agent.paneId, session: "old" });
+  handleAgentChat(ws, { type: "agentchat.send", key: "old", text: "previous thread only" });
+  assert.equal((await result).ok, false);
+  assert.deepEqual(sent, []);
+});
+
+test("일반 native Codex pane은 default control socket의 exact thread로 shared chat을 선택한다", async (t) => {
+  const { replace, snapshot } = await import("../server/runtime-state.js");
+  const before = snapshot();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-agent-chat-state-"));
+  const codexHome = path.join("/tmp", `c${process.pid}`);
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "iris-agent-chat-cwd-"));
+  const threadId = ["00000000", "0000", "7000", "8000", "9".repeat(12)].join("-");
+  const socketPath = path.join(codexHome, "app-server-control", "app-server-control.sock");
+  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+  const server = createServer();
+  const endpoint = new WebSocketServer({ server });
+  endpoint.on("connection", ws => ws.on("message", raw => {
+    const message = JSON.parse(raw);
+    if (!message.id) return;
+    const result = message.method === "thread/loaded/list"
+      ? { data: [threadId], nextCursor: null }
+      : message.method === "thread/read"
+        ? { thread: { id: threadId, cwd, status: { type: "idle" } } }
+        : {};
+    ws.send(JSON.stringify({ id: message.id, result }));
+  }));
+  server.listen(socketPath);
+  await once(server, "listening");
+  const oldStateDir = process.env.IRIS_STATE_DIR;
+  const oldCodexHome = process.env.CODEX_HOME;
+  process.env.IRIS_STATE_DIR = stateDir;
+  process.env.CODEX_HOME = codexHome;
+  replace({ state: [{ agent: "codex", paneId: "native:pane", terminalId: "native:terminal", cwd, sessionUuid: null, status: "idle" }] });
+  initAgentChat({ paseoUi: false, herdr: {
+    paneGet: async () => ({ pane_id: "native:pane", terminal_id: "native:terminal", agent: "codex", cwd,
+      agent_session: { kind: "id", value: threadId } }),
+    call: async () => ({ process_info: { foreground_processes: [{ name: "codex", argv: ["codex", "resume", threadId] }] } }),
+  } });
+  const frames = [];
+  const ws = { _local: true, readyState: 1, send(raw) { frames.push(JSON.parse(raw)); } };
+  t.after(async () => {
+    stopAgentChat();
+    replace(before);
+    if (oldStateDir === undefined) delete process.env.IRIS_STATE_DIR;
+    else process.env.IRIS_STATE_DIR = oldStateDir;
+    if (oldCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = oldCodexHome;
+    for (const client of endpoint.clients) client.terminate();
+    endpoint.close();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(codexHome, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  handleAgentChat(ws, { type: "agentchat.open", key: "native", paneId: "native:pane" });
+  for (let attempt = 0; attempt < 100 && !frames.some(frame => frame.kind === "error"); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+  const error = frames.find(frame => frame.kind === "error");
+  assert.ok(error, "shared Codex watcher should be selected after exact discovery");
+  assert.match(error.reason, /Paseo의 Codex 대화 화면을 먼저 준비하세요/);
 });

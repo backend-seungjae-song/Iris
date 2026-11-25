@@ -6,10 +6,15 @@
 //   에이전트 1개·워크스페이스 1개를 합성. 대화·상태는 부모 창(web/js/agentchat/boot.js)이 줌
 //   보내기·중단은 부모 창에 postMessage 로 넘김(iris-chat.send·iris-chat.cancel)
 import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
+import type { AgentPermissionRequest, AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
+import type { AgentConfigApply, AgentSnapshotPayload } from "@getpaseo/protocol/messages";
+import { AGENT_PROVIDER_DEFINITIONS } from "@getpaseo/protocol/provider-manifest";
 import { asUint8Array, decodeFileTransferFrame, FileTransferOpcode } from "@getpaseo/protocol/binary-frames/index";
 import { buildAgentForkContextAttachment } from "../server/src/server/agent/activity-curator";
 import { rebuiltRowsNotice } from "./iris-rows-notice";
+import { pairSends } from "./iris-pending-sends";
 import { CODEX_ONLY_MESSAGE, agentFields, answerRow, permissionRequest, providerEntries, type IrisAgentMeta, type IrisModelDefinition, type IrisPrompt } from "./iris-agent-meta";
+import { managedChat, ManagedSocket } from "./iris-managed-socket";
 
 export const SHIM_HOST = "iris-shim.invalid:80";
 const SHIM_URL_PREFIX = `ws://${SHIM_HOST}/`;
@@ -22,16 +27,26 @@ export const UPLOAD_LIMIT_BYTES = 30 * 1024 * 1024;
 // 시험·개발에서만 보낸 메시지를 Paseo 검사기로 확인. 주소에 check=1 이 있거나 개발 빌드
 const CHECK = (typeof __DEV__ !== "undefined" && __DEV__) || /[?&]check=1\b/.test(globalThis.location?.search || "");
 
-export type ShimItem = { key: string; item: any; ts: number };
+export type ShimItem = { key: string; item: any; ts: number; turnId?: string };
+export type EmbeddedSettings = Pick<AgentSnapshotPayload, "model" | "thinkingOptionId" | "controls" | "availableModes" | "currentModeId" | "lastUsage"> & Partial<Pick<AgentSnapshotPayload, "features" | "options">>;
+type AgentSetting = "model" | "thinking" | "mode";
+type AgentSettingResult = { ok: boolean; reason?: string; notice?: unknown };
 export interface ShimAgent {
   id: string;
   provider: string;
   cwd: string;
   title: string | null;
   running: boolean;
+  status?: AgentSnapshotPayload["status"];
+  activeTurn?: AgentSnapshotPayload["activeTurn"];
+  permissions?: AgentPermissionRequest[];
+  embeddedSettings?: EmbeddedSettings;
+  cliAvailable?: boolean;
+  embeddedModels?: IrisModelDefinition[];
   // 지금 모델·effort·모드·사용량. 서브에이전트 보기 등 모르면 null
   meta?: IrisAgentMeta | null;
   codexModels?: IrisModelDefinition[] | null;
+  agyModels?: IrisModelDefinition[] | null;
   // 터미널이 답을 기다리는 질문
   prompt?: IrisPrompt | null;
   // 지금 실행 중인 Claude 서브에이전트(부모 창이 아는 목록). Paseo 의 공급자 서브에이전트 줄로 보임
@@ -42,6 +57,7 @@ export interface ShimAgent {
 // - send: 부모에 넘기기 직전 실제로 보내는 글로 remember 를 불러야 대화 기록의 그 글이 보낸 행과 합쳐짐
 export interface ShimHost {
   send(input: { key: string; id: string; text: string; images: { data: string; mimeType: string }[]; attachments: unknown[]; remember: (text: string) => void }): Promise<{ ok: boolean; reason?: string }>;
+  openCli?(key: string): void;
   cancel(key: string): void;
   loadOlder(): Promise<void>;
   commands?(key: string): Promise<{ commands: { name: string; description: string; argumentHint: string; kind?: string }[]; error?: string }>;
@@ -49,9 +65,11 @@ export interface ShimHost {
   // 모델·effort 변경 같은 터미널 명령 글. 대화 글이 아니므로 remember 를 거치지 않음
   command?(key: string, text: string): Promise<{ ok: boolean; reason?: string }>;
   mode?(key: string, modeId: string): Promise<{ ok: boolean; reason?: string }>;
+  setting?(key: string, setting: AgentSetting | "config", value: string | AgentConfigApply | null): Promise<AgentSettingResult>;
   answer?(key: string, promptId: string, row: number): Promise<{ ok: boolean; reason?: string }>;
   // AskUserQuestion 답(Paseo 질문 카드 answers, 키는 header). null 이면 닫기(Esc)
   answerQuestion?(key: string, promptId: string, answers: Record<string, string> | null): Promise<{ ok: boolean; reason?: string }>;
+  permission?(key: string, requestId: string, response: AgentPermissionResponse): Promise<{ ok: boolean; reason?: string }>;
   upload?(input: { fileName: string; mimeType: string; bytes: Blob }): Promise<{ path: string; size: number; fileName: string }>;
   // 받았다고 답한 뒤 터미널에 넣지 못한 글. 말풍선을 빼고 글을 입력창에 되돌림
   sendFailed?(key: string, id: string, text: string, reason: string): void;
@@ -60,7 +78,7 @@ export interface ShimHost {
 // 보낸 글 하나. 보낸 대화, 보낸 때 기록에 있던 행 key 와 마지막 행 key 를 함께 저장
 type SentMark = { text: string; id: string; agent: string; seen: Set<string>; lastKey: string | null; at: number };
 
-type Row = { key: string; item: any; ts: number; seqStart: number; seqEnd: number; sig: string };
+type Row = ShimItem & { seqStart: number; seqEnd: number; sig: string };
 type SavedTimeline = { rows: Row[]; epoch: string; lastSeq: number; minSeq: number; hasOlder: boolean; provider: string };
 // 저장해 두는 대화 수·짝지은 보낸 글 수 상한
 const SAVED_MAX = 30;
@@ -92,14 +110,17 @@ class ShimDaemon {
   private pending: SentMark[] = [];
   // Iris 메시지 id → 대화 기록에 실제로 쓴 messageId(보낸 글이면 Paseo 의 id). 한 번 정하면 유지
   readonly messageIds = new Map<string, string>();
-  // 앱에 보여 준 모델 목록의 Codex 쪽. 부모가 null 을 보내도(서브에이전트 보기 등) 마지막 값을 유지
+  // 앱에 보여 준 모델 목록의 Codex·Antigravity 쪽. 부모가 null 을 보내도(서브에이전트 보기 등) 마지막 값을 유지
   private codexModels: IrisModelDefinition[] | null = null;
+  private agyModels: IrisModelDefinition[] | null = null;
   private providersSig = "";
   private metaSig = "";
   // 앱에 권한 요청으로 보낸 질문. 앱이 답한 id 는 질문이 사라질 때까지 다시 보내지 않음
   private shownPrompt: IrisPrompt | null = null;
   private shownPromptSig = "";
   private answeredPromptId: string | null = null;
+  private embeddedPermissions = new Map<string, AgentPermissionRequest>();
+  private embeddedReplies = new Map<string, "waiting" | "answered">();
   // 앱에 보여 준 서브에이전트 id → 내용 서명. 에이전트 목록(fetch_agents)에는 섞지 않고 전용 메시지로만 보냄
   private shownSubagents = new Map<string, string>();
   private subagentParent = "";
@@ -133,9 +154,10 @@ class ShimDaemon {
     this.agent = next;
     this.hasOlder = hasOlder;
     if (next.codexModels) this.codexModels = next.codexModels;
-    if (next.running && !this.turnId) {
-      this.turnId = `iris-turn-${Date.now().toString(36)}`;
-      this.turnStartedAt = new Date().toISOString();
+    if (next.agyModels) this.agyModels = next.agyModels;
+    if (next.running && (!this.turnId || (next.activeTurn && next.activeTurn.turnId !== this.turnId))) {
+      this.turnId = next.activeTurn?.turnId ?? `iris-turn-${Date.now().toString(36)}`;
+      this.turnStartedAt = next.activeTurn?.startedAt ?? new Date().toISOString();
       if (!switched) this.broadcastStream({ type: "turn_started", provider: next.provider, turnId: this.turnId });
     }
     // 돌아온 대화: 부모가 기록을 다시 받기 전의 빈 목록은 저장해 둔 행을 지우지 않게 건너뜀
@@ -149,9 +171,10 @@ class ShimDaemon {
       if (!switched) this.broadcastStream({ type: "turn_completed", provider: next.provider, turnId });
     }
     this.syncPrompt(prev, switched);
+    this.syncEmbeddedPermissions(prev, switched);
     this.syncProviders();
     this.syncSubagents(switched);
-    const metaSig = JSON.stringify([agentFields(next.provider, next.meta ?? null), this.shownPrompt?.id ?? null]);
+    const metaSig = JSON.stringify([next.embeddedSettings ?? agentFields(next.provider, next.meta ?? null), this.shownPrompt?.id ?? null, next.status, [...this.embeddedPermissions.values()]]);
     const metaChanged = metaSig !== this.metaSig;
     this.metaSig = metaSig;
     if (switched || metaChanged || prev?.running !== next.running || prev?.title !== next.title || prev?.cwd !== next.cwd) this.broadcastAgentUpdate();
@@ -162,25 +185,23 @@ class ShimDaemon {
     }
   }
 
-  // 보낸 글과 기록의 사용자 행 짝짓기
-  // - 보낸 때 기록 끝(lastKey) 뒤에 새로 생긴 사용자 행 하나에만 대응. 짝지은 보낸 글은 목록에서 뺌
-  // - 같은 글을 여러 번 보내도 앞의 기록 행이 새로 보낸 글과 합쳐지지 않음
-  // - 앞뒤 공백·줄바꿈은 비교에서 뺌(터미널이 붙여넣기 앞뒤에 줄바꿈을 더해 저장)
+  // 보낸 글과 기록의 사용자 행 짝짓기(pairSends). 보낸 때 기록 끝(lastKey) 뒤에 새로 생긴 행에만 대응
+  // - 짝지은 보낸 글은 목록에서 뺌. 같은 글을 여러 번 보내도 앞의 기록 행이 새로 보낸 글과 합쳐지지 않음
   private withSentIds(items: ShimItem[]): ShimItem[] {
-    return items.map((r, idx) => {
-      if (r.item.type !== "user_message") return r;
-      let id = this.messageIds.get(r.key);
-      if (!id) {
-        const n = this.pending.findIndex((s) => s.agent === this.agent?.id && s.text.trim() === String(r.item.text ?? "").trim() && !s.seen.has(r.key)
-          && (s.lastKey === null || idx > items.findIndex((x) => x.key === s.lastKey)));
-        if (n < 0) return r;
-        id = this.pending[n].id;
-        this.pending.splice(n, 1);
-        this.messageIds.set(r.key, id);
-        // 대화를 바꿔도 비우지 않음. 기록 행 key 는 대화마다 달라 섞이지 않음
-        if (this.messageIds.size > MESSAGE_IDS_MAX) this.messageIds.delete(this.messageIds.keys().next().value!);
-      }
-      return { ...r, item: { ...r.item, messageId: id, clientMessageId: id } };
+    const rows = items.map((r) => ({ key: r.key, user: r.item.type === "user_message", text: String(r.item.text ?? ""), ts: r.ts }));
+    for (const [key, id] of pairSends(rows, this.pending, this.agent?.id, this.messageIds)) {
+      this.pending = this.pending.filter((s) => s.id !== id);
+      this.messageIds.set(key, id);
+      // 대화를 바꿔도 비우지 않음. 기록 행 key 는 대화마다 달라 섞이지 않음
+      if (this.messageIds.size > MESSAGE_IDS_MAX) this.messageIds.delete(this.messageIds.keys().next().value!);
+    }
+    return items.map((r) => {
+      const id = r.item.type === "user_message" ? this.messageIds.get(r.key) : undefined;
+      if (!id) return r;
+      const item = this.agent?.permissions
+        ? { ...r.item, messageId: r.item.messageId ?? id, clientMessageId: r.item.clientMessageId ?? id }
+        : { ...r.item, messageId: id, clientMessageId: id };
+      return { ...r, item };
     });
   }
 
@@ -223,7 +244,7 @@ class ShimDaemon {
   // - 지금 행이 새 목록 가운데 그대로 이어져 있으면 앞쪽은 이전 대화, 뒤쪽은 새 행
   // - 맞지 않으면 새 epoch 로 갈아 끼우고 앱에 다시 받으라고 알림
   private applyItems(items: ShimItem[], fresh: boolean) {
-    const sig = (r: ShimItem) => JSON.stringify(r.item);
+    const sig = (r: ShimItem) => JSON.stringify([r.item, r.turnId]);
     if (fresh || this.rows.length === 0) {
       const notice = rebuiltRowsNotice({ hadRows: this.rows.length > 0, switchedSinceRows: this.switchedSinceRows, fresh, count: items.length });
       this.rows = [];
@@ -252,14 +273,14 @@ class ShimDaemon {
       const s = sig(r);
       if (s === row.sig) return;
       if (r.item.type !== "tool_call") { needsReplace = true; return; }
-      row.item = r.item; row.sig = s; row.ts = r.ts;
+      row.item = r.item; row.sig = s; row.ts = r.ts; row.turnId = r.turnId;
       row.seqEnd = this.issueSeq();
       this.broadcastRow(row);
     });
     const older = items.slice(0, start).reverse();
     for (const r of older) {
       const seq = --this.minSeq;
-      this.rows.unshift({ key: r.key, item: r.item, ts: r.ts, seqStart: seq, seqEnd: seq, sig: sig(r) });
+      this.rows.unshift({ ...r, seqStart: seq, seqEnd: seq, sig: sig(r) });
     }
     for (const r of items.slice(start + this.rows.length - older.length)) {
       const row = this.row(r, sig(r));
@@ -277,7 +298,7 @@ class ShimDaemon {
 
   private row(r: ShimItem, sig: string): Row {
     const seq = this.issueSeq();
-    return { key: r.key, item: r.item, ts: r.ts, seqStart: seq, seqEnd: seq, sig };
+    return { ...r, seqStart: seq, seqEnd: seq, sig };
   }
 
   private replace() {
@@ -291,9 +312,10 @@ class ShimDaemon {
     if (!this.agent) return;
     for (const s of this.sockets) {
       if (!s.timelineSub) continue;
+      const turnId = row.turnId ?? this.turnId;
       s.push({ type: "agent_stream", payload: {
         subscriptionId: s.timelineSub, agentId: this.agent.id,
-        event: { type: "timeline", provider: this.agent.provider, item: row.item, ...(this.turnId ? { turnId: this.turnId } : {}) },
+        event: { type: "timeline", provider: this.agent.provider, item: row.item, ...(turnId ? { turnId } : {}) },
         timestamp: new Date(row.ts).toISOString(), seq: row.seqEnd, epoch: this.epoch,
       } });
     }
@@ -384,7 +406,7 @@ class ShimDaemon {
   // Codex 모델 목록이 생기거나 바뀌면 앱의 모델 목록을 갱신
   // - 선택기는 cwd 별 캐시를 읽음. cwd 없는 알림은 홈 캐시에만 들어가므로 요청이 왔던 cwd 마다 보냄
   private syncProviders() {
-    const entries = providerEntries(this.codexModels, "");
+    const entries = this.providers("");
     const sig = JSON.stringify(entries);
     if (sig === this.providersSig) return;
     const first = this.providersSig === "";
@@ -392,21 +414,77 @@ class ShimDaemon {
     if (first) return;
     const now = new Date().toISOString();
     const cwds = new Set([...this.snapshotCwds, ...(this.agent?.cwd ? [this.agent.cwd] : [])]);
-    for (const s of this.sockets) for (const cwd of [null, ...cwds]) {
-      s.push({ type: "providers_snapshot_update", payload: { entries: providerEntries(this.codexModels, now), generatedAt: now, ...(cwd ? { cwd } : {}) } });
+    const models = this.providers(now);
+    for (const socket of this.sockets) {
+      for (const subscriptionId of socket.providerSubscriptions) {
+        for (const cwd of [null, ...cwds]) {
+          socket.push({ type: "providers_snapshot_update", payload: { subscriptionId, entries: models, generatedAt: now, ...(cwd ? { cwd } : {}) } });
+        }
+      }
     }
   }
 
-  providers() {
-    return providerEntries(this.codexModels, this.createdAt);
+  providers(fetchedAt = this.createdAt) {
+    const agent = this.agent;
+    if (agent?.embeddedSettings) {
+      const definition = AGENT_PROVIDER_DEFINITIONS.find(({ id }) => id === agent.provider);
+      return [{ provider: agent.provider, enabled: true, label: definition?.label,
+        status: agent.embeddedModels?.length ? "ready" as const : "unavailable" as const,
+        models: agent.embeddedModels ?? [], modes: agent.embeddedSettings.availableModes, fetchedAt }];
+    }
+    return providerEntries(this.codexModels, fetchedAt, this.agyModels);
   }
 
   private broadcast(message: any) {
     for (const s of this.sockets) s.push(message);
   }
 
+  private syncEmbeddedPermissions(prev: ShimAgent | null, switched: boolean) {
+    const agent = this.agent!;
+    const incoming = new Map((agent.permissions ?? []).map((request) => [request.id, request]));
+    if (switched) {
+      for (const id of this.embeddedPermissions.keys()) {
+        if (prev && this.embeddedReplies.get(id) !== "waiting") this.resolveEmbeddedPermission(prev.id, id);
+      }
+      this.embeddedPermissions.clear();
+      this.embeddedReplies = new Map();
+    }
+    for (const id of this.embeddedPermissions.keys()) {
+      if (incoming.has(id) || this.embeddedReplies.get(id) === "waiting") continue;
+      this.embeddedPermissions.delete(id);
+      this.resolveEmbeddedPermission(agent.id, id);
+    }
+    for (const [id, reply] of this.embeddedReplies) if (reply === "answered" && !incoming.has(id)) this.embeddedReplies.delete(id);
+    for (const [id, request] of incoming) {
+      if (this.embeddedReplies.get(id) === "answered" || JSON.stringify(this.embeddedPermissions.get(id)) === JSON.stringify(request)) continue;
+      this.embeddedPermissions.set(id, request);
+      this.broadcast({ type: "agent_permission_request", payload: { agentId: agent.id, request } });
+    }
+  }
+
+  private resolveEmbeddedPermission(agentId: string, requestId: string, resolution: AgentPermissionResponse = { behavior: "deny" }) {
+    this.broadcast({ type: "agent_permission_resolved", payload: { agentId, requestId, resolution } });
+  }
+
+  private async respondEmbeddedPermission(agentId: string, requestId: string, response: AgentPermissionResponse) {
+    const host = this.host;
+    const replies = this.embeddedReplies;
+    if (!host?.permission) return "Iris 창과 연결되지 않았습니다";
+    if (!this.embeddedPermissions.has(requestId) || replies.has(requestId)) return "이미 처리된 요청입니다";
+    replies.set(requestId, "waiting");
+    const result = await host.permission(agentId, requestId, response);
+    if (!result.ok) { replies.delete(requestId); return result.reason || "답을 보내지 못했습니다"; }
+    if (this.agent?.id !== agentId || this.embeddedReplies !== replies) return null;
+    replies.set(requestId, "answered");
+    this.embeddedPermissions.delete(requestId);
+    this.resolveEmbeddedPermission(agentId, requestId, response);
+    this.broadcastAgentUpdate();
+    return null;
+  }
+
   // 앱이 권한 카드에서 고른 답 → 터미널 선택지. 성공하면 앱에 해소를 알림
   async respondPermission(agentId: string, requestId: string, response: any): Promise<string | null> {
+    if (this.agent?.id === agentId && this.agent.permissions) return this.respondEmbeddedPermission(agentId, requestId, response);
     const prompt = this.shownPrompt;
     if (!prompt || prompt.id !== requestId || !this.agent || this.agent.id !== agentId) return "이미 처리된 요청입니다";
     const host = this.host;
@@ -441,16 +519,18 @@ class ShimDaemon {
     const a = this.agent;
     if (!a) return null;
     return {
-      id: a.id, provider: a.provider, cwd: a.cwd || "/", workspaceId: SHIM_WORKSPACE_ID, ...agentFields(a.provider, a.meta ?? null),
+      id: a.id, provider: a.provider, cwd: a.cwd || "/", workspaceId: SHIM_WORKSPACE_ID,
+      ...(a.embeddedSettings ?? agentFields(a.provider, a.meta ?? null)),
       createdAt: this.createdAt, updatedAt: new Date().toISOString(), lastUserMessageAt: null,
-      status: a.running ? "running" : "idle",
+      status: a.status ?? (a.running ? "running" : "idle"),
       activeTurn: a.running && this.turnId ? { turnId: this.turnId, startedAt: this.turnStartedAt } : null,
       capabilities: {
         supportsStreaming: true, supportsSessionPersistence: false, supportsDynamicModes: false, supportsMcpServers: false,
         supportsReasoningStream: true, supportsToolInvocations: true,
         supportsRewindConversation: false, supportsRewindFiles: false, supportsRewindBoth: false,
       },
-      pendingPermissions: this.shownPrompt ? [permissionRequest(a.provider, this.shownPrompt)] : [], persistence: null,
+      pendingPermissions: a.permissions ? [...this.embeddedPermissions.values()]
+        : this.shownPrompt ? [permissionRequest(a.provider, this.shownPrompt)] : [], persistence: null,
       title: a.title, labels: {},
     };
   }
@@ -535,7 +615,7 @@ class ShimDaemon {
       entries: picked.map((r) => ({
         provider: src.provider, item: r.item, timestamp: new Date(r.ts).toISOString(),
         seqStart: r.seqStart, seqEnd: r.seqEnd, sourceSeqRanges: [{ startSeq: r.seqStart, endSeq: r.seqEnd }], collapsed: [],
-        ...(turnId && r === last ? { turnId } : {}),
+        ...(r.turnId ? { turnId: r.turnId } : turnId && r === last ? { turnId } : {}),
       })),
       error: null, ...merge,
     };
@@ -591,6 +671,7 @@ class ShimSocket extends EventTarget {
   onclose: ((e: Event) => void) | null = null;
   onerror: ((e: Event) => void) | null = null;
   onmessage: ((e: MessageEvent) => void) | null = null;
+  providerSubscriptions = new Set<string>();
   timelineSub: string | null = null;
   agentsSub: string | null = null;
   workspacesSub: string | null = null;
@@ -708,18 +789,60 @@ class ShimSocket extends EventTarget {
     this.push({ type, payload });
   }
 
+  private openCliSettings(agent: ShimAgent) {
+    if (!agent.cliAvailable || !shimDaemon.host?.openCli) return { accepted: false, error: CODEX_ONLY_MESSAGE };
+    shimDaemon.host.openCli(agent.id);
+    return { accepted: false, error: "열린 CLI 화면에서 설정을 선택하세요" };
+  }
+
+  private async applyAgentConfig(agentId: string, config: AgentConfigApply): Promise<{ accepted: boolean; error: string | null; notice?: unknown }> {
+    const { host, agent } = shimDaemon;
+    if (agent?.id !== agentId || !host?.setting) return { accepted: false, error: "Iris 창과 연결되지 않았습니다" };
+    if (!agent.embeddedSettings && agent.cliAvailable) return this.openCliSettings(agent);
+    if (!config || typeof config !== "object" || Array.isArray(config)) return { accepted: false, error: "Paseo 설정 번들을 확인하세요" };
+    const result = await host.setting(agentId, "config", config);
+    return { accepted: result.ok, error: result.ok ? null : (result.reason || "설정을 바꾸지 못했습니다"), ...(result.notice !== undefined ? { notice: result.notice } : {}) };
+  }
+
   // 모델·effort 변경: 터미널과 같게 "/model <id>"·"/effort <수준>" 글을 보냄
   // - effort 의 off·ultracode·기본값(null)은 Claude 터미널 명령에 대응하는 값이 없음
   private async changeTerminalSetting(kind: "model" | "effort", value: string | null, agentId: string): Promise<{ accepted: boolean; error: string | null }> {
     const agent = shimDaemon.agent;
     const host = shimDaemon.host;
     if (!agent || agent.id !== agentId || !host?.command) return { accepted: false, error: "Iris 창과 연결되지 않았습니다" };
-    if (agent.provider !== "claude") return { accepted: false, error: CODEX_ONLY_MESSAGE };
+    if (agent.provider !== "claude" && agent.provider !== "agy") return this.openCliSettings(agent);
     if (!value) return { accepted: false, error: kind === "model" ? "기본 모델로 되돌릴 수 없습니다" : "기본 effort 로 되돌릴 수 없습니다" };
     if (kind === "effort" && (value === "off" || value === "ultracode")) return { accepted: false, error: "터미널에서 지원하지 않는 값입니다" };
     if (/\s/.test(value)) return { accepted: false, error: "잘못된 값입니다" };
-    const res = await host.command(agentId, `/${kind} ${value}`);
+    let nextValue = value;
+    if (agent.provider === "agy" && kind === "model" && !/-(?:low|medium|high|xhigh|max)$/i.test(value)) {
+      const def = shimDaemon.providers().find((p) => p.provider === "agy")?.models?.find((m) => m.id === value);
+      if (def?.thinkingOptions?.length) {
+        const curEffort = agent.meta?.effort;
+        const effort = (curEffort && def.thinkingOptions.some((o) => o.id === curEffort) ? curEffort : null)
+          || def.defaultThinkingOptionId
+          || def.thinkingOptions[0]?.id;
+        if (effort) nextValue = `${value}-${effort}`;
+      }
+    }
+    const res = await host.command(agentId, `/${kind} ${nextValue}`);
     return { accepted: !!res.ok, error: res.ok ? null : (res.reason || "보내지 못했습니다") };
+  }
+
+  private async changeSetting(setting: AgentSetting, agentId: string, value: string | null) {
+    const { host, agent } = shimDaemon;
+    const unavailable = { accepted: false, error: "Iris 창과 연결되지 않았습니다" };
+    if (agent?.id !== agentId) return unavailable;
+    if (agent.embeddedSettings) {
+      if (setting === "mode") return this.applyAgentConfig(agentId, { modeId: value ?? undefined });
+      if (setting === "model") return this.applyAgentConfig(agentId, { modelId: value });
+      return this.applyAgentConfig(agentId, { thinkingOptionId: value });
+    }
+    if (setting !== "mode") return this.changeTerminalSetting(setting === "thinking" ? "effort" : setting, value, agentId);
+    if (agent.provider === "codex") return this.openCliSettings(agent);
+    if (!host?.mode || !value) return unavailable;
+    const result = await host.mode(agentId, value);
+    return { accepted: result.ok, error: result.ok ? null : (result.reason || "모드를 바꾸지 못했습니다") };
   }
 
   private async handle(m: any) {
@@ -740,10 +863,14 @@ class ShimSocket extends EventTarget {
         if (requestId) this.reply("clear_agent_attention_response", { requestId, agentId: m.agentId, agents: agent ? [agent] : [] });
         return;
       }
-      case "session.events.set_subscription.request":
-        this.reply("session.events.set_subscription.response", { requestId, subscriptionId: nextSub("events") });
+      case "session.events.set_subscription.request": {
+        const subscriptionId = nextSub("events");
+        if (m.events?.includes("providers_snapshot_update")) this.providerSubscriptions.add(subscriptionId);
+        this.reply("session.events.set_subscription.response", { requestId, subscriptionId });
         return;
+      }
       case "subscription.release.request":
+        this.providerSubscriptions.delete(m.subscriptionId);
         if (m.subscriptionId === this.timelineSub) this.timelineSub = null;
         if (m.subscriptionId === this.agentsSub) this.agentsSub = null;
         if (m.subscriptionId === this.workspacesSub) this.workspacesSub = null;
@@ -848,26 +975,29 @@ class ShimSocket extends EventTarget {
       case "refresh_providers_snapshot_request":
         this.reply("refresh_providers_snapshot_response", { requestId, acknowledged: true });
         return;
+      case "agent.config.apply.request": {
+        const result = await this.applyAgentConfig(m.agentId, m.config);
+        this.reply("agent.config.apply.response", { requestId, agentId: m.agentId, ...result });
+        return;
+      }
       case "set_agent_model_request": {
-        const r = await this.changeTerminalSetting("model", m.modelId, m.agentId);
+        const r = await this.changeSetting("model", m.agentId, m.modelId);
         this.reply("set_agent_model_response", { requestId, agentId: m.agentId, ...r });
         return;
       }
       case "set_agent_thinking_request": {
-        const r = await this.changeTerminalSetting("effort", m.thinkingOptionId, m.agentId);
+        const r = await this.changeSetting("thinking", m.agentId, m.thinkingOptionId);
         this.reply("set_agent_thinking_response", { requestId, agentId: m.agentId, ...r });
         return;
       }
       case "set_agent_mode_request": {
-        const host = shimDaemon.host;
-        const provider = shimDaemon.agent?.provider;
-        let r: { accepted: boolean; error: string | null } = { accepted: false, error: "Iris 창과 연결되지 않았습니다" };
-        if (provider === "codex") r = { accepted: false, error: CODEX_ONLY_MESSAGE };
-        else if (host?.mode) {
-          const res = await host.mode(String(m.agentId), String(m.modeId));
-          r = { accepted: !!res.ok, error: res.ok ? null : (res.reason || "모드를 바꾸지 못했습니다") };
-        }
+        const r = await this.changeSetting("mode", m.agentId, m.modeId);
         this.reply("set_agent_mode_response", { requestId, agentId: m.agentId, ...r });
+        return;
+      }
+      case "set_agent_feature_request": {
+        const r = await this.applyAgentConfig(String(m.agentId), { featureValues: { [String(m.featureId)]: m.value } });
+        this.reply("set_agent_feature_response", { requestId, agentId: m.agentId, ...r });
         return;
       }
       case "agent_permission_response": {
@@ -910,7 +1040,7 @@ function serverInfo() {
     // canonicalSubmittedPrompts: 보낸 글 말풍선을 기록에 그 글이 나올 때까지 Paseo 가 "보내는 중"으로 둠
     // - 터미널 에이전트는 일하는 중에 받은 글을 대기열에 두었다가 나중에 넣음. 기록 행에 clientMessageId 를 실어 짝지음
     // agentForkContext: 응답 아래 분기 단추. 채팅 기록 첨부는 forkContext, 새 대화는 Iris 가 새 탭으로 만듦
-    features: { ownedSubscriptions: true, providersSnapshot: true, providerSubagents: true, canonicalSubmittedPrompts: true, agentForkContext: true },
+    features: { agentConfigApply: true, providerOptionControls: true, ownedSubscriptions: true, providersSnapshot: true, providerSubagents: true, canonicalSubmittedPrompts: true, agentForkContext: true },
     capabilities: {
       voice: {
         dictation: { enabled: false, reason: "Iris 대화 창에서는 받아쓰기를 쓰지 않습니다" },
@@ -928,13 +1058,14 @@ export function installIrisShim() {
   const Native = globalThis.WebSocket;
   function IrisWebSocket(this: unknown, url: string | URL, protocols?: string | string[]) {
     const href = String(url);
+    if (managedChat && (href.startsWith(`ws://${managedChat.host}/`) || href.startsWith("ws://iris-managed.invalid/"))) return new ManagedSocket(href, managedChat.key);
     if (href.startsWith(SHIM_URL_PREFIX) || href.startsWith(`ws://${SHIM_HOST.replace(/:80$/, "")}/`)) return new ShimSocket(href);
     return protocols === undefined ? new Native(url) : new Native(url, protocols);
   }
   Object.assign(IrisWebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
   IrisWebSocket.prototype = Native.prototype;
   (globalThis as any).WebSocket = IrisWebSocket;
-  (globalThis as any).__PASEO_INITIAL_DAEMON_CONNECTION__ = { listen: SHIM_HOST, useTls: false };
+  (globalThis as any).__PASEO_INITIAL_DAEMON_CONNECTION__ = { listen: managedChat?.host ?? SHIM_HOST, useTls: false };
 }
 
 installIrisShim();

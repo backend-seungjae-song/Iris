@@ -150,7 +150,7 @@ function renavigate(rec, target, attempt) {
   if (attempt > MAX_RENAV) {
     // episode 에서 처음 상한을 넘는 순간에만 알린다. 이후 같은 episode 에서는 알리지 않는다(gaveUp).
     log(`[challenge-recovery] ${safe} 재진입 ${MAX_RENAV}회 실패: 멈추고 사람에게 넘김`);
-    try { toast("claude.ai 보안 확인이 계속 막힙니다. 새로고침으로 다시 시도해 주세요."); } catch {}
+    try { toast("claude.ai 보안 확인을 통과하지 못했습니다. 새로고침해 다시 시도해 주세요."); } catch {}
     return;
   }
   log(`[challenge-recovery] wedge 감지 → 재진입 ${attempt}/${MAX_RENAV}: ${safe}`);

@@ -108,7 +108,7 @@ function createDeviceManager({ run = runCommand, platform = process.platform, en
     const inventory = await catalog();
     if (args.platform === 'ios') {
       const device = inventory.ios.devices.find(d => d.udid === args.device);
-      if (!device) fail('삭제할 iOS 시뮬레이터를 찾지 못했습니다. 목록을 새로 고침하세요.');
+      if (!device) fail('삭제할 iOS 시뮬레이터를 찾지 못했습니다. 목록을 새로고침하세요.');
       return { ...device, platform: 'ios', persistentId: device.udid, running: /^(Booted|Booting|Shutting Down)$/i.test(device.state || '') };
     }
     const android = inventory.android;
@@ -124,7 +124,7 @@ function createDeviceManager({ run = runCommand, platform = process.platform, en
     const name = live?.name || args.device;
     const avd = android.avds.find(d => d.name === name);
     if (!avd || /^emulator-\d+$/.test(args.device) && !live) fail('삭제할 Android 가상 기기를 찾지 못했습니다. 실제 기기는 삭제할 수 없습니다.');
-    if (args.persistentId && args.persistentId !== avd.name) fail('기기 목록이 바뀌었습니다. 목록을 새로 고침한 뒤 다시 삭제하세요.', 'device_changed');
+    if (args.persistentId && args.persistentId !== avd.name) fail('기기 목록이 바뀌었습니다. 목록을 새로고침한 뒤 다시 삭제하세요.', 'device_changed');
     return { platform: 'android', udid: live?.serial || avd.name, persistentId: avd.name, name: avd.name, running: Boolean(live), adb, avdmanager: android.avdmanager, sdkPath: android.sdkPath };
   }
 
@@ -136,7 +136,7 @@ function createDeviceManager({ run = runCommand, platform = process.platform, en
       if (!confirm || !await confirm(requested)) return { canceled: true };
       // 확인 창을 여는 동안 Android 시리얼이 다른 AVD에 재사용될 수 있다.
       const device = await deletionTarget(args);
-      if (device.persistentId !== requested.persistentId) fail('기기 목록이 바뀌었습니다. 목록을 새로 고침한 뒤 다시 삭제하세요.', 'device_changed');
+      if (device.persistentId !== requested.persistentId) fail('기기 목록이 바뀌었습니다. 목록을 새로고침한 뒤 다시 삭제하세요.', 'device_changed');
       if (device.running) {
         if (!stop) fail('실행 중인 기기를 먼저 끄세요.');
         await stop(device);
@@ -164,7 +164,7 @@ function createDeviceManager({ run = runCommand, platform = process.platform, en
       let modelId = args.modelId, runtimeId = args.runtimeId, imageId = args.imageId;
       if (args.platform === 'ios') {
         const source = args.sourceDevice && inventory.ios.devices.find(d => d.udid === args.sourceDevice);
-        if (args.sourceDevice && !source) fail('원본 기기를 찾지 못했습니다. 목록을 새로 고침하세요.');
+        if (args.sourceDevice && !source) fail('원본 기기를 찾지 못했습니다. 목록을 새로고침하세요.');
         if (source) { modelId = source.modelId; runtimeId = source.runtime; }
         const model = inventory.ios.models.find(m => m.id === modelId);
         const runtime = inventory.ios.runtimes.find(r => r.id === runtimeId && r.installed);
@@ -178,7 +178,7 @@ function createDeviceManager({ run = runCommand, platform = process.platform, en
         while (names.has(`${model.name} · ${number}`)) number += 1;
         const name = `${model.name} · ${number}`;
         const udid = String(await run('xcrun', ['simctl', 'create', name, model.id, runtime.id], { timeout: 30000 })).trim();
-        if (!/^[\da-f-]{36}$/i.test(udid)) fail('생성 결과를 확인하지 못했습니다. 기기 목록을 새로 고침하세요.', 'creation_unconfirmed');
+        if (!/^[\da-f-]{36}$/i.test(udid)) fail('생성 결과를 확인하지 못했습니다. 기기 목록을 새로고침하세요.', 'creation_unconfirmed');
         return { udid, name, runtime: runtime.id, modelId: model.id, state: 'Shutdown', isAvailable: true, runtimeInstalled: true };
       }
       const source = args.sourceDevice && inventory.android.avds.find(a => a.name === args.sourceDevice || a.name === args.sourceName);

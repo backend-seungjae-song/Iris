@@ -39,6 +39,7 @@ export function createSessionPolicyStore(options = {}) {
       try { await handle.sync(); } finally { await handle.close(); }
       await fsp.rename(temporary, policyFile);
       renamed = true;
+      if (process.platform === "win32") return;
       const directory = await fsp.open(remoteDir, "r");
       try { await directory.sync(); } finally { await directory.close(); }
     } catch (error) {

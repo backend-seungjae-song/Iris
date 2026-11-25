@@ -124,7 +124,7 @@ class PairingQr {
       throw const ProtocolException('컴퓨터 인증서 정보가 올바르지 않습니다.');
     }
     if (secret is! String || !_pairingSecret.hasMatch(secret)) {
-      throw const ProtocolException('페어링 비밀 정보가 올바르지 않습니다.');
+      throw const ProtocolException('등록 비밀 정보가 올바르지 않습니다.');
     }
     return PairingQr(
       address: address,
@@ -866,7 +866,7 @@ Map<String, Object> browserUserAnswerRequest({
 }) {
   _checkRef(request, '응답 요청');
   if (!const {'done', 'unable'}.contains(choice)) {
-    throw const ProtocolException('사람 차례 답변이 올바르지 않습니다.');
+    throw const ProtocolException('사람이 할 일의 답변이 올바르지 않습니다.');
   }
   return {
     'type': 'request.answer',

@@ -48,7 +48,7 @@ function resolveRef(id, ref) {
     throw refError("no_snapshot", "이 탭에서 먼저 snapshot을 실행하세요(ref 맵 없음).");
   }
   if (snapEpochs.get(id) !== navigationEpoch(id)) {
-    throw refError("stale_ref", "페이지가 이동되어 ref가 만료됐습니다 — 재-snapshot 필요.");
+    throw refError("stale_ref", "페이지가 이동되어 ref가 만료됐습니다. snapshot을 다시 실행하세요.");
   }
   const entry = refMap.get(ref);
   if (!entry) throw refError("not_found", "알 수 없는 ref: " + ref);

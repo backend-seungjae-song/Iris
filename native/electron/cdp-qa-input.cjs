@@ -261,11 +261,11 @@ async function mouse(send, type, point, extra = {}) {
 function sendCharsToTab(wc, text) {
   for (const ch of Array.from(String(text))) wc.sendInputEvent({ type: "char", keyCode: ch });
 }
-const FOCUS_GUARDED_ERROR = "사용자 포커스 보호: 이 QA 탭은 사용자가 쓰는 창에 있고 탭에 포커스를 줄 수 없어 진짜 클릭·키를 보내지 않습니다"
-  + " — 탭이 화면에 보이는지 확인한 뒤 다시 하세요";
+const FOCUS_GUARDED_ERROR = "사용자 포커스 보호: 이 QA 탭은 사용자가 쓰는 창에 있고 탭에 포커스를 줄 수 없어 실제 클릭·키를 보내지 않습니다"
+  + ". 탭이 화면에 보이는지 확인한 뒤 다시 하세요";
 
 const USER_TYPING_ERROR = "사용자 입력 보호: 사용자가 같은 창에서 계속 입력 중이라 포커스를 빌리지 않았습니다"
-  + " — 잠시 뒤 다시 하세요";
+  + ". 잠시 뒤 다시 하세요";
 
 // prepareFocus(wc): "trusted"(CDP 진짜 입력 사용 가능), "borrowed"(사용자 포커스를 입력 동안만 빌림),
 // "guarded"(빌리지 못함), "busy"(사용자가 계속 입력 중). 기본값은 trusted. 실제 조립부(cdp-control.cjs)가 user-focus.cjs 판정을 넘김
@@ -360,7 +360,7 @@ function createQaInputCommands({ prepareFocus = async () => "trusted", returnFoc
       // 휠·마우스 이동은 포커스를 옮기지 않음(실측). 누르기·키·글자만 판정
       // 포커스를 빌리는 시간을 줄이려고 입력 기록 준비를 먼저 함
       const recorder = await armCapture(send, wc);
-      const focus = action === "hover" || action === "scroll" ? "trusted" : await prepareFocus(wc);
+      const focus = action === "hover" || action === "scroll" ? "trusted" : await prepareFocus(wc, action);
       const borrowed = focus === "borrowed", trusted = focus === "trusted" || borrowed;
       if (!trusted && !["type", "typeahead"].includes(action)) {
         await recorder.release();

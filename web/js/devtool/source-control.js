@@ -1,4 +1,5 @@
 import { shortcutLabel } from "../core/keymap.js";
+import { patchHtml } from "../core/patch-html.js";
 import { isHostWindows, pathWithin, pathBasename, samePath } from "../core/host-path.js";
 // 소스 제어: 열린 스페이스와 pane의 git repo를 모아 stage·commit·push/pull·브랜치 전환을 한다.
 //
@@ -59,8 +60,8 @@ export const panelHtml = `
   </div>
   <div class="sc-views" id="sc-views" role="tablist" aria-label="변경 보기">
     <button class="sc-view" data-view="local" role="tab" title="커밋하지 않은 변경 (스테이지·작업 트리)">커밋 전</button>
-    <button class="sc-view" data-view="base" role="tab" title="Base 브랜치와 갈라진 뒤 커밋된 변경 (base...HEAD)">Base 대비</button>
-    <button class="sc-view" data-view="baseWork" role="tab" title="Base 브랜치와 갈라진 뒤의 모든 변경 (커밋 전 변경 포함)">Base+커밋 전</button>
+    <button class="sc-view" data-view="base" role="tab" title="Base 브랜치에서 분기한 뒤 커밋된 변경 (base...HEAD)">Base 대비</button>
+    <button class="sc-view" data-view="baseWork" role="tab" title="Base 브랜치에서 분기한 뒤의 모든 변경 (커밋 전 변경 포함)">Base+커밋 전</button>
   </div>
   <div class="sc-note" id="sc-note"></div>
   <div class="sc-body" id="sc-body"><div class="sc-empty">스페이스를 선택하세요.</div></div>
@@ -489,7 +490,7 @@ function scMountRepoDd(body, rows, common) {
         } });
       scRepoDd.set(r.primary, dd);
     }
-    dd.setValue(r.root);dd.setItems(scChoiceItems(r.st));slot.append(dd.el);
+    dd.setValue(r.root);dd.setItems(scChoiceItems(r.st));if (dd.el.parentNode !== slot) slot.append(dd.el);
   }
   for (const [primary, dd] of scRepoDd) if (!seen.has(primary)) { dd.destroy();scRepoDd.delete(primary); }
 }
@@ -510,7 +511,7 @@ function scPaintHead(r, many) {
   const repoEl = $("#sc-branch-repo"); if (repoEl) { repoEl.textContent = many ? name : ""; repoEl.hidden = !many; }
   // 레포가 하나면 레포 머리가 없으므로 Base 를 이 줄에. Base 보기에서는 레포 안 선택기가 같은 값을 보임
   const baseEl = $("#sc-branch-base");
-  if (baseEl) { const base = !many && scView === "local" ? scBaseOf(r.root) : ""; baseEl.textContent = base ? "← " + scBaseShort(base) : ""; baseEl.title = base ? `${base} 에서 갈라진 브랜치(Base)` : ""; baseEl.hidden = !base; }
+  if (baseEl) { const base = !many && scView === "local" ? scBaseOf(r.root) : ""; baseEl.textContent = base ? "← " + scBaseShort(base) : ""; baseEl.title = base ? `${base} 에서 분기한 브랜치(Base)` : ""; baseEl.hidden = !base; }
   const sync = $("#sc-sync");
   if (sync) sync.textContent = (st.ahead ? "↑" + st.ahead : "") + (st.ahead && st.behind ? " " : "") + (st.behind ? "↓" + st.behind : "");
   if (!scDd) return;
@@ -549,7 +550,7 @@ function scAskBranch(root) {
 function scAskBranchAll() { for (const root of scRepos.keys()) scAskBranch(root); }
 // expectRoot = 화면이 "이 레포에 한다"고 알고 있던 것. 서버가 그 사이 다른 레포로 풀리면 거절한다.
 function scOp(op, root, extra) {
-  if (!root) { scNote("레포를 찾지 못했습니다.", true); return; }
+  if (!root) { scNote("저장소를 찾지 못했습니다.", true); return; }
   wsSend(Object.assign({ type: "git." + op, path: root, expectRoot: root }, extra || {}));
 }
 // 서버 응답 반영. status는 root로 키를 잡아 합치고, repo가 아닌 후보는 목록에서 지운다.
@@ -612,7 +613,7 @@ function scMountBaseDd(body) {
     }
     dd.setValue(br.base || "");
     dd.setItems(items.length ? items : [{ value: "", label: "(브랜치 없음)" }]);
-    slot.appendChild(dd.el);
+    if (dd.el.parentNode !== slot) slot.appendChild(dd.el);
   }
   for (const [root, dd] of scBaseDd) if (!seen.has(root)) { dd.destroy(); scBaseDd.delete(root); }
 }
@@ -634,7 +635,7 @@ function renderSc() {
   if (!rows.length) {
     if (branch) branch.textContent = "";
     scPaintHead(null, false);
-    body.innerHTML = `<div class="sc-empty">${cands.length ? "git 저장소가 없습니다." : "스페이스를 선택하세요."}</div>`;
+    patchHtml(body, `<div class="sc-empty">${cands.length ? "git 저장소가 없습니다." : "스페이스를 선택하세요."}</div>`);
     scSig = sig;
     return;
   }
@@ -650,7 +651,7 @@ function renderSc() {
     if (many) {
       const n = rows.reduce((a, r) => a + countOf(r), 0);
       const dirty = rows.filter((r) => countOf(r)).length;
-      branch.textContent = n ? `레포 ${rows.length} · ${dirty}곳 ${n}개 변경` : `레포 ${rows.length} · 변경 없음`;
+      branch.textContent = n ? `저장소 ${rows.length} · ${dirty}곳 ${n}개 변경` : `저장소 ${rows.length} · 변경 없음`;
     } else branch.textContent = "";
   }
   const caret = icon("chevronRight", 10);
@@ -695,10 +696,10 @@ function renderSc() {
     const br = scBranch.get(root);
     if (!br) return `<div class="sc-repo-clean">불러오는 중…</div>`;
     // 선택기는 그린 뒤 이 자리에 붙인다(scMountBaseDd). 레포마다 한 벌을 만들어 두고 다시 쓴다.
-    let html = `<div class="sc-base-row"><span class="sc-base-lbl">Base</span><span class="sc-base-slot"></span></div>`;
+    let html = `<div class="sc-base-row"><span class="sc-base-lbl">Base</span><span class="sc-base-slot" data-owned-children></span></div>`;
     if (br.error) return html + `<div class="sc-repo-clean err">${esc(br.error)}</div>`;
     const files = br.files || [];
-    if (!files.length) return html + `<div class="sc-repo-clean">${esc(br.base)} 대비 달라진 파일이 없습니다.</div>`;
+    if (!files.length) return html + `<div class="sc-repo-clean">${esc(br.base)} 대비 변경된 파일이 없습니다.</div>`;
     html += `<div class="sc-group-head">${br.mode === "worktree" ? "커밋 전 포함 변경" : "커밋된 변경"}<span class="sc-count">${files.length}</span>${foldBtns("branch", files)}</div>`;
     return html + grouped(root, "branch", files, (f, d) => branchRow(f, br, d));
   };
@@ -738,25 +739,24 @@ function renderSc() {
       + (base ? `<span class="sc-repo-base" title="${esc(base)}">← ${esc(scBaseShort(base))}</span>` : "")
       + (ah ? `<span class="sc-repo-ahead">${ah}</span>` : "")
       + `<span class="sc-repo-n${n ? "" : " zero"}">${n}</span></div>`
-      + (!common ? `<div class="sc-worktree-slot" data-primary="${esc(r.primary)}"></div>` : "") + `</div>`;
+      + (!common ? `<div class="sc-worktree-slot" data-owned-children data-primary="${esc(r.primary)}"></div>` : "") + `</div>`;
     return `<div class="sc-repo${folded ? " folded" : ""}${r.isCur ? " cur" : ""}${many ? "" : " solo"}" data-root="${esc(r.root)}">`
       + head + `<div class="sc-repo-body">${inner}</div></div>`;
   };
-  // 커밋 메시지는 sc-body 안에 있어 재렌더에 지워진다. 저장·스페이스 전환이 갱신을 부르므로
-  // 작성 중이던 글과 커서 위치를 복원한다.
-  const ae = document.activeElement;
-  const keep = ae && ae.classList && ae.classList.contains("sc-msg")
-    ? { root: ae.dataset.root, s: ae.selectionStart, e: ae.selectionEnd } : null;
   const canUnify = many && scIndividualSpaces.has(scCurrentSpaceId())
     && rows.every((r) => scWorktreeName(r.root, r.primary) === scWorktreeName(rows[0].root, rows[0].primary))
     && scCommonChoices.has(`group:${scWorktreeName(rows[0].root, rows[0].primary)}`);
-  body.innerHTML = (canUnify ? '<div class="sc-worktree-mode"><button type="button" class="sc-btn" id="sc-common">공통 선택</button></div>' : "") + rows.map(section).join("");
+  patchHtml(body, (canUnify ? '<div class="sc-worktree-mode"><button type="button" class="sc-btn" id="sc-common">공통 선택</button></div>' : "") + rows.map(section).join(""), (node) => {
+    if (node.classList.contains("sc-repo")) return "repo:" + node.dataset.root;
+    if (node.dataset.abs) return JSON.stringify([node.dataset.staged, node.dataset.abs]);
+    return node.id;
+  });
   const unify = $("#sc-common");if (unify) unify.onclick = () => { scIndividualSpaces.delete(scCurrentSpaceId());scVer++;renderSc();scDd?.el.querySelector(".cc-dd-trigger")?.focus(); };
   scMountRepoDd(body, rows, common);
   scMountBaseDd(body);
   for (const ta of body.querySelectorAll(".sc-msg")) {
-    ta.value = scMsg.get(ta.dataset.root) || "";
-    if (keep && keep.root === ta.dataset.root) { ta.focus(); try { ta.setSelectionRange(keep.s, keep.e); } catch (e) {} }
+    const draft = scMsg.get(ta.dataset.root) || "";
+    if (ta.value !== draft) ta.value = draft;
   }
   scPaintSel(true);
   scSig = sig;

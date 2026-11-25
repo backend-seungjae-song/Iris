@@ -23,9 +23,9 @@ function fixture({ execute, live = true }) {
     timeoutMs: 200,
     tailGraceMs: 10,
   });
-  const run = (command) => units.run(
+  const run = (command, childSessionId) => units.run(
     { workerGeneration: "g1", commandId: `g1/${command}/${Math.random()}`, callId: 1, command,
-      target: { wcId: 7, debuggerGeneration: 1, documentGeneration: 1, childSessionId: "old" }, args: {} },
+      target: { wcId: 7, debuggerGeneration: 1, documentGeneration: 1, childSessionId }, args: {} },
     { unit: { command: "snapshot", phase: "last" }, key: 7 });
   return { units, resets, run };
 }
@@ -109,4 +109,12 @@ test("사용자 명령 이름이 qa- 로 시작하면 끊긴 세션을 다시 �
   const plain = fixture({ execute: async () => { calls++; if (calls === 1) throw new Error("Debugger is not attached to the tab"); return { ok: true }; } });
   assert.deepEqual(await plain.run("cdp.send"), { ok: true });
   assert.equal(calls, 2);
+});
+
+
+test("끊긴 자식 프레임 명령은 최상위 문서에서 재실행하지 않는다", async () => {
+  let calls = 0;
+  const f = fixture({ execute: async () => { calls++; throw new Error("Target closed"); } });
+  await assert.rejects(f.run("cdp.send", "child"), { code: "STALE_TARGET" });
+  assert.equal(calls, 1);
 });

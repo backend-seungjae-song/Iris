@@ -1,6 +1,6 @@
 ---
 name: iris-agent-context
-description: Use when Codex or Claude should split independent work into a parent-linked Iris terminal, or when navigating and closing child sessions in the Iris Agents tree.
+description: Use by default for option comparisons, decisions, and multi-field input. Render an A2UI surface even when the user never mentions Iris or A2UI. Also use for parent-linked terminals, worktrees, and child session navigation.
 ---
 
 # Iris parent-linked agent contexts
@@ -42,5 +42,29 @@ The launcher uses the installed Iris application. Re-run `pnpm install:app` from
 ## Prompt target registration
 
 Iris adds tab, group, picked-element, and emulator delimiters to the chat input when the user designates a target in the app. The UserPromptSubmit hook registers only valid delimiters that arrive in the user's submitted message. Tab and group delimiters keep the existing handle before `~`; emulator delimiters use `@device:<udid>~<nonce>`. When several emulators are registered, every `app_*` tool call must include `device`.
+
+## Interactive UI (A2UI v0.9 Basic Catalog)
+
+When showing comparable options, asking for a decision, or collecting related inputs, emit a surface in this turn. The request need not name Iris, the chat view, or A2UI. For a read-only comparison use a Table or Cards. For a decision use a ChoicePicker and a submit Button. Ask short single-answer questions in chat. To display a surface, emit a fenced `a2ui` JSON block in your assistant response, as shown below. When the user submits it, continue the task with the returned action and values.
+
+- **Lifecycle**: `createSurface`, `updateComponents`, `updateDataModel`, `deleteSurface` (`surfaceId`, `title`). Iris opens the surface in a console tab. The A2UI button just above the right edge of the message input reopens the tab.
+- **Catalog (`https://a2ui.org/specification/v0_9/basic_catalog.json`)**: supports both flat v0.9 adjacency lists (`id`, `component`, `child`/`children` IDs, `{"@path":"/a/b"}`) and compact nested components:
+  - Layout: `Row`, `Column`, `List`, `Card`, `Tabs` (`tabItems`), `Modal` (`entryPointChild`, `contentChild`), `Divider`
+  - Display: `Text` (`h1` | `h2` | `h3` | `body` | `caption` | `code`), `Image` (`http`/`https` only), `Icon`, `Badge`, `KeyValue`, `Table`, `Progress`
+  - Input/Action: `TextField`, `CheckBox`, `ChoicePicker` (`variant`: `"cards" | "chips" | "dropdown"`, `multiple`, `maxAllowedSelections`), `Slider`, `DateTimeInput`, `Button` (`variant`: `"primary" | "default" | "danger" | "ghost"`)
+- **Action round-trip**: clicking a `Button` sends `[A2UI:<title>] <action> payload={...} data={...}` back into your terminal input with the bound `dataModel`.
+
+```a2ui
+{
+  "type": "createSurface",
+  "surfaceId": "confirm",
+  "title": "설정 확인",
+  "components": [
+    { "type": "ChoicePicker", "label": "환경", "variant": "chips", "bind": "env", "options": ["staging", "prod"] },
+    { "type": "Button", "variant": "primary", "label": "적용", "action": "apply" }
+  ],
+  "dataModel": { "env": "staging" }
+}
+```
 
 <!-- iris-agent-context-managed:v1 -->

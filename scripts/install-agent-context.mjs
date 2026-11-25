@@ -22,6 +22,12 @@ const REQUIRED_RUNTIME_FILES = [
   "bin/iris-session.mjs",
   "bin/agent-run.mjs",
   "package.json",
+  "server/worktree-handlers.js",
+  "server/agent-homes.js",
+  "server/artifacts-home.cjs",
+  "server/win-native.cjs",
+  "server/windows-powershell.cjs",
+  "server/runtime-state.js",
   "server/agent-lineage.js",
   "server/agent-session-path.js",
   "server/codex-session.js",
@@ -143,11 +149,15 @@ function hookTargetInfo(file, runtime, command, nested, add) {
   // Iris가 ID와 기록 경로를 함께 등록한다. 구형 등록기는 공유 데몬의 pane 환경을 그대로 사용한다.
   for (const event of ["SessionStart", "SessionEnd"]) {
     if (!Array.isArray(owner[event])) continue;
-    owner[event] = owner[event].map((item) => ({ ...item, hooks: (item.hooks || []).filter((hook) => {
+    owner[event] = owner[event].flatMap((item) => {
+      if (!Array.isArray(item?.hooks)) return [item];
+      const hooks = item.hooks.filter((hook) => {
       const command = String(hook.command || "");
       return !(event === "SessionStart" && /^(?:bash|sh)\s+['"]?[^\n]*\/herdr-agent-state\.sh['"]?\s+session$/.test(command))
         && !(event === "SessionEnd" && /^(?:python3|\/usr\/bin\/python3)\s+['"]?[^\n]*\/herdr-session-register\.py['"]?$/.test(command));
-    }) })).filter((item) => item.hooks.length);
+      });
+      return hooks.length ? [{ ...item, hooks }] : [];
+    });
   }
   for (const event of events) {
     const next = [];
@@ -191,6 +201,7 @@ export function installAgentContext(options = {}) {
   const appPath = path.resolve(process.platform === "win32" && /\.exe$/i.test(suppliedPath) ? path.dirname(suppliedPath) : suppliedPath);
   const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   const claudeHome = options.claudeHome || process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(os.homedir(), ".claude");
+  const agyHome = options.agyHome || process.env.AGY_CONFIG_DIR || process.env.GEMINI_CONFIG_DIR || path.join(os.homedir(), ".gemini", "config");
   const { nodePath, launcherPath, runnerPath } = preflightRuntime(appPath);
   let template;
   try { template = fs.readFileSync(TEMPLATE, "utf8"); }
@@ -205,11 +216,13 @@ export function installAgentContext(options = {}) {
     .replace("{{RUNNER}}", quote(runnerPath));
   if (windows) content = content.replaceAll("```sh", "```powershell").replaceAll("Cmd+W", "Ctrl+Shift+W");
 
-  // 두 대상을 모두 검사한 뒤에만 쓰기 시작한다. 한쪽의 사용자 소유 skill 때문에 다른 쪽만
-  // 바뀌는 부분 설치를 만들지 않는다.
+  // 모든 대상을 검사한 뒤에만 쓰기 시작한다. 한쪽의 사용자 소유 skill 때문에 다른 쪽만
+  // 바뀌는 부분 설치를 만들지 않는다. Antigravity 는 명시 지정되거나 기본 설정 시 폴더가 있을 때 함께 갱신
+  const includeAgy = Boolean(options.agyHome) || (!options.codexHome && !options.claudeHome && fs.existsSync(agyHome));
   const targets = [
     targetInfo(codexHome, content, "Codex"),
     targetInfo(claudeHome, content, "Claude"),
+    ...(includeAgy ? [targetInfo(agyHome, content, "Antigravity")] : []),
   ];
   const hookTargets = [
     [claudeHome, "Claude", "claude"],
@@ -239,6 +252,7 @@ function main() {
     app: { type: "string" },
     "codex-home": { type: "string" },
     "claude-home": { type: "string" },
+    "agy-home": { type: "string" },
     check: { type: "boolean" },
     hooks: { type: "boolean" },
     "hook-status": { type: "boolean" },
@@ -247,6 +261,7 @@ function main() {
     appPath: values.app,
     codexHome: values["codex-home"],
     claudeHome: values["claude-home"],
+    agyHome: values["agy-home"],
     check: values.check || values["hook-status"],
     addHooks: values.hooks,
   });
@@ -268,7 +283,7 @@ function main() {
   if (process.platform === "win32" && result.hooks.some((item) => item.skipped && item.changed)) process.exitCode = 1;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   try { main(); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }

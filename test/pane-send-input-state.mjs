@@ -49,6 +49,27 @@ test("Codex 일반 글자는 사람이 쓴 글이다", () => {
   assert.equal(inputState(codex(line), "codex").state, "draft");
 });
 
+test("agy·Gemini·iris-embedded의 > 입력창을 빈 칸과 초안으로 구분한다", () => {
+  const screen = [
+    "이전 출력",
+    "─".repeat(48),
+    "> ",
+    "─".repeat(48),
+    "상태줄",
+  ].join("\r\n");
+  const draft = [
+    "이전 출력",
+    "─".repeat(48),
+    "> 실제 입력",
+    "─".repeat(48),
+    "상태줄",
+  ].join("\r\n");
+  for (const kind of ["agy", "gemini", "iris-embedded"]) {
+    assert.equal(inputState(screen, kind).state, "empty");
+    assert.deepEqual(inputState(draft, kind), { state: "draft", draft: "실제 입력", hint: "" });
+  }
+});
+
 test("입력창이 없으면 판정하지 않는다", () => {
   assert.equal(inputState("Compacting conversation…\r\n", "claude").state, "unknown");
   assert.equal(inputState(claude("❯ "), "gemini").state, "unknown");

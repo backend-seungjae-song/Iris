@@ -266,8 +266,12 @@ function readHookInput(input = process.stdin) {
     input.setEncoding("utf8");
     input.on("data", (chunk) => {
       bytes += Buffer.byteLength(chunk, "utf8");
+      if (bytes > MAX_HOOK_INPUT_BYTES) {
+        input.destroy();
+        reject(new Error("훅 입력이 너무 큽니다"));
+        return;
+      }
       body += chunk;
-      if (bytes > MAX_HOOK_INPUT_BYTES) reject(new Error("훅 입력이 너무 큽니다"));
     });
     input.on("end", () => {
       try { resolve(JSON.parse(body || "{}")); }
@@ -370,13 +374,13 @@ function promptTargetSummary(data) {
     return `${label} ${record.ref}`;
   });
   const lines = [];
-  if (parts.length) lines.push(`지목 등록: ${parts.join(" · ")}`);
+  if (parts.length) lines.push(`대상 등록: ${parts.join(" · ")}`);
   const devices = [...new Set(activated.filter((record) => record.kind === "device").map((record) => record.target?.udid).filter(Boolean))];
   if (devices.length > 1) lines.push(`등록 기기가 ${devices.length}대라 app_* 도구에는 device를 적으세요.`);
   if (rejected.length) {
     const counts = new Map();
     for (const item of rejected) counts.set(item.reason || "알 수 없는 이유", (counts.get(item.reason || "알 수 없는 이유") || 0) + 1);
-    lines.push(`지목 구분자 ${rejected.length}개 거절: ${[...counts].map(([reason, count]) => `${reason} ${count}`).join(" · ")}`);
+    lines.push(`등록 구분자 ${rejected.length}개 거절: ${[...counts].map(([reason, count]) => `${reason} ${count}`).join(" · ")}`);
   }
   return lines.join("\n");
 }
@@ -387,15 +391,15 @@ export async function submitPromptTargets(hook, deps = {}) {
   try {
     if (hook?.agent_id || hook?.is_subagent) return "";
     const pane = await promptPane(hook, { ...deps, runtime });
-    if (!pane) return markers.length ? "지목 등록 실패: 이 프롬프트의 Iris pane을 확인하지 못했습니다." : "";
+    if (!pane) return markers.length ? "대상 등록 실패: 이 프롬프트의 Iris pane을 확인하지 못했습니다." : "";
     const agentSession = hookAgentSession(hook, pane, runtime, deps);
     try { await reportHerdrSession(agentSession, hook, deps); } catch {}
     const registerOnly = hook?.hook_event_name === "SessionStart" || !Object.hasOwn(hook || {}, "prompt");
     const result = await callPromptTargets(markers, pane, agentSession?.transcriptPath ? agentSession : null, deps, registerOnly);
-    if (!result?.ok) return `지목 등록 실패: ${result?.error || "Iris 서버가 요청을 거절했습니다."}`;
+    if (!result?.ok) return `대상 등록 실패: ${result?.error || "Iris 서버가 요청을 거절했습니다."}`;
     return markers.length ? promptTargetSummary(result.data) : "";
   } catch (error) {
-    return markers.length ? `지목 등록 실패: ${String(error?.message || error)}` : "";
+    return markers.length ? `대상 등록 실패: ${String(error?.message || error)}` : "";
   }
 }
 
@@ -427,10 +431,10 @@ async function main() {
   console.log(JSON.stringify(await launchContext({ ...values, dryRun: values["dry-run"] }), null, 2));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((error) => {
     if (process.argv.includes("prompt-targets")) {
-      process.stdout.write(`지목 등록 실패: ${error.message}\n`, () => process.exit(0));
+      process.stdout.write(`대상 등록 실패: ${error.message}\n`, () => process.exit(0));
       return;
     }
     console.error(error.message); process.exitCode = 1;

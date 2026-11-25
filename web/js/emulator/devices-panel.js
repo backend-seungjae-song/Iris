@@ -121,8 +121,8 @@ export function mountDevicePanel(container, opts) {
   const headSpacer = el("span", "emu-sp");
   const headPill = el("span");
   const refreshBtn = button("emu-ib", "", ICON.refresh);
-  refreshBtn.title = "새로 고침";
-  refreshBtn.setAttribute("aria-label", "새로 고침");
+  refreshBtn.title = "새로고침";
+  refreshBtn.setAttribute("aria-label", "새로고침");
   refreshBtn.addEventListener("click", () => void refresh());
   const headParts = [headCount, headSpacer, headPill, refreshBtn];
   if (headTools) headTools.append(...headParts);
@@ -190,7 +190,7 @@ export function mountDevicePanel(container, opts) {
     const devices = ((a && a.devices) || []).filter(deviceRunnable);
     defDesc.textContent = devices.length === 0
       ? "iPhone 13이 없으면 처음 열 때 새 기기를 추가합니다. 지원하는 iOS 런타임이 필요합니다."
-      : settings.mobileEmulatorDefaultDeviceUdid ? "새로 여는 기기 화면이 이 기기로 시작합니다." : "iPhone 13이 없으면 처음 열 때 추가합니다. 설치된 iOS 런타임을 공유합니다.";
+      : settings.mobileEmulatorDefaultDeviceUdid ? "새 기기 화면을 이 기기로 엽니다." : "iPhone 13이 없으면 처음 열 때 추가합니다. 설치된 iOS 런타임을 공유합니다.";
     defaultDropdown.setItems([
       { value: AUTOMATIC_DEVICE_VALUE, label: "iPhone 13", sub: "기본" },
       ...devices.map((d) => ({ value: d.persistentId || d.udid, label: deviceLabel(d), sub: runtimeLabel(d.runtime) })),
@@ -229,8 +229,8 @@ export function mountDevicePanel(container, opts) {
     const dialog = makeDialog(android ? "Android 시스템 이미지 설치" : "iOS 런타임 설치");
     const runtime = runtimeLabel(device.runtime);
     dialog.append(el("p", "emu-dp-desc", android
-      ? "Android Studio의 Device Manager에서 이 기기의 시스템 이미지를 설치한 뒤 목록을 새로 고침하세요."
-      : `${runtime}을 Xcode 설정의 Components에서 설치한 뒤 목록을 새로 고침하세요.`));
+      ? "Android Studio의 Device Manager에서 이 기기의 시스템 이미지를 설치한 뒤 목록을 새로고침하세요."
+      : `${runtime}을 Xcode 설정의 Components에서 설치한 뒤 목록을 새로고침하세요.`));
     dialog.append(el("p", "emu-dp-desc", "같은 버전은 설치 파일을 공유합니다. 앱과 데이터는 기기마다 따로 저장됩니다."));
     const actions = el("div", "emu-dp-tacts");
     const open = button("emu-btn", android ? "Android Studio 열기" : "Xcode 열기");
@@ -340,7 +340,7 @@ export function mountDevicePanel(container, opts) {
       const power = button("emu-btn", booted ? "끄기" : "켜기");
       power.disabled = deviceBusy || (booted ? !onStopDevice : !onOpenDevice);
       power.addEventListener("click", () => void deviceAction(booted ? "기기 끄는 중…" : "기기 켜는 중…", () => booted ? onStopDevice?.(d) : onOpenDevice?.(d)));
-      const plus = button("emu-btn", "한 대 더");
+      const plus = button("emu-btn", "같은 기종 추가");
       plus.disabled = deviceBusy || !host.createDevice || d.canDuplicate === false;
       if (d.canDuplicate === false) plus.title = "이 기기의 원본 기종과 설치된 런타임을 확인할 수 없습니다.";
       plus.addEventListener("click", () => duplicate(d));

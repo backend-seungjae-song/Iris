@@ -109,7 +109,7 @@ export function registerPanel(railId, html) {
   const cur = document.querySelector(".rail-ico.active[data-rail]");
   if (cur && cur.dataset.rail === railId) el.classList.add("is-open");
   el.hidden = featureHidden().has(railId);
-  return true;
+  return () => { if (el.parentNode) el.remove(); };
 }
 
 // 늦게 로드된 화면이 자기 영역을 등록하는 지점. capability 는 부팅 뒤에 도착하므로 initRail 시점에는
@@ -126,7 +126,7 @@ export function registerScreen(id, screen) {
   screens[id] = screen;
   const cur = document.querySelector(".rail-ico.active[data-rail]");
   if (cur && cur.dataset.rail === id) screen.enter?.();
-  return true;
+  return () => { if (screens[id] === screen) delete screens[id]; };
 }
 
 export function railSelect(view) {

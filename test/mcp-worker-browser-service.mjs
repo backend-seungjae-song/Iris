@@ -102,7 +102,7 @@ test("검토 1-A의 대상·dialog·재시도 행은 기존 오류와 data를 �
             error: "그런 탭 핸들이 없습니다: @missing.", data: { tabs: ["@a"] } } };
           return { target: { tabId: "tab-a", targetToken: { wcId: 1 }, tab: { url: "https://e2e.test/" } } };
         }
-        if (operation === "browser.dialogAnswer") return { ok: true, data: { none: true, note: "떠 있는 확인 창이 없습니다." } };
+        if (operation === "browser.dialogAnswer") return { ok: true, data: { none: true, note: "열린 확인 창이 없습니다." } };
         if (operation === "browser.executeWithDialog") return input.relay.command === "dialogs"
           ? { ok: true, data: { dialogs: [] } } : { ok: false, error: "fixture selector missing" };
         if (operation === "journal.trace") return {};
@@ -125,7 +125,7 @@ test("검토 1-A의 대상·dialog·재시도 행은 기존 오류와 data를 �
     assert.deepEqual(missing, { ok: false, error: "그런 탭 핸들이 없습니다: @missing.", data: { tabs: ["@a"] } });
     stateMode = "target";
     const dialog = await dispatch("dialog", { answer: "cancel" });
-    assert.deepEqual(dialog.data, { none: true, note: "떠 있는 확인 창이 없습니다." });
+    assert.deepEqual(dialog.data, { none: true, note: "열린 확인 창이 없습니다." });
     const dialogs = await dispatch("dialogs");
     assert.deepEqual(dialogs.data, { dialogs: [] });
     assert.equal(calls.filter(([operation]) => operation === "browser.executeWithDialog").length, 1);

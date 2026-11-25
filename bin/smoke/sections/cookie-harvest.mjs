@@ -83,7 +83,7 @@ check("하나도 못 옮기면 성공으로 남기지 않는다", () =>
 // 합쳐서 "가져왔습니다"라고만 하면, 새로고침해도 여전히 로그아웃인 이유를 사용자가 알 수 없다.
 check("지금 먹는 것과 다시 켜야 먹는 것을 갈라 말한다", () =>
   /const later = r\.staged \|\| 0;/.test(handoff)
-  && /앱을 다시 켜면 들어옵니다/.test(handoff)
+  && /앱을 다시 시작하면 적용됩니다/.test(handoff)
   && /if \(!later && handoffBarEl === bar\)/.test(handoff));
 
 check("CAS 없는 옛 스테이징은 target에 적용하지 않고 폐기한다", () =>

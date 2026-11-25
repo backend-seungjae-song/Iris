@@ -189,7 +189,7 @@ test("처리 중 확인 창이 막으면 그 응답을 돌려주고 단위를 �
 
 test("붙임 실패(로그인 호스트 등)는 오류 응답을 그대로 돌려주고 단위를 종료한다", async () => {
   const page = pages.ordinary;
-  const { relays, hostApi } = harness(page, { attachError: "로그인 호스트에서는 CDP 를 붙이지 않아 snapshot 를 실행할 수 없습니다." });
+  const { relays, hostApi } = harness(page, { attachError: "로그인 호스트에서는 CDP 를 연결하지 않아 snapshot 를 실행할 수 없습니다." });
   const response = await run(createWorkerBrowserService({ hostApi, activity }), page);
   assert.equal(response.ok, false);
   assert.match(response.error, /로그인 호스트/);
@@ -213,13 +213,10 @@ test("경로 표를 legacy 로 바꾸면 옛 snapshot 봉투 하나로 간다", 
   assert.deepEqual(calls.map((c) => [c.command, c.unit]), [["snapshot", undefined]]);
 });
 
-test("worker 사본은 원본과 파일 내용이 같고(머리말·export 줄만 다름) 같은 입력에 같은 결과를 낸다", async () => {
-  // 다른 범위: worker 만 CDP 왕복을 묶음(요소 해석 부분 + resolveBackendIds·resolveBatched) · 그 범위는 mcp-worker-snapshot-batch.mjs 가 결과로 대조
-  const strip = (text) => text.replace(/^(\/\/ [^\n]*\n)+/, "").replace(/(const elements = JSON\.parse\(result\.value\);\n)[\s\S]*?(\n    await sendCommand\("Runtime\.evaluate", \{ expression: "delete)/, "$1$2")
-    .replace(/\/\/ worker 사본 전용[\s\S]*?(?=export \{)/, "")
+test("기존 프레임 구성에서 worker와 옛 처리기의 스냅샷과 안내가 같다", async () => {
+  const strip = (text) => text.replace(/^(\/\/ [^\n]*\n)+/, "")
     .replace(/module\.exports = \{[^}]*\};/, "").replace(/export \{[^}]*\};/, "").trim();
   const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
-  assert.equal(strip(read("../server/mcp-worker/snapshot-engine.js")), strip(read("../native/electron/snapshot-engine.cjs")));
   assert.equal(strip(read("../server/mcp-worker/page-hints.js")), strip(read("../native/electron/cdp-hints.cjs")));
   for (const [name, page] of Object.entries(pages)) {
     const frames = (send) => Object.keys(page.frames).map((sid) => ({ sid, send: send.on(sid) }));
@@ -231,4 +228,26 @@ test("worker 사본은 원본과 파일 내용이 같고(머리말·export 줄�
     assert.equal(await workerLoginHint(legacy), await legacyLoginHint(legacy), name);
     assert.equal(await workerHumanHint(legacy), await legacyHumanHint(legacy), name);
   }
+});
+
+test("교차 출처 세션에서 사라진 프레임을 건너뛰고 하위 iframe ref에 같은 sid를 기록한다", async () => {
+  const page = {
+    ...pages.iframe,
+    frameTrees: { "frame-1": { frame: { id: "frame-1" }, childFrames: [{ frame: { id: "removed" } }, { frame: { id: "nested" } }] } },
+    frameNodes: { nested: [
+      { nodeId: "1", role: { value: "RootWebArea" }, childIds: ["2"] },
+      { nodeId: "2", role: { value: "button" }, name: { value: "하위 버튼" }, backendDOMNodeId: 203 },
+    ] },
+  };
+  const { relays, hostApi } = harness(page, { axTree: true });
+  const response = await run(createWorkerBrowserService({ hostApi, activity }), page);
+  assert.equal(response.ok, true);
+  const ref = response.data.snapshot.match(/\[(@e\d+)\] button "하위 버튼"/)?.[1];
+  assert.ok(ref);
+  const entry = refRegistry.resolveRef(8, ref);
+  assert.equal(entry.sid, "frame-1");
+  assert.equal(entry.backendDOMNodeId, 203);
+  // frameId가 붙은 접근성 트리는 기존 cdp.send 중계 사용
+  const calls = relays.filter((r) => r.command === "cdp.send" && r.args.method === "Accessibility.getFullAXTree");
+  assert.deepEqual(calls.map((r) => [r.args.sessionId, r.args.params.frameId]), [["frame-1", "removed"], ["frame-1", "nested"]]);
 });

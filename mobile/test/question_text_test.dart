@@ -118,7 +118,7 @@ void approvalLabelTests() {
       expect(
         formatOption('3. No, and tell Codex what to do differently (esc)')
             .label,
-        '아니요, 다르게 할 일 알리기',
+        '아니요, 다르게 지시하기',
       );
       expect(
         formatOption('2. Yes, and don\'t ask again for these files (a)').label,

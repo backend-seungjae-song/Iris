@@ -238,7 +238,7 @@ export async function handleFsWrite(ws, msg) {
         const now = fileRevision(p);
         // 파일이 사라진 것은 충돌로 보지 않는다. 저장하면 다시 만들어지고 화면도 그렇게 안내한다.
         if (now !== null && now !== baseline) {
-          done({ error: "이 파일이 밖에서 바뀌었습니다", conflict: true, diskRevision: now });
+          done({ error: "이 파일이 외부에서 변경되었습니다", conflict: true, diskRevision: now });
           return;
         }
       }

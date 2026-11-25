@@ -267,7 +267,7 @@ function createInspectCommands({
             how = "css";
             matched = __acQA(spec.sel);
           } else {
-            return JSON.stringify({ error: "locator가 비어 있다 — testid·role/name·sel 중 하나가 필요하다" });
+            return JSON.stringify({ error: "locator가 비어 있다. testid·role/name·sel 중 하나가 필요하다" });
           }
           const total = matched.length;
           const visible = matched.filter(vis);
@@ -337,15 +337,15 @@ function createInspectCommands({
       // 판정은 여기서 내린다. 러너가 매번 같은 규칙을 다시 구현하면 호출 위치마다 달라진다.
       const reasons = [];
       if (v.count === 0) reasons.push(v.total ? `맞는 요소 ${v.total}개가 다 숨어 있다` : "맞는 요소가 없다");
-      else if (v.count > 1) reasons.push(`${v.count}개가 맞는다 — 어느 것을 뜻하는지 정해지지 않았다`);
+      else if (v.count > 1) reasons.push(`${v.count}개가 맞는다. 어느 것을 뜻하는지 정해지지 않았다`);
       else {
         if (!v.visible) reasons.push("요소가 보이지 않는다");
         if (v.occluded) reasons.push("다른 요소에 가려져 있다");
         if (v.disabled) reasons.push("요소가 비활성이다");
       }
       if (args.expectUrl && !String(v.url).includes(String(args.expectUrl)))
-        reasons.push(`화면이 계획과 다르다 — 기대 "${args.expectUrl}", 실제 ${v.url}`);
-      if (v.markRefused) reasons.push(v.markRefused + " — 이 페이지에서는 자국으로 지목할 수 없다");
+        reasons.push(`화면이 계획과 다르다. 기대 "${args.expectUrl}", 실제 ${v.url}`);
+      if (v.markRefused) reasons.push(v.markRefused + ". 이 페이지에서는 요소에 표시를 붙여 선택할 수 없다");
       return { ok: true, ...v, unique: reasons.length === 0, reasons };
     },
     async text(send) {

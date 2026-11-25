@@ -99,14 +99,14 @@ export function createWorkerBrowserService({ hostApi, activity, routes = COMMAND
       try {
         await call("browser.tabWake", { tabId: state.wakeTab, stateRevision: state.stateRevision, timeoutMs: 12000 });
       } catch {
-        return { ok: false, error: `잠든 탭 @${state.wakeHandle || state.wakeTab}을(를) 깨우지 못했습니다 — 이 탭을 띄울 브라우저 창(공유 탭이면 공유 브라우저 창)이 열려 있는지 확인하세요.`,
+        return { ok: false, error: `절전 탭 @${state.wakeHandle || state.wakeTab}을(를) 다시 열지 못했습니다. 이 탭을 표시할 브라우저 창(공유 탭이면 공유 브라우저 창)이 열려 있는지 확인하세요.`,
           data: { tab: state.wakeHandle || state.wakeTab, sleeping: true } };
       }
       return executeOne(command, args, identity, true);
     }
     if (state.grantedTab) return executeOne(command, { ...args, tab: state.grantedTab }, identity, true);
     if (state.needTab) {
-      if (noAutoTab) return { ok: false, error: "이 세션 몫의 탭을 만들었지만 브라우저가 아직 띄우지 못했습니다 — 잠시 뒤 다시 시도하세요.", sent: false };
+      if (noAutoTab) return { ok: false, error: "이 세션의 탭을 만들었지만 브라우저에 아직 표시되지 않았습니다. 잠시 뒤 다시 시도하세요.", sent: false };
       const created = commandResponse(await call("browser.tabCreate", {}));
       if (!created.ok) return created;
       const response = await executeOne(command, args, identity, true);

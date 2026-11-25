@@ -164,8 +164,15 @@ export function createDropdown({ items, value, onChange, ariaLabel, className, s
 
   return {
     el,
-    setValue(v) { current = v; renderValue(); renderMenu(); },   // 닫혀 있어도 aria-selected 를 맞춰 둔다
-    setItems(next) { list = Array.isArray(next) ? next : []; renderMenu(); renderValue(); },
+    setValue(v) { if (v === current) return; current = v; renderValue(); renderMenu(); },   // 닫혀 있어도 aria-selected 를 맞춰 둔다
+    setItems(next) {
+      const items = Array.isArray(next) ? next : [];
+      const same = list.length === items.length && list.every((old, i) =>
+        old.value === items[i].value && old.label === items[i].label && old.sub === items[i].sub);
+      list = items;
+      if (same) return;
+      renderMenu(); renderValue();
+    },
     destroy() { close({ refocus: false }); el.remove(); },
   };
 }

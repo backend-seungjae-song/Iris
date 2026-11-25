@@ -52,6 +52,47 @@ export function pendingQuestion(lines) {
   return null;
 }
 
+// 이어 받은 기록 묶음으로 답 없는 AskUserQuestion id 를 갱신. 없으면 null
+// - herdr 가 질문 중에도 blocked 로 보고하지 않을 때가 있어, 이 값이 있으면 질문 화면을 읽음
+export function openAskAfter(open, records) {
+  for (const rec of records) {
+    const content = Array.isArray(rec?.message?.content) ? rec.message.content : [];
+    if (rec?.type === "assistant") {
+      for (const c of content) if (c?.type === "tool_use" && c.name === "AskUserQuestion" && typeof c.id === "string") open = c.id;
+    } else if (rec?.type === "user") {
+      if (typeof rec.message?.content === "string" || content.some((c) => c?.type === "text")) open = null;
+      else if (content.some((c) => c?.type === "tool_result" && c.tool_use_id === open)) open = null;
+    }
+  }
+  return open;
+}
+
+// 기록 끝의 결과 없는 도구 호출 하나의 이름과 입력을 글로. 승인 화면 위가 잘려 내용이 안 보일 때 씀
+// - 결과 없는 호출이 둘 이상이면 어느 것을 묻는지 알 수 없어 null
+export function pendingToolInput(lines) {
+  const answered = new Set();
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let rec;
+    try { rec = JSON.parse(lines[i]); } catch { continue; }
+    const content = Array.isArray(rec?.message?.content) ? rec.message.content : [];
+    if (rec?.type === "user") {
+      for (const c of content) if (c?.type === "tool_result" && typeof c.tool_use_id === "string") answered.add(c.tool_use_id);
+      if (typeof rec.message?.content === "string" || content.some((c) => c?.type === "text")) return null;
+      continue;
+    }
+    if (rec?.type !== "assistant" || !content.some((c) => c?.type === "tool_use")) continue;
+    const open = content.filter((c) => c?.type === "tool_use" && typeof c.name === "string" && !answered.has(c.id));
+    if (open.length !== 1) return null;
+    const { name, input } = open[0];
+    const rows = Object.entries(input && typeof input === "object" ? input : {}).map(([key, value]) => {
+      if (typeof value === "string") return value.includes("\n") ? `${key}:\n${value.split("\n").map((l) => `  ${l}`).join("\n")}` : `${key}: ${value}`;
+      return `${key}: ${JSON.stringify(value)}`;
+    });
+    return [name, ...rows].join("\n");
+  }
+  return null;
+}
+
 // Codex 기록(rollout JSONL 줄들) 끝에서 아직 답이 없는 request_user_input. { toolUseId, questions } | null
 // - 질문 모양은 Paseo codex-app-server-agent.ts normalizeCodexQuestionPrompts 와 같음(id·header·question 필수)
 // - 여러 개 고르기·선택지 없는 질문은 터미널 화면을 재지 않아 제외(일반 카드로 남음)
@@ -75,6 +116,57 @@ export function pendingCodexQuestion(lines) {
     return questions ? { toolUseId: p.call_id, questions } : null;
   }
   return null;
+}
+
+function parseAgyQuestions(raw) {
+  let list = raw;
+  if (typeof raw === "string") {
+    try { list = JSON.parse(raw); } catch { return null; }
+  }
+  if (!Array.isArray(list) || !list.length) return null;
+  return parseQuestions({
+    questions: list.map((q) => ({
+      question: q?.question,
+      header: q?.header,
+      multiSelect: q?.is_multi_select === true || q?.multiSelect === true,
+      options: Array.isArray(q?.options)
+        ? q.options.map((o) => (typeof o === "string" ? { label: o, description: "" } : o))
+        : [],
+    })),
+  });
+}
+
+// Antigravity transcript 끝에서 아직 답이 없는 ask_question 추출
+export function pendingAgyQuestion(lines) {
+  let genericAfter = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let rec;
+    try { rec = JSON.parse(lines[i]); } catch { continue; }
+    if (rec?.type === "USER_INPUT" && (!rec.source || rec.source === "USER_EXPLICIT")) return null;
+    if (rec?.type === "GENERIC" && rec.source === "MODEL") { genericAfter++; continue; }
+    if (rec?.type !== "PLANNER_RESPONSE" || !Array.isArray(rec.tool_calls)) continue;
+    const idx = rec.tool_calls.findIndex((tc) => tc?.name === "ask_question");
+    if (idx < 0) return null;
+    if (genericAfter > idx) return null;
+    const questions = parseAgyQuestions(rec.tool_calls[idx]?.args?.questions);
+    return questions ? { toolUseId: `s${rec.step_index ?? i}:tc${idx}`, questions } : null;
+  }
+  return null;
+}
+
+export function openAgyAskAfter(open, records) {
+  for (const rec of records) {
+    if (!rec || typeof rec !== "object") continue;
+    if (rec.type === "PLANNER_RESPONSE" && Array.isArray(rec.tool_calls)) {
+      const idx = rec.tool_calls.findIndex((tc) => tc?.name === "ask_question");
+      if (idx >= 0) open = `s${rec.step_index ?? ""}:tc${idx}`;
+    } else if (rec.type === "USER_INPUT" && (!rec.source || rec.source === "USER_EXPLICIT")) {
+      open = null;
+    } else if (rec.type === "GENERIC" && rec.source === "MODEL") {
+      open = null;
+    }
+  }
+  return open;
 }
 
 // Paseo 질문 카드의 여러 개 답: 고른 label 들 뒤에 직접 입력 글, ", " 로 이음

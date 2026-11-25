@@ -262,6 +262,7 @@ export function reconcileDocTabs() {
   if (!BROWSER_MODE) return;
   const sp = boundSpace();
   if (!sp) {
+    if (getRenderedFileOwner()) withFileViewTransition(null, {}, () => {});
     browserview.hidden = false; fileview.hidden = true;
     for (const view of tabViews()) { const el = ensureTabViewPane(view); if (el) el.hidden = true; }
     return;
@@ -289,8 +290,7 @@ export function reconcileDocTabs() {
   setCenterSpace(sp);
   // 분리 창은 그 창이 고른 탭을 본다. 스페이스의 공유 활성 탭이 문서 탭이면 그 창까지 브라우저를
   // 닫고 문서를 띄우게 되어, 자기 탭이 아닌 것을 표시한다.
-  const boundTab = callHook("detach.boundTab") || null;
-  const activeId = boundTab || ((state.activeBySpace && state.activeBySpace[sp]) || null);
+  const activeId = activeBrowserId();
   const activeTab = activeId ? getTabs(sp).find((t) => t.id === activeId) : null;
   if (activeTab) {
     setActiveTab(sp, activeId);

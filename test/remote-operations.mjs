@@ -11,7 +11,7 @@ import { createUnregisterOperation } from "../server/remote/ops/unregister.js";
 import { createWatchOperation } from "../server/remote/ops/watch.js";
 import { createRequestStore } from "../server/remote/requests.js";
 
-function setupAgents() {
+function setupAgents(canMessage) {
   let listener = null;
   const runtime = { state: [
     { paneId: "secret-pane", workspaceId: "secret-space", tabLabel: "작업", agent: "codex", status: "working",
@@ -21,7 +21,7 @@ function setupAgents() {
   ], workspaces: [{ id: "secret-space", label: "표시 이름", folder: "/private/project" }],
   tabs: { "secret-space": [{ tabId: "tab-two" }, { tabId: "tab-one" }] } };
   let random = 1;
-  const agents = createAgentStore({ getSnapshot: () => runtime, subscribeSnapshot(fn) { listener = fn; return () => {}; },
+  const agents = createAgentStore({ getSnapshot: () => runtime, canMessage, subscribeSnapshot(fn) { listener = fn; return () => {}; },
     randomBytes: (size) => Buffer.alloc(size, random++) });
   return { agents, runtime, changed: () => listener() };
 }
@@ -71,13 +71,73 @@ test("에이전트 투영은 스페이스와 탭 순서대로 세션 순서를 �
 test("중지는 working Claude·Codex pane에 Esc 한 번만 보낸다", async () => {
   const { agents } = setupAgents();
   const calls = [];
-  const stop = createStopOperation({ agents, getHerdr: () => ({ paneSendText: async (...args) => calls.push(args) }) });
+  const stop = createStopOperation({ agents, getHerdr: () => ({ paneGet: async pane => ({ pane_id: pane, agent: "codex" }), paneSendText: async (...args) => calls.push(args) }) });
   const [working, idle] = agents.list();
   assert.deepEqual(await stop({}, { rid: "s1", agent: working.ref }), { type: "agent.stop.result", rid: "s1", result: "sent" });
   assert.deepEqual(calls, [["secret-pane", "\x1b"]]);
   assert.deepEqual(await stop({}, { rid: "s2", agent: idle.ref }), { type: "agent.stop.result", rid: "s2", result: "not-working" });
   assert.equal(calls.length, 1);
   assert.equal((await stop({}, { rid: "s3", agent: "f".repeat(32) })).error.code, "forbidden");
+  agents.close();
+});
+
+test("중지는 Claude·Codex 제공자 이름의 접미사를 허용한다", async () => {
+  const runtime = { state: [
+    { paneId: "claude-pane", workspaceId: "space", agent: "claude-code", status: "working", terminalId: "claude-term" },
+    { paneId: "codex-pane", workspaceId: "space", agent: "codex-cli", status: "working", terminalId: "codex-term" },
+  ], workspaces: [{ id: "space", label: "공간" }], tabs: {} };
+  const agents = createAgentStore({ getSnapshot: () => runtime });
+  const calls = [];
+  const stop = createStopOperation({ agents, getHerdr: () => ({
+    paneGet: async (pane) => ({ pane_id: pane, terminal_id: `${pane === "claude-pane" ? "claude" : "codex"}-term`, agent: pane === "claude-pane" ? "claude-code" : "codex-cli" }),
+    paneSendText: async (...args) => calls.push(args),
+  }) });
+  for (const agent of agents.list()) assert.equal((await stop({}, { rid: agent.ref, agent: agent.ref })).result, "sent");
+  assert.deepEqual(calls, [["claude-pane", "\x1b"], ["codex-pane", "\x1b"]]);
+  agents.close();
+});
+
+test("shared Codex TUI는 원격 메시지와 중지에서 일반 Codex로 취급한다", async () => {
+  const runtime = { state: [{ paneId: "shared", workspaceId: "space", tabId: "tab", agent: "codex", status: "working",
+    embeddedProvider: "codex", terminalId: "term", sessionUuid: "11111111-1111-4111-8111-111111111111" }], workspaces: [{ id: "space", label: "공간" }], tabs: {} };
+  const agents = createAgentStore({ getSnapshot: () => runtime });
+  const calls = [];
+  const herdr = { paneGet: async () => ({ pane_id: "shared", terminal_id: "term", agent: "codex-cli", agent_session: { kind: "id", value: "11111111-1111-4111-8111-111111111111" } }), paneSendText: async (...args) => calls.push(args) };
+  const stop = createStopOperation({ agents, getHerdr: () => herdr });
+  const message = createMessageOperation({ agents, messages: createMessageBridge({ getHerdr: () => herdr }) });
+  const before = agents.list()[0];
+  runtime.state[0].sharedCodex = true;
+  const [agent] = agents.list();
+  assert.equal(agent.ref, before.ref);
+  assert.deepEqual(agent.can, { stop: true, message: true });
+  assert.equal((await stop({}, { rid: "shared-stop", agent: agent.ref })).result, "sent");
+  assert.equal((await message({}, { rid: "shared-message", agent: agent.ref, text: "hi" })).result, "sent");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], ["shared", "\x1b"]);
+  assert.equal(calls[1][0], "shared");
+  agents.close();
+});
+
+test("사라진 pane의 원격 agent ref를 다음 목록에서 정리한다", () => {
+  const runtime = { state: [{ paneId: "gone", workspaceId: "space", agent: "codex", status: "idle", sessionUuid: "s" }], workspaces: [{ id: "space", label: "공간" }], tabs: {} };
+  let seed = 1;
+  const agents = createAgentStore({ getSnapshot: () => runtime, randomBytes: (size) => Buffer.alloc(size, seed++) });
+  const first = agents.list()[0].ref;
+  runtime.state = [];
+  assert.deepEqual(agents.list(), []);
+  runtime.state = [{ paneId: "gone", workspaceId: "space", agent: "codex", status: "idle", sessionUuid: "s" }];
+  assert.notEqual(agents.list()[0].ref, first);
+  agents.close();
+});
+
+test("pane이 없는 live workspace의 원격 space ref를 유지한다", () => {
+  const runtime = { state: [{ paneId: "live", workspaceId: "empty-space", agent: "codex", status: "idle", sessionUuid: "s" }], workspaces: [{ id: "empty-space", label: "빈 공간" }], tabs: {} };
+  const agents = createAgentStore({ getSnapshot: () => runtime });
+  const first = agents.list()[0].spaceRef;
+  runtime.state = [];
+  assert.deepEqual(agents.list(), []);
+  runtime.state = [{ paneId: "new", workspaceId: "empty-space", agent: "codex", status: "idle", sessionUuid: "n" }];
+  assert.equal(agents.list()[0].spaceRef, first);
   agents.close();
 });
 
@@ -93,6 +153,51 @@ test("Codex 메시지는 셸 없이 정해진 argv와 10초 제한을 쓴다", a
   assert.deepEqual(calls[0], { file: "codex", args: ["queue", "--thread",
     "11111111-1111-4111-8111-111111111111", "--message", "본문; $(touch no)"],
   options: { timeout: 10_000, maxBuffer: 64 * 1024 } });
+  agents.close();
+});
+
+test("원격 메시지와 중지는 일치하는 Paseo 세션을 사용한다", async () => {
+  const calls = [];
+  const terminalId = "term-managed";
+  const record = { agentId: "11111111-1111-4111-8111-111111111111", provider: "gemini",
+    serverId: "server-managed", workspaceId: "workspace-managed", socketPath: "/example/socket", build: "0.17.4-example" };
+  const pane = { pane_id: "secret-pane", terminal_id: terminalId, agent: "iris-paseo" };
+  const getHerdr = () => ({ paneGet: async () => pane, paneSendText: async (...args) => calls.push(["native", ...args]) });
+  const messages = createMessageBridge({ getHerdr,
+    execFile(...args) { calls.push(["native", ...args]); args.at(-1)(null); },
+    managedOptions: {
+      readPane: () => record,
+      openClient: async () => ({
+        connect: async () => {}, close: async () => {},
+        getLastServerInfoMessage: () => ({ serverId: record.serverId }),
+        fetchAgent: async () => ({ agent: { id: record.agentId, provider: record.provider, workspaceId: record.workspaceId, status: "running" } }),
+        sendAgentMessage: async (...args) => { calls.push(["message", ...args]); },
+        cancelAgent: async (...args) => { calls.push(["stop", ...args]); },
+      }),
+    },
+  });
+  const unregister = messages.registerClaudeMessageChannel({
+    canSend: () => true,
+    send: async (...args) => { calls.push(args); return "sent"; },
+  });
+  const { agents, runtime } = setupAgents(messages.canMessage);
+  Object.assign(runtime.state[0], { managedProvider: "gemini", agent: "gemini", terminalId });
+  runtime.state[1].managedProvider = "claude";
+  const send = createMessageOperation({ agents, messages });
+  const stop = createStopOperation({ agents, messages, getHerdr });
+
+  const [ready, incomplete] = agents.list();
+  assert.deepEqual(ready.can, { stop: true, message: true });
+  assert.deepEqual(incomplete.can, { stop: false, message: false });
+  assert.equal((await send({}, { rid: "send", agent: ready.ref, text: "본문" })).result, "sent");
+  assert.equal((await stop({}, { rid: "stop", agent: ready.ref })).result, "sent");
+  assert.equal((await send({}, { rid: "incomplete", agent: incomplete.ref, text: "본문" })).error.code, "forbidden");
+
+  pane.terminal_id = "term-reused";
+  assert.equal((await send({}, { rid: "stale", agent: ready.ref, text: "본문" })).error.code, "forbidden");
+  assert.equal((await stop({}, { rid: "stale-stop", agent: ready.ref })).error.code, "forbidden");
+  assert.deepEqual(calls, [["message", record.agentId, "본문"], ["stop", record.agentId]]);
+  unregister();
   agents.close();
 });
 
@@ -292,4 +397,21 @@ test("기기 삭제 요청은 인증된 연결의 기기만 지우고 실패하�
   const failing = createUnregisterOperation({ auth, unregisterDevice: async () => ({ ok: false }) });
   assert.deepEqual(await failing({ connId: "c1" }, { rid: "u3" }), { type: "error", rid: "u3", error: { code: "unavailable" } });
   assert.equal(removed.length, 1);
+});
+
+test("셸로 복귀한 pane과 임베디드 대화에는 원격 Esc를 전송하지 않는다", async () => {
+  const { agents, runtime } = setupAgents();
+  let writes = 0;
+  const stop = createStopOperation({ agents, getHerdr: () => ({
+    paneGet: async pane => ({ pane_id: pane, agent: "shell" }),
+    paneSendText: async () => { writes++; },
+  }) });
+  try {
+    await stop({}, { rid: "stop", agent: agents.list()[0].ref });
+    assert.equal(writes, 0);
+    runtime.state[0].embeddedProvider = "codex";
+    assert.equal(agents.list()[0].can.stop, false);
+    const bridge = createMessageBridge();
+    assert.equal(bridge.canMessage(agents.resolve(agents.list()[0].ref)), false);
+  } finally { agents.close(); }
 });

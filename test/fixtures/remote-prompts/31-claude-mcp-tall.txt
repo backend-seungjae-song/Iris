@@ -1,0 +1,43 @@
+
+ ▐▛███▛█   Claude Code v2.1.329
+▝▜██████▀  Sonnet 5.5 · Claude Max
+ ▝▝   ▝▝   ~/proj
+
+
+❯ 시험입니다. 다른 도구는 쓰지 말고 mcp__jira__jira_search 를 딱 한 번 호출하세요. jql
+  인자는 아래 12줄을 줄바꿈 그대로 넣은 문자열로 하세요: project = TEST / AND status in
+  (Open, "In Progress") / AND assignee = currentUser() / AND labels = alpha / AND labels
+  = beta / AND labels = gamma / AND labels = delta / AND labels = epsilon / AND labels =
+  zeta / AND labels = eta / AND labels = theta / ORDER BY created DESC (슬래시는
+  줄바꿈으로 바꾸세요). limit 는 1. 결과가 오든 거절되든 "끝" 한 단어만 답하세요.
+
+⏺ Calling jira…
+
+──────────────────────────────────────────────────────────────────────────────────────────
+ Tool use
+ jira — Search Issues Tool: (MCP)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ jql:
+   │ project = TEST
+   │ AND status in (Open, "In Progress")
+   │ AND assignee = currentUser()
+   │ AND labels = alpha
+   │ AND labels = beta
+   │ AND labels = gamma
+   │ AND labels = delta
+   │ AND labels = epsilon
+   │ AND labels = zeta
+   │ AND labels = eta
+   │ AND labels = theta
+   │ ORDER BY created DESC
+ limit: 1
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ About the jira — Search Issues Tool:
+ │ Search Jira issues using JQL (Jira Query Language).
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for jira — Search Issues commands in ~/proj/q…
+   3. No
+
+ Esc to cancel · Tab to amend

@@ -117,7 +117,7 @@ export function createWorkerCaptureTools({ fs, path, resolveRef, composeTiles, n
     }
     const png = await composeTiles(tiles, W, H, px);
     return { png, info: { width: W, height: H, scale: 1, tiles: tiles.length,
-      ...(dpr > 1 ? { note: "전체 캡처는 원래 해상도로 담습니다 — 배율은 화면 한 장이나 element 촬영에서 쓰세요." } : {}) } };
+      ...(dpr > 1 ? { note: "전체 캡처는 원래 해상도로 저장합니다. 배율은 화면 한 장이나 element 촬영에서 쓰세요." } : {}) } };
   }
 
   // 표시할 사각형(문서 좌표). ref면 CDP 박스 모델로, 선택자면 페이지에서 잰다. 못 찾으면 null.

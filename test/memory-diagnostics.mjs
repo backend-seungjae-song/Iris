@@ -23,7 +23,7 @@ test("서버 RSS 가 상한을 넘으면 6시간에 한 번 프로파일을 저�
   }
   let rss = 150;
   let clock = 0;
-  const diag = startMemoryDiagnostics({ dir, log: () => {}, setIntervalFn: () => ({ unref() {} }),
+  const diag = startMemoryDiagnostics({ dir, log: () => {}, setIntervalFn: () => ({ unref() {} }), hostFn: () => ({}),
     sampleFn: () => ({ rss }), nowMs: () => clock, setTimeoutFn: (fn) => setImmediate(fn) });
   assert.equal(fs.readdirSync(dir).filter((f) => f.includes("-auto")).length, 0);
 

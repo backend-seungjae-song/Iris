@@ -277,22 +277,22 @@ async function normalizedRelationshipBuffer(filePath) {
   return changed ? await zip.generateAsync({ type: "nodebuffer" }) : null;
 }
 
-async function loadWorkbook(filePath) {
+async function loadWorkbook(filePath, options) {
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.readFile(filePath, options);
     return workbook;
   } catch (originalError) {
     const normalized = await normalizedRelationshipBuffer(filePath);
     if (!normalized) throw originalError;
     const retry = new ExcelJS.Workbook();
-    await retry.xlsx.load(normalized);
+    await retry.xlsx.load(normalized, options);
     return retry;
   }
 }
 
 export async function readWorkbook(filePath) {
-  const wb = await loadWorkbook(filePath);
+  const wb = await loadWorkbook(filePath, { validationBounds: { rows: MAX_ROWS, cols: MAX_COLS } });
 
   const pool = new StylePool();
   const lists = new StylePool();     // 드롭다운 목록도 같은 서식이 수백 칸에 반복된다
@@ -562,7 +562,10 @@ function uniqueSheetName(wb, base) {
 }
 
 export async function writeWorkbook(filePath, edits) {
-  const wb = await loadWorkbook(filePath);
+  // 셀 값·서식만 고치면 입력 규칙의 범위와 순서를 그대로 저장
+  const cellEditsOnly = edits.every(edit => Number.isInteger(edit.r) && Number.isInteger(edit.c)
+    && Object.keys(edit).every(key => ["sheet", "r", "c", "v", "style", "result"].includes(key)));
+  const wb = await loadWorkbook(filePath, { preserveValidationRanges: cellEditsOnly });
   let n = 0;
   for (const e of edits) {
     if (e.newSheet !== undefined) {

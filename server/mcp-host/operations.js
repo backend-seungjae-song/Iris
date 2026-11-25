@@ -32,8 +32,8 @@ export const HOST_OPERATION_DEFINITIONS = Object.freeze({
 
   // 명령 단위 호출: 탭 잠금을 browser-dialog 의 단위 보유자가 단위 종료까지 쥠 (호출 사이에 옛 명령이 끼면 서로 기다림)
   "browser.executeWithDialog": definition((identity, input) => input?.lifecycle ? ["session", "run"] : targetIdentity(identity), ({ input }) => input?.relay?.unit ? [] : [`tab:${ref(input)}`]),
-  "browser.dialogState": definition((identity, input) => input?.lifecycle ? ["session", "run"] : targetIdentity(identity), ({ input }) => [`tab:${ref(input)}`], false),
-  "browser.dialogAnswer": definition((identity, input) => input?.lifecycle ? ["session", "run"] : targetIdentity(identity), ({ input }) => [`tab:${ref(input)}`]),
+  "browser.dialogState": definition((identity, input) => input?.lifecycle ? ["session", "run"] : targetIdentity(identity), ({ input }) => [`dialog:${ref(input)}`], false),
+  "browser.dialogAnswer": definition((identity, input) => input?.lifecycle ? ["session", "run"] : targetIdentity(identity), ({ input }) => [`dialog:${ref(input)}`]),
   "browser.legacyHostTask": definition(legacyHostIdentity, ({ input }) => [`tab:${ref(input)}`]),
   "qa.anchorUpdate": definition(identity => identity?.lifecycle === true ? ["session", "run"] : targetIdentity(identity),
     ({ identity, input }) => [`run:${identity.run || input?.runId || "unknown"}`]),

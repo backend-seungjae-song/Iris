@@ -115,6 +115,24 @@ const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css
   ".ttf": "font/ttf", ".woff": "font/woff", ".json": "application/json", ".svg": "image/svg+xml", ".map": "application/json",
   ".wasm": "application/wasm" };
 
+export function readRequestBody(req, limit, handle) {
+  const chunks = [];
+  let size = 0;
+  let aborted = false;
+  req.on("aborted", () => { aborted = true; });
+  req.on("error", () => { aborted = true; });
+  req.on("data", chunk => {
+    if (aborted) return;
+    const bytes = Buffer.from(chunk);
+    size += bytes.length;
+    if (size > limit) { aborted = true; chunks.length = 0; req.destroy(); return; }
+    chunks.push(bytes);
+  });
+  req.on("end", () => {
+    if (!aborted) handle(Buffer.concat(chunks).toString("utf8"));
+  });
+}
+
 export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, healthInfo = () => ({}) }) {
   return (req, res) => {
   // 정적 파일과 같은 경로로 판정해야 인코딩·상위 경로로 기능 게이트를 우회하지 못한다.
@@ -143,7 +161,7 @@ export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, 
     // 다른 탭의 wc를 사칭해 그 탭 이름으로 대화상자를 띄우는 것을 막는다. 묻는 페이지의 Origin이
     // 그 wc가 지금 띄우고 있는 문서의 Origin과 같아야 한다.
     const askOrigin = req.headers?.origin;
-    if (askOrigin && askOrigin !== "null") {
+    {
       const meta = metaOfWc(wc);
       let tabOrigin = null;
       try { tabOrigin = meta && meta.url ? new URL(meta.url).origin : null; } catch { tabOrigin = null; }
@@ -151,7 +169,7 @@ export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, 
       // 모두 막히고, 페이지에서는 취소로 처리돼 버튼이 동작하지 않는다(확인 결과:
       // 다른 출처의 iframe 안에 뜬 주문서). 그 탭이 실제로 띄우고 있는 문서들의 origin 을 함께 본다.
       const frameOK = meta && Array.isArray(meta.frameOrigins) && meta.frameOrigins.includes(askOrigin);
-      if (tabOrigin && tabOrigin !== askOrigin && !frameOK) { deny(403, "origin/wc mismatch"); return; }
+      if (!tabOrigin || tabOrigin === "null" || askOrigin === "null" || (askOrigin && tabOrigin !== askOrigin && !frameOK)) { deny(403, "origin/wc mismatch"); return; }
     }
     const kind = ["alert", "confirm", "prompt"].includes(q.get("kind")) ? q.get("kind") : "alert";
     const msg = String(q.get("msg") || "").slice(0, 2000);
@@ -187,8 +205,7 @@ export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, 
   // AI→브라우저 제어: iris-browser CLI가 POST /browser-cmd로 명령을 보낸다. 로컬(루프백) 전용(AC5).
   if (req.method === "POST" && ["/browser-cmd", "/qa-cmd"].includes(pathname)) {
     if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
-    let body = ""; req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on("end", async () => {
+    readRequestBody(req, 1e6, async body => {
       let j; try { j = JSON.parse(body || "{}"); } catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
       let r;
       try {
@@ -214,8 +231,7 @@ export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, 
   }
   if (req.method === "POST" && pathname === "/mcp-worker/activate") {
     if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only"}'); return; }
-    let body = ""; req.on("data", chunk => { body += chunk; if (body.length > 64 * 1024) req.destroy(); });
-    req.on("end", async () => {
+    readRequestBody(req, 64 * 1024, async body => {
       let input;
       try { input = JSON.parse(body || "{}"); }
       catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
@@ -253,8 +269,7 @@ export function createHttpHandler({ irisHome, capabilityHost, workerSupervisor, 
   // grep 하지 않게 하기 위해서다. 실행 출력과 같은 등급이라 루프백에만 연다.
   if (req.method === "POST" && pathname === "/pick-source") {
     if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
-    let body = ""; req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on("end", async () => {
+    readRequestBody(req, 1e6, async body => {
       let j; try { j = JSON.parse(body || "{}"); } catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
       let out;
       // 소스를 찾지 못한 것이 지목을 막으면 안 되므로, 실패하면 빈 결과로 응답한다.

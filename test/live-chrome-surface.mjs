@@ -96,7 +96,7 @@ test("크롬으로 열기는 선택창·미러 없이 탭과 짝지은 실제 Ch
   });
 
   const item = callHook("mirror.tabItem", rec);
-  assert.equal(item.label, "크롬으로 열기");
+  assert.equal(item.label, "Chrome에서 열기");
   item.act();
   await new Promise((resolve) => setImmediate(resolve));
   // 넘기기 기능이 없으면 Chrome 이 마지막으로 쓴 프로필로

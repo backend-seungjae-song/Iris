@@ -75,7 +75,7 @@ test('각 기기 행에서 이동·끄기·켜기·한 대 더를 실행하고 �
   await action(page, 'one', '끄기');
   await action(page, 'two', '켜기');
   assert.deepEqual(await page.evaluate(() => devices.slice(0, 2).map(d => d.state)), ['Shutdown', 'Booted']);
-  await action(page, 'two', '한 대 더');
+  await action(page, 'two', '같은 기종 추가');
   assert.deepEqual(await page.evaluate(() => calls.find(c => c[0] === 'create')[1]), { platform: 'ios', sourceDevice: 'two', sourceName: 'iPhone 15' });
   assert.equal(await page.evaluate(() => devices.at(-1).state), 'Shutdown');
   assert.equal(await page.evaluate(() => calls.filter(c => c[0] === 'open').length), 1, '한 대 더는 추가 기기를 열지 않는다');
@@ -108,7 +108,7 @@ test('런타임 미설치 행은 실행을 막고 설치 안내를 제공한다'
 
 test('생성 실패는 오류를 표시하고 자동으로 재시도하지 않는다', async () => fixture(async page => {
   await page.evaluate(() => { window.createError = '디스크 공간이 부족합니다.'; });
-  await action(page, 'two', '한 대 더');
+  await action(page, 'two', '같은 기종 추가');
   assert.equal(await page.$eval('.emu-dp-note', el => el.textContent), '디스크 공간이 부족합니다.');
   assert.equal(await page.evaluate(() => calls.filter(c => c[0] === 'create').length), 1);
   assert.equal(await page.evaluate(() => devices.length), 3);

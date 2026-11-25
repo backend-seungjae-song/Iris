@@ -21,12 +21,12 @@
 //   handoff/profiles/autofill 화면, startup의 파티션 UA 복원이다. 일치하지 않으면 인증·쿠키·비밀번호·UA가 함께 어긋난다.
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/chrome-handoff-ipc.cjs
 
-const { baseDomain, inScope, openInBrowserProfile } = require("./chrome-auth.cjs");
+const { baseDomain, inScope, existingBrowserProfile, openInBrowserProfile } = require("./chrome-auth.cjs");
 
 function createChromeHandoffIpc({
   app, BrowserWindow, screen, ipcMain, shell, session, isTrustedSender, isProfilePartition,
   runChromeAuth, cookieImport, chromeProfileCid, chromeImportRegistry, profileSessionPolicy,
-  passwordImport, setCreds, noteChromeImport,
+  passwordImport, setCreds, noteChromeImport, lookupProfile = existingBrowserProfile,
 }) {
   // 내장 인증기가 지원하지 않는 흐름은 연결된 Chrome 프로필에서 사람이 마치고 쿠키를 돌려받는다.
   // Chrome 세션 자체에 연결하는 경로는 별도 capability다. docs/chrome-auth-handoff.md
@@ -96,8 +96,38 @@ function createChromeHandoffIpc({
       const source = String(request.source || "");
       let entry = null;
       if (source) { try { entry = cookieImport.listChromeProfiles().find((profile) => chromeProfileCid(profile) === source) || null; } catch {} }
-      if (!openInBrowserProfile(u.href, entry)) shell.openExternal(u.href);
+      void openInBrowserProfile(u.href, entry).then(opened => opened || shell.openExternal(u.href)).catch(() => {});
     } catch {}
+  });
+  ipcMain.handle("ac-open-in-chrome", async (event, request) => {
+    if (!isTrustedSender(event)) return { ok: false, error: "이 창에서 요청할 수 없습니다." };
+    try {
+      const url = new URL(request?.url);
+      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+        return { ok: false, error: "일반 웹 주소만 열 수 있습니다." };
+      }
+      if (!isProfilePartition(request.partition)) return { ok: false, error: "이 탭의 프로필을 확인할 수 없습니다." };
+      if (!request.requireProfile) {
+        await shell.openExternal(url.href);
+        return { ok: true };
+      }
+      const recorded = chromeImportRegistry.latestForPartition(request.partition);
+      if (recorded?.cid && recorded.cid !== request.source) {
+        return { ok: false, error: "연결된 프로필이 바뀌었습니다. 현재 탭에서 다시 열어 주세요." };
+      }
+      let entry;
+      try { entry = await lookupProfile(request.source); }
+      catch (error) {
+        if (error.code !== "EACCES" && error.code !== "EPERM") throw error;
+      }
+      if (chromeImportRegistry.latestForPartition(request.partition)?.cid !== recorded?.cid) {
+        return { ok: false, error: "연결된 프로필이 바뀌었습니다. 현재 탭에서 다시 열어 주세요." };
+      }
+      if (!entry || !await openInBrowserProfile(url.href, entry)) {
+        return { ok: false, profileUnavailable: true, error: "연결된 프로필을 열 수 없습니다. 기본 브라우저에서 계정을 선택할 수 있습니다." };
+      }
+      return { ok: true };
+    } catch { return { ok: false, error: "브라우저를 열지 못했습니다." }; }
   });
   ipcMain.on("ac-ensure-profile", (e, partition) => {
     try {

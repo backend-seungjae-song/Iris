@@ -91,6 +91,38 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
       assert.equal(await page.evaluate(()=>sent.length),before);
     }
     await page.evaluate(()=>{local=true;shellPaneCount(1);render();});
+    await page.evaluate(async () => {
+      const { provide } = await import('/js/core/hooks.js');
+      provide('agentchat.providers', () => [
+        {id:'claude',label:'Claude'}, {id:'codex',label:'Codex'},
+        {id:'gemini',label:'Gemini CLI'}, {id:'antigravity',label:'Antigravity'},
+      ]);
+      document.body.insertAdjacentHTML('beforeend','<div id="km-panel"><div id="km-body"></div></div>');
+      const { initKeymapPage, renderKeymapPage } = await import('/js/devtool/keymap-page.js');
+      initKeymapPage({ $: s => document.querySelector(s) });
+      renderKeymapPage();
+    });
+    const menuLabels = async () => {
+      await page.click(`${topic} [data-worktree-action="group-add"]`);
+      const labels = await page.$$eval('#ctxmenu .ci', items => items.map(el => el.textContent.trim()));
+      await page.keyboard.press('Escape');
+      return labels;
+    };
+    assert.deepEqual(await menuLabels(), ['새 Claude 세션','새 Codex 세션','새 Antigravity 세션','새 터미널']);
+    await page.click('[data-km-sec="session-menu"]');
+    await page.click('[data-fs-key="gemini"][data-fs-value="show"]');
+    await page.click('[data-fs-key="antigravity"][data-fs-value="hide"]');
+    assert.deepEqual(await menuLabels(), ['새 Claude 세션','새 Codex 세션','새 Gemini CLI 세션','새 터미널']);
+    const reopened = await browser.newPage();
+    await reopened.goto(page.url());
+    assert.deepEqual(await reopened.evaluate(async () => {
+      const { provide } = await import('/js/core/hooks.js');
+      provide('agentchat.providers', () => [{ id:'gemini',label:'Gemini CLI' }, { id:'antigravity',label:'Antigravity' }]);
+      const { sessionLaunchOptions } = await import('/js/herdr/session-providers.js');
+      return sessionLaunchOptions().map(([id]) => id);
+    }), ['gemini','']);
+    await reopened.close();
+    await page.evaluate(() => document.querySelector('#km-panel').remove());
     for (const [label, launch] of [['새 Claude 세션','claude'], ['새 Codex 세션','codex'], ['새 터미널','']]) {
       await page.click(`${topic} [data-worktree-action="group-add"]`);
       await page.locator('::-p-text(' + label + ')').click();
@@ -105,7 +137,7 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
     assert.deepEqual(await page.evaluate(()=>sent.at(-1)),{type:'tab.create',workspaceId:'owner',cwd:'/repo-wt/unused',launch:'codex',name:'codex'});
     await page.click(`${topic} [data-worktree-action="group-toggle"]`);
     assert.equal(await page.$(`${topic} [data-target="agent"]`),null);
-    assert.equal(await page.$eval(`${topic} .wt-caret`,el=>getComputedStyle(el).transform),'none');
+    await page.waitForFunction(selector => getComputedStyle(document.querySelector(selector)).transform === 'none', {}, `${topic} .wt-caret`);
     await page.click(`${topic} [data-worktree-action="group-add"]`);
     await page.keyboard.press('Escape');
     assert.equal(await page.$eval('#ctxmenu',el=>el.hidden),true);
@@ -192,6 +224,24 @@ test('워크트리 계층에서 세션 추가·이름 변경·접기와 스페�
     assert.equal(await page.$$eval('.wt-meta[role="status"]',els=>els.length),0);
     await page.click('[data-worktree-action="compose"]');
     await page.type('.wt-compose-input','next-task');
+    await page.evaluate(() => {
+      const list = document.querySelector('#space-list');
+      list.style.cssText = 'height:160px;flex:none;overflow:auto';
+      window.editingInput = document.activeElement;
+      editingInput.setSelectionRange(2, 6);
+      list.scrollTop = list.scrollHeight;
+      window.beforeScroll = list.scrollTop;
+      window.neighbor = list.querySelector('.wt-group');
+      spaces[0].label = '새 스페이스 이름';
+      render();
+    });
+    assert.deepEqual(await page.evaluate(() => ({
+      input: document.activeElement === editingInput,
+      selection: [editingInput.selectionStart, editingInput.selectionEnd],
+      neighbor: neighbor === document.querySelector('.wt-group'),
+      scrolled: beforeScroll > 0 && document.querySelector('#space-list').scrollTop === beforeScroll,
+      label: document.querySelector('.space-name').textContent,
+    })), { input:true, selection:[2,6], neighbor:true, scrolled:true, label:'새 스페이스 이름' });
     await page.keyboard.press('Enter');
     const nextCreate=await page.evaluate(()=>sent.at(-1));
     assert.equal(nextCreate.type,'worktrees.create');

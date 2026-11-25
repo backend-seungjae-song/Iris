@@ -806,7 +806,7 @@ function tabAllowed(session, tabId) {
   if (grantedByTabId(session, tabId)) return { ok: true }; // 사용자가 지목해준 탭(여러 개 가능)
   const mine = sessionSpace(session);
   if (meta.space === SHARED_SPACE) {
-    return { ok: false, why: "공유 브라우저 창의 탭입니다 — 앱에서 그 탭을 직접 지목해 주셔야 이 세션이 쓸 수 있습니다(요소 선택 모드에서 탭 클릭)." };
+    return { ok: false, why: "공유 브라우저 창의 탭입니다 — 앱에서 그 탭을 직접 선택해 주셔야 이 세션이 쓸 수 있습니다(요소 선택 모드에서 탭 클릭)." };
   }
   if (!mine) return { ok: false, why: "이 세션의 스페이스를 알 수 없어(HERDR_PANE_ID 미해석) 탭을 고정할 수 없습니다." };
   if (!spaceKey.sameStorageSpace(meta.space, mine)) return { ok: false, why: `다른 스페이스(${meta.space})의 탭입니다 — 이 세션은 ${mine} 안에서만 조작합니다.` };
@@ -814,7 +814,7 @@ function tabAllowed(session, tabId) {
   // 없는 것으로 처리한다. 선택되지 않은 그룹은 접근도, 존재 노출도 막는다.
   const g = controlOwnerOf(mine, tabId), mineG = sessionGroupId(session);
   if (g === mineG || groupGranted(session, mine, g)) return { ok: true };
-  return { ok: false, why: "이 세션이 쓸 수 있는 탭이 아닙니다 — 자기 그룹의 탭이거나 사용자가 앱에서 지목해 준 것만 조작합니다." };
+  return { ok: false, why: "이 세션이 쓸 수 있는 탭이 아닙니다 — 자기 그룹의 탭이거나 사용자가 앱에서 선택해 준 것만 조작합니다." };
 }
 function tabIsShowing(space, tabId) {
   if (!space || !tabId) return false;
@@ -999,6 +999,20 @@ function releaseControl(tabId) {
   return changed;
 }
 
+// 세션이 사람에게 넘긴 탭의 조작 표시만 지움 · 최근 사용(5분)은 남겨 탭 유지 판정은 그대로
+// tabId 가 없으면 그 세션이 표시한 모든 탭
+function releaseSessionControl(session, tabId = null) {
+  const key = String(session);
+  let changed = false;
+  for (const [id, sessions] of controlByTab) {
+    if (tabId != null && id !== tabId) continue;
+    if (sessions.delete(key)) changed = true;
+    if (!sessions.size) controlByTab.delete(id);
+  }
+  if (changed) broadcastControl();
+  return changed;
+}
+
 const spaceStateParticipant = {
   backupPaths: () => [HANDLE_PATH],
   remap(map) {
@@ -1082,6 +1096,7 @@ export {
   hasTab,
   markControl,
   releaseControl,
+  releaseSessionControl,
   metaOfWc,
   noteChatTab,
   normalizeClosedTabHistory,

@@ -16,7 +16,7 @@ function createTouchDragArm({ screen, BrowserWindow, setTouchDrag, intervalMs = 
     if (!rect) return { ok: true, on: false };
     const host = target.hostWebContents;
     const win = host && BrowserWindow.fromWebContents(host);
-    if (!win) return { ok: false, error: "탭을 품은 창이 없습니다." };
+    if (!win) return { ok: false, error: "탭이 있는 창이 없습니다." };
     const a = { target, on: keepOn, busy: false, timer: null };
     const inside = () => {
       const z = host.getZoomFactor(), b = win.getContentBounds(), p = screen.getCursorScreenPoint();

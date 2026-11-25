@@ -5,9 +5,7 @@ Iris는 탭·프로필·스페이스와 도킹을 관리하고, 브라우저 기
 
 ## 브라우저 식별 정보와 Google 로그인
 
-일반 페이지는 현재 Electron 엔진의 UA와 Client Hints를 그대로 사용한다. 앱 이름 `Iris/…`만
-일부 모바일 감지기의 오인을 막기 위해 제거한다. Chrome에서 가져온 쿠키의 출처 정보가 실행
-엔진의 UA를 바꾸지는 않는다. `navigator`·권한 API·플러그인 목록을 가짜 객체로 바꾸지 않는다.
+일반 페이지에는 내장 Chromium 버전이 담긴 Chrome 호환 User-Agent를 보낸다. 기본 프로필과 추가 프로필 모두 제품 토큰 `Iris/…`와 `Electron/…`을 제외한다. Client Hints는 엔진 기본값을 사용한다.
 
 Google의 HTTPS 인증 호스트 `accounts.google.com`, `accounts.youtube.com`을 최상위 문서로
 열 때 Orca의 호환 처리를 적용한다. 요청과 페이지는 Firefox 호환 UA를 사용하고 Chromium Client

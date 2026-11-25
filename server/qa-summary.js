@@ -31,7 +31,7 @@ export async function createQaSummary(ledger, runIds, { out, session, runJson } 
     // 다른 회차 읽기: 서버 캐시에 줄을 남기지 않음(여섯 회차 줄을 서버가 끝날 때까지 보관한 사례)
     try { verified = await ledger.verify(runId, { retain: false }); }
     // 원래 사유를 함께 적음. 사유 없이 "장부 검증 실패"만 남아 qa_report 는 통과한 회차가 왜 빠졌는지 알 수 없던 사례
-    catch (error) { rejectedRuns.push({ runId, reason: `장부 검증 실패: ${String(error?.message || error).slice(0, 200)}` }); continue; }
+    catch (error) { rejectedRuns.push({ runId, reason: `기록 검증 실패: ${String(error?.message || error).slice(0, 200)}` }); continue; }
     const begin = verified.events.find(record => record.event.kind === "run_begin")?.event;
     if (!begin || session && begin.session !== session) { rejectedRuns.push({ runId, reason: "세션 소유권 확인 실패" }); continue; }
     const end = verified.events.findLast(record => record.event.kind === "run_end")?.event;
@@ -176,7 +176,7 @@ export async function createQaSummary(ledger, runIds, { out, session, runJson } 
     <section><h2>통과</h2>${list(summary.passed)}</section><section><h2>실패</h2>${list(summary.failed)}</section>
     <section><h2>고침</h2>${summary.fixed.length ? `<ul>${summary.fixed.map(item => `<li>${esc(item.run)} 결함 #${item.defect} · ${esc(item.problem)}<br>${esc(item.summary)}<br>commit ${esc(item.commit || "없음")} · branch ${esc(item.branch || "없음")} · diff ${item.diffStat.files.length} files +${item.diffStat.additions} -${item.diffStat.deletions}<br>원인: ${esc(item.diagnosis?.source)} · ${esc(item.diagnosis?.reason)}<br>사람 확인 이유: ${esc(item.reasons.join(" · ") || "없음")}<br>${shotLink(item.before,"수정 전")} · ${shotLink(item.after,"수정 후")} · 수정 전·후·영향: ${esc(item.evidence)} · ${esc(item.status)}</li>`).join("")}</ul>` : "<p>기록 없음</p>"}</section>
     <section><h2>못 함</h2>${list(summary.unable)}</section><section><h2>확인 방해 문제</h2>${list(summary.obstacles)}</section><section><h2>미확인 영역</h2>${list(summary.unverified)}</section>
-    <section><h2>장부 확인 실패</h2>${list(rejectedRuns.map(item => `${item.runId} · ${item.reason}`))}</section>${scenes}</body></html>`;
+    <section><h2>기록 확인 실패</h2>${list(rejectedRuns.map(item => `${item.runId} · ${item.reason}`))}</section>${scenes}</body></html>`;
   const dir = ledger.paths(runIds[0]).folder;
   const digest = crypto.createHash("sha256").update(JSON.stringify(runIds)).digest("hex").slice(0, 16);
   const file = out || path.join(dir, `summary-${digest}.html`);

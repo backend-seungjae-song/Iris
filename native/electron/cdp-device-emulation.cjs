@@ -166,7 +166,7 @@ function createDeviceEmulation({ attach, yieldToExplicitViewport, notify }) {
     }
     const width = Math.max(0, Math.round(Number(args.width) || 0));
     const height = Math.max(0, Math.round(Number(args.height) || 0));
-    if (!width || !height) throw new Error("가로·세로를 주세요 (예: viewport 390 844, 해제는 viewport clear).");
+    if (!width || !height) throw new Error("가로·세로를 지정하세요 (예: viewport 390 844, 해제는 viewport clear).");
     const cls = deviceClassFor(width);
     const d = deviceProfile(cls, baseUa);
     const dpr = Number(args.dpr) > 0 ? Number(args.dpr) : 0;   // 0 = 지금 화면 배율 그대로(억지 확대 금지)

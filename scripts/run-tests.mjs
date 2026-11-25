@@ -21,6 +21,7 @@ const only = process.argv.includes("--fast") ? (f) => !SLOW.has(f) : () => true;
 
 // 설치 앱 서버·worker 의 실행 식별값 · Iris 터미널이나 앱이 띄운 셸에서 돌려도 결과가 같게 뺌 (필요한 검사는 직접 설정)
 const APP_RUNTIME_ENV = ["IRIS_BUNDLE_ID", "IRIS_MAIN_PID", "IRIS_SERVER_ROOT", "IRIS_APP_PATH",
+  "IRIS_APP_CONNECTION_TOKEN",
   "IRIS_MCP_WORKER_DEPLOY_ID", "IRIS_MCP_WORKER_GENERATION", "IRIS_MCP_WORKER_TOKEN", "IRIS_QA_LEGACY_REVISION"];
 const testEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !APP_RUNTIME_ENV.includes(key)));
 

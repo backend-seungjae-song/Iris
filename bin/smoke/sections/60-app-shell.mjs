@@ -573,10 +573,10 @@ check("목록 없이는 공개본을 내지 않는다", () =>
 
 console.log("[4] 브라우저 정체성 — 엔진 기본값과 인증 호환");
 const hard = read("native/electron/browser-hardening.cjs");
-check("Electron 런타임은 유지하고 모바일 오인 Iris 토큰만 제거한다", () => {
+check("기본 UA는 내장 Chromium 버전을 사용한다", () => {
   const { cleanUserAgent } = require_(path.join(ROOT, "native/electron/browser-hardening.cjs"));
   const out = cleanUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Iris/0.1.0 Chrome/150.0.0.0 Electron/43.2.0 Safari/537.36");
-  return /Electron\/43/.test(out) && !/Iris\//.test(out) && /Chrome\/150/.test(out);
+  return !/Electron\//.test(out) && !/Iris\//.test(out) && /Chrome\/150/.test(out);
 });
 check("브라우저 API를 위장하는 스크립트를 주입하지 않는다", () => {
   const scripts = [hard, read("native/electron/webview-lifecycle.cjs"), read("native/electron/main-window.cjs")].join("\n");

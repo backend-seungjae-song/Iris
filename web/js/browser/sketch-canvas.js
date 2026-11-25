@@ -198,7 +198,7 @@ export function openSketchCanvas({ png, width, height, onDeliver, onCancel, init
   zoomLabel.className = "sk-zlabel";
   const zoomIn = button("sk-zbtn", "+", shortcutLabel("확대(⌘=)"));
   const fitW = button("sk-zbtn sk-zfit", "폭 맞춤", shortcutLabel("폭에 맞춤(⌘0)"));
-  const fitA = button("sk-zbtn sk-zfit", "전체", "전체가 보이게");
+  const fitA = button("sk-zbtn sk-zfit", "전체", "전체 보기");
   zoomWrap.append(zoomOut, zoomLabel, zoomIn, fitW, fitA);
   bar.appendChild(zoomWrap);
 

@@ -285,7 +285,7 @@ async function edgeFinish(e) {
     st._doubtRows = 0;
     const text = localSelectionText(st);
     if (st._doubtRows) {
-      degraded = (degraded ? degraded + " · " : "") + `${st._doubtRows}줄은 순서가 어긋났을 수 있습니다`;
+      degraded = (degraded ? degraded + " · " : "") + `${st._doubtRows}줄은 순서가 바뀌었을 수 있습니다`;
     }
     return { text, degraded };
   } finally {

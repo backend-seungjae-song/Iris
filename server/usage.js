@@ -445,6 +445,8 @@ async function fetchGemini() {
   const quota = await getJson(GEMINI_QUOTA_URL,
     { "Content-Type": "application/json", Authorization: `Bearer ${cred.token}` },
     { method: "POST", body: JSON.stringify({ project: projectId }) });
+  if (quota.status === 401 || quota.status === 403) return fail("gemini", "stale-token");
+  if (quota.status === 429) return backoff("gemini", quota);
   if (!quota.data) return fail("gemini", "server", `HTTP ${quota.status}`);
 
   const raw = Array.isArray(quota.data) ? quota.data
@@ -462,7 +464,103 @@ async function fetchGemini() {
   return ok("gemini", { session: { usedPercent: tightest.usedPercent, windowMinutes: tightest.windowMinutes, resetsAt: tightest.resetsAt }, buckets });
 }
 
-// Antigravity 는 현재 Gemini 와 같은 자격증명을 쓴다. 같은 결과에 이름만 바꿔 표시한다.
+const ANTIGRAVITY_KEYCHAIN_SERVICE = "gemini";
+const ANTIGRAVITY_KEYCHAIN_ACCOUNT = "antigravity";
+const ANTIGRAVITY_KEYRING_PREFIX = "go-keyring-base64:";
+const ANTIGRAVITY_QUOTA_URLS = [
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+  GEMINI_QUOTA_URL,
+];
+const ANTIGRAVITY_HEADERS = {
+  "Content-Type": "application/json",
+  "User-Agent": "antigravity/1.5.15 darwin/arm64",
+};
+
+// go-keyring 이 macOS 키체인에 저장한 값(go-keyring-base64:<base64> 또는 평문 JSON)을 풀어 토큰만 꺼낸다.
+export function parseAntigravityKeychain(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  let text = trimmed;
+  if (trimmed.startsWith(ANTIGRAVITY_KEYRING_PREFIX)) {
+    try {
+      text = Buffer.from(trimmed.slice(ANTIGRAVITY_KEYRING_PREFIX.length), "base64").toString("utf8");
+    } catch { return null; }
+  }
+  let parsed = null;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  if (!parsed || typeof parsed !== "object") return null;
+  const src = parsed.token && typeof parsed.token === "object" ? parsed.token : parsed;
+  const token = typeof src.access_token === "string" && src.access_token ? src.access_token : null;
+  if (!token) return null;
+  const expiresAt = toMs(src.expiry ?? src.expiry_date ?? src.expires_at ?? src.expiresAt);
+  return { token, expiresAt };
+}
+
+async function antigravityToken() {
+  if (process.platform !== "darwin") return null;
+  const raw = await execText("security", [
+    "find-generic-password", "-s", ANTIGRAVITY_KEYCHAIN_SERVICE, "-a", ANTIGRAVITY_KEYCHAIN_ACCOUNT, "-w",
+  ]);
+  return parseAntigravityKeychain(raw);
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function pickTighter(prev, next) {
+  if (!next) return prev;
+  if (!prev || next.usedPercent > prev.usedPercent) return next;
+  if (next.usedPercent === prev.usedPercent && next.resetsAt && (!prev.resetsAt || next.resetsAt < prev.resetsAt)) return next;
+  return prev;
+}
+
+// 타사 모델(claude·gpt)과 내부용(chat_·tab_)을 제외하고 Claude 와 같은 구조(5h·wk·Argon)로 맞춤
+export function parseAntigravityQuota(raw, now = Date.now()) {
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw && raw.buckets) ? raw.buckets : [];
+  let session = null;
+  let weekly = null;
+  let argon = null;
+  for (const one of list) {
+    if (!one || typeof one.remainingFraction !== "number" || typeof one.modelId !== "string") continue;
+    const id = one.modelId;
+    if (!/^gemini/i.test(id) && !/\bargon\b/i.test(id)) continue;
+    const resetMs = toMs(one.resetTime);
+    const isWeekly = resetMs !== null && resetMs - now > DAY_MS;
+    const entry = win(100 - one.remainingFraction * 100, isWeekly ? WEEK_MIN : SESSION_MIN, one.resetTime);
+    if (!entry) continue;
+    if (/\bargon\b/i.test(id)) {
+      argon = pickTighter(argon, entry);
+    } else if (isWeekly) {
+      weekly = pickTighter(weekly, entry);
+    } else {
+      session = pickTighter(session, entry);
+    }
+  }
+  const scoped = argon ? [{ label: "Argon", window: argon }] : [];
+  return { session, weekly, scoped };
+}
+
+async function fetchAntigravity() {
+  const cred = await antigravityToken();
+  if (!cred) return null;
+  if (cred.expiresAt && cred.expiresAt <= Date.now()) return fail("antigravity", "stale-token");
+
+  let lastStatus = null;
+  for (const url of ANTIGRAVITY_QUOTA_URLS) {
+    const quota = await getJson(url,
+      { ...ANTIGRAVITY_HEADERS, Authorization: `Bearer ${cred.token}` },
+      { method: "POST", body: "{}" });
+    if (quota.status === 401 || quota.status === 403) return fail("antigravity", "stale-token");
+    if (quota.status === 429) return backoff("antigravity", quota);
+    if (!quota.data) { lastStatus = quota.status; continue; }
+    const { session, weekly, scoped } = parseAntigravityQuota(quota.data);
+    if (!session && !weekly && !scoped.length) continue;
+    return ok("antigravity", { session, weekly, ...(scoped.length ? { scoped } : {}) });
+  }
+  return lastStatus ? fail("antigravity", "server", `HTTP ${lastStatus}`) : fail("antigravity", "usage-unavailable");
+}
+
+// 자체 키체인 자격증명이 없을 때만 Gemini 결과를 이어받는다.
 function mirrorAntigravity(gemini) {
   return { ...gemini, provider: "antigravity" };
 }
@@ -498,56 +596,38 @@ function opencodeAuthHeader(raw) {
 
 // 이 페이지는 React Flight 로 직렬화돼 있어서 `key:$R[28]={...}` 꼴이다. 같은 이름이 null 로도
 // 여러 번 나오므로, usagePercent 와 resetInSec 을 직속으로 가진 첫 덩어리만 집는다.
-function opencodeBlock(text, key) {
-  const keyRe = new RegExp(`\\b${key}\\b\\s*:`, "g");
-  let hit;
-  while ((hit = keyRe.exec(text)) !== null) {
-    const from = hit.index + hit[0].length;
-    const brace = text.slice(from, from + 30).indexOf("{");
-    if (brace < 0) continue;
-    const open = from + brace;
-    let depth = 0;
-    let block = null;
-    for (let i = open; i < text.length; i++) {
-      if (text[i] === "{") depth++;
-      else if (text[i] === "}" && --depth === 0) { block = text.slice(open, i + 1); break; }
-    }
-    if (!block) continue;
-    if (opencodeNumber(block, "usagePercent") !== null && opencodeNumber(block, "resetInSec") !== null) return block;
-  }
-  return null;
-}
-
-// 깊이 1 의 숫자만 집는다. 깊이를 안 세면 안쪽 객체의 같은 이름이 먼저 잡힌다.
-function opencodeNumber(block, field) {
-  const fieldRe = new RegExp(`\\b${field}\\b\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)`);
-  let depth = 0;
-  for (let i = 0; i < block.length; i++) {
-    if (block[i] === "{") { depth++; continue; }
-    if (block[i] === "}") { depth--; continue; }
-    if (depth !== 1) continue;
-    const hit = fieldRe.exec(block.slice(i, i + field.length + 30));
-    if (hit && hit.index === 0) {
-      const value = Number.parseFloat(hit[1]);
-      return Number.isFinite(value) ? value : null;
-    }
-  }
-  return null;
-}
-
-function opencodeParse(text) {
+async function opencodeParse(text) {
   if (!text || text.length > 10_000_000) return null;
-  const read = (key) => {
-    const block = opencodeBlock(text, key);
-    if (!block) return null;
-    const percent = opencodeNumber(block, "usagePercent");
-    const reset = opencodeNumber(block, "resetInSec");
-    return percent === null || reset === null ? null : { percent, reset };
-  };
-  const rolling = read("rollingUsage");
-  const weekly = read("weeklyUsage");
-  if (!rolling || !weekly) return null;
-  return { rolling, weekly, monthly: read("monthlyUsage") };
+  const blocks = new Map();
+  const found = new Map();
+  const tokens = /\b(rollingUsage|weeklyUsage|monthlyUsage)\b\s*:|\b(usagePercent|resetInSec)\b\s*:\s*(-?[0-9]+(?:\.[0-9]+)?)|[{}]/g;
+  let depth = 0, pending, match, count = 0;
+  while ((match = tokens.exec(text))) {
+    if (++count % 4096 === 0) await new Promise(resolve => setImmediate(resolve));
+    const [token, key, field, raw] = match;
+    if (key) {
+      pending = { key, end: tokens.lastIndex };
+    } else if (token === "{") {
+      depth++;
+      if (pending && match.index - pending.end < 30 && !found.has(pending.key)) {
+        blocks.set(depth, { key: pending.key });
+      }
+      pending = null;
+    } else if (token === "}") {
+      const block = blocks.get(depth);
+      if (block && Number.isFinite(block.usagePercent) && Number.isFinite(block.resetInSec)) {
+        found.set(block.key, { percent: block.usagePercent, reset: block.resetInSec });
+      }
+      blocks.delete(depth);
+      depth = Math.max(0, depth - 1);
+      pending = null;
+    } else {
+      const block = blocks.get(depth);
+      if (block && !Object.hasOwn(block, field)) block[field] = Number(raw);
+    }
+  }
+  const rolling = found.get("rollingUsage"), weekly = found.get("weeklyUsage");
+  return rolling && weekly ? { rolling, weekly, monthly: found.get("monthlyUsage") } : null;
 }
 
 async function opencodeText(url, cookie, headers) {
@@ -585,7 +665,7 @@ async function fetchOpencodeGo(prefs) {
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     });
     if (!text) continue;
-    const parsed = opencodeParse(text);
+    const parsed = await opencodeParse(text);
     if (!parsed) continue;
     const at = (seconds) => Date.now() + seconds * 1000;
     return ok("opencode-go", {
@@ -732,6 +812,8 @@ async function fetchGrok() {
   }
   // 통합 청구 계정은 credits 화면에 비율이 없으므로 기본 화면의 월 예산으로 대체한다.
   const billing = await getJson(`${GROK_BASE}/billing`, grokHeaders(session));
+  if (billing.status === 401 || billing.status === 403) return fail("grok", "stale-token");
+  if (billing.status === 429) return backoff("grok", billing);
   const monthly = billing.data;
   const used = Number(monthly && monthly.used);
   const limit = Number(monthly && monthly.limit);
@@ -754,14 +836,16 @@ async function guarded(provider, skipUntil, run) {
 }
 
 export async function fetchAllUsage(prefs, skipUntil) {
-  const [claude, codex, gemini, opencodeGo, kimi, minimax, grok] = await Promise.all([
+  const [claude, codex, gemini, antigravityOwn, opencodeGo, kimi, minimax, grok] = await Promise.all([
     guarded("claude", skipUntil, fetchClaude),
     guarded("codex", skipUntil, fetchCodex),
     guarded("gemini", skipUntil, fetchGemini),
+    guarded("antigravity", skipUntil, fetchAntigravity),
     guarded("opencode-go", skipUntil, () => fetchOpencodeGo(prefs)),
     guarded("kimi", skipUntil, fetchKimi),
     guarded("minimax", skipUntil, () => fetchMinimax(prefs)),
     guarded("grok", skipUntil, fetchGrok),
   ]);
-  return [claude, codex, gemini, mirrorAntigravity(gemini), opencodeGo, kimi, minimax, grok];
+  const antigravity = antigravityOwn || mirrorAntigravity(gemini);
+  return [claude, codex, gemini, antigravity, opencodeGo, kimi, minimax, grok];
 }

@@ -9,6 +9,7 @@ const CLIENT_HINTS = ["sec-ch-ua", "sec-ch-ua-arch", "sec-ch-ua-bitness", "sec-c
   "sec-ch-ua-full-version-list", "sec-ch-ua-mobile", "sec-ch-ua-model", "sec-ch-ua-platform", "sec-ch-ua-platform-version", "sec-ch-ua-wow64"];
 const WORKER = "iris-google-auth.js";
 const CHANNEL = "iris-google-auth-rules";
+const ZOOM_CHANNEL = "iris-browser-tab-zoom";
 // 탭별 이탈 규칙 id. 정적 규칙(1·2)과 겹치지 않는 범위
 const LEAVE_RULE_BASE = 1000;
 
@@ -39,12 +40,20 @@ globalThis.__irisGoogleAuthRules?.listen((rules) => {
     await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: current.map((rule) => rule.id), addRules: rules });
   }).catch((error) => console.error("Iris Google 인증 규칙:", error));
 });
+globalThis.__irisBrowserTabZoom?.listen(async (tabId, requestId) => {
+  try {
+    await chrome.tabs.setZoomSettings(tabId, { mode: "automatic", scope: "per-tab" });
+    globalThis.__irisBrowserTabZoom.reply(requestId, null);
+  } catch (error) {
+    globalThis.__irisBrowserTabZoom.reply(requestId, String(error));
+  }
+});
 `;
 
 function extensionFiles() {
   return {
     "manifest.json": JSON.stringify({
-      manifest_version: 3, name: "Iris Google 로그인 호환", version: "1.0.0",
+      manifest_version: 3, name: "Iris Google 로그인 호환", version: "1.1.0",
       background: { service_worker: WORKER },
       permissions: ["declarativeNetRequest"], host_permissions: ["<all_urls>"],
       declarative_net_request: { rule_resources: [{ id: "google_auth", enabled: true, path: "rules.json" }] },
@@ -75,6 +84,7 @@ function writeExtension(directory) {
 // 이미 등록된 확장은 완료 이벤트가 없으므로 대기 상한 뒤 진행. 시작 요청에도 상한을 둬 규칙 전달 줄이 막히지 않게 함
 const REGISTRATION_WAIT_MS = 5000;
 const START_TIMEOUT_MS = 10000;
+const ZOOM_TIMEOUT_MS = 5000;
 
 function withTimeout(promise, ms, message, setTimer) {
   return new Promise((resolve, reject) => {
@@ -86,6 +96,7 @@ function withTimeout(promise, ms, message, setTimer) {
 function createGoogleAuthRules({ stateHomeImpl = stateHome, error = console.error, setTimer = setTimeout } = {}) {
   const directory = path.join(stateHomeImpl(), "browser-extensions", "internal", "google-auth");
   const sessions = new Map();
+  let zoomRequest = 0;
 
   // 워커를 멈추지 않게 붙잡음. 쉬다 멈춘 워커를 규칙 전달 때 다시 띄우는 순간 Electron 43.7 메인 프로세스가
   // "Unsuitable process reused for site"(render_process_host_impl.cc) 로 죽었음
@@ -96,9 +107,16 @@ function createGoogleAuthRules({ stateHomeImpl = stateHome, error = console.erro
   }
 
   function startWorker(state) {
-    const scope = `chrome-extension://${state.extension.id}/`;
-    return withTimeout(state.session.serviceWorkers.startWorkerForScope(scope), START_TIMEOUT_MS, `워커 시작 응답 없음: ${scope}`, setTimer)
-      .then((worker) => keepAlive(state, worker));
+    if (!state.starting) {
+      state.starting = (async () => {
+        await state.registered;
+        const scope = `chrome-extension://${state.extension.id}/`;
+        const worker = await withTimeout(state.session.serviceWorkers.startWorkerForScope(scope), START_TIMEOUT_MS, `워커 시작 응답 없음: ${scope}`, setTimer);
+        state.worker = keepAlive(state, worker);
+        return state.worker;
+      })().finally(() => { state.starting = null; });
+    }
+    return state.starting;
   }
 
   // 등록 완료 또는 대기 상한 중 먼저 오는 것
@@ -120,6 +138,27 @@ function createGoogleAuthRules({ stateHomeImpl = stateHome, error = console.erro
       .catch((failure) => error("[google-auth-rules]", String(failure?.message || failure)));
   }
 
+  // 같은 워커에서 동시에 설정하는 탭의 응답을 요청 번호로 구분
+  async function isolateTab(session, tabId) {
+    await load(session);
+    const state = sessions.get(session);
+    if (!state?.extension) throw new Error("탭별 확대를 설정할 내부 확장이 없습니다");
+    const worker = state.worker && !state.worker.isDestroyed?.() ? state.worker : await startWorker(state);
+    const requestId = ++zoomRequest;
+    const channel = `${ZOOM_CHANNEL}-reply-${requestId}`;
+    let onReply;
+    const reply = new Promise((resolve, reject) => {
+      onReply = (_event, failure) => failure ? reject(new Error(failure)) : resolve();
+      worker.ipc.once(channel, onReply);
+      worker.send(ZOOM_CHANNEL, tabId, requestId);
+    });
+    try {
+      await withTimeout(reply, ZOOM_TIMEOUT_MS, "탭별 확대 범위 설정 응답 없음", setTimer);
+    } finally {
+      worker.ipc.removeListener(channel, onReply);
+    }
+  }
+
   const stopIdentity = onIdentityChange((wc, identity) => {
     let state;
     try { state = sessions.get(wc.session); } catch { return; }
@@ -133,15 +172,15 @@ function createGoogleAuthRules({ stateHomeImpl = stateHome, error = console.erro
   function load(session) {
     if (typeof session?.extensions?.loadExtension !== "function") return Promise.resolve();
     if (sessions.has(session)) return sessions.get(session).ready;
-    const state = { session, extension: null, leave: new Map(), sending: Promise.resolve(), ready: null, kept: null };
+    const state = { session, extension: null, leave: new Map(), sending: Promise.resolve(), ready: null,
+      registered: null, starting: null, worker: null, kept: null };
     sessions.set(session, state);
     state.ready = (async () => {
       writeExtension(directory);
       session.registerPreloadScript({ type: "service-worker", filePath: path.join(__dirname, "google-auth-worker-preload.cjs") });
       const existing = session.extensions.getAllExtensions().find((item) => path.resolve(item.path) === path.resolve(directory));
-      const registered = existing ? null : registration(session);
+      state.registered = existing ? null : registration(session);
       state.extension = existing || await session.extensions.loadExtension(directory);
-      if (registered) state.sending = state.sending.then(() => registered);
       if (state.leave.size) sendRules(state);
       else state.sending = state.sending.then(() => startWorker(state))
         .catch((failure) => error("[google-auth-rules]", String(failure?.message || failure)));
@@ -149,7 +188,7 @@ function createGoogleAuthRules({ stateHomeImpl = stateHome, error = console.erro
     return state.ready;
   }
 
-  return { load, dispose: stopIdentity, directory };
+  return { load, isolateTab, dispose: stopIdentity, directory };
 }
 
 let shared = null;

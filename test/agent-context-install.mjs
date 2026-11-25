@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,8 @@ import test from "node:test";
 import { installAgentContext } from "../scripts/install-agent-context.mjs";
 
 const REQUIRED = [
+  "server/worktree-handlers.js", "server/agent-homes.js", "server/artifacts-home.cjs",
+  "server/win-native.cjs", "server/windows-powershell.cjs", "server/runtime-state.js",
   "bin/agent-context.mjs", "bin/iris-session.mjs", "bin/agent-run.mjs", "server/agent-lineage.js", "server/agent-session-path.js", "server/codex-session.js", "server/env.cjs",
   "server/herdr-session.cjs", "server/herdr.js", "server/prompt-targets.js", "server/state-home.cjs",
 ];
@@ -300,6 +303,12 @@ test("incomplete installed package leaves both guidance homes untouched", (t) =>
   assert.equal(fs.existsSync(skill(f.claudeHome)), false);
 });
 
+test("전이 의존성이 빠진 설치 패키지는 guidance 전에 거절한다", (t) => {
+  const f = fixture(t, "transitive-missing");
+  fs.unlinkSync(path.join(f.unpacked, "server", "runtime-state.js"));
+  assert.throws(() => installAgentContext(f), /package is incomplete/);
+});
+
 test("packaging keeps the installed launcher and its module boundary unpacked", () => {
   const root = path.resolve(import.meta.dirname, "..");
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
@@ -317,6 +326,16 @@ test("packaging keeps the installed launcher and its module boundary unpacked", 
   const discardBackup = appInstaller.indexOf('[ -n "$OLD" ] && rm -rf "$OLD"');
   assert.ok(health >= 0 && guidance > health && discardBackup > guidance,
     "guidance must install from the verified app before the recoverable backup is discarded");
+});
+
+test("심볼릭 링크로 호출한 agent-context도 CLI 진입점을 실행한다", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "iris-agent-context-link-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const link = path.join(root, "agent-context.mjs");
+  fs.symlinkSync(path.join(path.resolve(import.meta.dirname, ".."), "bin", "agent-context.mjs"), link);
+  const result = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /pnpm agent:context/);
 });
 
 test("중복된 Herdr 세션 등록만 제거하고 다른 개인 훅은 보존한다", (t) => {
@@ -344,4 +363,34 @@ test("중복된 Herdr 세션 등록만 제거하고 다른 개인 훅은 보존�
     assert.ok(!commands.some(c => c.includes("herdr-agent-state.sh") || c.includes("herdr-session-register.py")));
     assert.equal(data.hooks.SessionStart.flatMap(i => i.hooks).filter(h => h.command.includes("IRIS_AGENT_CONTEXT")).length, 1);
   }
+});
+
+test("A2UI v0.9 Basic Catalog 안내가 포함되고 Antigravity(agyHome)까지 멱등하게 설치된다", (t) => {
+  const f = fixture(t, "agy");
+  const agyHome = path.join(f.root, "gemini-config");
+  const first = installAgentContext({ ...f, agyHome });
+  assert.equal(first.changed.length, 3);
+  assert.equal(first.installed.length, 3);
+
+  for (const home of [f.codexHome, f.claudeHome, agyHome]) {
+    const text = fs.readFileSync(skill(home), "utf8");
+    assert.ok(text.includes("https://a2ui.org/specification/v0_9/basic_catalog.json"));
+    assert.ok(text.includes("ChoicePicker"));
+    assert.ok(text.includes("```a2ui"));
+  }
+
+  const second = installAgentContext({ ...f, agyHome });
+  assert.deepEqual(second.changed, []);
+});
+
+test("SessionStart의 사용자 정의 항목을 보존한다", t => {
+  const f = fixture(t);
+  writeHookConfigs(f);
+  const file = path.join(f.claudeHome, "settings.json");
+  const data = JSON.parse(fs.readFileSync(file));
+  const personal = { matcher: "personal", command: "own-hook" };
+  data.hooks.SessionStart = [personal];
+  fs.writeFileSync(file, JSON.stringify(data));
+  installAgentContext({ ...f, addHooks: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).hooks.SessionStart[0], personal);
 });

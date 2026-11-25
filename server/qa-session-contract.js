@@ -58,7 +58,7 @@ export const QA_ORACLES = Object.freeze([
 const DEFECT_REQUIRED = object({
   problem: text("관찰한 문제"),
   oracle: { type: "string", enum: QA_ORACLES, description: "문제로 판단한 기준" },
-  oracleNote: text("판단 기준과 관찰 결과가 어긋난 이유"),
+  oracleNote: text("판단 기준과 관찰 결과가 다른 이유"),
   importance: text("누가 어떤 영향을 받는지"),
   tried: text("재현과 원인 확인을 위해 시도한 것"),
 });
@@ -75,7 +75,7 @@ export const QA_NOTE_SCHEMA = freeze(object({
 export const QA_CHARTER_CHANGE_SCHEMA = freeze(object({ charter: QA_CHARTER_SCHEMA, reason: text("charter를 바꾸는 이유") }));
 export const QA_STORED_SESSION_SCHEMA = freeze(object({
   ...QA_SESSION_SCHEMA.properties,
-  defects: text("장부의 결함 기록에서 서버가 만든 요약"),
+  defects: text("QA 기록의 결함 항목에서 서버가 만든 요약"),
 }));
 
 function validate(schema, value, field) {

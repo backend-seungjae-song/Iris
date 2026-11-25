@@ -85,7 +85,7 @@ void main() {
 
   for (final terminal in [false, true]) {
     for (final entry in const {
-      'auth_required': 'Mac의 GitHub CLI가 로그인되어 있지 않습니다. gh auth login을 실행하세요.',
+      'auth_required': '컴퓨터의 GitHub CLI가 로그인되어 있지 않습니다. gh auth login을 실행하세요.',
       'no_pr': '현재 브랜치에 연결된 GitHub PR이 없습니다.',
     }.entries) {
       testWidgets(

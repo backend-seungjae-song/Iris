@@ -140,7 +140,7 @@ export function revealTerminalPath(raw) {
 export function openTerminalPath(raw) {
   const p = resolveTerminalPath(raw);
   const hostHome = getHostHome();
-  if (!p) { showToast(hostHome ? "경로를 해석할 수 없습니다: " + raw : "서버에서 홈 경로를 아직 못 받았습니다", { level: "warn" }); return; }
+  if (!p) { showToast(hostHome ? "경로를 해석할 수 없습니다: " + raw : "홈 경로를 아직 확인하지 못했습니다", { level: "warn" }); return; }
   const rooted = /^[/~]/.test(String(raw || "").trim()) || isAbsolutePath(String(raw || "").trim());
   if (isHostWindows() && !rooted) {
     const windowsRoots = [...getLastAgents().map((a) => a.cwd), spaceRootFor(getSelectedSpaceId())].filter(Boolean);
@@ -156,7 +156,7 @@ export function openTerminalPath(raw) {
     // 조용히 반환하지 않는다. 눌렀는데 아무 일도 일어나지 않으면 기능이 고장 난 것으로 보이고,
     // 무엇이 막았는지 알아야 다음 동작을 고를 수 있다.
     if (!/\.[A-Za-z0-9]{1,10}$/.test(p)) {
-      showToast("파일 이름으로 안 보여 열지 않았습니다. 전체 경로면 엽니다: " + raw, { level: "warn" });
+      showToast("파일 이름 형식이 아니라 열지 않았습니다. 전체 경로면 엽니다: " + raw, { level: "warn" });
       return;
     }
     const roots = [...new Set([...getLastAgents().map((a) => a.cwd), spaceRootFor(getSelectedSpaceId())].filter(Boolean).map((c) => c.replace(/\/$/, "")))];
@@ -165,7 +165,14 @@ export function openTerminalPath(raw) {
       return;
     }
   }
-  openFile(p);
+  openFileOrFolder(p);
+}
+
+// 폴더면 Finder 창으로, 아니면 파일 뷰어로. 폴더인지는 확장자로 알 수 없어(.d·.app 등) 앱 본체가 stat 으로 판정
+function openFileOrFolder(p) {
+  const ask = acHost && acHost.openFolder ? acHost.openFolder(p) : null;
+  if (!ask) { openFile(p); return; }
+  Promise.resolve(ask).then((opened) => { if (!opened) openFile(p); }, () => openFile(p));
 }
 
 // 브라우저가 그릴 수 있는 것은 브라우저가 그린다. 예외는 마크다운으로, 브라우저는 원문 그대로

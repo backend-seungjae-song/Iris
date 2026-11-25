@@ -29,7 +29,7 @@ import { openFile } from "../center/file-routing.js";
 import { getActiveTabId, getCenterSpace, getTabs } from "../center/tab-store.js";
 import { STATE_LABEL, spaceState } from "../core/agent-state.js";
 import { callHook } from "../core/hooks.js";
-import { setHtml } from "../core/set-html.js";
+import { patchHtml } from "../core/patch-html.js";
 import { getLastAgents } from "../herdr/state.js";
 
 let $, esc, wsSend, orderedSpaces, getIsLocal, getSelectedSpaceId;
@@ -88,29 +88,39 @@ function renderDir(dirPath, depth) {
 }
 
 // Explorer: 포커스된 스페이스의 루트 트리를 그린다(스페이스마다 각각의 작업공간).
+function fileKey(node) {
+  if (node.localName === "li") return node.firstElementChild?.dataset.file || node.firstElementChild?.dataset.dir;
+}
+
 export function renderFileTree() {
   const s = orderedSpaces().find((x) => x.id === getSelectedSpaceId());
   fileAdd.hidden = !getIsLocal() || !s || !s.folder;
   folderAdd.hidden = !getIsLocal() || !s || !s.folder;
-  if (!s || !s.folder) { setHtml(fileTree, `<div class="fempty">스페이스를 선택하면 파일 트리가 열립니다.</div>`); explorerSpace.textContent = "스페이스 선택"; return; }
+  if (!s || !s.folder) { patchHtml(fileTree, `<div class="fempty">스페이스를 선택하면 파일 트리가 열립니다.</div>`); explorerSpace.textContent = "스페이스 선택"; return; }
   explorerSpace.textContent = s.label;
-  setHtml(fileTree, renderDir(s.folder, 0));
+  patchHtml(fileTree, renderDir(s.folder, 0), fileKey);
 }
 
 // 스페이스 줄마다 바로 아래에 그 스페이스의 에이전트 줄을 끼운다. 에이전트 줄은 herdr/agents 가
 // 등록한 함수가 만들고, 등록한 쪽이 없으면 스페이스 줄만 남는다. herdr 는 앱 셸이라 이름 훅
-// (core/hooks.js, 기능만 채운다) 대신 context-menu 의 registerAgentRenderer 와 같은 등록으로 잇는다.
-// rows(spaceId) → { count, open, html }, hold() → 참이면 지금 다시 그리지 않는다.
+// (core/hooks.js, 기능만 채운다) 대신 context-menu 의 registerSpaceRowClick 와 같은 등록으로 잇는다.
+// rows(spaceId) → { count, open, html }
 let spaceAgents = null;
 export function registerSpaceAgents(provider) { spaceAgents = provider; }
 
+function spaceKey(node) {
+  const data = node.dataset;
+  if (data.subAgent) return JSON.stringify([data.subPane, data.subAgent]);
+  if (data.target) return "agent:" + data.target;
+  if (node.classList.contains("space-row")) return "space:" + data.space;
+  return data.renderKey;
+}
+
 export function renderSpaces() {
-  // 에이전트 이름을 제자리에서 고치는 중이면 다시 그리지 않는다. 그리면 입력칸이 사라진다.
-  if (spaceAgents && spaceAgents.hold()) return;
   const list = orderedSpaces();
   // 스페이스 생성은 셸을 만드는 작업이라 로컬에서만 가능하다(AC5). 원격에서는 버튼을 두지 않는다.
   const addBtn = $("#space-add"); if (addBtn) addBtn.hidden = !getIsLocal();
-  if (!list.length) { setHtml(spaceList, `<div class="fempty">Space 없음</div>`); return; }
+  if (!list.length) { patchHtml(spaceList, `<div class="fempty">스페이스 없음</div>`); return; }
   const renderSpace = (s, afterRow = "") => {
     const sel = s.id === getSelectedSpaceId();
     const st = spaceState(s.status, getLastAgents(), s.id);
@@ -127,7 +137,7 @@ export function renderSpaces() {
       + `<span class="dot ${st}" role="img" aria-label="${STATE_LABEL[st]}" title="${STATE_LABEL[st]}"></span></div>`
       + afterRow + ((ag && ag.html) || "");
   };
-  setHtml(spaceList, callHook("worktrees.renderSpaces", list, renderSpace) ?? list.map((s) => renderSpace(s)).join(""));
+  patchHtml(spaceList, callHook("worktrees.renderSpaces", list, renderSpace) ?? list.map((s) => renderSpace(s)).join(""), spaceKey);
 }
 
 export function requestDir(p) { if (p && !dirCache.has(p)) { dirCache.set(p, "loading"); wsSend({ type: "fs.list", path: p }); } }

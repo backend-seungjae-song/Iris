@@ -16,3 +16,9 @@
   background:#2b5f96; color:#fff; font-size:var(--fs); cursor:pointer; }
 .hoff-close { flex:none; padding:7px 10px; border-radius:var(--r-blk); border:1px solid #3a3e47;
   background:transparent; color:#a8adb8; font-size:var(--fs); cursor:pointer; }
+
+@media (max-width: 640px) {
+  .hoff-bar { box-sizing:border-box; width:92vw; flex-wrap:wrap; gap:8px; }
+  .hoff-text { flex-basis:calc(100% - 30px); }
+  .hoff-go, .hoff-close { max-width:100%; white-space:normal; }
+}

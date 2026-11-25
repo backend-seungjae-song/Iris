@@ -116,6 +116,7 @@ class LiveChromeIpc {
     }
     this.ctx = ctx;
     this.clients = new Map();
+    this.documents = new Map();
     this.ownerByTab = new Map();
     this.openNativeFn = openNativeFn;
     this.backend = createBackend({
@@ -133,10 +134,28 @@ class LiveChromeIpc {
     const key = String(sender.id);
     if (this.clients.has(key)) return key;
     this.clients.set(key, sender);
-    sender.once?.("destroyed", () => {
+    const release = () => {
+      if (this.documents.get(key) !== release) return;
+      this.documents.delete(key);
       this.clients.delete(key);
-      if (this.clients.size === 0) void this.backend.disconnect().catch(() => {});
-    });
+      sender.off?.("destroyed", release);
+      sender.off?.("did-start-navigation", navigate);
+      const releases = [];
+      for (const [id, owner] of this.ownerByTab) {
+        if (owner !== key) continue;
+        this.ownerByTab.delete(id);
+        releases.push(this.backend.releaseTab(id));
+      }
+      void Promise.allSettled(releases).then(() => {
+        if (!this.clients.size) return this.backend.disconnect();
+      }).catch(() => {});
+    };
+    const navigate = (event, _url, inPlace, mainFrame) => {
+      if ((event?.isMainFrame ?? mainFrame) && !(event?.isSameDocument ?? inPlace)) release();
+    };
+    this.documents.set(key, release);
+    sender.once?.("destroyed", release);
+    sender.on?.("did-start-navigation", navigate);
     return key;
   }
 
@@ -189,12 +208,13 @@ class LiveChromeIpc {
   async connect(event) {
     const sender = this.trusted(event);
     const key = this.track(sender);
+    const document = this.documents.get(key);
     try {
       const result = await this.backend.connect();
-      if (!result?.ok && ![...this.ownerByTab.values()].includes(key)) this.clients.delete(key);
+      if (!result?.ok && ![...this.ownerByTab.values()].includes(key)) document();
       return safeResult(result);
     } catch (error) {
-      if (![...this.ownerByTab.values()].includes(key)) this.clients.delete(key);
+      if (![...this.ownerByTab.values()].includes(key)) document();
       return safeFailure(error);
     }
   }
@@ -202,14 +222,21 @@ class LiveChromeIpc {
   async open(event, payload) {
     const sender = this.trusted(event);
     const key = String(sender.id);
-    if (!this.clients.has(key)) return safeFailure({ code: "not-connected" });
+    const document = this.documents.get(key);
+    if (!document) return safeFailure({ code: "not-connected" });
     try {
       const result = await this.backend.openTab({
         url: payload?.url,
         owner: `renderer:${key}`,
         screencast: payload?.screencast,
       });
-      if (result?.ok && typeof result.id === "string") this.ownerByTab.set(result.id, key);
+      if (result?.ok && typeof result.id === "string") {
+        if (this.documents.get(key) !== document) {
+          await this.backend.releaseTab(result.id);
+          return safeFailure({ code: "not-connected" });
+        }
+        this.ownerByTab.set(result.id, key);
+      }
       return safeResult(result);
     } catch (error) {
       return safeFailure(error, "target-unavailable");
