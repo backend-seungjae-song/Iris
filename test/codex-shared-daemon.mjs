@@ -227,13 +227,13 @@ test("죽은 Codex daemon의 socket, PID, lease를 함께 회수한다", async (
   const stateDir = await mkdtemp(path.join(tmpdir(), "iris-codex-reap-"));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
   process.env.IRIS_STATE_DIR = stateDir;
-  const id = "bbbbbbbbbbbbbbbbbbbbbbbb";
+  const id = randomBytes(12).toString("hex");
   const socketDir = path.join("/tmp", `iris-codex-${process.getuid()}`);
   const socketPath = path.join(socketDir, `${id}.sock`);
   const endpoint = createServer();
   endpoint.on("connection", socket => socket.destroy());
   t.after(() => endpoint.listening ? new Promise(resolve => endpoint.close(() => resolve())) : undefined);
-  await rm(socketPath, { force: true });
+  await mkdir(socketDir, { recursive: true, mode: 0o700 });
   endpoint.listen(socketPath);
   await once(endpoint, "listening");
   const socketInfo = await stat(socketPath);
