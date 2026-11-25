@@ -291,7 +291,7 @@ function makeSurface(rec) {
   surface.spellcheck = false;
   surface.setAttribute("contenteditable", "true");
   surface.setAttribute("role", "application");
-  surface.setAttribute("aria-label", "진짜 Chrome 미러");
+  surface.setAttribute("aria-label", "Chrome 미러");
   const stack = select && select("#wv-stack");
   if (!stack) throw new Error("Chrome 미러 표면을 붙일 컨테이너가 없습니다.");
   stack.appendChild(surface);
@@ -388,7 +388,7 @@ function makeLiveControls(state) {
     } else if (result?.ok) {
       state.nativeMode = true;
       state.liveConnected = false;
-      bar.__label.textContent = "Chrome 창에서 작업 중입니다. 끝난 뒤 명시적으로 다시 연결하세요.";
+      bar.__label.textContent = "Chrome 창에서 작업 중입니다. 끝나면 ‘다시 연결’을 누르세요.";
       native.textContent = "다시 연결";
     } else {
       bar.__label.textContent = result?.message || "Chrome 연결을 바꾸지 못했습니다.";
@@ -470,7 +470,7 @@ function ensureBackend(state) {
       if (state.transport === "live") {
         if (!state.liveConnected) {
           if (!state.connectNeeded) {
-            failStart(state, "연결이 끝났습니다. 사용자가 다시 연결해야 합니다.");
+            failStart(state, "연결이 종료됐습니다. 다시 연결해 주세요.");
             return;
           }
           state.connectNeeded = false;
@@ -669,7 +669,7 @@ function receiveLiveState(value) {
       if (state.controls) {
         state.controls.__label.textContent = value.state === "tab-unavailable"
           ? "이전에 만든 Chrome 탭을 찾지 못했습니다. 새 연결을 선택해 주세요."
-          : "Chrome 화면 연결이 끝났습니다. 사용자가 다시 연결할 수 있습니다.";
+          : "Chrome 화면 연결이 종료됐습니다. 다시 연결할 수 있습니다.";
         state.controls.__native.textContent = "다시 연결";
       }
     }
@@ -704,7 +704,7 @@ function mirrorTabItem(rec) {
   if (!rec || rec.tabId == null) return null;
   const state = mirrorsByTab.get(rec.tabId);
   if (state) {
-    return { label: "진짜 Chrome 미러 끄기", act: () => leaveMirror(state.rec, { restoreUrl: state.url }) };
+    return { label: "Chrome 미러 끄기", act: () => leaveMirror(state.rec, { restoreUrl: state.url }) };
   }
   let url = rec.url || "";
   try { if (!url && rec.el?.getURL) url = rec.el.getURL() || ""; } catch {}
@@ -712,7 +712,7 @@ function mirrorTabItem(rec) {
   if (!parsed) return null;
   // 미러는 전용 빈 프로필이라 계정·확장이 없음. 탭과 짝지은 실제 Chrome 프로필 창으로 엶(Chrome 은 그 프로필의 원격 디버깅을 막음)
   // 짝지은 프로필이 있으면 넘기기 기능이 열고, 창을 닫을 때 쿠키를 가져옴
-  return { label: "크롬으로 열기", act: () => {
+  return { label: "Chrome에서 열기", act: () => {
     if (callHook("handoff.openSynced", rec) === true) return;
     host.openInChrome({ url: parsed.href, source: callHook("handoff.chromeSource", rec) || "" });
   } };

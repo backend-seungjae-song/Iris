@@ -16,6 +16,6 @@ void main() {
     expect(requestAnswerResultText('expired'), '만료됨');
     expect(requestAnswerResultText('failed'), '실패');
     expect(agentMessageResultText('sent'), '전송함');
-    expect(agentStopResultText('sent'), '중지 요청을 보냄');
+    expect(agentStopResultText('sent'), '중지 요청함');
   });
 }

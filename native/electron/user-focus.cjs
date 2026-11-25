@@ -10,6 +10,8 @@
 //   claimWindowFocus(wc) → Promise<boolean>: 그 창의 앱 셸에서 이 탭 webview 에 focus(). canPress 일 때만 부를 것
 //   borrowWindowFocus(wc) → Promise<boolean>: 지금 포커스 요소를 저장하고 이 탭 webview 에 focus()
 //   returnWindowFocus(wc) → Promise<"restored"|"blurred"|"moved"|null>: 저장한 요소로 포커스 반환
+//   armAiFocus(wc) → Promise<boolean>: 뒤에 깐 AI 탭 조작 시작. 지금 포커스 요소를 저장하고, 그 탭 webview 가 포커스를 받으면 바로 다음 태스크에서 되돌리는 감시를 켬
+//   releaseAiFocus(wc) → Promise<"restored"|"blurred"|"kept"|null>: 조작 끝. 감시를 끄고, 포커스가 아직 그 탭에 있고 그 탭이 뒤에 깔린 채일 때만 되돌림
 //
 // 의존 대상
 //   wc.hostWebContents.executeJavaScript 하나와 호출부가 주는 windowFocused(host). Electron require 없음
@@ -26,6 +28,11 @@
 //   빌리기: QA 탭이 사용자가 쓰는 창(세션 탭 그룹)에 있을 때 진짜 입력 동안만 포커스를 가져오고 바로 반환
 //   빌린 사이 사용자가 친 키는 QA 탭으로 감(사용자 2026-10-28 세션 탭 진행 선택)
 //   반환 직전 포커스가 이 탭이 아니면 사용자가 옮긴 것이라 그대로 둠("moved")
+//   뒤에 깐 AI 탭(사용자가 누를 수 없음)은 CDP 누르기가 창 안 포커스를 옮기므로 arm 으로 저장하고 감시해 포커스가 옮겨진 직후 되돌리고, release 가 남은 것을 되돌림
+//   탭마다 따로 저장(wc id 표). 다른 AI 탭이 아직 되돌리는 중이라 포커스가 뒤 탭 webview 에 있으면 그 탭의 저장값을 이어받음
+//   사용자가 그 탭을 앞으로 올려(ai-behind 해제) 직접 쓰는 포커스는 되돌리지 않음
+//   빌리기·claim 은 의도한 포커스 이동이라 __irisQaBorrowed 로 감시에서 제외
+//   뒤에 깐 탭의 CDP insertText·키는 그 창의 포커스 위젯으로 가므로(실측: 포커스가 다른 칸이면 그 칸에 글이 들어감) 누르기만 빌리지 않음
 //   webview 사이 이동은 앞 요소 blur 뒤 focus 해야 게스트 키 입력도 옮겨 감(blur 없으면 글자가 앞 탭에 남음, 실측)
 //
 // 영향 범위
@@ -62,8 +69,9 @@ async function focusState(wc, { windowFocused = () => true, timeoutMs = DEFAULT_
 
 // QA 입력의 포커스 처리. quiet: 사용자가 최근 키를 치지 않았음
 // - 사용자가 같은 창 다른 곳에서 치는 중에 빌리면 사용자 키가 QA 탭으로 감(사용자 2026-10-29) → 기다림
-function qaFocusPlan(state, quiet) {
-  if (canSendKeys(state)) return "trusted";
+// pointerBehind: 뒤에 깐 AI 탭에 보내는 누르기. 포커스 에뮬레이션으로 도달하므로 빌리거나 기다리지 않음
+function qaFocusPlan(state, quiet, pointerBehind = false) {
+  if (pointerBehind || canSendKeys(state)) return "trusted";
   if (canPress(state)) return "claim";
   return quiet ? "borrow" : "wait";
 }
@@ -80,7 +88,8 @@ async function ownsUserFocus(wc, opts) { return canSendKeys(await focusState(wc,
 
 function claimExpression(wcId) {
   return `(() => { for (const el of document.querySelectorAll("webview")) {
-    try { if (el.getWebContentsId() === ${Number(wcId)}) { el.focus({ preventScroll: true }); return document.activeElement === el; } }
+    try { if (el.getWebContentsId() === ${Number(wcId)}) { document.__irisQaBorrowed = ${Number(wcId)};
+      el.focus({ preventScroll: true }); return document.activeElement === el; } }
     catch (e) {} } return false; })()`;
 }
 
@@ -104,13 +113,54 @@ function borrowExpression(wcId) {
     for (const el of document.querySelectorAll("webview")) {
       try { if (el.getWebContentsId() === ${Number(wcId)}) {
         document.__irisQaPrevFocus = prev === el ? null : prev;
+        document.__irisQaBorrowed = ${Number(wcId)};
         if (prev && prev !== el && typeof prev.blur === "function") prev.blur();
         el.focus({ preventScroll: true }); return document.activeElement === el; } }
       catch (e) {} } return false; })()`;
 }
 
+// 뒤에 깐 AI 탭 조작 중 감시. 같은 표현식 안에서 쓰는 보조 함수를 한 곳에 둠
+const AI_FOCUS_HELPERS = `const S = document.__irisAiFocus || (document.__irisAiFocus = { prev: new Map(), handler: null });
+    const behind = (el) => !!el && el.tagName === "WEBVIEW" && el.classList.contains("ai-behind");
+    const idOf = (el) => { try { return el.getWebContentsId(); } catch (e) { return 0; } };
+    const back = (prev, el) => { if (typeof el.blur === "function") el.blur();
+      if (prev && prev.isConnected !== false && typeof prev.focus === "function") prev.focus({ preventScroll: true }); };`;
+
+function armExpression(wcId) {
+  return `(() => { const id = ${Number(wcId)}; ${AI_FOCUS_HELPERS}
+    if (!S.handler) {
+      // webview 가 포커스를 받을 때는 그 요소에 focus·focusin 이 오지 않고(실측) 앞 포커스 요소의 focusout 만 오며,
+      // 그 시점 activeElement 는 아직 앞 요소라 다음 태스크에서 확인
+      S.check = () => { for (const [wc, prev] of S.prev) {
+        if (document.__irisQaBorrowed === wc) continue;
+        for (const el of document.querySelectorAll("webview")) if (behind(el) && idOf(el) === wc && document.activeElement === el) back(prev, el); } };
+      S.handler = () => setTimeout(S.check, 0);
+      document.addEventListener("focusout", S.handler, true);
+    }
+    const a = document.activeElement;
+    if (!S.prev.has(id)) {
+      let prev = a && a !== document.body && a !== document.documentElement ? a : null;
+      if (behind(a)) { prev = null; for (const v of S.prev.values()) if (v) { prev = v; break; } }
+      S.prev.set(id, prev);
+    }
+    return true; })()`;
+}
+
+function releaseExpression(wcId) {
+  return `(() => { const id = ${Number(wcId)}; ${AI_FOCUS_HELPERS}
+    if (!S.prev.has(id)) return "kept";
+    const prev = S.prev.get(id); S.prev.delete(id);
+    if (!S.prev.size && S.handler) { document.removeEventListener("focusout", S.handler, true); S.handler = null; }
+    if (document.__irisQaBorrowed === id) document.__irisQaBorrowed = 0;
+    let wv = null;
+    for (const el of document.querySelectorAll("webview")) if (idOf(el) === id) { wv = el; break; }
+    if (!wv || document.activeElement !== wv || !behind(wv)) return "kept";
+    back(prev, wv);
+    return prev ? "restored" : "blurred"; })()`;
+}
+
 function returnExpression(wcId) {
-  return `(() => { const prev = document.__irisQaPrevFocus; document.__irisQaPrevFocus = null;
+  return `(() => { const prev = document.__irisQaPrevFocus; document.__irisQaPrevFocus = null; document.__irisQaBorrowed = 0;
     const a = document.activeElement;
     let mine = false; try { mine = !!a && a.tagName === "WEBVIEW" && a.getWebContentsId() === ${Number(wcId)}; } catch (e) {}
     if (!mine) return "moved";
@@ -138,9 +188,16 @@ async function runInHost(wc, expression, timeoutMs, fallback) {
 async function borrowWindowFocus(wc, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return (await runInHost(wc, borrowExpression(wc && wc.id), timeoutMs, false)) === true;
 }
+async function armAiFocus(wc, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  return (await runInHost(wc, armExpression(wc && wc.id), timeoutMs, false)) === true;
+}
+async function releaseAiFocus(wc, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const out = await runInHost(wc, releaseExpression(wc && wc.id), timeoutMs, null);
+  return ["restored", "blurred", "kept"].includes(out) ? out : null;
+}
 async function returnWindowFocus(wc, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const out = await runInHost(wc, returnExpression(wc && wc.id), timeoutMs, null);
   return ["restored", "blurred", "moved"].includes(out) ? out : null;
 }
 
-module.exports = { qaFocusPlan, userQuiet, focusState, canPress, canSendKeys, ownsUserFocus, claimWindowFocus, borrowWindowFocus, returnWindowFocus, focusProbeExpression };
+module.exports = { qaFocusPlan, userQuiet, focusState, canPress, canSendKeys, ownsUserFocus, claimWindowFocus, borrowWindowFocus, armAiFocus, releaseAiFocus, returnWindowFocus, focusProbeExpression };

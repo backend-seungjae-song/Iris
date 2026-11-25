@@ -88,12 +88,12 @@ async function renameProfile(profileId, newName) {
 async function deleteProfile(profileId) {
   const name = profileName(profileId);
   if (!profileId) { showToast("기본 프로필은 삭제할 수 없습니다", { level: "warn" }); acctRefresh(); return; }
-  // 1) 저장된 로그인(자격증명)을 먼저 삭제한다. 실패하면 프로필도 지우지 않고 알린다.
+  // 프로필 목록을 바꾸기 전에 자격증명 삭제와 입력 기록 쓰기 차단
   try {
     if (!(window.acHost && acHost.clearCreds)) throw new Error("자격증명 삭제 불가(로컬 앱에서만)");
-    const result = await acHost.clearCreds(partitionFor(profileId));
+    const result = await acHost.clearCreds(partitionFor(profileId), true);
     if (!(result && result.ok)) throw new Error((result && result.error) || "자격증명 삭제 실패");
-  } catch (e) { showToast("로그인을 지우지 못해 프로필 삭제를 취소했습니다", { level: "err", detail: String(e && e.message || e) }); acctRefresh(); return; }
+  } catch (e) { showToast("프로필 삭제를 시작하지 못했습니다", { level: "err", detail: String(e && e.message || e) }); acctRefresh(); return; }
   // 2) 프로필 목록·Chrome 소스 매핑·스페이스 기본값 정리.
   // 삭제는 전용 연산으로 보낸다. 목록 전체 저장으로 보내면 마지막 하나를 지울 때 빈 목록이 되고,
   // 서버는 빈 목록을 (부팅 경합으로 보고) 거부하므로 지워지지 않는다. 크롬 연결·스페이스 기본값
@@ -118,7 +118,7 @@ async function deleteProfile(profileId) {
   } catch { purged = false; }
   updateProfileBtn(); acctRefresh();
   showToast(purged ? `프로필 삭제됨: ${name} (로그인 포함)`
-    : `프로필 삭제됨: ${name}. 다만 저장소를 비우지 못했습니다(앱 재시작 후 다시 시도)`, { level: purged ? "ok" : "err" });
+    : `프로필 삭제됨: ${name}. 저장소 정리를 완료하지 못했습니다.`, { level: purged ? "ok" : "err" });
 }
 // 다시 불러오는 동안 보일 직전 응답
 // - 비우고 그리면 "확인 중…"·합계 0·Chrome 상자 스피너가 잠깐 비쳐 깜빡임
@@ -283,7 +283,7 @@ function wireAccounts() {
         else {
           // 비밀번호를 가져오지 않은 것은 실패가 아니라 선택이므로, 화면에 그대로 구분해 표시한다.
           const pw = res && res.loginsSkipped ? "로그인 미포함" : `로그인 ${(res && res.logins) || 0}`;
-          showToast(`가져오기 완료: ${label} (쿠키 ${(res && res.imported) || 0}개 추가, 이미 있던 ${(res && res.kept) || 0}개는 그대로, ${pw})`, { level: "ok" }); acctRefresh();
+          showToast(`가져오기 완료: ${label} (쿠키 ${(res && res.imported) || 0}개 추가, 기존 ${(res && res.kept) || 0}개 유지, ${pw})`, { level: "ok" }); acctRefresh();
         }
       } catch (error) {
         imp.classList.add("acct-btn-danger");

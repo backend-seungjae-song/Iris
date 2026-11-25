@@ -255,7 +255,7 @@ window.addEventListener("submit", (e) => {
       ai.type = "button"; ai.setAttribute("data-ac-ai", "1");
       var paintAi = function () {
         ai.textContent = "AI";
-        ai.title = acc.ai ? "AI가 이 계정으로 로그인할 수 있습니다 — 눌러서 잠금" : "AI에게는 잠겨 있습니다 — 눌러서 허용";
+        ai.title = acc.ai ? "AI 로그인 허용됨. 누르면 잠금" : "AI 로그인 잠김. 누르면 허용";
         ai.style.cssText = "flex:none;font:inherit;font-size:10px;font-weight:700;letter-spacing:.03em;padding:2px 7px;border-radius:999px;cursor:pointer;"
           + (acc.ai ? "background:#2B7FD4;color:#F2F8FC;border:1px solid #2B7FD4;" : "background:transparent;color:#9DB4C4;border:1px solid #C7D9E6;");
       };

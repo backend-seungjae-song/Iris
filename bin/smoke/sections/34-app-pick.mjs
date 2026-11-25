@@ -474,7 +474,7 @@ check("서버가 다시 뜨면 열린 탭을 전부 다시 알린다", () => {
   // 실행기 재연결(browser-tabs-resync)도 같은 보고를 쓰므로 reportAllBrowserTabs 로 묶여 있음
   const seg = fnBody(mainJs, "handleWsOpen");
   const all = fnBody(mainJs, "reportAllBrowserTabs");
-  return /setTimeout\(reportAllBrowserTabs, \d+\)/.test(seg)
+  return /reportAllBrowserTabs\(\)/.test(seg)
     && /for \(const tid of getWebviewIds\(\)\) reportTabWc\(getWebview\(tid\), tid\)/.test(all)
     && /reportActiveBrowserWc\(\)/.test(all);
 });

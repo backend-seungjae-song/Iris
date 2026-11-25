@@ -318,11 +318,131 @@ function decodeCodex(rec, fallbackId) {
   return [];
 }
 
+// ── Antigravity transcript ──────────────────────────────────────────────────
+function unwrapAgyArgs(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return boundInput(args);
+  const out = {};
+  for (const [k, v] of Object.entries(args).slice(0, 50)) {
+    if (typeof v === "string") {
+      try { out[k] = boundInput(JSON.parse(v)); } catch { out[k] = clip(v, LIMITS.inputString); }
+    } else {
+      out[k] = boundInput(v);
+    }
+  }
+  return out;
+}
+
+function agyUserText(content) {
+  if (typeof content !== "string") return "";
+  const m = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/.exec(content);
+  if (m) return m[1].trim();
+  return content.replace(/<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>[\s\S]*?<\/(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>/g, "").trim();
+}
+
+function mapAgyTool(name, input) {
+  const args = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  if (name === "run_command" && typeof args.CommandLine === "string") {
+    return {
+      name: "Bash",
+      input: {
+        command: args.CommandLine,
+        ...(typeof args.toolSummary === "string" && args.toolSummary ? { description: args.toolSummary } : {}),
+      },
+    };
+  }
+  if (name === "read_file" && typeof args.Path === "string") {
+    const start = Number(args.StartLine);
+    const end = Number(args.EndLine);
+    return {
+      name: "Read",
+      input: {
+        file_path: args.Path,
+        ...(Number.isFinite(start) && start > 0 ? { offset: start } : {}),
+        ...(Number.isFinite(start) && Number.isFinite(end) && end >= start ? { limit: end - start + 1 } : {}),
+      },
+    };
+  }
+  if (name === "edit_file" && typeof args.Path === "string") {
+    return {
+      name: "Edit",
+      input: {
+        file_path: args.Path,
+        old_string: typeof args.Target === "string" ? args.Target : "",
+        new_string: typeof args.Replacement === "string" ? args.Replacement : "",
+      },
+    };
+  }
+  if (name === "write_file" && typeof args.Path === "string") {
+    return {
+      name: "Write",
+      input: {
+        file_path: args.Path,
+        content: typeof args.Content === "string" ? args.Content : "",
+      },
+    };
+  }
+  if (name === "search_web" && typeof args.query === "string") {
+    return { name: "WebSearch", input: { query: args.query } };
+  }
+  return { name, input };
+}
+
+function decodeAgy(rec, fallbackId) {
+  const id = Number.isInteger(rec.step_index) ? `s${rec.step_index}` : fallbackId;
+  const time = ts(rec.created_at);
+  if (rec.type === "USER_INPUT") {
+    if (rec.source && rec.source !== "USER_EXPLICIT") return [];
+    const text = agyUserText(rec.content);
+    return text ? [{ id, role: "user", blocks: [{ type: "text", text: clip(text, LIMITS.text) }], ts: time }] : [];
+  }
+  if (rec.type === "PLANNER_RESPONSE") {
+    const out = [];
+    if (typeof rec.thinking === "string" && rec.thinking.trim()) {
+      out.push({ id: `${id}:r`, role: "reasoning", blocks: [{ type: "text", text: clip(rec.thinking.trim(), LIMITS.text) }], ts: time });
+    }
+    const blocks = [];
+    if (typeof rec.content === "string" && rec.content.trim()) {
+      blocks.push({ type: "text", text: clip(rec.content, LIMITS.text) });
+    }
+    if (Array.isArray(rec.tool_calls)) {
+      rec.tool_calls.forEach((tc, idx) => {
+        if (!tc || typeof tc.name !== "string") return;
+        const mapped = mapAgyTool(tc.name, unwrapAgyArgs(tc.args));
+        blocks.push({ type: "tool-call", id: `${id}:tc${idx}`, name: mapped.name, input: mapped.input });
+      });
+    }
+    if (blocks.length) out.push({ id, role: "assistant", blocks, ts: time });
+    return out;
+  }
+  if (rec.type === "GENERIC" && rec.source === "MODEL") {
+    const text = typeof rec.content === "string" ? rec.content.trim() : "";
+    if (!text) return [];
+    const isError = /Encountered error|Command exited with code [1-9]/.test(text);
+    return [{ id, role: "tool", blocks: [{ type: "tool-result", id: null, output: clip(text, LIMITS.toolResult), isError }], ts: time }];
+  }
+  return [];
+}
+
+// Antigravity transcript 의 GENERIC 도구 결과는 call id 가 없으므로 앞선 PLANNER_RESPONSE 의 tool-call 순서대로 짝지음
+export function pairAgyToolResults(messages, pendingIds = []) {
+  for (const m of messages) {
+    if (!m || !Array.isArray(m.blocks)) continue;
+    if (m.role === "user") { pendingIds.length = 0; continue; }
+    for (const b of m.blocks) {
+      if (b.type === "tool-call" && b.id) pendingIds.push(b.id);
+      else if (b.type === "tool-result" && !b.id && pendingIds.length) b.id = pendingIds.shift();
+    }
+  }
+  return messages;
+}
+
 export function decodeLine(kind, line, fallbackId) {
   if (!line || line.length < 2) return [];
   const rec = parse(line);
   if (!rec) return [];
-  const out = kind === "codex" ? decodeCodex(rec, fallbackId) : decodeClaude(rec, fallbackId);
+  const out = kind === "codex" ? decodeCodex(rec, fallbackId)
+    : kind === "agy" ? decodeAgy(rec, fallbackId)
+      : decodeClaude(rec, fallbackId);
   return out.filter((m) => !isNoiseMessage(m));
 }
 
@@ -347,7 +467,7 @@ function decodeRange(kind, buf, base) {
 
 // [stopAt, end) 구간을 파일 끝 쪽부터 거꾸로 읽어 메시지 want 개를 모은다. end 는 줄 경계여야 한다.
 // 돌려주는 start 는 포함한 첫 줄의 시작 위치다. 다음 "이전 더 읽기"가 거기서 이어진다.
-export function readTailWindow(source, { end, stopAt = 0, want, kind }) {
+export function readTailWindow(source, { end, stopAt = 0, want, kind, pendingToolIds = null }) {
   let pos = end;
   let carry = Buffer.alloc(0);
   let entries = [];
@@ -376,11 +496,13 @@ export function readTailWindow(source, { end, stopAt = 0, want, kind }) {
     trimmed = true;
   }
   const start = exhausted && !trimmed ? stopAt : (entries.length ? entries[0].off : pos);
-  return { messages: entries.flatMap((e) => e.msgs), start, hasOlder: start > stopAt };
+  const messages = entries.flatMap((e) => e.msgs);
+  if (kind === "agy") pairAgyToolResults(messages, pendingToolIds || []);
+  return { messages, start, hasOlder: start > stopAt };
 }
 
 // from 부터 파일 끝까지. 마지막 줄이 아직 쓰이는 중(\n 없음)이면 그 줄은 다음 회차로 미룬다.
-export function readForward(source, from, kind) {
+export function readForward(source, from, kind, pendingToolIds = null) {
   const size = source.size;
   if (size <= from) return { messages: [], end: from };
   const buf = Buffer.alloc(size - from);
@@ -389,7 +511,9 @@ export function readForward(source, from, kind) {
   const last = view.lastIndexOf(10);
   if (last < 0) return { messages: [], end: from };
   const entries = decodeRange(kind, view.subarray(0, last), from);
-  return { messages: entries.flatMap((e) => e.msgs), end: from + last + 1 };
+  const messages = entries.flatMap((e) => e.msgs);
+  if (kind === "agy") pairAgyToolResults(messages, pendingToolIds || []);
+  return { messages, end: from + last + 1 };
 }
 
 // 파일 크기에서 마지막 완성 줄의 끝. 쓰이는 중인 마지막 줄을 첫 창에 넣지 않는다.

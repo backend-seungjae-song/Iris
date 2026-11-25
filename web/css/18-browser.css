@@ -33,10 +33,13 @@ body.browser-mode #wv-dock { display:grid; }
    사이트가 자기 배경을 칠하면 그것이 이 위를 덮으므로 다크 테마 사이트는 그대로 다크로 보인다. */
 .wv-wrap webview { position:absolute; inset:0; width:100%; height:100%; display:none; border:0; background:#fff; }
 .wv-wrap webview.active { display:flex; }
-/* QA 회차가 잡은 탭도 사람이 앞에 띄우면 그대로 누르고 입력한다. 뒤에 깔린 QA 탭만 입력을 받지 않는다. */
-.wv-wrap webview.qa-owned:not(.active) { pointer-events:none; }
-.wv-wrap webview.qa-owned:not(.active) { display:flex; z-index:0; }
+/* AI 가 쓰는 탭(QA 소유·최근 AI 사용)은 숨길 때도 활성 탭과 같은 위치·크기로 뒤에 깐다. 페이지 크기가
+   숨은 동안에도 사람이 열었을 때와 같아, 크기를 대신 거는 보정이 필요 없다. 사람이 앞에 띄우면 그대로
+   누르고 입력하고, 뒤에 깔린 동안만 입력을 받지 않는다. */
+.wv-wrap webview.ai-behind:not(.active) { display:flex; z-index:0; pointer-events:none; }
 .wv-wrap webview.active { z-index:1; }
+/* 크기를 지정한 탭 옆에서는 뒤에 깐 탭도 같은 상자로 깔아, 앞 탭이 완전히 덮고 남는 공간에 비치지 않게 한다 */
+.wv-wrap.sized webview.ai-behind:not(.active) { inset:auto; left:var(--vleft); top:var(--vtop); width:var(--vw); height:var(--vh); }
 .browserview.picking .wv-wrap { outline:2px solid var(--focus); outline-offset:-2px; }
 /* 크기를 지정하면 크롬 기기 모드와 같다. 화면 자체가 그 크기가 되어 가운데 놓이고, 남는 공간은
    빈 배경이다. 확대·축소는 걸지 않는다(배율을 걸면 크기 조절이 아니라 줌이 된다). */
@@ -87,6 +90,7 @@ body.browser-mode #wv-dock { display:grid; }
 /* 좁은 칸(분할 등)에서 칸 밖으로 넘치지 않게 줄바꿈 */
 .ub-tools { display:flex; flex-wrap:wrap; align-items:center; gap:2px; flex:none; max-width:100%; }
 .ub-sep { width:1px; height:16px; background:var(--line); flex:none; margin:0 2px; }
+#wv-zoom { color:var(--muted); font:500 var(--fs-xs)/1 var(--mono); padding:0 4px; }
 .urlbar svg { width:14px; height:14px; flex:none; display:block; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
 /* 크기를 지정해 둔 상태. 지금 보는 것이 실제 크기가 아니라는 표시라 값을 글자로 붙이고 눈에 띄게 둔다. */
 .urlbar .ico.on { width:auto; display:flex; gap:5px; padding:0 8px; border:1px solid var(--accent); color:var(--accent); font:500 var(--fs-s)/1 var(--mono); }

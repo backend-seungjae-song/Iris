@@ -1,0 +1,66 @@
+diff --git a/lib/xlsx/xform/sheet/data-validations-xform.js b/lib/xlsx/xform/sheet/data-validations-xform.js
+index 58d6f098aa3e2e712d23185356bd861d76e4e99f..a8db59794ce74253a8fb20fd46f32edd489cad18 100644
+--- a/lib/xlsx/xform/sheet/data-validations-xform.js
++++ b/lib/xlsx/xform/sheet/data-validations-xform.js
+@@ -94,12 +94,18 @@ function optimiseDataValidations(model) {
+ }
+ 
+ class DataValidationsXform extends BaseXform {
++  constructor(options = {}) {
++    super();
++    this.bounds = options.validationBounds;
++    this.preserveRanges = options.preserveValidationRanges;
++  }
++
+   get tag() {
+     return 'dataValidations';
+   }
+ 
+   render(xmlStream, model) {
+-    const optimizedModel = optimiseDataValidations(model);
++    const optimizedModel = Array.isArray(model) ? model : optimiseDataValidations(model);
+     if (optimizedModel.length) {
+       xmlStream.openNode('dataValidations', {count: optimizedModel.length});
+ 
+@@ -156,7 +162,7 @@ class DataValidationsXform extends BaseXform {
+   parseOpen(node) {
+     switch (node.name) {
+       case 'dataValidations':
+-        this.model = {};
++        this.model = this.preserveRanges ? [] : {};
+         return true;
+ 
+       case 'dataValidation': {
+@@ -213,11 +219,19 @@ class DataValidationsXform extends BaseXform {
+           delete this._dataValidation.formulae;
+           delete this._dataValidation.operator;
+         }
++        if (this.preserveRanges) {
++          this.model.push({...this._dataValidation, sqref: this._address});
++          return true;
++        }
+         // The four known cases: 1. E4:L9 N4:U9  2.E4 L9  3. N4:U9  4. E4
+         const list = this._address.split(/\s+/g) || [];
+         list.forEach(addr => {
+           if (addr.includes(':')) {
+             const range = new Range(addr);
++            if (this.bounds) {
++              range.bottom = Math.min(range.bottom, this.bounds.rows);
++              range.right = Math.min(range.right, this.bounds.cols);
++            }
+             range.forEachAddress(address => {
+               this.model[address] = this._dataValidation;
+             });
+diff --git a/lib/xlsx/xform/sheet/worksheet-xform.js b/lib/xlsx/xform/sheet/worksheet-xform.js
+index b38930042cbb05dccd01c46a9adacb7a9fc59dba..9e5228b3d3840cd6f68963ea8ade48d9747834e3 100644
+--- a/lib/xlsx/xform/sheet/worksheet-xform.js
++++ b/lib/xlsx/xform/sheet/worksheet-xform.js
+@@ -122,7 +122,7 @@ class WorkSheetXform extends BaseXform {
+         childXform: new HyperlinkXform(),
+       }),
+       pageMargins: new PageMarginsXform(),
+-      dataValidations: new DataValidationsXform(),
++      dataValidations: new DataValidationsXform(options),
+       pageSetup: new PageSetupXform(),
+       headerFooter: new HeaderFooterXform(),
+       printOptions: new PrintOptionsXform(),

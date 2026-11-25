@@ -534,7 +534,7 @@ class _AgentHomeViewState extends State<AgentHomeView> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 40, 20, 0),
                     child: Text(
-                      '열려 있는 세션이 없습니다.',
+                      '열린 세션이 없습니다.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: colors.muted, fontSize: 15),
                     ),
@@ -1017,7 +1017,7 @@ class _QuestionEmpty extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '새 질문이 오면 알림으로 알려 줍니다.',
+                '새 질문이 오면 알림을 보냅니다.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: colors.muted,
@@ -1364,7 +1364,7 @@ class _WaitingTerminalCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           IrisButton(
-            label: agent.question ? '대화창으로 이동' : '터미널에서 답하기',
+            label: agent.question ? '대화로 이동' : '터미널에서 답하기',
             tone: IrisButtonTone.primary,
             height: 36,
             expand: false,
@@ -1643,7 +1643,7 @@ class _RequestCardState extends State<_RequestCard> {
       const SizedBox(width: 6),
       IrisButton(
         key: Key('home-human-done-${widget.request.ref}'),
-        label: '다 했음',
+        label: '완료',
         tone: IrisButtonTone.primary,
         height: 36,
         expand: false,
@@ -2164,7 +2164,7 @@ class _AgentRow extends StatelessWidget {
 String _actionLabel(RemoteAgent agent, String status) {
   if (agent.kind == 'terminal') return '열기';
   return switch (status) {
-    'working' => '지켜보기',
+    'working' => '진행 보기',
     'done' => '결과 보기',
     _ => '열기',
   };

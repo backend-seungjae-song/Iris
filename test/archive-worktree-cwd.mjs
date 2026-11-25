@@ -10,6 +10,7 @@ process.env.IRIS_STATE_DIR = path.join(root, "state");
 const archive = await import("../server/archive.js");
 const { initArchiveHandlers, handleArchive } = await import("../server/archive-handlers.js");
 const { initRuntimeState, replace } = await import("../server/runtime-state.js");
+const { reserveManagedPane } = await import("../server/paseo-ui/managed-pane.js");
 test.after(() => { archive.flushNow(); fs.rmSync(root, { recursive: true, force: true }); });
 
 function fixture({ live = false, paneList, paneSendText } = {}) {
@@ -23,6 +24,7 @@ function fixture({ live = false, paneList, paneSendText } = {}) {
   replace({ state: [], workspaces: live ? [{ id: "live", folder: base }] : [], tabs: {} });
   initArchiveHandlers({ broadcast() {}, herdr: {
     paneList: paneList || (async () => [{ pane_id: "old-pane", tab_id: "old-tab", cwd }]),
+    paneClose: async (id) => calls.push(["paneClose", id]),
     workspaceClose: async (id) => calls.push(["close", id]),
     workspaceCreate: async (options) => { calls.push(["workspace", options]); return {
       workspace: { workspace_id: "restored" }, tab: { tab_id: "spare-tab" }, root_pane: { pane_id: "spare-pane", cwd: base },
@@ -35,6 +37,29 @@ function fixture({ live = false, paneList, paneSendText } = {}) {
   const dispatch = (msg) => new Promise((resolve) => { completed = resolve; handleArchive(ws, msg); });
   return { base, cwd, calls, messages, dispatch };
 }
+
+test("Paseo에서 연 세션은 기본 CLI 복원 명령으로 보관할 수 없다", async () => {
+  const f = fixture();
+  replace({ state: [{ agent: "claude", managedProvider: "claude", paneId: "old-pane", sessionUuid: "paseo-agent-id" }] });
+
+  await f.dispatch({ type: "archive.agent", paneId: "old-pane" });
+
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(archive.list(), []);
+  assert.match(f.messages.at(-1)?.message, /Paseo/);
+});
+
+test("스페이스 보관은 목록에 아직 표시되지 않은 Paseo pane도 열어 둔다", async () => {
+  const f = fixture({ paneList: async () => [{ pane_id: "launching-pane", terminal_id: "managed-terminal", tab_id: "new-tab", cwd: f.cwd }] });
+  reserveManagedPane("prior-pane", "claude", "1.0.0", undefined, "managed-terminal");
+  replace({ workspaces: [{ id: "old", folder: f.base }] });
+
+  await f.dispatch({ type: "archive.space", workspaceId: "old" });
+
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(archive.list(), []);
+  assert.match(f.messages.at(-1)?.message, /Paseo/);
+});
 
 test("스페이스 보관과 복원은 워크트리 터미널의 폴더를 유지한다", async () => {
   const f = fixture();

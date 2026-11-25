@@ -14,7 +14,7 @@ class Socket extends EventEmitter {
   terminate() { this.emit("close"); }
 }
 
-test("transport는 재등록 상태, worker 세대 제어, relay 명령 메타를 전달한다", async () => {
+test("transport는 앱 인증, 재등록 상태, worker 세대 제어, relay 명령 메타를 전달한다", async () => {
   const sockets = [];
   class WebSocket { constructor() { const socket = new Socket(); sockets.push(socket); return socket; } }
   const accepted = [], retired = [], executions = [], replayed = [], deliveries = [];
@@ -43,18 +43,19 @@ test("transport는 재등록 상태, worker 세대 제어, relay 명령 메타�
     setTimeoutFn() {},
     log() {}, error() {},
   });
-  transport.setupCdpControl({ fromId() {} });
+  transport.setupCdpControl({ fromId() {} }, undefined, () => "fixture");
   transport.ctlSend({ type: "browser-frame-origins", wc: 7, origins: ["https://stale.test"] },
     (delivered) => deliveries.push(delivered));
   const socket = sockets[0];
   socket.readyState = 1;
   socket.emit("open");
   assert.equal(replayed.length, 1);
-  assert.deepEqual(socket.sent.slice(0, 3).map((message) => message.type),
-    ["cdp-executor-register", "browser-frame-origins", "browser-frame-origins"]);
-  assert.deepEqual(socket.sent[0].features, ["worker-command-unit"]);
-  assert.deepEqual(socket.sent[1].origins, ["https://stale.test"]);
-  assert.deepEqual(socket.sent[2].origins, ["https://a.test"]);
+  assert.deepEqual(socket.sent.slice(0, 4).map((message) => message.type),
+    ["app-auth", "cdp-executor-register", "browser-frame-origins", "browser-frame-origins"]);
+  assert.equal(socket.sent[0].token, "fixture");
+  assert.deepEqual(socket.sent[1].features, ["worker-command-unit"]);
+  assert.deepEqual(socket.sent[2].origins, ["https://stale.test"]);
+  assert.deepEqual(socket.sent[3].origins, ["https://a.test"]);
   assert.deepEqual(deliveries, [true]);
 
   const relayEvent = { workerGeneration: "boot:1", subscriptionId: "sub-1", eventSeq: 1,

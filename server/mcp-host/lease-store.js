@@ -8,11 +8,31 @@ const scopes = (value) => Array.isArray(value)
   ? [...new Set(value.filter((item) => typeof item === "string" && item.length > 0 && item.length <= 200))]
   : [];
 
-export function createHostLeaseStore({ now = Date.now } = {}) {
+export function createHostLeaseStore({ now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
+  sweepMs = 60_000 } = {}) {
   const leases = new Map();
   const qaGrants = createQaGrants({ now });
+  let expiryTimer = null;
+
+  function scheduleExpiry() {
+    if (expiryTimer || !leases.size) return;
+    const next = Math.min(...[...leases.values()].map((lease) => lease.expiresAt));
+    const delay = Math.max(0, Math.min(Number(sweepMs) || 60_000, next - now()));
+    expiryTimer = setTimer(() => {
+      expiryTimer = null;
+      pruneExpired();
+    }, delay);
+    expiryTimer?.unref?.();
+  }
+
+  function pruneExpired(timestamp = now()) {
+    for (const [id, lease] of leases) if (lease.expiresAt <= timestamp) leases.delete(id);
+    scheduleExpiry();
+    return leases.size;
+  }
 
   function grant(identity, input = {}) {
+    pruneExpired();
     if (input.fixTree || input.repo) return qaGrants.approve(input, identity.session);
     if (!identity.run) throw hostError("RUN_DENIED", "실행기 lease에는 QA 회차가 필요합니다.");
     if (typeof input.executor !== "string" || !input.executor) {
@@ -28,10 +48,12 @@ export function createHostLeaseStore({ now = Date.now } = {}) {
     const id = `lease-${crypto.randomUUID()}`;
     leases.set(id, { id, session: identity.session, run: identity.run, executor: input.executor,
       scope: allowed, expiresAt });
+    scheduleExpiry();
     return { leaseId: id, executor: input.executor, scope: allowed, expiresAt };
   }
 
   function check(identity, input = {}) {
+    pruneExpired();
     if (input.renew === true) return qaGrants.renew(input, identity.session);
     if (input.forRun === true) return qaGrants.forRun(identity.session, input.repo, input.charter);
     if (input.active === true) return { active: qaGrants.active(identity.session) };
@@ -54,6 +76,7 @@ export function createHostLeaseStore({ now = Date.now } = {}) {
   }
 
   function revoke(identity, input = {}) {
+    pruneExpired();
     if (input.fixTree) return qaGrants.end(input, identity.session);
     if (!identity.run) throw hostError("RUN_DENIED", "실행기 lease에는 QA 회차가 필요합니다.");
     const lease = leases.get(String(input.leaseId || ""));
@@ -62,8 +85,15 @@ export function createHostLeaseStore({ now = Date.now } = {}) {
       throw hostError("RUN_DENIED", "이 회차의 lease가 아닙니다.");
     }
     leases.delete(lease.id);
+    scheduleExpiry();
     return { revoked: true, leaseId: lease.id };
   }
 
-  return { grant, check, revoke, size: () => leases.size };
+  function close() {
+    if (expiryTimer) clearTimer(expiryTimer);
+    expiryTimer = null;
+    leases.clear();
+  }
+
+  return { grant, check, revoke, pruneExpired, close, size: () => (pruneExpired(), leases.size) };
 }

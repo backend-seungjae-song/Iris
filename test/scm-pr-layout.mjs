@@ -119,6 +119,19 @@ test('패널 버튼·워크트리별 파일 클릭·PR Markdown과 끝까지 스
   });
   assert.equal(await page.$$eval('.sc-commit-row',els=>els.every(e=>e.scrollWidth<=e.clientWidth)),true,'220px에서도 커밋 버튼이 넘치지 않는다');
   assert.equal(await page.$$eval('.sc-repo',els=>els.length),3,'원본과 온보딩의 여섯 경로를 세 저장소로 묶는다');
+  const retained = await page.evaluate(async () => {
+    const input = document.querySelector(".sc-msg");
+    input.focus();
+    input.value = "작업 중인 커밋";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.setSelectionRange(2, 5);
+    const sc = await import("/js/devtool/source-control.js");
+    const status = multiStatuses.find(item => item.root === input.dataset.root);
+    sc.handleSourceControlMessage({ ...status, ahead: 1 });
+    return document.activeElement === input && input.value === "작업 중인 커밋" &&
+      input.selectionStart === 2 && input.selectionEnd === 5;
+  });
+  assert.equal(retained, true, "Git 상태가 바뀌어도 작성 중인 커밋 입력란과 선택 범위 유지");
   await page.click('#sc-branch-dd .cc-dd-trigger');await page.click('#sc-branch-dd [data-value="group:sample-task"]');
   assert.equal(await page.$$eval('.sc-repo',els=>els.every(e=>e.dataset.root.includes('/worktrees/'))),true,'공통 선택이 세 저장소에 적용된다');
   assert.equal(await page.$eval('#sc-branch-row',e=>e.hidden),false);

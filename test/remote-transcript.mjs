@@ -54,6 +54,44 @@ test("대화 페이지는 최신순 Item만 내보내고 커서는 연결별 불
   assert.deepEqual(service.page("conn-1", "f".repeat(32)), { ok: false, error: "forbidden" });
 });
 
+test("임베디드·관리형 세션은 로컬 transcript 경로를 갖고 있어도 원격 timeline에서 제외한다", (t) => {
+  const { file, service } = harness(t);
+  const agents = {
+    resolve(ref) {
+      if (ref === "embedded") return { ref, kind: "other", source: { embeddedProvider: "gemini", sessionFile: file } };
+      if (ref === "managed") return { ref, kind: "other", source: { managedProvider: "gemini", transcriptFile: file } };
+      return null;
+    },
+  };
+  // 비원격 kind 차단 확인
+  const guarded = createTranscriptService({ agents, stateDir: path.dirname(file) });
+  t.after(() => guarded.close());
+  assert.deepEqual(guarded.page("conn", "embedded"), { ok: false, error: "forbidden" });
+  assert.deepEqual(guarded.page("conn", "managed"), { ok: false, error: "forbidden" });
+  assert.deepEqual(guarded.watch("conn", "embedded", () => {}), { ok: false, error: "forbidden" });
+  assert.deepEqual(guarded.watch("conn", "managed", () => {}), { ok: false, error: "forbidden" });
+});
+
+test("sharedCodex는 Codex transcript를 원격 timeline에 유지한다", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "iris-remote-shared-codex-"));
+  const previous = process.env.CODEX_HOME;
+  const file = path.join(root, "sessions", "rollout.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, line({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "질문" }] } }));
+  process.env.CODEX_HOME = root;
+  t.after(() => {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const agent = { ref: AGENT, kind: "codex", source: { embeddedProvider: "codex", sharedCodex: true, sessionFile: file } };
+  const service = createTranscriptService({ agents: { resolve: (ref) => ref === AGENT ? agent : null }, stateDir: path.join(root, "state") });
+  t.after(() => service.close());
+  const page = service.page("conn", AGENT);
+  assert.equal(page.ok, true);
+  assert.equal(page.items.length, 1);
+});
+
 test("transcript.watch는 새 완성 줄을 1초 폴링으로 append한다", async (t) => {
   const { file, service, timers } = harness(t);
   const sent = [];

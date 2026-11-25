@@ -29,13 +29,13 @@ import { provide } from "../core/hooks.js";
 export const panelHtml = `
   <div class="bkm-head">
     <h1>북마크</h1><span class="bkm-sum" id="bkm-sum"></span><span class="bkm-sp"></span>
-    <div class="bkm-seg" role="radiogroup" aria-label="거르기">
+    <div class="bkm-seg" role="radiogroup" aria-label="필터">
       <button role="radio" data-bkm-mode="all" aria-checked="true">전체</button>
       <button role="radio" data-bkm-mode="set" aria-checked="false">계정 지정</button>
       <button role="radio" data-bkm-mode="auto" aria-checked="false">자동</button>
     </div>
     <label class="bkm-search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
-      <input id="bkm-q" type="search" placeholder="이름·주소 찾기" autocomplete="off" spellcheck="false" aria-label="북마크 찾기"><kbd>/</kbd></label>
+      <input id="bkm-q" type="search" placeholder="이름·주소 검색" autocomplete="off" spellcheck="false" aria-label="북마크 검색"><kbd>/</kbd></label>
   </div>
   <div class="bkm-body" id="bkm-body">
     <div class="bkm-main">
@@ -127,8 +127,8 @@ function render() {
     list.innerHTML = `<div class="bkm-empty"><b>북마크가 없습니다.</b><span>브라우저 주소창 오른쪽의 별을 눌러 추가하면 여기서 계정을 정할 수 있습니다.</span></div>`;
   } else if (!shown.length) {
     destroyAll(rowDropdowns); rowDropdowns = []; listKey = "";
-    const what = query ? `‘${esc(query)}’와 맞는 북마크가 없습니다.` : mode === "set" ? "계정을 정한 북마크가 없습니다." : "자동으로 여는 북마크가 없습니다.";
-    list.innerHTML = `<div class="bkm-empty"><b>${what}</b><button class="bkm-btn ghost" data-bkm-reset>거르기 풀기</button></div>`;
+    const what = query ? `‘${esc(query)}’ 검색 결과가 없습니다.` : mode === "set" ? "계정을 지정한 북마크가 없습니다." : "자동으로 여는 북마크가 없습니다.";
+    list.innerHTML = `<div class="bkm-empty"><b>${what}</b><button class="bkm-btn ghost" data-bkm-reset>필터 해제</button></div>`;
   } else {
     const html = sectionsMarkup(shown, { selected, editing, fresh });
     // 드롭다운은 마크업에 안 보이므로 값에 영향을 주는 것도 열쇠에 넣음
@@ -157,10 +157,10 @@ function renderBulk() {
   const bar = $("#bkm-bulk"); if (!bar) return;
   if (!selected.size) { bar.hidden = true; bar.innerHTML = ""; return; }
   bar.hidden = false;
-  bar.innerHTML = `<span class="bkm-bn"><b>${selected.size}</b>개 고름</span><span class="bkm-bl">계정</span><span class="bkm-bdd"></span>
-    <button class="bkm-btn ghost" data-bkm-selall>보이는 것 모두 고르기</button><button class="bkm-btn ghost" data-bkm-selnone>고르기 해제</button>`;
+  bar.innerHTML = `<span class="bkm-bn"><b>${selected.size}</b>개 선택</span><span class="bkm-bl">계정</span><span class="bkm-bdd"></span>
+    <button class="bkm-btn ghost" data-bkm-selall>보이는 항목 모두 선택</button><button class="bkm-btn ghost" data-bkm-selnone>선택 해제</button>`;
   const dd = createDropdown({
-    items: accountItems(null), value: "", ariaLabel: "고른 북마크를 열 계정", className: "bkm-dd",
+    items: accountItems(null), value: "", ariaLabel: "선택한 북마크를 열 계정", className: "bkm-dd",
     onChange: (v) => {
       const rows = [...selected].map((k) => rowsByKey.get(k)).filter(Boolean);
       for (const row of rows) send(editMutation(row, { profile: v === "auto" ? null : v }));
@@ -169,7 +169,7 @@ function renderBulk() {
     },
   });
   // 고르기 전에는 아무 계정도 고른 것처럼 보이지 않게 함
-  dd.el.querySelector(".cc-dd-value") && (dd.el.querySelector(".cc-dd-value").textContent = "계정 고르기");
+  dd.el.querySelector(".cc-dd-value") && (dd.el.querySelector(".cc-dd-value").textContent = "계정 선택");
   bar.querySelector(".bkm-bdd").appendChild(dd.el); dropdowns.push(dd);
 }
 
@@ -177,7 +177,7 @@ function renderUndo() {
   const bar = $("#bkm-undo"); if (!bar) return;
   if (!undo) { bar.hidden = true; bar.innerHTML = ""; return; }
   bar.hidden = false;
-  bar.innerHTML = `<span><b>${esc(undo.row.title)}</b> 북마크를 지웠습니다.</span><button class="bkm-btn" data-bkm-undo>되돌리기</button>`;
+  bar.innerHTML = `<span><b>${esc(undo.row.title)}</b> 북마크를 삭제했습니다.</span><button class="bkm-btn" data-bkm-undo>되돌리기</button>`;
 }
 
 function removeRow(row) {

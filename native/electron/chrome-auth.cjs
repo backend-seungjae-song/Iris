@@ -138,9 +138,9 @@ async function windowIds(browser) {
 
 async function fillOverAppleScript(browser, windowId, fields, wantOrigin) {
   if (!windowId || !fields.length) return { filled: 0, requested: fields.length, why: "no-window" };
-  const encoded = Buffer.from(fillJs(fields, wantOrigin), "utf8").toString("base64");
+  const script = appleScriptString(fillJs(fields, wantOrigin));
   const output = await osaRunStdin(
-    `tell application "${browser.osa}" to execute active tab of window id ${windowId} javascript "eval(atob('${encoded}'))"`);
+    `tell application "${browser.osa}" to execute active tab of window id ${windowId} javascript ${script}`);
   if (output === null) return { filled: 0, requested: fields.length, why: "apple-events-blocked" };
   const count = Number.parseInt(String(output).trim(), 10);
   if (count === -2) return { filled: 0, requested: fields.length, why: "wrong-page" };
@@ -186,14 +186,17 @@ async function runProfileHandoff({ target, session, partition, entry, cookieImpo
   }
 
   stage("launching", { profile: entry.label });
+  const marker = `about:blank#iris-${crypto.randomUUID()}`;
   const wasOpen = await windowIds(browser);
+  let launchError;
   try {
-    const child = spawn(browser.bin, ["--profile-directory=" + entry.profile, "--new-window", "about:blank"], {
+    const child = spawn(browser.bin, ["--profile-directory=" + entry.profile, "--new-window", marker], {
       detached: true, stdio: "ignore",
     });
+    child.once("error", error => { launchError = error; });
     child.unref();
   } catch (error) {
-    return { ok: false, error: `${browser.osa}을(를) 띄우지 못했습니다: ` + String(error.message || error) };
+    return { ok: false, error: `${browser.osa}을(를) 열지 못했습니다: ` + String(error.message || error) };
   }
 
   let windowId = null;
@@ -201,18 +204,30 @@ async function runProfileHandoff({ target, session, partition, entry, cookieImpo
     const until = Date.now() + 8000;
     while (Date.now() < until) {
       await waitFor(400);
+      if (launchError || !isCurrent()) break;
       const current = await windowIds(browser);
       if (!current) break;
       const fresh = current.filter((id) => !wasOpen.includes(id));
-      if (fresh.length === 1) { windowId = fresh[0]; break; }
+      for (const id of fresh) {
+        const url = await osaRunStdin(`tell application "${browser.osa}" to get URL of active tab of window id ${id}`);
+        if (url === marker) { windowId = id; break; }
+      }
+      if (windowId) break;
     }
   }
-  if (!windowId) {
+  if (launchError) return { ok: false, error: String(launchError.message || launchError) };
+  if (!windowId || !isCurrent()) {
     return { ok: false, error: "연결된 Chrome 프로필 창을 식별하지 못했습니다. macOS 자동화 권한을 확인해 주세요." };
   }
   const navigated = await osaRunStdin(
-    `tell application "${browser.osa}" to set URL of active tab of window id ${windowId} to ${appleScriptString(target.href)}`);
-  if (navigated === null) {
+    `tell application "${browser.osa}"
+      if URL of active tab of window id ${windowId} is ${appleScriptString(marker)} then
+        set URL of active tab of window id ${windowId} to ${appleScriptString(target.href)}
+        return true
+      end if
+      return false
+    end tell`);
+  if (navigated !== "true") {
     return { ok: false, error: "인증 주소를 연결된 Chrome 프로필 창에 열지 못했습니다. macOS 자동화 권한을 확인해 주세요." };
   }
 
@@ -222,8 +237,12 @@ async function runProfileHandoff({ target, session, partition, entry, cookieImpo
   }
   let fill = { filled: 0, requested: fields.length, why: "none" };
   if (fields.length) {
-    await waitFor(1500);
-    fill = await fillOverAppleScript(browser, windowId, fields, target.origin);
+    const readyUntil = Date.now() + 5000;
+    while (Date.now() < readyUntil && isCurrent()) {
+      fill = await fillOverAppleScript(browser, windowId, fields, target.origin);
+      if (fill.filled || (fill.why && fill.why !== "wrong-page")) break;
+      await waitFor(200);
+    }
     stage("filling", { filled: fill.filled, requested: fill.requested, why: fill.why });
   }
 
@@ -288,10 +307,10 @@ async function runProfileHandoff({ target, session, partition, entry, cookieImpo
       return { ok: false, error: "쿠키를 적용하기 전에 이 Iris 프로필의 Chrome 연결이 바뀌었습니다. 다시 시도해 주세요." };
     }
     if (result.error === "target-changed") {
-      return { ok: false, error: "기다리는 동안 Iris의 로그인 상태가 바뀌어 Chrome 쿠키로 덮지 않았습니다." };
+      return { ok: false, error: "기다리는 동안 Iris의 로그인 상태가 바뀌어 Chrome 쿠키로 덮어쓰지 않았습니다." };
     }
     if (result.error === "source-changed") {
-      return { ok: false, error: "Chrome 쿠키가 다시 바뀌어 안정된 한 벌을 적용하지 않았습니다. 다시 시도해 주세요." };
+      return { ok: false, error: "Chrome 쿠키가 다시 바뀌어 적용하지 않았습니다. 다시 시도해 주세요." };
     }
     return { ok: false, error: result.rolledBack
       ? "로그인 쿠키를 옮기지 못해 기존 로그인을 유지했습니다."
@@ -309,7 +328,7 @@ async function runProfileHandoff({ target, session, partition, entry, cookieImpo
   stage("done", { harvested, live, staged, skipped, read: cookies.length, filled: fill.filled, profile: entry.label });
   if (!harvested) {
     return { ok: false, error: `${base} 쿠키를 ${cookies.length}개 읽었지만 하나도 옮기지 못했습니다. `
-      + "계정 목록에서 이 프로필을 직접 불러오면 같은 쿠키를 통째로 가져올 수 있습니다." };
+      + "계정 목록에서 이 프로필을 직접 불러오면 같은 쿠키를 모두 가져올 수 있습니다." };
   }
   return { ok: true, harvested, live, staged, skipped, read: cookies.length,
     filled: fill.filled, requested: fill.requested, fillWhy: fill.why,
@@ -326,13 +345,14 @@ async function runChromeAuth({ url, session, partition, onStage, bounds, fields:
   };
   let target;
   try { target = new URL(String(url)); } catch { return { ok: false, error: "주소를 해석할 수 없습니다." }; }
-  if (!/^https?:$/.test(target.protocol)) return { ok: false, error: "http(s) 주소에서만 인증을 넘길 수 있습니다." };
+  if (!/^https?:$/.test(target.protocol)) return { ok: false, error: "http(s) 주소만 Chrome에서 열 수 있습니다." };
   if (process.platform === "win32") {
-    const browserId = String(chromeSource || "chrome").split(":", 1)[0] || "chrome";
+    const [browserId, profile] = String(chromeSource || "chrome").split(":");
     const browser = require("../../server/win-native.cjs").browserPath(browserId);
     if (!browser) return { ok: false, error: "연결된 Windows 브라우저를 찾지 못했습니다." };
     return new Promise((resolve) => {
-      const child = spawn(browser, ["--new-window", target.href], { detached: true, stdio: "ignore", windowsHide: true });
+      const args = /^(Default|Profile \d+)$/.test(profile || "") ? ["--profile-directory=" + profile] : [];
+      const child = spawn(browser, [...args, "--new-window", target.href], { detached: true, stdio: "ignore", windowsHide: true });
       child.once("error", () => resolve({ ok: false, error: "연결된 Windows 브라우저를 열지 못했습니다." }));
       child.once("spawn", () => {
         child.unref();
@@ -352,18 +372,37 @@ async function runChromeAuth({ url, session, partition, onStage, bounds, fields:
   return runProfileHandoff({ target, session, partition, entry, cookieImport, stage, bounds, fields, isCurrent });
 }
 
+async function existingBrowserProfile(source, { platform = process.platform, home = os.homedir(), local = process.env.LOCALAPPDATA } = {}) {
+  const match = /^(chrome|brave|edge):(Default|Profile \d+)$/.exec(source);
+  if (!match) return null;
+  const [, id, profile] = match;
+  const roots = { chrome: "Google/Chrome", brave: "BraveSoftware/Brave-Browser", edge: platform === "win32" ? "Microsoft/Edge" : "Microsoft Edge" };
+  const base = platform === "darwin" ? path.join(home, "Library", "Application Support") : platform === "win32" ? local : null;
+  if (!base) return null;
+  const directory = path.join(base, roots[id], platform === "win32" ? "User Data" : "", profile);
+  try {
+    return (await fs.promises.stat(directory)).isDirectory() ? { browser: { id }, profile } : null;
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
+    throw error;
+  }
+}
+
 // 탭과 짝지은 실제 브라우저 프로필에서 주소를 일반 창으로 엶. 짝지은 프로필이 없으면 그 브라우저가 마지막으로 쓴 프로필.
 // 원격 디버깅·별도 user-data-dir 없음(Chrome 은 기본 데이터 폴더의 원격 디버깅을 막음)
-function openInBrowserProfile(url, entry) {
-  const browser = BROWSER_APPS[(entry && entry.browser && entry.browser.id) || "chrome"];
-  if (!browser || !fs.existsSync(browser.bin)) return false;
+async function openInBrowserProfile(url, entry) {
+  const id = entry?.browser?.id || "chrome";
+  const bin = process.platform === "win32" ? require("../../server/win-native.cjs").browserPath(id) : BROWSER_APPS[id]?.bin;
+  if (!bin || !fs.existsSync(bin)) return false;
   const args = entry && entry.profile ? ["--profile-directory=" + entry.profile, url] : [url];
-  const child = spawn(browser.bin, args, { detached: true, stdio: "ignore" });
-  child.unref();
-  return true;
+  return new Promise(resolve => {
+    const child = spawn(bin, args, { detached: true, stdio: "ignore" });
+    child.once("error", () => resolve(false));
+    child.once("spawn", () => { child.unref(); resolve(true); });
+  });
 }
 
 const waitFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-module.exports = { runChromeAuth, runProfileHandoff, openInBrowserProfile, osaRun, baseDomain, inScope,
+module.exports = { runChromeAuth, runProfileHandoff, existingBrowserProfile, openInBrowserProfile, osaRun, baseDomain, inScope,
   findPoisonedChrome, sanitizeFields, fillJs };

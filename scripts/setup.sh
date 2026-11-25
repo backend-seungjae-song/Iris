@@ -307,9 +307,9 @@ fi
 if [ -d /Applications/Iris.app ]; then
   if [ "$CHECK" = "1" ]; then
     if CTX_CHECK="$(node scripts/install-agent-context.mjs --app /Applications/Iris.app --check 2>&1)"; then
-      ok "에이전트 스킬 파일(iris-agent-context)과 세션 기록·지목 등록 훅이 최신입니다"
+      ok "에이전트 스킬 파일(iris-agent-context)과 세션 기록·대상 등록 훅이 최신입니다"
     else
-      warn "에이전트 스킬 파일이나 세션 기록·지목 등록 훅이 없거나 낡았습니다 — ./setup 을 옵션 없이 돌리면 맞춰 줍니다"
+      warn "에이전트 스킬 파일이나 세션 기록·대상 등록 훅이 없거나 낡았습니다 — ./setup 을 옵션 없이 돌리면 맞춰 줍니다"
       echo "$CTX_CHECK" | sed 's/^/     /'
       # 심볼릭 링크·깨진 JSON 설정은 setup 도 건드리지 않는다. 사람이 고쳐야 하는 항목임을 따로 알린다
       echo "$CTX_CHECK" | grep -q "hook skipped" \
@@ -319,22 +319,22 @@ if [ -d /Applications/Iris.app ]; then
   else
     HOOKS=""
     if [ "$(node scripts/install-agent-context.mjs --app /Applications/Iris.app --hook-status 2>/dev/null)" = "missing" ]; then
-      info "세션 기록·지목 등록 훅: 실제 대화 파일 경로와 앱에서 지목한 대상을 해당 Iris 세션에 등록합니다."
+      info "세션 기록·대상 등록 훅: 실제 대화 파일 경로와 앱에서 선택한 대상을 해당 Iris 세션에 등록합니다."
       info "~/.claude/settings.json·~/.codex/hooks.json 의 SessionStart·UserPromptSubmit 에 Iris 항목을 하나씩 넣습니다(기존 파일은 .iris-agent-context.bak 으로 먼저 복사)."
       info "\$ node scripts/install-agent-context.mjs --app /Applications/Iris.app --hooks"
-      if ask "Claude Code·Codex 에 Iris 세션 기록·지목 등록 훅을 넣을까요?"; then
+      if ask "Claude Code·Codex 에 Iris 세션 기록·대상 등록 훅을 넣을까요?"; then
         HOOKS="--hooks"
       else
-        echo "     건너뜁니다. 대화 기록 경로와 지목한 대상이 세션에 등록되지 않습니다. 나중에 './setup' 을 다시 돌리면 됩니다."
+        echo "     건너뜁니다. 대화 기록 경로와 선택한 대상이 세션에 등록되지 않습니다. 나중에 './setup' 을 다시 돌리면 됩니다."
       fi
     fi
     run node scripts/install-agent-context.mjs --app /Applications/Iris.app $HOOKS \
-      && ok "에이전트 스킬 파일·세션 기록·지목 등록 훅 준비됨" || { bad "에이전트 스킬 파일이나 훅을 놓지 못했습니다"; note_fail; }
+      && ok "에이전트 스킬 파일·세션 기록·대상 등록 훅 준비됨" || { bad "에이전트 스킬 파일이나 훅을 놓지 못했습니다"; note_fail; }
     [ -n "$HOOKS" ] && command -v codex >/dev/null 2>&1 \
       && info "Codex 는 새 훅을 신뢰해야 실행합니다 — Codex 에서 /hooks 를 열어 Iris 훅을 신뢰하세요."
   fi
 else
-  info "앱이 아직 없어 에이전트 스킬 파일·세션 기록·지목 등록 훅은 앱을 넣은 뒤에 봅니다."
+  info "앱이 아직 없어 에이전트 스킬 파일·세션 기록·대상 등록 훅은 앱을 넣은 뒤에 봅니다."
 fi
 
 # 세션 지목 블록의 「보내기」 줄이 부르는 명령. 맨 이름으로 부르므로 PATH 에 링크가 있어야 한다.

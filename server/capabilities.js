@@ -6,10 +6,10 @@ import { handleUsage, initUsageHandlers, usageOnConnect } from "./usage-handlers
 import { handleUsageHistory, initUsageHistory, stopUsageHistory, usageHistoryOnConnect } from "./usage-history-handlers.js";
 import { initMemoService, handleMemoMessage, memosWire, memoNotesWire, archivesOut } from "./memo-service.js";
 import { handleLocaldev } from "./localdev-bridge.js";
-import { agentChatOnConnect, handleAgentChat, handleAgentChatFile, handleAgentChatImage, handleAgentChatUpload, initAgentChat } from "./agent-chat.js";
+import { agentChatOnConnect, handleAgentChat, handleAgentChatA2ui, handleAgentChatFile, handleAgentChatImage, handleAgentChatUpload, initAgentChat } from "./agent-chat.js";
 import { handlePaseoUiStatic } from "./paseo-ui/index.js";
 import { isPathAllowed as fsPathAllowed } from "./runtime-state.js";
-import { isLoopbackRequest } from "./http-handler.js";
+import { isLoopbackRequest, readRequestBody } from "./http-handler.js";
 import { createAgentDraftWriter } from "./agent-draft.js";
 import { initDiffReviewHandler, handleDiffReview } from "./diff-review-handler.js";
 import { initGithubPrHandler, handleGithubPr } from "./github-pr-handler.js";
@@ -24,8 +24,7 @@ let remoteLifecycle;
 function runHttp(req, res, ctx) {
     const runMgr = ctx.runManager;
     if (!isLoopbackRequest(req)) { res.writeHead(403).end('{"ok":false,"error":"local only (AC5)"}'); return; }
-    let body = ""; req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on("end", () => {
+    readRequestBody(req, 1e6, body => {
       let j; try { j = JSON.parse(body || "{}"); } catch { res.writeHead(400).end('{"ok":false,"error":"bad json"}'); return; }
       const cmd = String(j.cmd || ""), dir = j.path;
       const reply = (o) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
@@ -97,6 +96,7 @@ export const capabilities = [
       { method: "GET", path: "/agentchat-image", handler: handleAgentChatImage },
       { method: "GET", path: "/agentchat-file", handler: handleAgentChatFile },
       { method: "POST", path: "/agentchat-upload", handler: handleAgentChatUpload },
+      { method: "POST", path: "/agentchat-a2ui", handler: handleAgentChatA2ui },
     ],
     onConnect: agentChatOnConnect,
     handle: handleAgentChat,

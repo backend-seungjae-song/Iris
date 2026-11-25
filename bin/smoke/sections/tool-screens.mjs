@@ -538,7 +538,7 @@ await checkAsync("창 전환 등록 실패는 다음·이전·두 방향을 구�
   if (!both.includes("다음 창 키(⌥Tab)와 이전 창 키(⌥⇧Tab)를 다른 앱이 쓰고 있습니다")) {
     throw new Error("두 방향 실패 문구가 없다");
   }
-  if (!markup({ next: false, prev: false }, "internal:pick-mode").includes("이 키는 요소 지목에 이미 쓰고 있습니다")) {
+  if (!markup({ next: false, prev: false }, "internal:pick-mode").includes("이 키는 요소 선택에 이미 쓰고 있습니다")) {
     throw new Error("요소 지목 충돌 문구가 바뀌었다");
   }
   const unsupported = markup({ next: false, prev: true }, undefined, { next: "unsupported" });
@@ -1337,9 +1337,9 @@ check("다시 읽으라는 안내가 실제 조합과 같다", () => {
   const features = read("web/js/core/features.js").replace(/\/\/[^\n]*/g, "");
   const note = sliceBetween(features, "export function featureRestartNote(id)", "export function featureIsKnown");
   if (!/showToast\([^;]*featureRestartNote\(id\)/.test(page)) throw new Error("설정이 기능별 다시 읽기 안내를 안 쓴다");
-  const toast = /"([^"]*다시 읽으면[^"]*)"/.exec(note);
+  const toast = /"([^"]*새로고침하면[^"]*)"/.exec(note);
   if (!toast) throw new Error("안내 문구를 못 찾음");
-  if (!/shortcutLabel\("⌘⇧R 로 다시 읽으면 빠집니다"\)/.test(note)) throw new Error("Windows 안내가 수정키를 변환하지 않음");
+  if (!/shortcutLabel\("⌘⇧R 로 새로고침하면 꺼집니다"\)/.test(note)) throw new Error("Windows 안내가 수정키를 변환하지 않음");
   if (!/⌘⇧R/.test(toast[1])) throw new Error("안내가 ⌘⇧R 이 아니다: " + toast[1]);
   // ⌘R 만 적혀 있으면 그것은 이름 변경이다.
   if (/(^|[^⇧])⌘R/.test(toast[1])) throw new Error("⌘R 은 이름 변경이다: " + toast[1]);

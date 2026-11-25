@@ -292,7 +292,7 @@ function recToScript(evs) {
     else if (e.k === "toggle" && s) out.push(`iris-browser click ${JSON.stringify(s)}  # 체크박스 → ${e.on ? "on" : "off"}`);
     else if (e.k === "contextmenu" && s) out.push(`# 우클릭 ${s}`);
     else if (e.k === "autofill") out.push(`# 자동완성으로 아이디/비번 입력 (값·길이 모두 미기록: 재생 땐 직접 로그인)`);
-    else if (e.k === "pick") out.push(`# ▶ 사용자가 지목한 요소: ${s || "?"}`);
+    else if (e.k === "pick") out.push(`# ▶ 사용자가 선택한 요소: ${s || "?"}`);
     else if (e.k === "dialog") out.push(`# ⚠ ${DLG[e.kind] || e.kind} 대화상자${e.msg ? `: "${e.msg}"` : ""}${dlgAns(e.answer)}`);
   }
   return out;
@@ -355,7 +355,7 @@ async function finishRecording() {
   for (const e of evs) if (e.wc) tabSeen.set(e.wc, { url: e.tabUrl || "", title: e.tabTitle || "" });
   const tabLines = [...tabSeen.entries()].map(([wc, m]) => `- @${wc}  ${m.title || "(제목 없음)"}  ${m.url}`);
   const mainWc = [...tabSeen.keys()][tabSeen.size - 1] || null;
-  const head = `[브라우저 재현 기록 · ${dur}초 · 조작 ${evs.length}건${picks.length ? ` · 지목 ${picks.length}건` : ""}${dlgs.length ? ` · 대화상자 ${dlgs.length}건` : ""}${errs.length ? ` · 오류 ${errs.length}건` : ""}]`;
+  const head = `[브라우저 재현 기록 · ${dur}초 · 조작 ${evs.length}건${picks.length ? ` · 선택 ${picks.length}건` : ""}${dlgs.length ? ` · 대화상자 ${dlgs.length}건` : ""}${errs.length ? ` · 오류 ${errs.length}건` : ""}]`;
   // 대화상자는 재생을 멈춰 세우는 유일한 요소라 따로 세워 보여준다(스크립트 주석만으론 묻힌다).
   const dlgSection = dlgs.length ? ["", "## 시스템 대화상자", ...dlgs.map((e) =>
     `- [${Math.round(e.ms)}ms] ${DLG[e.kind] || e.kind}${e.msg ? `: "${e.msg}"` : ""}${dlgAns(e.answer)}${e.dur ? ` (${(e.dur / 1000).toFixed(1)}초 열려 있었음)` : ""}`),
@@ -382,7 +382,7 @@ async function finishRecording() {
     "```",
     ...timeline,
     "```",
-    ...(picks.length ? ["", "## 녹화 중 지목한 요소", ...picks.flatMap((e) => ["", `[${Math.round(e.ms)}ms]`, pickBlock(e.pick)])] : []),
+    ...(picks.length ? ["", "## 녹화 중 선택한 요소", ...picks.flatMap((e) => ["", `[${Math.round(e.ms)}ms]`, pickBlock(e.pick)])] : []),
     ...dlgSection,
     ...(errs.length ? ["", "## 이 구간의 오류", ...errs.map((e) => "- " + e)] : []),
   ].join("\n");
@@ -405,7 +405,7 @@ async function finishRecording() {
     ...script.slice(0, 80),
     script.length > 80 ? `# … ${script.length - 80}줄 더 (전문 파일 참조)` : "",
     "```",
-    ...(picks.length ? ["", "## 녹화 중 지목한 요소", ...picks.flatMap((e) => ["", `[${Math.round(e.ms)}ms]`, pickBlock(e.pick)])] : []),
+    ...(picks.length ? ["", "## 녹화 중 선택한 요소", ...picks.flatMap((e) => ["", `[${Math.round(e.ms)}ms]`, pickBlock(e.pick)])] : []),
     ...dlgSection,
     ...(errs.length ? ["", "## 이 구간의 오류", ...errs.slice(0, 10).map((e) => "- " + e)] : []),
   ].filter(Boolean).join("\n");

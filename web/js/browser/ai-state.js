@@ -75,6 +75,14 @@ export function aiRecentTabIds(now) {
   return out;
 }
 
+// 보호가 가장 먼저 끝나는 시각. 남은 보호가 없으면 0 (끝나는 때 다시 판정하려는 호출부용)
+export function nextAiRecentExpiry(now) {
+  const t = now || Date.now();
+  let next = 0;
+  for (const until of aiRecentUntil.values()) if (until > t && (!next || until < next)) next = until;
+  return next;
+}
+
 export function getAiBusyTabs() { return aiBusyTabs; }
 export function setAiBusyTabs(map) { aiBusyTabs = map; }
 

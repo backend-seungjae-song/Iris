@@ -84,11 +84,11 @@ export function initCapability(ctx) {
     catch (e2) {
       // 여기까지 오면 서버 기록과 로컬 누적분을 모두 쓰지 못한 것으로, 결과가 비는 유일한 경우다.
       blog("edge finish", e2.message);
-      showToast("범위 복사를 만들지 못했습니다", { level: "err", detail: String(e2.message || "원인 불명") });
+      showToast("범위를 복사하지 못했습니다", { level: "err", detail: String(e2.message || "원인 불명") });
     }
     if (!got || !got.text) return;
     const text = got.text;
-    if (!(await writeClipboard(text))) { showToast("범위 복사를 만들었지만 클립보드에 쓰지 못했습니다", { level: "err", near: "action" }); return; }
+    if (!(await writeClipboard(text))) { showToast("클립보드에 복사하지 못했습니다", { level: "err", near: "action" }); return; }
     // 잘렸을 수 있다는 사실을 감추면 모르고 붙여넣게 된다. 어느 대조가 일치하지 않았는지 함께 남긴다.
     // 완전히 복사한 경우는 알리지 않음(위 실패 알림과 같은 이유)
     if (got.degraded) showToast(`${text.split("\n").length}줄만 복사했습니다`,

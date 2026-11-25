@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { stateHome } from "./state-home.cjs";
 
 const KEY_PATH = path.join(stateHome(), "space-keys.json");
@@ -160,7 +161,12 @@ function readKeyFile() {
 }
 
 function readKeyRaw() {
-  try { return JSON.parse(fs.readFileSync(KEY_PATH, "utf8")) || {}; } catch { return null; }
+  let text;
+  try { text = fs.readFileSync(KEY_PATH, "utf8"); } catch { return null; }
+  try { return JSON.parse(text) || {}; } catch {
+    try { fs.copyFileSync(KEY_PATH, `${KEY_PATH}.corrupt-${randomUUID()}`); } catch {}
+    return null;
+  }
 }
 
 let saveTimer = null;
@@ -186,17 +192,17 @@ function writeNow() {
   saveTimer = null;
   try {
     fs.mkdirSync(path.dirname(KEY_PATH), { recursive: true });
-    fs.writeFileSync(KEY_PATH + ".tmp", JSON.stringify(folderById), { mode: 0o600 });
+    fs.writeFileSync(KEY_PATH + ".tmp", JSON.stringify(folderById), { mode: 0o600, flush: true });
     fs.renameSync(KEY_PATH + ".tmp", KEY_PATH);
-  } catch {}
+    return true;
+  } catch (error) { console.error("스페이스 키 저장 실패", error); return false; }
 }
 // 종료 신호가 지연 구간에 들어오면 방금 만든 스페이스↔폴더 연결이 사라진다. 키가 그 상태의
 // 주소이므로, 다음 실행에서 그 스페이스는 자기 탭·북마크를 찾지 못한다.
 export function flushNow() {
   if (!saveTimer) return false;
   clearTimeout(saveTimer);
-  writeNow();
-  return true;
+  return writeNow();
 }
 
 // 반환:

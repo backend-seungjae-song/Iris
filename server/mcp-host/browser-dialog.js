@@ -33,6 +33,7 @@ export function createBrowserDialogHost({
   resolveForCommand,
   ownerOf = () => null,
   markControl = () => {},
+  releaseControl = () => {},
   execute,
   raceDialog,
   currentDialog = () => null,
@@ -94,10 +95,16 @@ export function createBrowserDialogHost({
       hold = await startUnitHold(lockKey, request.commandId);
     }
     clearTimeout(hold.timer);
-    try { return await executeOne(ctx); }
-    finally {
-      if (phase === "last" || phase === "end") hold.release();
-      else if (!hold.released) armUnitHold(hold);
+    try {
+      const result = await executeOne(ctx);
+      // 사람에게 로그인을 넘긴 단위 · 조작 표시가 남으면 그 탭의 저장된 계정 자동 완성이 막힘
+      if (input.relay.command === "login.fill" && result?.data?.needUser === true) hold.handoff = true;
+      return result;
+    } finally {
+      if (phase === "last" || phase === "end") {
+        hold.release();
+        if (hold.handoff) releaseControl(input.tabId, input.controlLabel || ctx.identity.session);
+      } else if (!hold.released) armUnitHold(hold);
     }
   }
 

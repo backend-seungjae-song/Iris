@@ -25,6 +25,7 @@ import { isHostWindows } from "./host-path.js";
 
 import { bmActiveId, bmTabs, boundSpace, bsMutate } from "../browser/state.js";
 import { activeBrowserId, activeWv, reloadActiveTab } from "../browser/webview.js";
+import { requestBrowserZoom } from "../browser/zoom.js";
 import { reopenLastClosed } from "../center/closed-tabs.js";
 import { closeActiveTab, closeTabs } from "../center/tab-close.js";
 import { getActiveTabId, getCenterSpace } from "../center/tab-store.js";
@@ -176,14 +177,9 @@ export function initKeynav(deps) {
     if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+" || e.key === "-" || e.key === "_" || e.key === "0")) {
       const t = curTabs().find((x) => x.id === getActiveTabId(getCenterSpace()));
       const r = typeof activeWv === "function" ? activeWv() : null;
-      if (t && t.kind === "browser" && r) {
+      if ((BROWSER_MODE || t?.kind === "browser") && r) {
         e.preventDefault();
-        try {
-          const z = r.el.getZoomLevel ? r.el.getZoomLevel() : 0;
-          if (e.key === "0") r.el.setZoomLevel(0);
-          else if (e.key === "-" || e.key === "_") r.el.setZoomLevel(z - 0.5);
-          else r.el.setZoomLevel(z + 0.5);
-        } catch {}
+        requestBrowserZoom(window.acHost, r.el, e.key);
         return;
       }
     }
@@ -280,7 +276,7 @@ export function cycleCenterTab(dir) {
   if (arr.length < 2) return;
   // 현재 탭 = 서버 focused 플래그 우선(권위), 없으면 현재 에이전트의 tabId. 세션 없는 탭 포커스 후엔
   // curTarget이 옛 에이전트에 남아 있으므로 focused 플래그가 정확하다.
-  const curTabId = (arr.find((t) => t.focused) || {}).tabId || (agentByPane(curTarget) && agentByPane(curTarget).tabId);
+  const curTabId = callHook("agentchat.selectedTab") || (arr.find((t) => t.focused) || {}).tabId || (agentByPane(curTarget) && agentByPane(curTarget).tabId);
   let i = arr.findIndex((t) => t.tabId === curTabId); if (i < 0) i = 0;
   i = (i + dir + arr.length) % arr.length;
   lastTabBySpace[sp] = arr[i].tabId;
@@ -308,7 +304,7 @@ export async function closeCurrentHerdrPane() {
   const agent = selected || agentsOfSpace(getSelectedSpaceId()).find((a) => a.focused);
   if (agent) {
     if (!agent.paneId || !agent.terminalId) return;
-    if (!(await askClose(`"${nameOf(agent)}"을(를) 닫을까요?`, "되돌릴 수 없습니다. 접기와 달리 되살릴 열쇠를 남기지 않습니다."))) return;
+    if (!(await askClose(`"${nameOf(agent)}"을(를) 닫을까요?`, "되돌릴 수 없습니다. 접기와 달리 복원 정보를 저장하지 않습니다."))) return;
     wsSend({ type: "pane-close", paneId: agent.paneId, terminalId: agent.terminalId });
     return;
   }

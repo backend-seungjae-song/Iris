@@ -72,7 +72,7 @@ function handleMemoArchivesMessage(m) {
 
 function handleMemoArchivedMessage(m) {
       if (m.empty) showToast("메모가 비어 있어 보관하지 않았습니다.", { level: "info" });
-      else showToast(`${m.date} 보관함에 ${m.updated ? "이어 붙였습니다" : "담았습니다"}.`, { level: "info" });
+      else showToast(`${m.date} 보관함에 ${m.updated ? "추가했습니다" : "저장했습니다"}.`, { level: "info" });
 }
 
 function handleMemosMessage(m) {

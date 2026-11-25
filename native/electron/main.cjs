@@ -43,6 +43,7 @@ const { boundsVisible: windowBoundsVisible } = require("./window-bounds.cjs");
 const { ServerHost } = require("./server-host.cjs");
 const { createAudioDiagnostics } = require("./audio-diagnostics.cjs");
 const { createProcessMemoryLog } = require("./process-memory-log.cjs");
+const { createAppLifecycleLog } = require("./app-lifecycle-log.cjs");
 const { createResourceGuard } = require("./resource-guard.cjs");
 const { createCertificateTrust } = require("./certificate-trust.cjs");
 const { createChromeImportRegistry } = require("./chrome-import-registry.cjs");
@@ -54,6 +55,8 @@ const visibilityRegistry = require("./visibility-registry.cjs");
 const { createWebviewThrottle } = require("./webview-throttle.cjs");
 const { createProfileSessionPolicy, isProfilePartition: matchesProfilePartition } = require("./profile-session-policy.cjs");
 const { createWebviewLifecycle } = require("./webview-lifecycle.cjs");
+const { createBrowserTabZoom } = require("./browser-tab-zoom.cjs");
+const { googleAuthRules } = require("./google-auth-rules.cjs");
 const { createWebviewContextMenu } = require("./webview-context-menu.cjs");
 const { createWebviewContextActions } = require("./webview-context-actions.cjs");
 const { createMenu } = require("./menu.cjs");
@@ -61,6 +64,7 @@ const { createDownloadHook } = require("./download-hook.cjs");
 const { consoleOpenTarget } = require("./local-link.cjs");
 const { createFsIpc } = require("./fs-ipc.cjs");
 const { createCredentialIpc } = require("./credential-ipc.cjs");
+const { createPartitionStores } = require("./partition-data-store.cjs");
 const { createMainWindow, setRelayKeymap, DEFAULT_RELAY } = require("./main-window.cjs");
 const { createBrowserWindowManager } = require("./browser-window-manager.cjs");
 const { createMemoWindowManager } = require("./memo-window-manager.cjs");
@@ -77,13 +81,13 @@ const { createAiLoginPolicy } = require("./ai-login-policy.cjs");
 const { localLoginFor } = require("../../server/local-login.cjs");
 const { port: acPort } = require("../../server/env.cjs");
 const { createTouchDragArm } = require("./touch-drag-arm.cjs");
-const { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setShownKnownProbe, applyViewportTo, setTouchDrag, forgetSecrets, clearAutoViewport, setShownProbe, setDefaultViewport, noteChildSession, dropChildSession, noteFrameOrigin, injectOverlayAllFrames, hoverAtPoint, diagSince,
+const { setupCdpControl, ctlSend, setLoginProvider, setViewportNotify, setCaptureHold, setShownKnownProbe, applyViewportTo, setTouchDrag, forgetSecrets, clearAutoViewport, setShownProbe, setBehindProbe, setDefaultViewport, noteChildSession, dropChildSession, noteFrameOrigin, injectOverlayAllFrames, hoverAtPoint, diagSince,
   registerSessionPrimer, noteNavigation, noteDocumentNavigation, forgetAttachPolicy, reconsiderAttach, pinHiddenViewportById, runCdp, aiDriving, aiDrivingAnywhere,
   holdAiCausality, setPaintableProbe, setContextActionProvider, setBgTabsHandler, noteUserKey } = require("./cdp-control.cjs"); // AI→브라우저 CDP 제어 실행기
 const downloadState = require("./download-state.cjs");
 
 
-// Iris 제품명은 일부 모바일 감지기가 휴대폰으로 오인한다. Electron 런타임 표시는 유지한다.
+// 첫 문서 요청과 프로필별 세션에 같은 Chrome 호환 UA 적용
 try {
   app.userAgentFallback = require("./browser-hardening.cjs").cleanUserAgent(app.userAgentFallback);
   setNativeUserAgent(app.userAgentFallback);
@@ -121,7 +125,7 @@ const { installDownloadHook, noteExplicitSave } = createDownloadHook({
     try {
       downloadState.blocked({
         name: item.getFilename(), url: String(item.getURL() || "").slice(0, 300), wc: wc.id,
-        why: "받을 자리를 정하지 않아 취소했습니다. browser_download 로 자리를 먼저 정하고 다시 누르세요.",
+        why: "저장 폴더를 정하지 않아 취소했습니다. browser_download 로 폴더를 먼저 정하고 다시 누르세요.",
       });
     } catch {}
   },
@@ -137,8 +141,8 @@ const sitePermissions = require("./site-permissions.cjs").createSitePermissions(
     try {
       const result = await dialog.showMessageBox({
         type: "question", title: `${name} 권한`, message: `${site} 에서 ${asks}`,
-        detail: "허용하거나 차단하면 이 사이트에 기억합니다. 설정의 보안에서 지울 수 있습니다.",
-        buttons: ["허용", "차단", "지금은 안 함"], defaultId: 1, cancelId: 2, noLink: true,
+        detail: "허용하거나 차단하면 이 사이트에 저장됩니다. 설정의 보안에서 삭제할 수 있습니다.",
+        buttons: ["허용", "차단", "나중에"], defaultId: 1, cancelId: 2, noLink: true,
       });
       return result.response === 0 ? true : result.response === 1 ? false : null;
     } finally { nativeAx.holdNativeInput(null); }
@@ -154,7 +158,7 @@ const profileSessionPolicy = createProfileSessionPolicy({
     nativeAx.holdNativeInput("화면 공유");
     try {
       const result = await dialog.showMessageBox({
-        type: "question", title: "화면 공유", message: `${site} 에 공유할 화면을 고르세요`,
+        type: "question", title: "화면 공유", message: `${site} 에 공유할 화면을 선택하세요`,
         buttons: [...sources.map((src) => src.name), "취소"], defaultId: sources.length, cancelId: sources.length, noLink: true,
       });
       return sources[result.response] || null;
@@ -204,11 +208,18 @@ const profileSessionPolicy = createProfileSessionPolicy({
   installSessionHook: installDownloadHook,
 });
 const { attachGoogleAuthUserAgent } = require("./google-auth-user-agent.cjs");
+const browserTabZoom = createBrowserTabZoom({
+  isolate: (wc) => googleAuthRules().isolateTab(wc.session, wc.id),
+  ipcMain,
+  findContents: (id) => webContents.fromId(id),
+  isTrustedSender: (event) => isTrustedMainFrame(event, APP_URL, event.sender),
+});
 app.on("web-contents-created", (_event, contents) => {
   // 사용자 키 시각. QA 가 포커스를 빌릴지 판정(cdp-control.cjs qaPrepareFocus)
   contents.on("before-input-event", (_ev, input) => { if (input.type === "keyDown") noteUserKey(contents.id); });
   // 팝업도 생성 직후부터 같은 정책을 받아야 첫 OAuth 탐색이 옛 UA로 시작하지 않는다.
   if (contents.getType() === "webview" || profileSessionPolicy.ownsSession(contents.session)) {
+    browserTabZoom.attach(contents);
     // 인증 호스트를 떠나 정체성 전용 attach 를 내려놓으면 부착 정책이 그 탭을 다시 판정한다.
     attachGoogleAuthUserAgent(contents, { onRelease: (wc) => reconsiderAttach(wc.id) });
   }
@@ -227,6 +238,9 @@ const processMemoryLog = createProcessMemoryLog({
   app, allWebContents: () => webContents.getAllWebContents(), allWindows: () => BrowserWindow.getAllWindows(),
   screen, dir: path.join(IRIS_HOME, "diagnostics"), contentTracing: require("electron").contentTracing,
 });
+const appLifecycleLog = createAppLifecycleLog({ app, dir: path.join(IRIS_HOME, "diagnostics"), version: app.getVersion() });
+let quitReason = "app-quit";
+app.on("will-quit", () => appLifecycleLog.quit(quitReason));
 
 // 터미널 붙여넣기용 클립보드 읽기(동기). sandbox preload는 clipboard 모듈이 없어 메인이 대신 읽는다.
 // 읽기·쓰기 모두 이 앱의 렌더러만 받는다. webview 게스트가 사용자 클립보드를 읽거나 덮어쓰지 못하게 한다.
@@ -260,7 +274,7 @@ ipcMain.on("ac-keymap", (e, map) => {
 // 신뢰 발신자는 이 앱의 렌더러(APP_URL origin)다. webview 게스트(임의 사이트)나 원격 프레임은 거부한다.
 // 렌더러 오염 시에도 파일조작 IPC가 워크스페이스 밖으로 확대되지 않도록 경계에서 강제.
 function isTrustedSender(e) {
-  return matchesTrustedSender(e, APP_URL);
+  return isTrustedMainFrame(e, APP_URL, BrowserWindow.fromWebContents(e.sender)?.webContents);
 }
 
 const webviewContextActions = createWebviewContextActions();
@@ -358,7 +372,7 @@ setViewportNotify((wcId, vp) => {
 // 그래서 요청 수를 세어 마지막 요청이 해제하게 한다.
 setCaptureHold(async (wcId, on) => {
   const id = Number(wcId);
-  if (!captureHoldState.needsHold(on, visibilityRegistry.isShown(id))) return false;
+  if (!captureHoldState.needsHold(on, visibilityRegistry.isShown(id) || visibilityRegistry.isBehind(id))) return false;
   const guest = webContents.fromId(id);
   if (guest && !guest.isDestroyed() && on) setThrottleReason(guest, "capture", true);
   const host = guest && !guest.isDestroyed() && guest.hostWebContents;
@@ -384,11 +398,16 @@ setCaptureHold(async (wcId, on) => {
 // (루프백이라는 사실만으로는 앱과 임의의 로컬 프로세스를 구분할 수 없어, 증명이 없으면 어떤 프로세스든
 // 자기 자신에게 임의의 탭을 지목하고 곧바로 조작할 수 있다.)
 ipcMain.on("ac-ui-token", (e) => {
-  try { e.returnValue = serverHost.currentUiToken(); }
+  try { e.returnValue = isTrustedSender(e) ? serverHost.currentUiToken() : ""; }
   catch { e.returnValue = ""; }
+});
+ipcMain.on("ac-app-connection-token", (e) => {
+  const trustedWindow = isTrustedSender(e);
+  e.returnValue = trustedWindow ? serverHost.currentAppConnectionToken() : "";
 });
 // 창(호스트)마다 현재 그려지는 탭은 하나이므로, 호스트별로 마지막 보고만 보관하면 판정할 수 있다.
 ipcMain.on("ac-tab-shown", (_e, m) => {
+  if (!isTrustedSender(_e)) return;
   try {
     const wc = Number(m && m.wc);
     const before = visibilityRegistry.shownForHost(_e.sender.id);
@@ -422,6 +441,23 @@ ipcMain.on("ac-tab-shown", (_e, m) => {
     if (before && before !== wc) pinHiddenViewportById(before, webContents);
   } catch {}
 });
+// 사람이 안 보는 AI 탭을 패널 크기로 뒤에 깔아 둔 목록(창마다 전체 목록). 이 탭은 이미 패널 크기로
+// 그려지므로 대체 크기와 캡처 유지를 걸지 않고, 걸려 있던 대체 크기는 깔리는 순간 거둔다.
+const behindHostsWired = new WeakSet();
+ipcMain.on("ac-tabs-behind", (e, m) => {
+  if (!isTrustedSender(e)) return;
+  try {
+    const wcs = (Array.isArray(m && m.wcs) ? m.wcs : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const { fresh, left } = visibilityRegistry.reportBehind(e.sender.id, wcs);
+    if (!behindHostsWired.has(e.sender)) {
+      behindHostsWired.add(e.sender);
+      try { e.sender.once("destroyed", () => visibilityRegistry.dropBehind(e.sender.id)); } catch {}
+    }
+    for (const id of fresh) clearAutoViewport(id, webContents);
+    // 기준에서 빠져 display:none 으로 돌아가는 탭은 보이는 탭이 아니면 대체 크기를 다시 건다
+    for (const id of left) if (!visibilityRegistry.isShown(id) && !visibilityRegistry.isBehind(id)) pinHiddenViewportById(id, webContents);
+  } catch {}
+});
 // 그 탭을 담은 창이 현재 프레임을 낼 수 있는지 판정한다. 가림은 스위치로 해결되지만 최소화·숨김은
 // 해결되지 않는다(확인 결과: 그 둘은 스위치를 켜도 초당 0프레임). 창을 임의로 펼치지 않고 원인을 알린다.
 setPaintableProbe((wcId) => {
@@ -443,6 +479,7 @@ setPaintableProbe((wcId) => {
   } catch { return { ok: true }; }
 });
 setShownProbe((wc) => visibilityRegistry.isShown(wc));
+setBehindProbe((wc) => visibilityRegistry.isBehind(wc));
 setShownKnownProbe(() => visibilityRegistry.isKnown());
 function isProfilePartition(partition) {
   return matchesProfilePartition(partition);
@@ -450,8 +487,13 @@ function isProfilePartition(partition) {
 function guardWebviewPartition(webPreferences) {
   return profileSessionPolicy.guardWebviewPartition(webPreferences);
 }
-async function purgePartition(part) {
-  return profileSessionPolicy.purgePartition(part);
+const partitionStores = createPartitionStores({
+  stateDir: IRIS_HOME, fs, safeStorage,
+  files: NATIVE_CAPABILITIES.map((item) => item.partitionStore).filter(Boolean),
+  error: (...args) => console.error(...args),
+});
+function purgePartition(part) {
+  return partitionStores.purge(part, profileSessionPolicy.purgePartition);
 }
 function hardenSession(sess, partition = IRIS_PARTITION) {
   return profileSessionPolicy.hardenSession(sess, partition);
@@ -516,6 +558,7 @@ ipcMain.handle("ac-site-permissions", (e, arg) => {
 const { setCreds } = createCredentialIpc({
   ipcMain, credentialService, isTrustedSender, isProfilePartition,
   purgePartition, basePartition: IRIS_PARTITION, loginConvenienceOn,
+  beginPartitionPurge: partitionStores.beginPurge,
 });
 require("./browser-navigation-history.cjs").createBrowserNavigationHistory({
   app,
@@ -566,13 +609,13 @@ createAiLoginPolicy({
 });
 
 // 나가기 전 세션 저장소 비우기는 storage-lifecycle.cjs 가 소유한다.
-const { createStorageLifecycle } = require("./storage-lifecycle.cjs");
+const { createStorageLifecycle, STORAGE_FLUSH_TIMEOUT_MS } = require("./storage-lifecycle.cjs");
 const storageLifecycle = createStorageLifecycle({
   forEachHardened: (fn) => profileSessionPolicy.forEachHardened(fn),
   flushPartition: async (partition) => {
     const sess = session.fromPartition(partition);
-    try { await sess.flushStorageData(); } catch {}
-    try { await sess.cookies.flushStore(); } catch {}
+    await sess.flushStorageData();
+    await sess.cookies.flushStore();
   },
   isReady: () => app.isReady(),
   quit: () => app.quit(),
@@ -767,6 +810,7 @@ const mainWindow = createMainWindow({
   webContents,
   windowLayout,
   guardWebviewPartition,
+  adjustBrowserZoom: browserTabZoom.adjust,
   pinHiddenViewportById,
   preloadPath: path.join(__dirname, "preload.cjs"),
   webviewPreloadPath: path.join(__dirname, "webview-preload.cjs"),
@@ -967,7 +1011,9 @@ function showConsoleWindow() {
   if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); return; }
   mainWindow.createWindow();
 }
-ipcMain.on("ac-refocus-console", () => { try { showConsoleWindow(); } catch {} });
+ipcMain.on("ac-refocus-console", (e) => {
+  if (!isTrustedSender(e)) return;
+  try { showConsoleWindow(); } catch {} });
 // 메인 창 ⌘⇧R = 앱 강제 재로딩(메인 + 열려 있는 브라우저 창 전부). 캐시를 무시하고 다시 읽는다.
 // 녹화 전문 저장. 채팅에 모두 넣기에 긴 기록은 파일로 두고 경로만 넘긴다(로컬 전용).
 ipcMain.handle("ac-save-recording", (e, text) => {
@@ -980,7 +1026,8 @@ ipcMain.handle("ac-save-recording", (e, text) => {
     return { ok: true, path: file };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.on("ac-app-reload", () => {
+ipcMain.on("ac-app-reload", (e) => {
+  if (!isTrustedSender(e)) return;
   const win = getMainWindow();
   try { win?.webContents.reloadIgnoringCache(); } catch {}
   for (const b of browserWindowManager.allBrowserWindows()) { try { b.webContents.reloadIgnoringCache(); } catch {} }
@@ -1009,8 +1056,12 @@ ipcMain.on("ac-notify", (event, message) => {
   });
   notice.show();
 });
-ipcMain.on("ac-open-browser", (_e, opts) => { try { browserWindowManager.createBrowserModeWindow(false, opts); } catch {} });
-ipcMain.on("ac-open-shared-browser", (_e, opts) => { try { browserWindowManager.createBrowserModeWindow(true, opts); } catch {} });
+ipcMain.on("ac-open-browser", (_e, opts) => {
+  if (!isTrustedSender(_e)) return;
+  try { browserWindowManager.createBrowserModeWindow(false, opts); } catch {} });
+ipcMain.on("ac-open-shared-browser", (_e, opts) => {
+  if (!isTrustedSender(_e)) return;
+  try { browserWindowManager.createBrowserModeWindow(true, opts); } catch {} });
 // 다른 앱에서 누른 웹 링크. macOS 는 앱 준비 전에도 보내므로 whenReady 전 최상위에서 등록
 const { createLinkInbox, createDefaultBrowser, linkTarget } = require("./default-browser.cjs");
 // 링크를 받을 창을 앞으로. 이미 열린 창도 최소화·다른 앱 뒤에 있을 수 있어 focus 만으로는 보이지 않음
@@ -1038,7 +1089,9 @@ ipcMain.handle("ac-link-target", (e, value) => {
 const defaultBrowser = createDefaultBrowser({ execFile });
 ipcMain.handle("ac-default-browser-status", (e) => isTrustedSender(e) ? defaultBrowser.status() : { ok: false });
 ipcMain.handle("ac-default-browser-choose", (e, id) => isTrustedSender(e) ? defaultBrowser.choose(String(id || "")) : { ok: false });
-ipcMain.on("ac-dock-browser", () => { browserWindowManager.dockBrowserModeWindows(); });
+ipcMain.on("ac-dock-browser", (e) => {
+  if (!isTrustedSender(e)) return;
+  browserWindowManager.dockBrowserModeWindows(); });
 memoWindowManager.registerMemoIpc();
 // 네이티브 기능은 표를 통해서만 등록된다. 이 위치에 기능 이름이 나오지 않는 것이 핵심이다.
 // 기능을 제거해도 이 줄은 그대로다. 넘기는 ctx 는 앱 셸이 가진 공용 요소뿐이다.
@@ -1052,9 +1105,11 @@ bootNativeCapabilities({
     webviewPreloadPath: path.join(__dirname, "webview-preload.cjs"),
     // 상태 폴더와 CDP 연결도 앱 셸의 공용 요소다. 기능이 각자 경로를 조합하거나 세션을 새로 열지 않는다.
     stateDir: IRIS_HOME,
+    openPartitionStore: partitionStores.open,
     // 개발 앱 QA 실측의 숨김 실행. 기능이 띄우는 창도 화면에 보이지 않음
     hidden: QA_HIDDEN,
     runCdp,
+    aiDriving,
     windowLayout,
     guardWebviewPartition,
     isProfilePartition: matchesProfilePartition,
@@ -1131,6 +1186,7 @@ else app.on("will-quit", () => { try { serverHost.stop(); } catch {} });
 app.on("will-quit", () => { try { switcherHost.stop(); } catch {} });
 
 app.whenReady().then(async () => {
+  partitionStores.retryPurges();
   const webauthn = require("./webauthn-platform.cjs").configurePlatformWebAuthn(app);
   console.log(`[webauthn] ${webauthn.reason}`);
   if (!QA_HIDDEN) pickMode.registerGlobalShortcut();
@@ -1148,14 +1204,14 @@ app.whenReady().then(async () => {
     const c = started.conflict;
     const answer = dialog.showMessageBoxSync({
       type: "warning",
-      buttons: ["종료", "그래도 연결"],
+      buttons: ["종료", "무시하고 연결"],
       defaultId: 0,
       cancelId: 0,
       message: `${APP_PORT}번을 다른 서버가 쓰고 있습니다`,
       detail: `그 서버(pid ${c.pid})는 ${c.stateDir || "알 수 없는 곳"}을 상태 폴더로 씁니다.\n`
         + `이 앱의 상태 폴더는 ${IRIS_HOME} 입니다.\n\n`
-        + `그대로 연결하면 그쪽 탭·북마크·계정이 보이고, 여기서 고친 것은 그쪽에 저장됩니다.\n`
-        + `보통은 그 서버를 내리거나 IRIS_PORT로 포트를 갈라야 합니다.`,
+        + `그대로 연결하면 그쪽 탭·북마크·계정이 보이고, 여기서 바꾼 내용은 그쪽에 저장됩니다.\n`
+        + `그 서버를 종료하거나 IRIS_PORT로 다른 포트를 지정하세요.`,
     });
     if (answer === 0) { app.quit(); return; }
   }
@@ -1170,6 +1226,7 @@ app.whenReady().then(async () => {
   startAudioDiagnostics();
   if (!QA_HIDDEN) resourceGuard.start();
   processMemoryLog.start();
+  appLifecycleLog.start();
   if (process.platform !== "win32") process.on("SIGUSR2", () => processMemoryLog.snapshotRequested());
   // 사용자의 실제 Chrome이 원격 디버깅 플래그로 실행 중이면 그 창에서는 구글 로그인이 막힌다.
   // 알리지 않으면 "브라우저가 안전하지 않다"는 메시지의 원인을 찾기 어려우므로, 시작할 때 한 번 알린다.
@@ -1177,13 +1234,14 @@ app.whenReady().then(async () => {
     const bad = chromeAuth.findPoisonedChrome();
     if (bad.length) {
       console.log("[chrome] 경고: 원격 디버깅 플래그가 붙은 Chrome이 떠 있습니다 — 그 창에선 구글 로그인이 거부됩니다. Chrome을 완전히 종료 후 재실행하세요. pid=" + bad.map((b) => b.pid).join(","));
-      setTimeout(() => { try { const win = getMainWindow(); if (win && !win.isDestroyed()) dialog.showMessageBox(win, { type: "warning", message: "Chrome이 원격 디버깅 상태로 실행 중입니다", detail: "그 Chrome 창에서는 구글 로그인이 거부됩니다(\"브라우저 또는 앱이 안전하지 않을 수 있습니다\").\n\nChrome을 완전히 종료했다 다시 켜면 풀립니다.\npid " + bad.map((b) => b.pid).join(", ") }); } catch {} }, 1500);
+      setTimeout(() => { try { const win = getMainWindow(); if (win && !win.isDestroyed()) dialog.showMessageBox(win, { type: "warning", message: "Chrome이 원격 디버깅 상태로 실행 중입니다", detail: "그 Chrome 창에서는 구글 로그인이 거부됩니다(\"브라우저 또는 앱이 안전하지 않을 수 있습니다\").\n\nChrome을 완전히 종료한 뒤 다시 실행하면 해결됩니다.\npid " + bad.map((b) => b.pid).join(", ") }); } catch {} }, 1500);
     }
   } catch {}
   hardenSession(session.fromPartition(IRIS_PARTITION), IRIS_PARTITION); // ①③ UA 정리 + Client Hints (첫 내비 전) + 다운로드 관찰
   installCertificateTrust();
   mainWindow.createWindow();
-  setupCdpControl(webContents); // 서버(4271)에 CDP 실행기로 붙어 iris-browser 명령을 활성 webview에 실행
+  // 잠든 탭과 닫힌 탭을 구분하는 서버의 탭 목록
+  setupCdpControl(webContents, browserTabZoom.reconcileTabs, () => serverHost.currentAppConnectionToken());
   const storageFlushTimer = setInterval(() => { void flushAcStorage(); }, 10000); // 강제 종료 시 유실 구간을 줄인다
   if (storageFlushTimer.unref) storageFlushTimer.unref();
   // 재기동 자동 리스폰: 분리 브라우저 창이 직전에 열려 있었으면 자동 재오픈한다.
@@ -1204,4 +1262,8 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 // SIGTERM(예: kill로 재기동)에 graceful quit 한다. before-quit/close 핸들러가 실행되어 창 bounds가 저장된다.
 // 막히면 1.5s 후 강제 종료. (SIGKILL/kickstart -k는 어떤 핸들러도 못 돌므로 마지막 debounce 저장분은 유실될 수 있음.)
-process.on("SIGTERM", () => { try { app.quit(); } catch {} setTimeout(() => process.exit(0), 1500); });
+process.on("SIGTERM", () => {
+  quitReason = "SIGTERM";
+  try { app.quit(); } catch {}
+  setTimeout(() => process.exit(0), STORAGE_FLUSH_TIMEOUT_MS + 500);
+});

@@ -113,7 +113,7 @@ export function mmRefresh() {
   }).join("");
   const notes = `
     <div class="mm-sec">
-      <div class="mm-sec-head"><h3>닫아 둔 별도 메모</h3><span class="mm-n">${closedNotes.length}</span></div>
+      <div class="mm-sec-head"><h3>닫은 별도 메모</h3><span class="mm-n">${closedNotes.length}</span></div>
       <div class="mm-list">
         ${closedNotes.length ? closedNotes.map((note) => `<div class="mm-nrow">
           <span class="mm-nm">${esc(note.name)}</span><span class="mm-pv">${note.text ? esc(oneLine(note.text, 36)) : "빈 메모"}</span>
@@ -141,7 +141,7 @@ export function mmRefresh() {
           <button class="mm-btn txt sm dz" data-mm="del" data-date="${esc(a.date)}">하루치 삭제</button>
         </div>` : ""}
     </div>`;
-  }).join("") : `<div class="mm-hint mm-hint-day">아직 보관한 것이 없습니다.</div>`;
+  }).join("") : `<div class="mm-hint mm-hint-day">보관본이 없습니다.</div>`;
   const html = `
     <div class="mm-main">
       <div class="mm-col mm-col-a">
@@ -159,11 +159,11 @@ export function mmRefresh() {
           ${away ? `<button class="mm-back" data-mm="home">${MM_ICON.back}${esc(mmSpaceLabel(mmHome))}(지금 작업 중)으로</button>` : ""}
           <div class="mm-seg" role="tablist"><button role="tab" data-memo-md="raw" class="${memoMdMode !== "preview" ? "on" : ""}">원문</button><button role="tab" data-memo-md="preview" class="${memoMdMode === "preview" ? "on" : ""}">미리보기</button></div>
         </div>
-        <div class="mm-why">스페이스마다 따로 저장됩니다. 보관하면 오늘 날짜 장에 시각을 달고 이어 붙고, 본문은 지우지 않습니다.</div>
+        <div class="mm-why">스페이스마다 따로 저장됩니다. 보관하면 오늘 날짜 보관본에 시각과 함께 추가되고 본문은 그대로 남습니다.</div>
         <div class="mm-slot" id="mm-slot"${memoMdMode === "preview" ? ' style="display:none"' : ""}></div>
         <div class="md-body mm-edit-pv" id="mm-preview"${memoMdMode === "preview" ? "" : " hidden"}>${memoMdMode === "preview" ? mdToHtml(text) : ""}</div>
         <div class="mm-ebar">
-          <button class="mm-btn pri" data-mm="archive">오늘 자로 보관</button><span class="kbd" title="단축키">${MM_MOD}${isHostWindows() ? "+Shift+" : "⇧"}S</span>
+          <button class="mm-btn pri" data-mm="archive">오늘 날짜로 보관</button><span class="kbd" title="단축키">${MM_MOD}${isHostWindows() ? "+Shift+" : "⇧"}S</span>
           <span class="mm-sp"></span>
           <button class="mm-btn txt dz" data-mm="clear">본문 비우기</button>
         </div>
@@ -216,11 +216,11 @@ function wireMemoAdmin() {
     switch (b.dataset.mm) {
       case "archive": wsSend({ type: "memo.archive", space: sp, text: memoTextOf(sp) }); break; // 보고 있는 스페이스 것을 담는다
       case "open": mmOpen = mmOpen === d ? null : d; mmRefresh(); break;
-      case "del": askConfirm(`${d} 보관본을 통째로 삭제할까요?`).then((ok) => { if (ok) wsSend({ type: "memo.archive.delete", space: sp, date: d }); }); break;
+      case "del": askConfirm(`${d} 보관본을 모두 삭제할까요?`).then((ok) => { if (ok) wsSend({ type: "memo.archive.delete", space: sp, date: d }); }); break;
       case "copy": if (a) copyText(a.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); break;
       // 하루치 안의 한 기록만 지운다. 잘못 담은 하나 때문에 하루를 버리지 않는다.
       case "bdel": { const bk = a && (a.blocks || []).find((x) => x.id === b.dataset.id); if (!bk) break;
-        askConfirm(`${d} ${bk.clock || "이전 기록"}에 보관한 것만 삭제할까요?`).then((ok) => { if (ok) wsSend({ type: "memo.archive.block.delete", space: sp, date: d, id: bk.id }); }); } break;
+        askConfirm(`${d} ${bk.clock || "이전 기록"}에 보관한 기록만 삭제할까요?`).then((ok) => { if (ok) wsSend({ type: "memo.archive.block.delete", space: sp, date: d, id: bk.id }); }); } break;
       case "bcopy": { const bk = a && (a.blocks || []).find((x) => x.id === b.dataset.id); if (bk) copyText(bk.text).then((ok) => showToast(ok ? "복사됨" : "복사하지 못했습니다", { level: ok ? "ok" : "err", near: "action" })); } break;
       case "restore": if (a) { // 덮지 않고 이어 붙인다. 작성 중인 내용을 잃지 않기 위한 것이다
         const cur = memoTextOf(sp);

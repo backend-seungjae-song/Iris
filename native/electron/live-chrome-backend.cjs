@@ -348,9 +348,11 @@ class LiveChromeBackend {
       let session;
       try {
         session = await attachExactTarget(browser, record.targetId, record.browserContextId);
+        if (!this.records.has(record.id)) { await session.detach(); continue; }
         this.bindSession(record, session);
         await session.send("Page.enable");
         await session.send("Page.startScreencast", normalizeScreencast(record.screencast));
+        if (!this.records.has(record.id)) continue;
         record.screencasting = true;
         record.mode = "live";
         record.accepting = true;
@@ -537,6 +539,17 @@ class LiveChromeBackend {
     }
     if (failure) throw new LiveChromeError("target-unavailable", "Chrome 탭을 앞으로 전환하지 못했습니다.", { cause: failure });
     return { ok: true, mode: "native", id: record.id, owner: record.owner, target: this.safeTarget(record) };
+  }
+
+  async releaseTab(id) {
+    const record = this.records.get(id);
+    if (!record) return;
+    this.records.delete(id);
+    try { await this.stopRecord(record); }
+    finally {
+      try { record.unbind?.(); }
+      finally { await record.session?.detach?.(); }
+    }
   }
 
   async closeTab(id) {

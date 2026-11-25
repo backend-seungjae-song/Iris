@@ -192,7 +192,7 @@ class _HumanTurnSheetState extends State<HumanTurnSheet> {
         ? '보내는 중…'
         : (_choice == null
               ? '답을 고르세요'
-              : (_choice == 'done' ? '‘다 했음’ 보내기' : '‘못 하겠음’ 보내기'));
+              : (_choice == 'done' ? '‘완료’ 보내기' : '‘할 수 없음’ 보내기'));
     return ResponseFrame(
       header: ResponseHeader.titledNext,
       title: widget.agent.name,
@@ -240,7 +240,7 @@ class _HumanTurnSheetState extends State<HumanTurnSheet> {
         const ResponseSectionLabel('답'),
         ResponseOption(
           key: const Key('human-turn-done'),
-          title: '다 했음',
+          title: '완료',
           description: '에이전트가 다음 단계로 진행합니다',
           selected: _choice == 'done',
           onTap: _busy ? null : () => _pick('done'),
@@ -248,7 +248,7 @@ class _HumanTurnSheetState extends State<HumanTurnSheet> {
         const SizedBox(height: 8),
         ResponseOption(
           key: const Key('human-turn-unable'),
-          title: '못 하겠음',
+          title: '할 수 없음',
           description: '에이전트가 이 단계를 건너뛰고 다른 방법을 찾습니다',
           negative: true,
           selected: _choice == 'unable',
@@ -340,7 +340,7 @@ class _HumanTurnSheetState extends State<HumanTurnSheet> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Text(
-                        'Mac 화면',
+                        '컴퓨터 화면',
                         style: TextStyle(color: Colors.white, fontSize: 11),
                       ),
                     ),

@@ -127,7 +127,7 @@ void main() {
     await tester.tap(find.byKey(const Key('terminal-line-up')));
     await tester.pumpAndSettle();
     expect(selected(), 1);
-    await tester.tap(find.text('자동 따라가기'));
+    await tester.tap(find.text('자동 스크롤'));
     await tester.pumpAndSettle();
     expect(selected(), 0);
     await _close(tester, state, session);
@@ -149,7 +149,7 @@ void main() {
                 .painter!
             as TerminalGridPainter;
     expect(painter().grid.cells[0][0].value, 'o');
-    await tester.tap(find.text('자동 따라가기'));
+    await tester.tap(find.text('자동 스크롤'));
     await tester.pumpAndSettle();
     expect(painter().grid.cells[0][0].value, 'A');
     await _close(tester, state, session);

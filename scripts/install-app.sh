@@ -141,6 +141,6 @@ echo "6/6  에이전트 컨텍스트 안내 설치"
 # 앱은 이미 바뀌어 돌고 있다. 스킬 파일 하나 때문에 여기서 실패하면 옛 앱 사본이 남고 설치가
 # 실패로 끝난다. 안내만 남기고 마친다. ./setup --check 가 이 상태를 다시 보여 준다.
 # 지목 등록 훅은 이미 넣어 둔 Iris 항목만 갱신한다. 새로 넣는 것은 묻고 나서 하는 ./setup 몫이다.
-node scripts/install-agent-context.mjs --app "$APP" || echo "에이전트 스킬 파일·지목 등록 훅을 갱신하지 못했습니다 — 위 이유를 해결한 뒤 ./setup 을 다시 돌리면 됩니다."
+node scripts/install-agent-context.mjs --app "$APP" || echo "에이전트 스킬 파일·대상 등록 훅을 갱신하지 못했습니다 — 위 이유를 해결한 뒤 ./setup 을 다시 돌리면 됩니다."
 [ -n "$OLD" ] && rm -rf "$OLD"
 echo "교체 완료 — 설치된 앱이 현재 소스로 돕니다."

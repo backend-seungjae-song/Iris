@@ -37,3 +37,22 @@ test("호출마다 쓰임새와 결과를 남기고 페이지 글은 남기지 �
     assert.ok(!fs.readFileSync(path.join(state, "mcp-use.jsonl"), "utf8").includes("비밀 문구"));
   });
 });
+
+test("다른 프로세스가 회전 중이면 현재 파일에 쓰고 다음 회전에 보존한다", async () => {
+  const { default: lockfile } = await import("proper-lockfile");
+  await withMcp(reply, async (callTool, _seen, state) => {
+    const file = path.join(state, "mcp-use.jsonl");
+    const seed = JSON.stringify({ payload: "a".repeat(4 * 1024 * 1024) }) + "\n";
+    fs.writeFileSync(file, seed);
+    const unlock = lockfile.lockSync(file);
+    try {
+      await callTool("browser_click", { selector: "#first" });
+      assert.equal(fs.existsSync(file + ".1"), false);
+    } finally { unlock(); }
+    await callTool("browser_click", { selector: "#second" });
+    const archive = fs.readFileSync(file + ".1", "utf8");
+    assert.ok(archive.startsWith(seed));
+    assert.equal(JSON.parse(archive.slice(seed.length)).selector, "#first");
+    assert.deepEqual(rows(state).map(row => row.selector), ["#second"]);
+  });
+});

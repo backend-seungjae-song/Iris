@@ -42,27 +42,36 @@ function providerModes(provider: string) {
   };
 }
 
-// 모델 목록. Claude 는 manifest, Codex 는 부모가 준 목록(없으면 unavailable)
-export function providerEntries(codexModels: IrisModelDefinition[] | null, fetchedAt: string) {
+const AGY_MODES = (() => {
+  const claude = providerModes("claude").modes;
+  const keep = new Set(["default", "acceptEdits", "auto", "plan"]);
+  return claude.filter((m) => keep.has(m.id));
+})();
+
+// 모델 목록. Claude 는 manifest, Codex·Antigravity 는 부모가 준 목록(없으면 unavailable)
+export function providerEntries(codexModels: IrisModelDefinition[] | null, fetchedAt: string, agyModels: IrisModelDefinition[] | null = null) {
   const claude = providerModes("claude");
   const codex = providerModes("codex");
   const hasCodex = !!codexModels?.length;
+  const hasAgy = !!agyModels?.length;
   return [
     { provider: "claude", status: "ready" as const, enabled: true, label: "Claude", models: getClaudeManifestModels(), modes: claude.modes, defaultModeId: claude.defaultModeId, fetchedAt },
     { provider: "codex", status: hasCodex ? ("ready" as const) : ("unavailable" as const), enabled: true, label: "Codex", models: hasCodex ? codexModels! : [], modes: codex.modes, defaultModeId: codex.defaultModeId, fetchedAt },
+    { provider: "agy", status: hasAgy ? ("ready" as const) : ("unavailable" as const), enabled: true, label: "Antigravity", models: hasAgy ? agyModels! : [], modes: AGY_MODES, defaultModeId: "auto", fetchedAt },
   ];
 }
 
 // 에이전트 스냅샷의 모델·effort·모드·사용량 칸
 export function agentFields(provider: string, meta: IrisAgentMeta | null) {
-  const { modes } = providerModes(provider);
+  const modes = provider === "agy" ? AGY_MODES : providerModes(provider).modes;
   // Claude 기록의 모델 id 는 날짜·[1m] 이 붙어 있어 manifest id 로 맞춤
   const model = meta?.model ? (provider === "claude" ? normalizeClaudeRuntimeModelId(meta.model) ?? meta.model : meta.model) : null;
   const effort = meta?.effort || null;
   const mode = meta?.mode || null;
   let max = meta?.usage?.max ?? null;
-  // Claude 기록에는 창 크기가 없음. manifest 값 사용
+  // Claude·Antigravity 기록에는 창 크기가 없을 수 있음
   if (max === null && provider === "claude" && model) max = getClaudeManifestModels().find((m) => m.id === model)?.contextWindowMaxTokens ?? null;
+  if (max === null && provider === "agy") max = 1_000_000;
   const used = meta?.usage?.used;
   return {
     model,

@@ -1302,7 +1302,7 @@ class RemoteSession {
       );
       if (response is RemoteError) throw _remoteError(response.code);
       if (response is! PairPending) {
-        throw const RemoteFailure('컴퓨터가 페어링 코드를 보내지 않았습니다.');
+        throw const RemoteFailure('컴퓨터가 등록 코드를 보내지 않았습니다.');
       }
       return PendingPairing(
         settings: PairingSettings(
@@ -1508,9 +1508,9 @@ RemoteFailure _remoteError(String code) {
     'unsupported-request' => const RemoteFailure(
       '컴퓨터의 Iris가 이 요청을 지원하지 않습니다. 컴퓨터와 폰 앱의 버전을 확인하세요.',
     ),
-    'gh_missing' => const RemoteFailure('Mac에 GitHub CLI(gh)가 설치되어 있지 않습니다.'),
+    'gh_missing' => const RemoteFailure('컴퓨터에 GitHub CLI(gh)가 설치되어 있지 않습니다.'),
     'auth_required' => const RemoteFailure(
-      'Mac의 GitHub CLI가 로그인되어 있지 않습니다. gh auth login을 실행하세요.',
+      '컴퓨터의 GitHub CLI가 로그인되어 있지 않습니다. gh auth login을 실행하세요.',
     ),
     'no_pr' => const RemoteFailure('현재 브랜치에 연결된 GitHub PR이 없습니다.'),
     'no_remote' => const RemoteFailure(
@@ -1530,7 +1530,7 @@ RemoteFailure _remoteError(String code) {
       '컴퓨터의 Iris 브라우저 제어기가 연결되지 않았습니다. Iris 앱에서 브라우저를 연 뒤 다시 시도하세요.',
     ),
     'browser-tab-unavailable' => const RemoteFailure(
-      '컴퓨터가 잠든 브라우저 탭을 열지 못했습니다. Iris에서 해당 스페이스의 브라우저 창을 연 뒤 다시 시도하세요.',
+      '컴퓨터가 브라우저의 절전 탭을 다시 열지 못했습니다. Iris에서 해당 스페이스의 브라우저 창을 연 뒤 다시 시도하세요.',
     ),
     'browser-frame-unavailable' => const RemoteFailure(
       '컴퓨터가 브라우저 화면을 만들지 못했습니다. 해당 탭을 컴퓨터에서 연 뒤 다시 시도하세요.',
@@ -1557,7 +1557,7 @@ RemoteFailure _remoteError(String code) {
       '터미널 읽기 시간이 초과되었습니다. 자동으로 다시 시도합니다.',
     ),
     'terminal-screen-stale' => const RemoteFailure(
-      '출력은 바뀌지만 화면이 갱신되지 않습니다. Mac에서 이 터미널을 확인하세요.',
+      '출력은 바뀌지만 화면이 갱신되지 않습니다. 컴퓨터에서 이 터미널을 확인하세요.',
     ),
     'terminal-read-unavailable' => const RemoteFailure(
       '터미널 화면을 읽지 못했습니다. 컴퓨터에서 터미널 상태를 확인하세요.',

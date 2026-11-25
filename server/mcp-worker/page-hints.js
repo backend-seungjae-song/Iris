@@ -34,7 +34,7 @@ async function loginHint(send) {
     });
     const origin = r && r.result && r.result.value;
     if (!origin) return null;
-    return `로그인 칸 있음(${origin}) — 사람에게 넘기기 전에 login 먼저. 허용된 계정이 없으면 그때 사람 차례.`;
+    return `로그인 칸 있음(${origin}). 사람에게 넘기기 전에 login 먼저. 허용된 계정이 없으면 그때 사람에게 넘긴다.`;
   } catch { return null; }
 }
 
@@ -58,8 +58,8 @@ async function humanHint(send) {
     })()` });
     const hits = (r && r.result && r.result.value) || [];
     if (!Array.isArray(hits) || !hits.length) return null;
-    return `사람만 할 수 있는 자리다(${hits.join(" · ")}). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. `
-      + `답을 받은 뒤 화면을 다시 확인하고 이어 간다.`;
+    return `사람만 할 수 있는 단계다(${hits.join(" · ")}). 대신하지 말고, 이 세션 대화에서 사용자에게 이 탭에서 해 달라고 직접 물어라. `
+      + `답을 받은 뒤 화면을 다시 확인하고 계속한다.`;
   } catch { return null; }
 }
 

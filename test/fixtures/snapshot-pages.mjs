@@ -50,7 +50,13 @@ export function createPageSend(page) {
     const expression = String(params.expression || "");
     switch (method) {
       case "Accessibility.enable": return {};
-      case "Accessibility.getFullAXTree": return { nodes: sessionId ? page.frames[sessionId] : page.tree };
+      case "Page.getFrameTree": return { frameTree: page.frameTrees?.[sessionId || "main"] || { frame: { id: sessionId || "main" } } };
+      case "Accessibility.getFullAXTree": {
+        if (!params.frameId) return { nodes: sessionId ? page.frames[sessionId] : page.tree };
+        const nodes = page.frameNodes?.[params.frameId];
+        if (!nodes) throw new Error("Frame with the given frameId is not found.");
+        return { nodes };
+      }
       case "Runtime.evaluate":
         if (expression.includes("found.push")) return { result: { value: JSON.stringify(page.cursor) } };
         if (expression.startsWith("window.__acCursorInteractive[")) {

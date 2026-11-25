@@ -138,8 +138,8 @@ async function execute(cmd, args, base, context = {}) {
       const state = await focusState();
       if (state?.paint && !state.paint.ok) {
         throw codedError("window_not_drawing",
-          `이 탭을 담은 창이 ${state.paint.why} 상태라 화면을 그리지 않습니다 — ${runCmd} 를 보내도 도달하지 않습니다.`
-          + " 창을 띄워 달라고 사람에게 부탁하고 다시 하세요(browser_ask_user).");
+          `이 탭이 있는 창이 ${state.paint.why} 상태라 화면을 그리지 않습니다. ${runCmd} 를 보내도 전달되지 않습니다.`
+          + " 사람에게 창을 열어 달라고 요청한 뒤 다시 하세요(browser_ask_user).");
       }
     }
     await refreshFrames();

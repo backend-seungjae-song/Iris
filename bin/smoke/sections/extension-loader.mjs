@@ -258,24 +258,48 @@ export default async function run() {
     return true;
   });
 
-  await checkAsync("async capability가 끝나기 전 다음 capability boot가 진행되지 않는다", async () => {
+  await checkAsync("capability는 load를 병렬로 진행하고 init은 기존 순서를 지킨다", async () => {
     const { bootCapabilities } = await import(new URL(`../../../web/js/core/capability-boot.js?ordering=${Date.now()}`, import.meta.url).href);
     const events = [];
-    let release;
-    const gate = new Promise((resolve) => { release = resolve; });
+    let releaseLoad;
+    const loadGate = new Promise((resolve) => { releaseLoad = resolve; });
+    let releaseInit;
+    const initGate = new Promise((resolve) => { releaseInit = resolve; });
+    let resolveFastLoad;
+    const fastLoad = new Promise((resolve) => { resolveFastLoad = resolve; });
+    let resolveFirstInit;
+    const firstInit = new Promise((resolve) => { resolveFirstInit = resolve; });
     const pending = bootCapabilities({
       items: [
-        { id: "first", load: async () => ({ initCapability: async () => { events.push("first-start"); await gate; events.push("first-end"); } }) },
-        { id: "second", load: async () => { events.push("second-load"); return {}; } },
+        { id: "first", load: async () => {
+          events.push("first-load");
+          await loadGate;
+          events.push("first-loaded");
+          return { initCapability: async () => {
+            events.push("first-init");
+            resolveFirstInit();
+            await initGate;
+            events.push("first-initialized");
+          } };
+        } },
+        { id: "second", load: async () => {
+          events.push("second-load");
+          resolveFastLoad();
+          return { initCapability: () => { events.push("second-init"); } };
+        } },
       ],
     });
-    await Promise.resolve();
-    await Promise.resolve();
-    const beforeRelease = events.join("/");
-    release();
+    await fastLoad;
+    if (events.join("/") !== "first-load/second-load") throw new Error(`load가 병렬이 아님: ${events.join("/")}`);
+    releaseLoad();
+    await firstInit;
+    if (events.join("/") !== "first-load/second-load/first-loaded/first-init") {
+      throw new Error(`두 번째 init이 첫 번째 init보다 먼저 시작됨: ${events.join("/")}`);
+    }
+    releaseInit();
     await pending;
-    if (beforeRelease !== "first-start" || events.join("/") !== "first-start/first-end/second-load") {
-      throw new Error(`${beforeRelease} -> ${events.join("/")}`);
+    if (events.join("/") !== "first-load/second-load/first-loaded/first-init/first-initialized/second-init") {
+      throw new Error(`init 순서가 바뀜: ${events.join("/")}`);
     }
     return true;
   });

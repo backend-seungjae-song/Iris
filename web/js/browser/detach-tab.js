@@ -83,7 +83,7 @@ function closeOwnTabs(ids) {
 async function detach(tabId, title, space) {
   if (!host || !host.detachTab) return;
   const r = await host.detachTab({ tabId, title, space });
-  if (!r || !r.ok) notify(r && r.error ? `탭을 빼지 못했습니다: ${r.error}` : "탭을 빼지 못했습니다");
+  if (!r || !r.ok) notify(r && r.error ? `탭을 분리하지 못했습니다: ${r.error}` : "탭을 분리하지 못했습니다");
   // 감추는 것은 방송을 받은 뒤다. 미리 감추면 창이 뜨지 않았을 때 탭이 어디에도 없게 된다.
 }
 
@@ -102,7 +102,7 @@ export function initCapability(ctx) {
     if (!tab || !tab.id) return null;
     if (myWin && own.size < 2) return null;
     return {
-      label: myWin ? "새 창으로 빼기" : "창으로 빼기",
+      label: myWin ? "새 창으로 분리" : "창으로 분리",
       act: () => detach(tab.id, tab.name || tab.title || "", space),
     };
   });

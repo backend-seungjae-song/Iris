@@ -24,6 +24,7 @@
 let socket = null;
 let generation = 0;
 let retry = 0;
+let reconnectTimer = null;
 let watch = null;
 let config = null;
 let verified = false;      // 현재 소켓의 서버 정책 확인 여부
@@ -33,6 +34,12 @@ let policyBlocked = false; // 정책 불일치 서버 확인 후 재연결 중�
 export const EXPECTED_NET_POLICY = "loopback-only/1";
 
 export function initWs(deps) {
+  clearTimeout(reconnectTimer);
+  const previous = socket;
+  socket = null;
+  previous?.close();
+  policyBlocked = false;
+  retry = 0;
   config = deps;
   connect();
 }
@@ -47,9 +54,13 @@ function connect() {
   // 소켓 열림만으로 연결 완료 처리 안 함. 첫 caps 의 정책 확인 후 처리
   openedSocket.onopen = () => {};
   openedSocket.onclose = () => {
+    if (openedSocket !== socket) return;
+    verified = false;
+    socket = null;
+    clearInterval(watch);
     config.onClose(socketGeneration);
     if (policyBlocked) return;
-    setTimeout(connect, Math.min(1000 * ++retry, 5000));
+    reconnectTimer = setTimeout(connect, Math.min(1000 * ++retry, 5000));
   };
   // 소켓이 정상 종료 없이 끊기면 onclose가 오지 않는다. 서버 heartbeat가 끊기면 먼저 닫고 재연결한다.
   socket._lastMsg = Date.now();
@@ -59,7 +70,8 @@ function connect() {
     if (Date.now() - socket._lastMsg > 25000) { try { socket.close(); } catch {} }
   }, 5000);
   openedSocket.onmessage = (event) => {
-    socket._lastMsg = Date.now();
+    if (openedSocket !== socket) return;
+    openedSocket._lastMsg = Date.now();
     if (!verified) {
       // 확인 전 수신은 전달 없음. 첫 문자 메시지 = 정책 실린 caps 만 통과
       let first = null;
@@ -74,13 +86,18 @@ function connect() {
       verified = true;
       socketGeneration = ++generation;
       retry = 0;
+      // 탭 보고를 시작하기 전에 이 연결을 인증
+      const appToken = first.local === true && config.getAppConnectionToken?.();
+      if (appToken) wsSend({ type: "app-auth", token: appToken });
       config.onOpen(socketGeneration);
       const capsHandler = config.dispatch.caps;
       if (capsHandler) capsHandler(first);
       return;
     }
     if (event.data instanceof ArrayBuffer) { config.onBinary(event.data); return; }
-    const message = JSON.parse(event.data);
+    let message;
+    try { message = JSON.parse(event.data); } catch { return; }
+    if (typeof message?.type !== "string") return;
     const handler = config.dispatch[message.type];
     if (handler) handler(message);
   };

@@ -14,6 +14,7 @@ const REQUEST_RATE = 40;
 const REQUEST_BURST = 60;
 // 대화 화면 하나가 여는 요청(기록 구독·첫 페이지·PR·변경 파일·브라우저 목록)과 긴 브라우저 요청이 함께 들어가는 수
 const INFLIGHT_LIMIT = 16;
+const FAILURE_SWEEP_MS = 60_000;
 
 function sameImpact(session, impact) {
   if (impact.scope === "all") return true;
@@ -83,6 +84,7 @@ export function createConnectionAuth(options) {
   }
   const failures = new Map();
   const blocks = new Map();
+  let lastFailureSweep = 0;
 
   function clearRecordTimers(record) {
     for (const timer of [record.challengeTimer, record.idleTimer]) {
@@ -121,6 +123,7 @@ export function createConnectionAuth(options) {
 
   function recordFailure(peerIp) {
     const timestamp = now();
+    sweepFailures(timestamp);
     const recent = (failures.get(peerIp) || []).filter((value) => timestamp - value < FAILURE_WINDOW_MS);
     recent.push(timestamp);
     if (recent.length < 5) {
@@ -132,6 +135,22 @@ export function createConnectionAuth(options) {
     blocks.set(peerIp, until);
     onThrottle(peerIp, until);
     return until;
+  }
+
+  function pruneFailures(timestamp = now()) {
+    let removed = 0;
+    for (const [peerIp, values] of failures) {
+      const recent = values.filter((value) => timestamp - value < FAILURE_WINDOW_MS);
+      if (recent.length) failures.set(peerIp, recent);
+      else if (failures.delete(peerIp)) removed++;
+    }
+    return removed;
+  }
+
+  function sweepFailures(timestamp = now()) {
+    if (timestamp - lastFailureSweep < FAILURE_SWEEP_MS) return;
+    lastFailureSweep = timestamp;
+    pruneFailures(timestamp);
   }
 
   function reject(connId, countFailure = true) {
@@ -168,13 +187,14 @@ export function createConnectionAuth(options) {
   function open(input) {
     if (!input || !/^[0-9a-f]{32}$/.test(input.connId || "") || typeof input.peerIp !== "string"
       || typeof input.nodeId !== "string" || records.has(input.connId)) return { ok: false, error: "forbidden" };
-    const blocked = blockedUntil(input.peerIp);
+    const timestamp = now();
+    sweepFailures(timestamp);
+    const blocked = blockedUntil(input.peerIp, timestamp);
     if (blocked) return { ok: false, error: "forbidden", blockedUntil: blocked };
     const certHash = getCertificateHash();
     if (!isRemoteEnabled() || !/^[0-9a-f]{64}$/.test(certHash || "") || input.certHash !== certHash) {
       return { ok: false, error: "forbidden" };
     }
-    const timestamp = now();
     const nonce = randomBytes(32).toString("hex");
     const record = {
       phase: "challenge",
@@ -400,8 +420,20 @@ export function createConnectionAuth(options) {
     return expired;
   }
 
+  function closeAll({ revokeTokens = false } = {}) {
+    for (const record of records.values()) clearRecordTimers(record);
+    records.clear();
+    failures.clear();
+    blocks.clear();
+    if (revokeTokens) {
+      resumeTokens.clear();
+      resumeStore?.flushSync?.({ final: true });
+    }
+  }
+
   function activeBlocks() {
     const timestamp = now();
+    pruneFailures(timestamp);
     const result = [];
     for (const [peerIp, until] of blocks) {
       if (until <= timestamp) blocks.delete(peerIp);
@@ -419,6 +451,7 @@ export function createConnectionAuth(options) {
     beginRequest,
     endRequest,
     close: (connId) => !!remove(connId),
+    closeAll,
     invalidate,
     refreshExpiry,
     pruneExpiredTokens: () => pruneTokens(),

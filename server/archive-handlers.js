@@ -5,7 +5,10 @@ import path from "node:path";
 import { agentArgv, shellCommand } from "./agent-launch.js";
 import * as archive from "./archive.js";
 import { bindSpaceFolder } from "./browser-state-owner.js";
+import { resolveAgySession } from "./agy-session.js";
 import { resolveCodexSession } from "./codex-session.js";
+import { embeddedPane } from "./paseo-ui/embedded-pane.js";
+import { managedPane } from "./paseo-ui/managed-pane.js";
 import { requestRecompute as recompute, snapshot } from "./runtime-state.js";
 
 // 보관·복원 WebSocket handler와 복원 흐름의 단일 소유 모듈.
@@ -60,11 +63,22 @@ async function readTail(paneId, agentKind, uuid, file) {
 // 그 사이 대화가 바뀌었으면 최신이 아닐 수 있어서 닫기 직전에 다시 찾는다. 오래된 키로 보관하면
 // 복원할 때 다른 대화가 열리고, 보관된 대화는 복원할 방법이 없어진다.
 async function sessionKey(a) {
-  if (String(a.agent || "").toLowerCase() === "codex") {
+  const kind = String(a.agent || "").toLowerCase();
+  if (kind === "codex") {
     const hit = await resolveCodexSession(herdr, a.paneId);
     if (hit) return hit;
   }
+  if (kind === "agy" || kind.startsWith("agy") || kind.startsWith("antigravity")) {
+    const hit = await resolveAgySession(herdr, a.paneId);
+    if (hit) return hit;
+  }
   return a.sessionUuid ? { uuid: a.sessionUuid, file: a.sessionFile || null } : null;
+}
+
+function assertArchivable(paneId, terminalId, managedProvider) {
+  if (managedProvider || embeddedPane(terminalId) || managedPane(paneId, undefined, terminalId)) {
+    throw new Error("Paseo 세션은 아직 보관함에서 복원할 수 없습니다. 탭을 열어 뒀습니다.");
+  }
 }
 
 export function handleArchive(ws, msg) {
@@ -76,6 +90,9 @@ export function handleArchive(ws, msg) {
 
   if (msg.type === "archive.agent") {
     const a = snapshot().state.find((x) => x.paneId === msg.paneId);
+    if (msg.paneId) {
+      try { assertArchivable(msg.paneId, a?.terminalId, a?.managedProvider); } catch (error) { fail(error); return; }
+    }
     if (!a) { fail("그 에이전트를 찾을 수 없습니다."); return; }
     if (!archive.canResume(a.agent)) { fail(`${a.agent} 세션을 잇는 방법을 모릅니다 — 접지 않았습니다.`); return; }
     const w = snapshot().workspaces.find((x) => x.id === a.workspaceId);
@@ -84,11 +101,12 @@ export function handleArchive(ws, msg) {
       const key = await sessionKey(a);
       if (!key) { fail("세션 id가 없어 되살릴 수 없습니다 — 접지 않았습니다."); return; }
       const tail = await readTail(a.paneId, a.agent, key.uuid, key.file);   // 닫은 뒤에는 읽을 수 없다
+      assertArchivable(a.paneId, a.terminalId);
       archive.add(archive.agentEntry({ ...a, sessionUuid: key.uuid }, w?.label, w?.folder, tail));
       broadcastArchives();
       try { await herdr.paneClose(a.paneId); } catch (e) { fail(e); }
       recompute();
-    })();
+    })().catch(fail);
     return;
   }
 
@@ -97,6 +115,7 @@ export function handleArchive(ws, msg) {
     if (!w) { fail("그 스페이스를 찾을 수 없습니다."); return; }
     const mine = snapshot().state.filter((x) => x.workspaceId === w.id);
     (async () => {
+      for (const a of mine) assertArchivable(a.paneId, a.terminalId, a.managedProvider);
       // 폴더를 모르면 복원할 수 없다. state의 folder는 에이전트 cwd에서 유추한 값이라
       // 에이전트가 없는 스페이스에서는 비어 있고, 그럴 때는 pane에서 직접 읽는다.
       let folder = w.folder;
@@ -108,17 +127,14 @@ export function handleArchive(ws, msg) {
       const lost = mine.length - keep.length;
       const savedTabs = snapshot().tabs[w.id] || [];
       const keptTabIds = new Set(keep.map((agent) => agent.tabId));
-      let panes = [];
-      if (savedTabs.some((tab) => !keptTabIds.has(tab.tabId))) {
-        try { panes = await herdr.paneList(w.id); }
-        catch (error) { fail(error); return; }
-        if (!Array.isArray(panes)) { fail("터미널의 작업 폴더를 확인하지 못해 접지 않았습니다."); return; }
-        for (const tab of savedTabs) if (!keptTabIds.has(tab.tabId)) {
-          try { validateTerminalCwd(panes.find((pane) => pane.tab_id === tab.tabId)?.cwd); }
-          catch (error) { fail(error); return; }
-        }
-      }
       const tails = await Promise.all(keep.map((x) => readTail(x.paneId, x.agent, x.sessionUuid, x.sessionFile)));
+      // 에이전트 목록에 나타나기 전의 Paseo pane도 확인
+      const panes = await herdr.paneList(w.id);
+      if (!Array.isArray(panes)) throw new Error("스페이스의 pane 목록을 확인하지 못했습니다.");
+      for (const pane of panes) assertArchivable(pane.pane_id, pane.terminal_id);
+      for (const tab of savedTabs) if (!keptTabIds.has(tab.tabId)) {
+        validateTerminalCwd(panes.find((pane) => pane.tab_id === tab.tabId)?.cwd);
+      }
       const entries = keep.map((x, i) => archive.agentEntry(x, w.label, folder, tails[i]));
       archive.addMany(entries);
       // 탭 구성도 함께 남긴다. 세션이 붙지 않은 터미널 탭도 그 스페이스의 일부다.
@@ -130,7 +146,7 @@ export function handleArchive(ws, msg) {
       if (lost) ws.send(JSON.stringify({ type: "archive-note", message: `세션 id가 없는 에이전트 ${lost}개는 기록하지 못했습니다.` }));
       try { await herdr.workspaceClose(w.id); } catch (e) { fail(e); }
       recompute();
-    })();
+    })().catch(fail);
     return;
   }
 

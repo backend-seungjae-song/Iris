@@ -31,7 +31,16 @@ for (const scenario of SCENARIOS) {
     const worker = createWorkerRun(scenario, { legacyResponse: recorded.response });
     const response = await worker.run();
     assert.deepEqual(response, recorded.response);
-    assert.deepEqual(worker.effects, recorded.effects);
+    const effects = (calls) => calls.map((call) => {
+      const [kind, method, params, sid] = call;
+      if (scenario.cmd !== "fill" || kind !== "cdp" || method !== "Runtime.evaluate"
+          || !params.expression?.includes("el=document.activeElement")) return call;
+      // fill의 문서 선택 식은 iframe 테스트에서 실행하고 이 테스트는 명령 순서를 비교
+      const expression = params.expression.includes("selectAll") ? "선택"
+        : params.expression.includes("dispatchEvent") ? "직접 설정" : "입력값 확인";
+      return [kind, method, { ...params, expression }, sid];
+    });
+    assert.deepEqual(effects(worker.effects), effects(recorded.effects));
     // 사용자 포커스를 옮기는 기본 명령은 이번 처리기에서 부르지 않는다
     assert.equal(worker.relays.some((r) => ["focus.prepare", "focus.return", "viewport.apply", "dialog.plan"].includes(r.command)), false);
     // 단위 규칙: 모든 호출이 사용자 명령 이름으로 묶이고 마지막 호출 표시는 많아야 하나
@@ -70,10 +79,11 @@ test("처리기가 쓰는 옛 원문 구간이 cdp-control.cjs 에 있다(원본
     "runCdpCmd(send, wc, cmd, args, webContentsMod)", "observation.settleAnimations(send)", "captureHold(wc.id, false)"]);
 });
 
-test("worker 사본은 원본과 파일 내용이 같다(머리말·export 줄만 다름)", () => {
-  const strip = (text) => text.replace(/^\/\/ worker 사본[^\n]*\n\/\/ 원본은 ⑧에서 지움\n/, "")
+test("iframe 대응을 추가한 fill 외의 입력 처리기는 옛 처리기와 같다", () => {
+  const strip = (text) => text.replace(/^\/\/ worker [^\n]*\n\/\/ 원본은 ⑧에서 지움\n/, "")
     .replace(/module\.exports = \{[^}]*\};/, "").replace(/export \{[^}]*\};/, "").trim();
-  assert.equal(strip(read("../server/mcp-worker/input-commands.js")), strip(read("../native/electron/cdp-cmd-input.cjs")));
+  const beforeFill = (text) => strip(text).split("\n    async fill(")[0];
+  assert.equal(beforeFill(read("../server/mcp-worker/input-commands.js")), beforeFill(read("../native/electron/cdp-cmd-input.cjs")));
   assert.equal(strip(read("../server/mcp-worker/layout.js")), strip(read("../native/electron/cdp-layout.cjs")));
   assert.equal(strip(read("../server/mcp-worker/text-insert.js")), LEGACY_PARTS.insert.trim());
 });

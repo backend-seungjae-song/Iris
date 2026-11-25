@@ -49,7 +49,7 @@ function paint(next = frame) {
   const stale = store.stale(key, tab.patch);
   if (stale.length) {
     const box = document.createElement("details"); box.className = "dr-stale"; box.dataset.diffreview = "";
-    const title = document.createElement("summary"); title.textContent = `diff가 바뀌기 전에 단 의견 ${stale.length}개. 줄 위치를 확인하세요`; box.append(title);
+    const title = document.createElement("summary"); title.textContent = `diff가 바뀌기 전에 작성한 의견 ${stale.length}개. 줄 위치를 확인하세요`; box.append(title);
     box.open = staleWasOpen;
     for (const note of stale) box.append(noteCard(note, key));
     toolbar?.after(box);
@@ -57,9 +57,9 @@ function paint(next = frame) {
   for (const [draftKey, draft] of edits) if (draftKey.startsWith(key + ":") && draft.patch !== tab.patch) {
     const box = document.createElement("span"); box.className = "dr-note"; box.dataset.diffreview = "";
     const text = document.createElement("span"); text.className = "dr-note-text";
-    text.textContent = `diff가 바뀌기 전에 쓰던 의견입니다. 줄 위치를 확인하세요\n${draft.text}`;
+    text.textContent = `diff가 바뀌기 전에 작성하던 의견입니다. 줄 위치를 확인하세요\n${draft.text}`;
     box.append(text, button("복사", () => ctx.copyText(draft.text)),
-      button("지우기", () => { edits.delete(draftKey); paint(); })); toolbar?.after(box);
+      button("삭제", () => { edits.delete(draftKey); paint(); })); toolbar?.after(box);
   }
   lines.forEach((line, index) => {
     const row = rows[index]; if (!row || !(row.o || row.n) || !/^[ +\-]/.test(row.text)) return;
@@ -94,7 +94,7 @@ function editLine(current, row, line, index, focus = true) {
   const key = reviewKey(current.tab, current.spaceId) + ":" + index;
   const capturedPatch = current.tab.patch;
   if (edits.has(key) && edits.get(key).patch !== capturedPatch) {
-    ctx.showToast("diff가 바뀌기 전에 쓰던 의견을 복사하거나 지운 뒤 새 의견을 추가하세요", { level: "info" }); return;
+    ctx.showToast("diff가 바뀌기 전에 작성하던 의견을 복사하거나 지운 뒤 새 의견을 추가하세요", { level: "info" }); return;
   }
   if (line.nextElementSibling?.dataset.editor === key) { if (focus) line.nextElementSibling.querySelector("textarea").focus(); return; }
   const form = document.createElement("span"); form.className = "dr-editor"; form.dataset.diffreview = ""; form.dataset.editor = key;

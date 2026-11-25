@@ -185,7 +185,7 @@ test("prompt-targets는 활성화 요약과 여러 기기 안내를 nonce 없이
       { kind: "device", ref: "@device:d2", label: "iPhone", target: { udid: "d2" } },
     ], rejected: [] } }),
   });
-  assert.match(output, /지목 등록: 탭 @work-tab-a12345/);
+  assert.match(output, /대상 등록: 탭 @work-tab-a12345/);
   assert.match(output, /등록 기기가 2대라/);
   assert.doesNotMatch(output, /nonce_/);
 });
@@ -266,7 +266,7 @@ test("prompt-targets CLI는 서버가 꺼져도 한 줄을 출력하고 exit 0",
     env: { ...process.env, HERDR_PANE_ID: "w1:p1", IRIS_PORT: "65534" }, timeout: 4000,
   });
   assert.equal(result.status, 0);
-  assert.match(result.stdout.trim(), /^지목 등록 실패: /);
+  assert.match(result.stdout.trim(), /^대상 등록 실패: /);
   assert.equal(result.stdout.trim().split("\n").length, 1);
 });
 

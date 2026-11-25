@@ -6,30 +6,43 @@ import { cellWidth } from "./cell-width.js";
 // - 접는 폭: Claude Code 는 터미널 폭 − 2, Codex 는 − 1(실제 화면에서 잰 값)
 
 const RULE = /^─{8,}\s*$/;
+const AGY_RULE = /^[─\ufffd]{8,}\s*$/;
 // Claude Code 는 ❯ 뒤에 줄바꿈 없는 공백(U+00A0)을 씀
 // 붙여 넣은 덩어리·이미지 자리. 화면에는 이름만 있어 내용을 못 읽음
 const PASTED = /\[(?:Pasted (?:text|Content)[^\]]*|Image #\d+)\]/;
 
 // 이스케이프를 지우고 흐림 글자도 뺀 글
-export function undimmed(line) {
+export function undimmed(line, { hideGray = false } = {}) {
   const re = /\x1b\[([0-9;:?]*)([ -/]*[@-~])|\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1b[@-_]/g;
   let out = "";
   let dim = false;
+  let muted = false;
   let last = 0;
   let m;
   while ((m = re.exec(line))) {
-    if (!dim) out += line.slice(last, m.index);
+    if (!dim && !muted) out += line.slice(last, m.index);
     last = re.lastIndex;
     if (m[2] !== "m") continue;
     const ps = m[1] === "" ? [0] : m[1].split(/[;:]/).map(Number);
     for (let i = 0; i < ps.length; i++) {
       const p = ps[i];
-      if (p === 0 || p === 22) dim = false;
+      if (p === 0) { dim = false; muted = false; }
+      else if (p === 22) dim = false;
       else if (p === 2) dim = true;
-      else if (p === 38 || p === 48 || p === 58) i += ps[i + 1] === 5 ? 2 : ps[i + 1] === 2 ? 4 : 0;
+      else if (p === 39 || (p >= 30 && p <= 37) || (p >= 91 && p <= 97)) muted = false;
+      else if (p === 90) { if (hideGray) muted = true; }
+      else if (p === 38) {
+        if (ps[i + 1] === 5) { muted = false; i += 2; }
+        else if (ps[i + 1] === 2) {
+          const r = ps[i + 2], g = ps[i + 3], b = ps[i + 4];
+          muted = hideGray && Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)
+            && Math.max(r, g, b) - Math.min(r, g, b) <= 12 && r >= 80 && r <= 175;
+          i += 4;
+        }
+      } else if (p === 48 || p === 58) i += ps[i + 1] === 5 ? 2 : ps[i + 1] === 2 ? 4 : 0;
     }
   }
-  if (!dim) out += line.slice(last);
+  if (!dim && !muted) out += line.slice(last);
   return out;
 }
 const plain = (line) => line.replace(/\x1b\[[0-9;:?]*[ -/]*[@-~]|\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1b[@-_]/g, "");
@@ -42,6 +55,19 @@ function claudeBox(lines) {
     const end = lines.findIndex((l, j) => j > i && RULE.test(plain(l)));
     if (end < 0) return null;
     const rows = lines.slice(i, end).map((l, k) => undimmed(l).replace(k === 0 ? /^❯[ \u00a0]?/ : /^[ \u00a0]{1,2}/, "").trimEnd());
+    return { rows, limit: cellWidth(plain(lines[end]).trimEnd()) - 2 };
+  }
+  return null;
+}
+function agyBox(lines) {
+  for (let i = lines.length - 1; i > 0; i--) {
+    const text = undimmed(lines[i], { hideGray: true });
+    if (!/^>(?:[ \u00a0]|$)/.test(text)) continue;
+    // 가장 아래쪽 > 프롬프트 줄 하나만 검사해 위 스크롤백의 이전 입력으로 올라가지 않음
+    if (!AGY_RULE.test(plain(lines[i - 1]))) return null;
+    const end = lines.findIndex((l, j) => j > i && AGY_RULE.test(plain(l)));
+    if (end < 0 || lines.length - 1 - end > 8) return null;
+    const rows = lines.slice(i, end).map((l, k) => undimmed(l, { hideGray: true }).replace(k === 0 ? /^>[ \u00a0]?/ : /^[ \u00a0]{1,2}/, "").trimEnd());
     return { rows, limit: cellWidth(plain(lines[end]).trimEnd()) - 2 };
   }
   return null;
@@ -80,7 +106,7 @@ export function joinRows(rows, limit) {
 // - cut: 입력 칸이 화면 절반 이상이면 위쪽이 스크롤로 가려졌을 수 있음(Codex 30줄 붙여넣기에서 뒤 20줄만 보임)
 export function terminalDraft(screen, kind) {
   const lines = String(screen || "").replace(/\n$/, "").split(/\r?\n/);
-  const box = kind === "codex" ? codexBox(lines) : claudeBox(lines);
+  const box = kind === "codex" ? codexBox(lines) : kind === "agy" ? agyBox(lines) : claudeBox(lines);
   if (!box) return null;
   const text = joinRows(box.rows, box.limit).replace(/\s+$/, "");
   return { text, lines: box.rows.length, pasted: PASTED.test(text), cut: box.rows.length >= Math.max(4, Math.floor(lines.length / 2)) };

@@ -17,7 +17,6 @@ const { execFile, execFileSync, spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
-const net = require("node:net");
 const path = require("node:path");
 const WebSocket = require("ws");
 // 상태 루트는 ctx로 주입받는 것이 기본이지만, 주입이 없을 때의 기본값은
@@ -136,17 +135,19 @@ async function waitForJson(port, pathname, isCurrent = () => true, timeoutMs = R
   throw new Error(`Chrome CDP가 준비되지 않았습니다: ${errorText(lastError)}`);
 }
 
-function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = address && typeof address === "object" ? address.port : 0;
-      server.close((error) => error ? reject(error) : resolve(port));
-    });
-  });
+async function activeEndpoint(file, isCurrent) {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  while (isCurrent() && Date.now() < deadline) {
+    let lines;
+    try { lines = (await fs.promises.readFile(file, "utf8")).trim().split(/\r?\n/); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    const port = Number(lines?.[0]);
+    if (Number.isInteger(port) && port > 0 && port <= 65535 && /^\/devtools\/browser\/[a-z0-9-]+$/i.test(lines[1])) {
+      return { port, ws: `ws://127.0.0.1:${port}${lines[1]}` };
+    }
+    await wait(100);
+  }
+  throw new Error("Chrome 미러의 디버깅 포트를 확인할 수 없습니다.");
 }
 
 class CdpClient {
@@ -164,7 +165,7 @@ class CdpClient {
 
   static open(url, handlers) {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, { perMessageDeflate: false, maxPayload: 64 * 1024 * 1024 });
+      const socket = new WebSocket(url, { handshakeTimeout: READY_TIMEOUT_MS, perMessageDeflate: false, maxPayload: 64 * 1024 * 1024 });
       let opened = false;
       const failOpen = (error) => { if (!opened) reject(error); };
       socket.once("error", failOpen);
@@ -240,6 +241,10 @@ function escapePgrepPattern(value) {
   return String(value || "").replace(/[\\.^$|?*+()[\]{}]/g, "\\$&");
 }
 
+function chromeProcessPattern(marker) {
+  return "^" + escapePgrepPattern(CHROME_BIN) + " (.* )?" + escapePgrepPattern(marker) + "( |$)";
+}
+
 function parsePidList(stdout) {
   return String(stdout || "").split(/\s+/).map(Number)
     .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
@@ -247,7 +252,7 @@ function parsePidList(stdout) {
 
 function pgrepPids(marker, execFileFn = execFile) {
   return new Promise((resolve, reject) => {
-    execFileFn("pgrep", ["-f", "--", escapePgrepPattern(marker)], { encoding: "utf8" }, (error, stdout) => {
+    execFileFn("pgrep", ["-f", "--", chromeProcessPattern(marker)], { encoding: "utf8", timeout: HTTP_TIMEOUT_MS }, (error, stdout) => {
       if (error && error.code !== 1) { reject(error); return; }
       resolve(parsePidList(stdout));
     });
@@ -256,7 +261,7 @@ function pgrepPids(marker, execFileFn = execFile) {
 
 function pgrepPidsSync(marker, execFileSyncFn = execFileSync) {
   try {
-    return parsePidList(execFileSyncFn("pgrep", ["-f", "--", escapePgrepPattern(marker)], { encoding: "utf8" }));
+    return parsePidList(execFileSyncFn("pgrep", ["-f", "--", chromeProcessPattern(marker)], { encoding: "utf8", timeout: HTTP_TIMEOUT_MS }));
   } catch (error) {
     if (error && error.status === 1) return [];
     throw error;
@@ -299,7 +304,7 @@ class ChromeMirrorBackend {
     execFileFn = execFile,
     execFileSyncFn = execFileSync,
     killFn = process.kill.bind(process),
-    reservePortFn = reservePort,
+    activeEndpointFn = activeEndpoint,
     waitForJsonFn = waitForJson,
     requestJsonFn = requestJson,
     openCdpFn = CdpClient.open,
@@ -316,7 +321,7 @@ class ChromeMirrorBackend {
     this.execFileFn = execFileFn;
     this.execFileSyncFn = execFileSyncFn;
     this.killFn = killFn;
-    this.reservePortFn = reservePortFn;
+    this.activeEndpointFn = activeEndpointFn;
     this.waitForJsonFn = waitForJsonFn;
     this.requestJsonFn = requestJsonFn;
     this.openCdpFn = openCdpFn;
@@ -341,7 +346,6 @@ class ChromeMirrorBackend {
     this.healthFailures = 0;
     this.restartAttempt = 0;
     this.bootstrapTargetIds = new Set();
-    this.ownedPids = new Set();
     this.stopping = false;
     this.exitCleanup = () => {
       this.killChromeSync();
@@ -393,7 +397,8 @@ class ChromeMirrorBackend {
   async launchBrowser(viewport) {
     this.resolveChrome();
     const profileDir = this.resolveProfileDir();
-    const port = await this.reservePortFn();
+    const portFile = this.path.join(profileDir, "DevToolsActivePort");
+    let port;
     if (this.stopping || !this.mirrors.size) throw new Error("Chrome 미러 요청이 취소되었습니다.");
     const epoch = ++this.browserEpoch;
     const size = normalizeViewport(viewport);
@@ -401,7 +406,7 @@ class ChromeMirrorBackend {
     const chromeArgs = [
       `--user-data-dir=${profileDir}`,
       `--window-size=${size.width},${size.height}`,
-      `--remote-debugging-port=${port}`,
+      "--remote-debugging-port=0",
       "--remote-debugging-address=127.0.0.1",
       "--disable-backgrounding-occluded-windows",
       "--disable-renderer-backgrounding",
@@ -416,6 +421,7 @@ class ChromeMirrorBackend {
     ];
     const args = ["-g", "-j", "-n", "-a", "Google Chrome", "--args", ...chromeArgs];
     await this.killChromePids(profileDir);
+    await this.fs.promises.rm(portFile, { force: true });
     if (this.stopping || epoch !== this.browserEpoch || !this.mirrors.size) {
       throw new Error("Chrome 미러 요청이 취소되었습니다.");
     }
@@ -432,7 +438,6 @@ class ChromeMirrorBackend {
       throw new Error("Chrome 실행 요청 프로세스를 시작하지 못했습니다.");
     }
     this.openProcess = child;
-    this.cdpPort = port;
     child.once("error", () => {});
     child.once("exit", () => { if (this.openProcess === child) this.openProcess = null; });
     child.unref?.();
@@ -440,14 +445,17 @@ class ChromeMirrorBackend {
 
     let browserClient = null;
     try {
-      const isCurrent = () => this.browserEpoch === epoch && this.cdpPort === port && !this.stopping;
+      const isCurrent = () => this.browserEpoch === epoch && !this.stopping;
+      const endpoint = await this.activeEndpointFn(portFile, isCurrent);
+      if (!isCurrent()) throw new Error("Chrome 미러 요청이 취소되었습니다.");
+      port = this.cdpPort = endpoint.port;
       const version = await this.waitForJsonFn(port, "/json/version", isCurrent);
-      if (!version || !version.webSocketDebuggerUrl) throw new Error("browser CDP endpoint가 없습니다.");
+      if (version?.webSocketDebuggerUrl !== endpoint.ws) throw new Error("browser CDP endpoint가 없습니다.");
       browserClient = await this.openCdpFn(version.webSocketDebuggerUrl, {
         onEvent: (method, params) => this.onBrowserEvent(browserClient, method, params),
         onClose: () => { void this.onBrowserGone(epoch, browserClient, "browser-cdp-close"); },
       });
-      if (!isCurrent()) { browserClient.close(); throw new Error("Chrome 미러 요청이 취소되었습니다."); }
+      if (!isCurrent()) throw new Error("Chrome 미러 요청이 취소되었습니다.");
       this.browserClient = browserClient;
       await browserClient.call("Target.setDiscoverTargets", { discover: true });
       const targets = await this.requestJsonFn(port, "/json");
@@ -459,28 +467,31 @@ class ChromeMirrorBackend {
       // Chrome 실행~이 호출 사이의 startup 창 1회뿐이고 탭마다 반복되지 않는다. off-screen 이동은
       // macOS 가 화면 안으로 클램프해 쓸 수 없고(확인 결과: -3200 요청→(0,38)), 최소화만 확실히 동작한다.
       await this.minimizeBootstrapWindow();
-      for (const pid of await this.findChromePids(profileDir)) this.ownedPids.add(pid);
       this.startHealthMonitor(epoch, port, browserClient);
       clearTimeout(this.stableTimer);
       this.stableTimer = setTimeout(() => { this.restartAttempt = 0; }, STABLE_RUN_MS);
       this.stableTimer.unref?.();
       return;
     } catch (error) {
-      if (browserClient) browserClient.close();
-      if (this.browserEpoch === epoch) {
+      const ownsBrowser = this.browserEpoch === epoch;
+      if (ownsBrowser) {
         this.browserEpoch += 1;
         if (this.browserClient === browserClient) this.browserClient = null;
         if (this.cdpPort === port) this.cdpPort = null;
         this.stopHealthMonitor();
       }
-      await this.killChromePids(profileDir, port, false);
+      try { browserClient?.close(); } catch (cleanupError) { this.log("browser-close-error", { error: errorText(cleanupError) }); }
+      if (ownsBrowser) {
+        try { await this.killChromePids(profileDir); }
+        catch (cleanupError) { this.log("process-cleanup-error", { error: errorText(cleanupError) }); }
+      }
       throw error;
     }
   }
 
-  async findChromePids(profileDir = this.profileDir, port = null) {
+  async findChromePids(profileDir = this.profileDir) {
     if (!profileDir) return [];
-    const marker = port ? `--remote-debugging-port=${port}` : `--user-data-dir=${profileDir}`;
+    const marker = `--user-data-dir=${profileDir}`;
     if (process.platform === "win32") {
       const r = await require("../../server/win-native.cjs").request({ op: "processes" });
       if (!r.ok) throw new Error("Chrome 프로세스 조회 실패: " + r.error);
@@ -490,26 +501,36 @@ class ChromeMirrorBackend {
     return pgrepPids(marker, this.execFileFn);
   }
 
-  killPids(pids) {
+  killPids(pids, signal) {
     for (const pid of new Set(pids)) {
       if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue;
-      try { this.killFn(pid, "SIGKILL"); } catch {}
-      this.ownedPids.delete(pid);
+      try { this.killFn(pid, signal); } catch {}
     }
   }
 
-  async killChromePids(profileDir = this.profileDir, port = null, includeOwned = true) {
-    let found = [];
-    try { found = await this.findChromePids(profileDir, port); } catch {}
-    this.killPids([...(includeOwned ? this.ownedPids : []), ...found]);
+  async killChromePids(profileDir = this.profileDir) {
+    const initial = new Set(await this.findChromePids(profileDir));
+    if (!initial.size) return;
+    this.killPids(initial, "SIGTERM");
+    const deadline = Date.now() + 2000;
+    while (true) {
+      await wait(100);
+      const remaining = (await this.findChromePids(profileDir)).filter(pid => initial.has(pid));
+      if (!remaining.length) return;
+      if (Date.now() >= deadline) { this.killPids(remaining, "SIGKILL"); return; }
+    }
   }
 
   killChromeSync() {
+    if (process.platform === "win32") {
+      try { this.openProcess?.kill("SIGTERM"); } catch {}
+      return;
+    }
     let found = [];
     try {
       if (this.profileDir && process.platform !== "win32") found = pgrepPidsSync(`--user-data-dir=${this.profileDir}`, this.execFileSyncFn);
     } catch {}
-    this.killPids([...this.ownedPids, ...found]);
+    this.killPids(found, "SIGTERM");
   }
 
   startHealthMonitor(epoch, port, browserClient) {
@@ -843,7 +864,19 @@ class ChromeMirrorBackend {
     if (!entry) {
       entry = { sender, mirrorIds: new Set() };
       this.ownerMirrors.set(ownerId, entry);
-      try { sender.once("destroyed", () => { void this.stopOwner(ownerId); }); } catch {}
+      const release = () => {
+        if (this.ownerMirrors.get(ownerId) !== entry) return;
+        void this.stopOwner(ownerId).catch(error => this.reportError("owner-stop", { code: error.code || "cleanup-failed" }));
+      };
+      const navigate = (event, _url, inPlace, mainFrame) => {
+        if ((event?.isMainFrame ?? mainFrame) && !(event?.isSameDocument ?? inPlace)) release();
+      };
+      sender.once?.("destroyed", release);
+      sender.on?.("did-start-navigation", navigate);
+      entry.unsubscribe = () => {
+        sender.off?.("destroyed", release);
+        sender.off?.("did-start-navigation", navigate);
+      };
     }
     entry.mirrorIds.add(mirrorId);
   }
@@ -1026,7 +1059,7 @@ class ChromeMirrorBackend {
     const owner = this.ownerMirrors.get(mirror.ownerId);
     if (owner) {
       owner.mirrorIds.delete(mirror.mirrorId);
-      if (!owner.mirrorIds.size) this.ownerMirrors.delete(mirror.ownerId);
+      if (!owner.mirrorIds.size) { owner.unsubscribe(); this.ownerMirrors.delete(mirror.ownerId); }
     }
     const closing = this.closeMirrorPage(mirror);
     this.log("mirror-stop", { mirrorId: mirror.mirrorId });
@@ -1038,6 +1071,7 @@ class ChromeMirrorBackend {
   async stopOwner(ownerId) {
     const owner = this.ownerMirrors.get(ownerId);
     if (!owner) return;
+    owner.unsubscribe();
     this.ownerMirrors.delete(ownerId);
     const mirrors = [...owner.mirrorIds].map((id) => this.mirrors.get(id)).filter(Boolean);
     const closings = [];
@@ -1081,6 +1115,7 @@ class ChromeMirrorBackend {
     }
     this.mirrors.clear();
     this.tabMirrors.clear();
+    for (const entry of this.ownerMirrors.values()) entry.unsubscribe();
     this.ownerMirrors.clear();
     this.browserEpoch += 1;
     clearTimeout(this.restartTimer);
@@ -1094,9 +1129,9 @@ class ChromeMirrorBackend {
     const browserClient = this.browserClient;
     this.browserClient = null;
     if (browserClient) browserClient.close();
+    this.killChromeSync();
     this.openProcess = null;
     this.cdpPort = null;
-    this.killChromeSync();
     process.removeListener("exit", this.exitCleanup);
   }
 }

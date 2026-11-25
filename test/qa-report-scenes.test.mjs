@@ -51,7 +51,7 @@ test("dHash: 같은 그림은 필터와 관계없이 같고, 한 화소만 다�
 });
 
 test("판정 글의 회차 안 번호만 찾고 개수·배율·전화번호·파일 줄 번호는 빼며, 캡션에서는 번호만 지운다", () => {
-  assert.deepEqual(seqRefs("1.2배 lib/app.dart:249 11개 40단계 010-3335-8620 9자리 5113~5180 #68 (17417, 스냅샷 17423)"),
+  assert.deepEqual(seqRefs("1.2배 lib/app.dart:249 11개 40단계 010-0000-0000 9자리 5113~5180 #68 (17417, 스냅샷 17423)"),
     [{ from: 5113, to: 5180 }, { from: 68, to: 68 }, { from: 17417, to: 17417 }, { from: 17423, to: 17423 }]);
   const known = (a, b) => [17493, 17505, 17417, 17423, 6249].some((n) => n >= a && n <= b);
   assert.equal(dropSeqRefs("안내가 뜨고 팝업이 남았다(사진 17493).", known), "안내가 뜨고 팝업이 남았다.");
@@ -89,14 +89,14 @@ test("확인자 글에서는 Iris 명령 이름·회차 번호·반응 후보 �
   assert.equal(plainText("개발자 도구 (receipt 표시 옵션) 켬", known), "개발자 도구 (receipt 표시 옵션) 켬");
   // 해시·소스 경로·좌표·요구 번호·영어 효과 이름·제품 코드는 다른 앱에서 화면 내용일 수 있어 그대로(확인자가 text 로 고침)
   for (const keep of ["커밋 fe6b10c0 표시", "파일 test/features/shop/shop_layout_test.dart 열림", "(48,281) 좌표 표시", "P30 모델", "U6 요금제",
-    "S3 등급", "K1 리그", "unchanged 배지", "tool-issues 6", "카테고리 key qa_c6a 삭제", "상품 133 통과 · 1.2배 · 010-3335-8620 · GS25 · 2pt"])
+    "S3 등급", "K1 리그", "unchanged 배지", "tool-issues 6", "카테고리 key qa_c6a 삭제", "상품 133 통과 · 1.2배 · 010-0000-0000 · GS25 · 2pt"])
     assert.equal(plainText(keep), keep);
 });
 
 test("입력 중간은 같은 대상에 연속한 입력 조작으로만 판별하고, 같은 확인 줄은 구조 값으로 묶는다", () => {
   const typed = (name, to) => ({ act: { kind: "type", name }, effects: [{ type: "change", name, to }], pass: true });
-  const xs = [typed("전화번호", "010-3"), typed("전화번호", "010-33"), typed("전화번호", "010-333"), { act: { kind: "tap", name: "확인" }, effects: [{ type: "appear", name: "닫힘" }], pass: true }, typed("전화번호", "010-3335")];
-  assert.deepEqual([...typingIntermediates(xs)].map((x) => x.effects[0].to), ["010-3", "010-33"]);
+  const xs = [typed("전화번호", "010-1"), typed("전화번호", "010-12"), typed("전화번호", "010-123"), { act: { kind: "tap", name: "확인" }, effects: [{ type: "appear", name: "닫힘" }], pass: true }, typed("전화번호", "010-1234")];
+  assert.deepEqual([...typingIntermediates(xs)].map((x) => x.effects[0].to), ["010-1", "010-12"]);
   // 조작 기록이 없는 옛 판정은 앞부분이 같아도 따로 확인한 값일 수 있어 빼지 않음
   assert.equal(typingIntermediates([{ label: "수량", want: "1" }, { label: "수량", want: "10" }]).size, 0);
   const line = checkText({ act: { kind: "tap", name: "칩" }, effects: [{ type: "appear", name: "목록" }], pass: true });

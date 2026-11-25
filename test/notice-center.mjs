@@ -147,7 +147,7 @@ test("모달 네 곳은 같은 창 디자인과 취소·포커스 복귀 계약�
     const source = files.map((file) => readFileSync(new URL(file, import.meta.url), "utf8")).join("\n");
     assert.match(source, /class="dim"/);
     assert.match(source, /role="dialog" aria-modal="true"/);
-    assert.match(source, /previous\?\.focus\?\.\(\)/);
+    assert.match(source, /previous\?\.focus\?\.\((?:\{\s*preventScroll:\s*true\s*\})?\)/);
     assert.match(source, /key === "Escape"/);
   }
 });
@@ -157,7 +157,7 @@ test("macOS 알림은 앱이 뒤에 있을 때만 띄우고 누르면 같은 알
   const preload = readFileSync(new URL("../native/electron/preload.cjs", import.meta.url), "utf8");
   assert.match(main, /ipcMain\.on\("ac-notify"[\s\S]*BrowserWindow\.getFocusedWindow\(\)[\s\S]*Notification\.isSupported\(\)/);
   assert.match(main, /target\.webContents\.send\("ac-notice-activate", \{ id \}\)/);
-  assert.match(preload, /onNoticeActivated: \(cb\) => ipcRenderer\.on\("ac-notice-activate"/);
+  assert.match(preload, /onNoticeActivated: \(cb\) => subscribe\("ac-notice-activate", cb\)/);
 });
 
 // 사이드바 머리의 알림 입구는 알림 기능(notifications)의 종 버튼 하나. 토스트 부품이 두 번째 입구를 만들지 않음

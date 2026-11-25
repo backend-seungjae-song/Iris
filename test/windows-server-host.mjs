@@ -20,6 +20,8 @@ function fixture(platform, { openFails = false } = {}) {
   stream.write = (text) => writes.push(text);
   const child = new EventEmitter();
   child.pid = 81;
+  child.exitCode = null;
+  child.signalCode = null;
   child.connected = true;
   child.send = (message) => sent.push(message);
   child.kill = (signal) => killed.push(signal);
@@ -180,6 +182,8 @@ for (const transport of ["IPC", "disconnect"]) {
       };
       const spaceKey = { flushNow() {} }, archive = { flushNow() {} };
       const flushBrowserRuntimeNow = () => ({}), flushMemoNow = () => {};
+      const workerSupervisor = { shutdown: async () => {} };
+      const clearGitStatusCache = () => {};
       const exitCapabilities = [];
       ${handlers}
       ${finalizers}

@@ -1528,7 +1528,7 @@
     "responses": [
       {
         "ok": false,
-        "error": "이 탭을 담은 창이 최소화 상태라 화면을 그리지 않습니다 — qa-screenshot 를 보내도 도달하지 않습니다. 창을 띄워 달라고 사람에게 부탁하고 다시 하세요(browser_ask_user).",
+        "error": "이 탭이 있는 창이 최소화 상태라 화면을 그리지 않습니다. qa-screenshot 를 보내도 전달되지 않습니다. 사람에게 창을 열어 달라고 요청한 뒤 다시 하세요(browser_ask_user).",
         "code": "window_not_drawing"
       }
     ],
@@ -1580,7 +1580,7 @@
     "responses": [
       {
         "ok": false,
-        "error": "로그인 호스트에서는 CDP 를 붙이지 않아 qa-screenshot 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
+        "error": "로그인 호스트에서는 CDP 를 연결하지 않아 qa-screenshot 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
         "code": "cdp_blocked"
       }
     ],
@@ -3880,7 +3880,7 @@
           "queried": 1,
           "url": "https://example.test/page",
           "shot": null,
-          "shotError": "이 탭을 담은 창이 최소화 상태라 화면을 그리지 않습니다 — qa-screenshot 를 보내도 도달하지 않습니다. 창을 띄워 달라고 사람에게 부탁하고 다시 하세요(browser_ask_user).",
+          "shotError": "이 탭이 있는 창이 최소화 상태라 화면을 그리지 않습니다. qa-screenshot 를 보내도 전달되지 않습니다. 사람에게 창을 열어 달라고 요청한 뒤 다시 하세요(browser_ask_user).",
           "inspectionError": null
         }
       }
@@ -3965,7 +3965,7 @@
     "responses": [
       {
         "ok": false,
-        "error": "로그인 호스트에서는 CDP 를 붙이지 않아 qa-expect 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
+        "error": "로그인 호스트에서는 CDP 를 연결하지 않아 qa-expect 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
         "code": "cdp_blocked"
       }
     ],
@@ -9361,7 +9361,7 @@
     "responses": [
       {
         "ok": false,
-        "error": "로그인 호스트에서는 CDP 를 붙이지 않아 qa-reaction-start 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
+        "error": "로그인 호스트에서는 CDP 를 연결하지 않아 qa-reaction-start 를 실행할 수 없습니다. 쓸 수 있는 것: goto url back forward reload wait text screenshot login dialogs download nativewin nativekey nativeclick. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.",
         "code": "cdp_blocked"
       }
     ],

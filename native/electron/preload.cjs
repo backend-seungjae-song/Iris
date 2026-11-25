@@ -27,13 +27,13 @@ contextBridge.exposeInMainWorld("acHost", {
   setMemoAlwaysOnTop: (enabled) => ipcRenderer.invoke("ac-memo-always-on-top", !!enabled),
   setMemoWindowTitle: (title) => ipcRenderer.send("ac-memo-window-title", title),
   closeMemoWindow: () => ipcRenderer.send("ac-memo-close-window"),
-  onMemoWindowsChanged: (cb) => ipcRenderer.on("ac-memo-windows-changed", (_e, value) => cb(value)),
+  onMemoWindowsChanged: (cb) => subscribe("ac-memo-windows-changed", cb),
   // 분리 브라우저 창에서 도킹 → 그 창을 닫고 콘솔 센터로 되돌린다.
   dockBrowser: () => ipcRenderer.send("ac-dock-browser"),
   // webview 포커스 중 눌린 브라우저 단축키(⌘⇧E/⌘⇧D)를 메인이 가로채 콜백에 이름으로 전달한다.
-  onShortcut: (cb) => ipcRenderer.on("ac-shortcut", (_e, name) => cb(name)),
+  onShortcut: (cb) => subscribe("ac-shortcut", cb),
   // 기기 메모리가 심각할 때 메인이 보냄. 쉬는 탭을 바로 재움
-  onMemoryPressure: (cb) => ipcRenderer.on("ac-memory-pressure", () => cb()),
+  onMemoryPressure: (cb) => subscribe("ac-memory-pressure", () => cb()),
   // 선택 기능이 webview 우클릭 메뉴에 보탤 범용 action. 등록은 host renderer만 할 수 있고,
   // click은 action 이름과 실제 guest id만 돌아온다. 번역 등 기능의 뜻은 이 bridge가 모른다.
   registerContextAction: (action) => ipcRenderer.send("ac-context-action-register", action),
@@ -46,9 +46,9 @@ contextBridge.exposeInMainWorld("acHost", {
   // 않으므로 그쪽 판정도 같은 표를 봐야 한다. 보내지 않으면 화면에서 바꾼 키가 페이지 위에서 동작하지 않는다.
   setKeymap: (map) => ipcRenderer.send("ac-keymap", map),
   windowSwitcher: (payload) => ipcRenderer.invoke("ac-window-switcher", payload),
-  onSwitcherState: (cb) => ipcRenderer.on("ac-switcher-state", (_e, value) => cb(value)),
+  onSwitcherState: (cb) => subscribe("ac-switcher-state", cb),
   // 고른 창 없이 전역으로 받은 ⌥Tab 을 Iris 창이 앞일 때 이 창의 기존 토글로 넘긴다.
-  onSwitcherToggle: (cb) => ipcRenderer.on("ac-switcher-toggle", () => cb()),
+  onSwitcherToggle: (cb) => subscribe("ac-switcher-toggle", () => cb()),
   // 탭별 프로필 파티션 세션 하드닝(UA/Client Hints) 보장. webview attach 전에 호출한다.
   ensureProfile: (partition) => ipcRenderer.send("ac-ensure-profile", partition),
   // Chrome 확장 로더는 고정 descriptor만 다룬다. renderer는 path나 extension id를 정하지 못한다.
@@ -62,6 +62,9 @@ contextBridge.exposeInMainWorld("acHost", {
   },
   extensionTabCreated: (result) => ipcRenderer.send("ac-extension-tab-created", result),
   searchSuggestions: (query) => ipcRenderer.invoke("ac-search-suggestions", query),
+  formHistoryQuery: (partition, key, prefix, wcId) => ipcRenderer.invoke("ac-form-history-query", partition, key, prefix, wcId),
+  formHistoryAdd: (partition, entries, wcId) => ipcRenderer.invoke("ac-form-history-add", partition, entries, wcId),
+  formHistoryRemove: (partition, key, value) => ipcRenderer.invoke("ac-form-history-remove", partition, key, value),
   pageTranslate: (payload) => ipcRenderer.invoke("ac-page-translate", payload),
   // 실제 Chrome 미러. frame/meta payload는 화면에 전달할 뿐 로그로 남기지 않는다.
   browserHistoryExport: (wcId) => ipcRenderer.invoke("ac-browser-history-export", wcId),
@@ -77,14 +80,14 @@ contextBridge.exposeInMainWorld("acHost", {
   liveChromeDisconnect: () => ipcRenderer.invoke("ac-live-chrome-disconnect"),
   liveChromeOpenNative: (payload) => ipcRenderer.invoke("ac-live-chrome-open-native", payload),
   liveChromeOpenSettings: () => ipcRenderer.invoke("ac-live-chrome-open-settings"),
-  onLiveChromeFrame: (cb) => ipcRenderer.on("live-chrome-frame", (_e, payload) => cb(payload)),
-  onLiveChromeState: (cb) => ipcRenderer.on("live-chrome-state", (_e, payload) => cb(payload)),
+  onLiveChromeFrame: (cb) => subscribe("live-chrome-frame", cb),
+  onLiveChromeState: (cb) => subscribe("live-chrome-state", cb),
   mirrorStart: (payload) => ipcRenderer.invoke("ac-mirror-start", payload),
   mirrorInput: (payload) => ipcRenderer.invoke("ac-mirror-input", payload),
   mirrorResize: (payload) => ipcRenderer.invoke("ac-mirror-resize", payload),
   mirrorStop: (payload) => ipcRenderer.invoke("ac-mirror-stop", payload),
-  onMirrorFrame: (cb) => ipcRenderer.on("mirror-frame", (_e, payload) => cb(payload)),
-  onMirrorMeta: (cb) => ipcRenderer.on("mirror-meta", (_e, payload) => cb(payload)),
+  onMirrorFrame: (cb) => subscribe("mirror-frame", cb),
+  onMirrorMeta: (cb) => subscribe("mirror-meta", cb),
   // 설치된 Chrome/Brave/Edge 프로필 목록(그대로 가져오기용).
   listChromeProfiles: () => ipcRenderer.invoke("ac-list-chrome-profiles"),
   // 목록이 비었을 때, macOS 가 브라우저 폴더 읽기를 막았으면 그 안내 문구(아니면 빈 문자열).
@@ -95,11 +98,14 @@ contextBridge.exposeInMainWorld("acHost", {
   // 프로필을 일반 창으로 열고, 닫힌 뒤 현재 사이트 범위의 쿠키만 돌려받는다.
   chromeAuth: (url, partition, chromeSource, fields) =>
     ipcRenderer.invoke("ac-chrome-auth", { url, partition, chromeSource, fields }),
-  onChromeAuthStage: (cb) => ipcRenderer.on("ac-chrome-auth-stage", (_e, s) => cb(s)),
+  onChromeAuthStage: (cb) => subscribe("ac-chrome-auth-stage", cb),
   // 이 주소를 기본 브라우저로 연다. 호출하는 버튼은 아직 없다(main.cjs 쪽 주석 참고).
-  openInChrome: (url) => ipcRenderer.send("ac-open-in-chrome", url),
+  openInChrome: (request) => typeof request?.requireProfile === "boolean"
+    ? ipcRenderer.invoke("ac-open-in-chrome", request) : ipcRenderer.send("ac-open-in-chrome", request),
   // 파일 트리 컨텍스트 메뉴. 파일 위치를 Finder에서 보여준다.
   revealInFinder: (p) => ipcRenderer.send("ac-reveal-in-finder", p),
+  // 경로 링크가 폴더면 그 폴더를 Finder 창으로 엶. 결과 true(폴더를 엶) | false(폴더 아님)
+  openFolder: (p) => ipcRenderer.invoke("ac-open-folder", p),
   // 새 스페이스의 작업 폴더 선택. macOS 폴더 창. 결과 { ok, path } 또는 { ok:false, canceled }.
   pickFolder: (defaultPath) => ipcRenderer.invoke("ac-pick-folder", { defaultPath }),
   // 파일/폴더를 macOS 휴지통으로(되돌릴 수 있는 삭제). 결과 { ok, error }.
@@ -112,11 +118,16 @@ contextBridge.exposeInMainWorld("acHost", {
   // 탭 화면 크기 지정(반응형 확인). wcId = webview.getWebContentsId(). 결과 { ok, error }.
   setViewport: (opts) => ipcRenderer.invoke("ac-viewport", opts),
   // AI가 iris-browser viewport로 바꿨을 때 주소줄 버튼이 실제 상태와 일치하도록 알린다.
-  onViewportChanged: (cb) => ipcRenderer.on("ac-viewport-changed", (_e, m) => cb(m)),
+  onViewportChanged: (cb) => subscribe("ac-viewport-changed", cb),
+  // 새 webview를 기존 Iris 탭의 배율에 연결할 때 필요한 두 ID
+  bindBrowserTabZoom: (wcId, tabId) => ipcRenderer.send("ac-browser-tab-zoom-bind", wcId, tabId),
+  adjustBrowserZoom: (wcId, action) => ipcRenderer.send("ac-browser-zoom", wcId, action),
+  onBrowserZoomChanged: (cb) => subscribe("ac-browser-zoom-changed", cb),
   // 캡처 순간에만 그 탭을 합성 대상으로 유지해 달라는 요청(보이지 않는 탭도 캡처되게).
-  onCaptureHold: (cb) => ipcRenderer.on("ac-capture-hold", (_e, m) => cb(m)),
+  onCaptureHold: (cb) => subscribe("ac-capture-hold", cb),
   // 이 탭이 화면에 나왔다는 통지. 보이지 않을 때 대신 넣어 준 화면 크기를 해제한다.
   tabShown: (wc, w, h) => ipcRenderer.send("ac-tab-shown", { wc, w, h }),
+  tabsBehind: (wcs) => ipcRenderer.send("ac-tabs-behind", { wcs }),
   // webview LRU/스로틀 정책은 메인 프로세스 env가 정본이다. 렌더러는 값을 읽고 보호 집합만 보고한다.
   webviewPolicy: () => ipcRenderer.sendSync("ac-webview-policy"),
   setWebviewThrottleState: (state) => ipcRenderer.send("ac-webview-throttle-state", state),
@@ -126,6 +137,7 @@ contextBridge.exposeInMainWorld("acHost", {
   } : {}),
   // 지목(권한 확대) 메시지를 서버가 받아 주게 하는 증명. 앱만 읽을 수 있는 파일에서 온다.
   uiToken: () => ipcRenderer.sendSync("ac-ui-token"),
+  appConnectionToken: () => ipcRenderer.sendSync("ac-app-connection-token"),
   // 자체 자동완성. 파티션·origin의 저장된 로그인이며, webview-preload 요청을 렌더러가 중계한다.
   // 목록에는 아이디만 온다. 비번은 사용자가 그 계정을 고른 순간 credsPassword로 하나만 꺼낸다.
   getCreds: (partition, origin) => ipcRenderer.invoke("ac-get-creds", { partition, origin }),
@@ -138,7 +150,7 @@ contextBridge.exposeInMainWorld("acHost", {
   sitePermissions: (arg) => ipcRenderer.invoke("ac-site-permissions", arg || {}),
   // 계정 페이지. 파티션별 저장된 자격증명 요약(비번 제외)과 삭제.
   credsSummary: (partition) => ipcRenderer.invoke("ac-creds-summary", partition),
-  clearCreds: (partition) => ipcRenderer.invoke("ac-clear-creds", partition),
+  clearCreds: (partition, deletingProfile) => ipcRenderer.invoke("ac-clear-creds", partition, deletingProfile),
   purgePartition: (partition) => ipcRenderer.invoke("ac-purge-partition", partition),
   // 탭 하나를 자기 창으로 분리한다(Chrome의 탭 분리). 되돌리기는 reattachTab 이고, 창을 닫으면 그 창의 탭도 닫힌다.
   detachTab: (arg) => ipcRenderer.invoke("ac-detach-tab", arg || {}),
@@ -194,19 +206,19 @@ contextBridge.exposeInMainWorld("acHost", {
   framesHover: (wc, x, y) => ipcRenderer.send("ac-frames-hover", { wc, x, y }),
   // 녹화에 합칠 관찰 기록(콘솔·예외·네트워크 실패·확인창).
   recDiag: (wcs, since) => ipcRenderer.invoke("ac-rec-diag", { wcs, since }),
-  onCursor: (cb) => ipcRenderer.on("ac-cursor", (_e, pt) => cb(pt)),
-  onRecNative: (cb) => ipcRenderer.on("ac-rec-native", (_e, ev) => cb(ev)), // 게스트 JS로 못 보는 시스템 이벤트(다운로드 등)
+  onCursor: (cb) => subscribe("ac-cursor", cb),
+  onRecNative: (cb) => subscribe("ac-rec-native", cb), // 게스트 JS로 못 보는 시스템 이벤트(다운로드 등)
   // main 이 사용자에게 한 줄 알리는 경로. 취소된 동작이 버튼 오작동으로 보이지 않게 한다.
-  onNativeNotice: (cb) => ipcRenderer.on("ac-native-notice", (_e, m) => cb(m)),
+  onNativeNotice: (cb) => subscribe("ac-native-notice", cb),
   notify: (message) => ipcRenderer.send("ac-notify", message),
-  onNoticeActivated: (cb) => ipcRenderer.on("ac-notice-activate", (_e, m) => cb(m)),
+  onNoticeActivated: (cb) => subscribe("ac-notice-activate", cb),
   setLinkAccountRules: (list) => ipcRenderer.send("ac-link-account-rules", list), // 설정 「링크 열기」 계정 규칙 사본
-  onLinkAccount: (cb) => ipcRenderer.on("ac-link-account", (_e, m) => cb(m)), // 막은 이동을 규칙 계정으로 다시 열기
-  onOpenTab: (cb) => ipcRenderer.on("ac-open-tab", (_e, m) => cb(m)), // 게스트의 "새 탭으로 열기"를 별도 창이 아니라 앱의 탭으로 처리
+  onLinkAccount: (cb) => subscribe("ac-link-account", cb), // 막은 이동을 규칙 계정으로 다시 열기
+  onOpenTab: (cb) => subscribe("ac-open-tab", cb), // 게스트의 "새 탭으로 열기"를 별도 창이 아니라 앱의 탭으로 처리
   // 페이지 안에서 누른 로컬 링크. 브라우저가 렌더링하지 못하는 것(표·문서)과 앱이 렌더링하는 것(마크다운).
-  onOpenLocal: (cb) => ipcRenderer.on("ac-open-local", (_e, m) => cb(m)),
+  onOpenLocal: (cb) => subscribe("ac-open-local", cb),
   // 로컬에서 받은 파일. 뷰어가 맡는 종류면 연다. 그 판정은 렌더러가 한다.
-  onDownloaded: (cb) => ipcRenderer.on("ac-downloaded", (_e, m) => cb(m)),
+  onDownloaded: (cb) => subscribe("ac-downloaded", cb),
   // 분리 브라우저 창에는 글자 탭 영역이 없으므로 그 파일은 콘솔 창이 연다.
   openInConsole: (target) => ipcRenderer.send("ac-open-in-console", target),
   // 앱이 렌더링하는 링크 확장자 표. 등록표는 렌더러가 소유하고 main 은 복사본만 본다.

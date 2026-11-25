@@ -39,10 +39,10 @@ const PROVIDER_SOURCE = {
   claude: "키체인 Claude Code-credentials · ~/.claude/.credentials.json",
   codex: "~/.codex/auth.json",
   gemini: "~/.gemini/oauth_creds.json · opencode auth.json",
-  antigravity: "Gemini 와 같은 자격증명",
-  "opencode-go": "아래 쿠키 칸",
+  antigravity: "키체인 gemini(antigravity) · Gemini 자격증명",
+  "opencode-go": "아래 쿠키 입력란",
   kimi: "~/.kimi-code/credentials/kimi-code.json",
-  minimax: "아래 쿠키 칸",
+  minimax: "아래 쿠키 입력란",
   grok: "~/.grok/auth.json",
 };
 const REASONS = {
@@ -61,7 +61,7 @@ const SECRET_FIELDS = [
   { field: "opencodeCookie", label: "opencode 쿠키", hint: "opencode.ai 로그인 뒤 auth 쿠키" },
   { field: "opencodeWorkspace", label: "opencode 워크스페이스", hint: "비워 두면 첫 워크스페이스" },
   { field: "minimaxCookie", label: "MiniMax 쿠키", hint: "platform.minimax.io 로그인 쿠키 전체" },
-  { field: "minimaxGroupId", label: "MiniMax 그룹 ID", hint: "쿠키에서 못 읽을 때만" },
+  { field: "minimaxGroupId", label: "MiniMax 그룹 ID", hint: "쿠키에서 읽지 못할 때만" },
 ];
 
 const CHART_DAYS = 60;
@@ -298,8 +298,8 @@ function scanBar() {
     const p = history.progress;
     const what = p && p.kind === "codex" ? "Codex" : "Claude";
     bar.appendChild(el("i", "ust-pulse"));
-    bar.appendChild(el("b", "", "기록을 훑는 중"));
-    bar.appendChild(el("span", "ust-scan-n", p ? `${what} ${full(p.done)} / ${full(p.total)}` : "시작하는 중"));
+    bar.appendChild(el("b", "", "집계 진행 중"));
+    bar.appendChild(el("span", "ust-scan-n", p ? `${what} ${full(p.done)} / ${full(p.total)}` : "시작 중"));
     const prog = el("span", "ust-prog");
     const fill = el("i", "");
     fill.style.width = p && p.total ? `${Math.round((p.done / p.total) * 100)}%` : "0%";
@@ -307,15 +307,15 @@ function scanBar() {
     bar.appendChild(prog);
   } else if (history.summary) {
     const files = (history.summary.claude.fileCount || 0) + (history.summary.codex.fileCount || 0);
-    const t = el("span", "", "마지막 훑기 ");
+    const t = el("span", "", "최종 집계 ");
     t.appendChild(el("b", "", since(history.summary.scannedAt) || "-"));
     bar.appendChild(t);
-    bar.appendChild(el("span", "ust-scan-n faint", `파일 ${full(files)}개 · ${Math.round((history.summary.durationMs || 0) / 1000)}초 걸림`));
+    bar.appendChild(el("span", "ust-scan-n faint", `파일 ${full(files)}개 · ${Math.round((history.summary.durationMs || 0) / 1000)}초 소요`));
   } else {
-    bar.appendChild(el("b", "", "아직 훑지 않았습니다"));
-    bar.appendChild(el("span", "ust-scan-n faint", "기록이 크면 첫 훑기에 몇 분이 걸립니다"));
+    bar.appendChild(el("b", "", "집계 전"));
+    bar.appendChild(el("span", "ust-scan-n faint", "기록이 크면 첫 집계에 몇 분이 걸립니다"));
   }
-  const btn = el("button", "ust-btn", history.scanning ? "훑는 중" : "새로고침");
+  const btn = el("button", "ust-btn", history.scanning ? "새로고침 중" : "새로고침");
   btn.type = "button";
   btn.disabled = history.scanning;
   btn.addEventListener("click", () => wsSend({ type: "usage.history.scan" }));
@@ -345,7 +345,7 @@ function codexSeries(summary) {
 function body() { return el("div", "ust-body"); }
 function foot() {
   return el("div", "ust-foot",
-    "이 집계는 이 기계에 남은 대화 기록에서 셉니다. 요금이 아니라 토큰 수이고, 지운 기록은 세지 않습니다.");
+    "이 컴퓨터에 남은 대화 기록의 토큰 수를 집계합니다. 요금과는 다르고, 지운 기록은 포함하지 않습니다.");
 }
 
 function overviewPane() {
@@ -353,7 +353,7 @@ function overviewPane() {
   const s = history.summary;
   if (!s) {
     const b = body();
-    b.appendChild(el("div", "ust-empty", "훑기를 마치면 여기에 집계가 섭니다."));
+    b.appendChild(el("div", "ust-empty", "집계가 끝나면 여기에 표시됩니다."));
     pane.appendChild(b);
     return pane;
   }
@@ -388,9 +388,9 @@ function providerPane(s, cells, series, color, unit) {
   two.appendChild(rankTable("프로젝트", s.projects, color));
   b.appendChild(two);
   const recent = el("div", "");
-  recent.appendChild(sectionTitle("최근 세션", "마지막 기록 순"));
+  recent.appendChild(sectionTitle("최근 세션", "최근 기록 순"));
   recent.appendChild(sessionTable(s.recent, [
-    { label: "마지막", w: "w-time", td: "ust-mono", value: (x) => stamp(x.last) },
+    { label: "최근 기록", w: "w-time", td: "ust-mono", value: (x) => stamp(x.last) },
     { label: "프로젝트", value: (x) => x.project },
     { label: "모델", w: "w-model", td: "ust-mono", value: (x) => x.model },
     { label: unit.label, w: "w-num", num: true, value: unit.value },
@@ -473,19 +473,19 @@ function accountsPane() {
       tag.appendChild(document.createTextNode(st.text));
       return tag;
     } },
-    { label: "읽는 곳", td: "ust-mono", value: (id) => PROVIDER_SOURCE[id] },
+    { label: "출처", td: "ust-mono", value: (id) => PROVIDER_SOURCE[id] },
   ], Object.keys(PROVIDER_NAMES)));
   b.appendChild(creds);
 
   const direct = el("div", "");
-  direct.appendChild(sectionTitle("직접 넣는 값"));
-  direct.appendChild(el("p", "ust-note", "opencode Go 와 MiniMax 는 로그인 쿠키가 있어야 잔량을 읽습니다. 넣은 값은 창으로 되돌아오지 않고 이 기계에만 남습니다."));
+  direct.appendChild(sectionTitle("직접 입력하는 값"));
+  direct.appendChild(el("p", "ust-note", "opencode Go 와 MiniMax 는 로그인 쿠키가 있어야 잔량을 읽습니다. 입력한 값은 화면에 다시 표시되지 않고 이 컴퓨터에만 저장됩니다."));
   const form = el("div", "");
   for (const f of SECRET_FIELDS) {
     const row = el("div", "ust-secret");
     row.appendChild(el("span", "", f.label));
     const flag = prefsFlags[`has${f.field.charAt(0).toUpperCase()}${f.field.slice(1)}`];
-    row.appendChild(el("span", `ust-secret-f ${flag ? "on" : ""}`, flag ? "들어 있음" : "비어 있음"));
+    row.appendChild(el("span", `ust-secret-f ${flag ? "on" : ""}`, flag ? "입력됨" : "비어 있음"));
     const input = el("input", "ust-input");
     input.type = "password";
     input.autocomplete = "off";

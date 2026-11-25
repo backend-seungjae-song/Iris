@@ -187,7 +187,7 @@ Future<void> _prepare(WidgetTester tester, String screen) async {
       await tester.tap(find.text('스케치'));
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.widgetWithText(TextField, '그림과 함께 보낼 글'),
+        find.widgetWithText(TextField, '스케치 설명'),
         '결제 버튼을 더 크게, 테두리 부분 강조',
       );
       tester.testTextInput.hide();

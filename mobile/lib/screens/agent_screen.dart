@@ -215,7 +215,7 @@ class _AgentScreenState extends State<AgentScreen> {
                     final tabRef = result.tab;
                     if (tabRef != null && context.mounted) {
                       if (widget.state.browserTab(tabRef) == null) {
-                        return '컴퓨터에서 탭을 열었지만 목록을 확인하지 못했습니다. 목록을 새로 고치세요.';
+                        return '컴퓨터에서 탭을 열었지만 목록을 확인하지 못했습니다. 목록을 새로고침하세요.';
                       }
                       unawaited(
                         Navigator.of(context).push<void>(

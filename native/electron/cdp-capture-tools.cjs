@@ -158,7 +158,7 @@ function createCdpCaptureTools({ refRegistry, fs, path, nativeImage, BrowserWind
     }
     const png = await composeTiles(tiles, W, H, px);
     return { png, info: { width: W, height: H, scale: 1, tiles: tiles.length,
-      ...(dpr > 1 ? { note: "전체 캡처는 원래 해상도로 담습니다 — 배율은 화면 한 장이나 element 촬영에서 쓰세요." } : {}) } };
+      ...(dpr > 1 ? { note: "전체 캡처는 원래 해상도로 저장합니다. 배율은 화면 한 장이나 element 촬영에서 쓰세요." } : {}) } };
   }
   // 이어 붙이기. nativeImage bitmap을 문서 좌표의 아직 비지 않은 행에만 복사한다.
   // 마지막 scroll은 문서 끝에서 clamp되어 앞 장과 겹치므로, 이미 채운 행을 다시 덮으면 긴 페이지
@@ -283,7 +283,7 @@ function createCdpCaptureTools({ refRegistry, fs, path, nativeImage, BrowserWind
     fs.writeFileSync(outPath, nativeImage.createFromBitmap(out, { width: w, height: h }).toPNG());
     const total = w * h;
     const note = (sa.width !== sb.width || sa.height !== sb.height)
-      ? `크기가 다릅니다(${sa.width}x${sa.height} → ${sb.width}x${sb.height}) — 겹치는 ${w}x${h}만 비교했습니다.` : undefined;
+      ? `크기가 다릅니다(${sa.width}x${sa.height} → ${sb.width}x${sb.height}). 겹치는 ${w}x${h}만 비교했습니다.` : undefined;
     return { changed, total, ratio: Math.round((changed / total) * 10000) / 100, note };
   }
 

@@ -35,6 +35,6 @@ test("모든 화면의 키 입력이 사용자 키 시각을 갱신하고 AI 가
 test("포커스를 빌리기 전에 입력 기록 준비를 끝냄", () => {
   const src = readFileSync(new URL("../native/electron/cdp-qa-input.cjs", import.meta.url), "utf8");
   const arm = src.indexOf("const recorder = await armCapture(send, wc);");
-  const focus = src.indexOf("await prepareFocus(wc)");
+  const focus = src.indexOf("await prepareFocus(wc, action)");
   assert.ok(arm > 0 && focus > 0 && arm < focus);
 });

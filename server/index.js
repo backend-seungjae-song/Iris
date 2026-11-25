@@ -27,8 +27,11 @@ import { createMcpWorkerSupervisor } from "./mcp-worker/supervisor.js";
 // 기록이 설치된 앱의 것과 섞여, 각 기록이 어느 환경의 것인지 구분할 수 없다.
 // 어디인지는 state-home.cjs 한 곳이 정한다.
 const IRIS_HOME = stateHome();
+const appConnectionToken = process.env.IRIS_APP_CONNECTION_TOKEN;
+// 서버가 띄우는 worker와 셸에 앱 연결 토큰 상속 차단
+delete process.env.IRIS_APP_CONNECTION_TOKEN;
 import { WebSocketServer } from "ws";
-import { initWsTransport, attachWs, broadcast, broadcastLocal, startHeartbeat } from "./ws-transport.js";
+import { sendFrame, initWsTransport, attachWs, broadcast, broadcastLocal, startHeartbeat } from "./ws-transport.js";
 import { HerdrClient } from "./herdr.js";
 import { PtyManager } from "./pty.js";
 import {
@@ -61,6 +64,7 @@ import {
   isPathAllowed as fsPathAllowed,
   replace,
   requestRecompute as recompute,
+  clearGitStatusCache,
 } from "./runtime-state.js";
 import {
   initBrowserStateOwner,
@@ -124,6 +128,7 @@ import {
   profileRefToId,
   regTab,
   registerCdpExecutor,
+  releaseSessionControl,
   requestWorkerGeneration,
   requestWorkerRelay,
   removeClosedTab,
@@ -271,9 +276,10 @@ function claimStateDir(attempt = 0) {
     if (pidIsThisServer(prev)) { dropTmp(); return prev; }
   }
   // 유효하지 않은 잠금은 제거하고 처음부터 다시 건다. 제거 권한은 하나에게만 준다.
+  if (attempt >= 3) { dropTmp(); return -1; }
+  const reaped = reapDeadLock(prev, tmp);
   dropTmp();
-  if (attempt >= 3) return -1;   // 계속 실패하면 대기한다. 강제로 가져오지 않는다
-  if (!reapDeadLock(prev)) return -1;   // 치우지 못했으면 기다린다
+  if (!reaped) return -1;   // 계속 실패하면 대기한다. 강제로 가져오지 않는다
   return claimStateDir(attempt + 1);
 }
 
@@ -288,11 +294,10 @@ function claimStateDir(attempt = 0) {
 // 배타 파일로 제거 권한을 하나로 제한하면 이 구간이 닫힌다. 권한을 가진 하나만 unlink 하고,
 // 나머지는 link가 EEXIST로 막혀 그동안 아무도 잠금을 걸 수 없다. 권한을 얻은 뒤에도
 // 그 잠금이 여전히 무효인지 다시 확인한다.
-function reapDeadLock(deadPid) {
+function reapDeadLock(deadPid, tmp) {
   const reap = `${LOCK_PATH}.reap`;
-  let fd = null;
   try {
-    fd = fs.openSync(reap, "wx");
+    fs.linkSync(tmp, reap);
   } catch (e) {
     if (!e || e.code !== "EEXIST") return false;
     // 제거하던 프로세스가 종료돼 표시 파일만 남았을 수 있다. 그 소유자가 살아 있지 않으면 제거하고,
@@ -303,9 +308,6 @@ function reapDeadLock(deadPid) {
     return false;
   }
   try {
-    try { fs.writeSync(fd, String(process.pid)); } catch {}
-    try { fs.closeSync(fd); } catch {}
-    fd = null;
     // 표시 파일을 얻는 사이에 다른 프로세스가 새 잠금을 걸었다면 제거 대상이 아니다.
     let now = 0;
     try { now = Number(String(fs.readFileSync(LOCK_PATH, "utf8")).trim()); }
@@ -314,7 +316,6 @@ function reapDeadLock(deadPid) {
     try { fs.unlinkSync(LOCK_PATH); } catch { return false; }
     return true;
   } finally {
-    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
     try { fs.unlinkSync(reap); } catch {}
   }
 }
@@ -352,6 +353,7 @@ const shutdownCapabilities = [], exitCapabilities = [];
 const capabilityContext = {
   broadcast: (message) => broadcast(message),
   broadcastLocal: (message) => broadcastLocal(message),
+  canRelayManagedChat: (ws) => ws._local && (appConnectionToken === undefined || ws._app === true),
   spaceOrder: spaceOrderStore,
   visitClients: (visitor) => { for (const client of wss.clients) visitor(client); },
   onShutdown: (callback) => shutdownCapabilities.push(callback),
@@ -374,6 +376,7 @@ initBrowserRuntime({
       return;
     }
     if (!message?.wc) return;
+    if (message.reason === "destroy") { targetGenerations.delete(Number(message.wc)); return; }
     const target = {
       wcId: Number(message.wc),
       documentGeneration: message.documentGeneration,
@@ -388,6 +391,7 @@ initBrowserRuntime({
 
 initBrowserCommands({ broadcast: (message) => broadcast(message) });
 initBrowserMessageHandlers({
+  appToken: appConnectionToken,
   broadcast: (message) => broadcast(message),
   broadcastLocal: (message) => broadcastLocal(message),
 });
@@ -415,7 +419,7 @@ const hostPorts = createCurrentServerHostPorts({
 });
 const hostHandlers = createMcpHostHandlers({
   ...hostPorts,
-  user: createIndexUserPorts({ consoleAsk, notifyHostUser, progressHostUser }),
+  user: createIndexUserPorts({ consoleAsk, notifyHostUser, progressHostUser, releaseSessionControl }),
 });
 workerSupervisor = createMcpWorkerSupervisor({
   stateDir: IRIS_HOME,
@@ -526,24 +530,24 @@ attachWs({
     // 어디인지 몰라 그 경로를 해석하지 못해 열기·Finder 보기가 모두 실패한다.
     // 홈 경로는 같은 기기의 서버가 알고 있으므로 창이 추정하지 않게 한다.
     // netPolicy: 창이 연결 완료 처리 전 확인하는 서버 네트워크 정책(첫 메시지)
-    ws.send(JSON.stringify({ type: "caps", local: ws._local, home: os.homedir(), netPolicy: NET_POLICY }));
+    sendFrame(ws, JSON.stringify({ type: "caps", local: ws._local, home: os.homedir(), netPolicy: NET_POLICY }));
     // 창이 자기 저장분(파일 탭·기본 프로필·순서)을 같은 키로 옮기는 데 쓴다. 창은 첫 state에서
     // 파일 탭을 복원하므로 그보다 먼저 보낸다. 이관이 끝난 뒤 붙은 창도 이 표만 있으면 스스로 옮긴다.
-    ws.send(JSON.stringify(spaceKeysWire()));
+    sendFrame(ws, JSON.stringify(spaceKeysWire()));
     const runtime = snapshot();
-    ws.send(JSON.stringify({ type: "state", agents: runtime.state, workspaces: runtime.workspaces, tabs: runtime.tabs, ts: Date.now(), local: ws._local }));
-    ws.send(JSON.stringify(keymapWire())); // 사용자가 변경한 단축키. 창이 이 값으로 판정한다
-    ws.send(JSON.stringify(closedTabsWire())); // 복원 스택. 새로 연 창도 앞서 닫힌 탭을 복원할 수 있게 한다
-    ws.send(JSON.stringify(controlMessage())); // 재접속 시 조작 상태 + 최근 AI 사용 동기(둘을 한 메시지로 묶어 어긋나지 않게)
-    ws.send(JSON.stringify({ type: "ai-targets", targets: aiTargetsSnapshot() })); // 어느 세션이 어느 탭을 쓰는지
+    sendFrame(ws, JSON.stringify({ type: "state", agents: runtime.state, workspaces: runtime.workspaces, tabs: runtime.tabs, ts: Date.now(), local: ws._local }));
+    sendFrame(ws, JSON.stringify(keymapWire())); // 사용자가 변경한 단축키. 창이 이 값으로 판정한다
+    sendFrame(ws, JSON.stringify(closedTabsWire())); // 복원 스택. 새로 연 창도 앞서 닫힌 탭을 복원할 수 있게 한다
+    sendFrame(ws, JSON.stringify(controlMessage())); // 재접속 시 조작 상태 + 최근 AI 사용 동기(둘을 한 메시지로 묶어 어긋나지 않게)
+    sendFrame(ws, JSON.stringify({ type: "ai-targets", targets: aiTargetsSnapshot() })); // 어느 세션이 어느 탭을 쓰는지
     // 창이 요소 지목 문구에 쓸 이름. 연결 직후 한 번 보내고 이후에는 등록·해제 때 갱신한다.
-    try { ws.send(JSON.stringify({ type: "tab-handles", map: handleMap() })); } catch {}
-    ws.send(JSON.stringify({ type: "pick-mode", on: getPickMode() })); // 뒤늦게 뜬 창도 같은 위상으로 시작
+    try { sendFrame(ws, JSON.stringify({ type: "tab-handles", map: handleMap() })); } catch {}
+    sendFrame(ws, JSON.stringify({ type: "pick-mode", on: getPickMode() })); // 뒤늦게 뜬 창도 같은 위상으로 시작
     // 브라우저 공유 상태 초기 스냅샷(북마크·스페이스별 탭·활성 스페이스·도킹). 이후 변경은 broadcast.
-    ws.send(JSON.stringify({ type: "browser-state", state: bsWire() }));
+    sendFrame(ws, JSON.stringify({ type: "browser-state", state: bsWire() }));
     // 대기 중인 깨우기 알림 재전송. 탭 목록(browser-state) 뒤 순서
     // 대상: 깨울 창이 없어 콘솔이 뒤늦게 띄운 분리 창
-    for (const tabId of pendingWakeTabIds()) ws.send(JSON.stringify({ type: "wake-tab", tabId }));
+    for (const tabId of pendingWakeTabIds()) sendFrame(ws, JSON.stringify({ type: "wake-tab", tabId }));
     // 구독 사용량 스냅샷과 표시 설정. 나중에 연 창도 상태바를 채운 상태로 시작한다.
     capabilityHost.onConnect(ws);
   },
@@ -584,6 +588,7 @@ attachWs({
       || msg.type === "emulator-reply"
       || msg.type === "ai-ask-answer"
       || msg.type === "browser-profiles"
+      || msg.type === "app-auth"
       || msg.type === "ui-auth"
       || msg.type === "chat-submitted"
       || msg.type === "browser-target-set"
@@ -617,7 +622,7 @@ attachWs({
     else if (msg.type === "tab.create" || msg.type === "tab.rename" || msg.type === "tab.move") handleTab(ws, msg);
     else if (msg.type === "space.create" || msg.type === "space.close") handleSpace(ws, msg);
     else if (msg.type.startsWith("artifacts.")) handleArtifacts(ws, msg);
-    else ws.send(JSON.stringify({ type: "control-error", message: "모르는 메시지: " + msg.type }));
+    else sendFrame(ws, JSON.stringify({ type: "control-error", message: "모르는 메시지: " + msg.type }));
   },
   // 연결 종료 시 PTY detach(좀비 herdr 클라이언트 방지, 세션은 persistent 유지).
   onClose: (ws) => {
@@ -641,40 +646,49 @@ function logWindowsShutdown(stage) {
   if (process.platform !== "win32") return;
   try { fs.appendFileSync(path.join(IRIS_HOME, "server.log"), `[server-shutdown] ${new Date().toISOString()} pid ${process.pid} ${stage}\n`); } catch {}
 }
-let windowsStopping = false;
-function shutdownWindows(reason) {
-  if (windowsStopping) return;
-  windowsStopping = true;
+let stopping = false;
+function releaseServerLock() {
+  try {
+    if (Number(String(fs.readFileSync(LOCK_PATH, "utf8")).trim()) === process.pid) fs.unlinkSync(LOCK_PATH);
+  } catch (error) {
+    logWindowsShutdown(`잠금 해제 오류 ${error.code || error.message}`);
+  }
+}
+async function shutdown(reason) {
+  if (stopping) return;
+  stopping = true;
   logWindowsShutdown(`종료 요청 ${reason}`);
-  for (const [index, stop] of shutdownCapabilities.entries()) {
+  flushPendingState();
+  const pending = [...shutdownCapabilities, () => workerSupervisor?.shutdown()].map(async (stop, index) => {
     const label = `${index}:${stop.name || "anonymous"}`;
     logWindowsShutdown(`콜백 시작 ${label}`);
-    try { stop(); } catch (error) { logWindowsShutdown(`콜백 실패 ${label} ${error.message}`); }
+    try { await stop(); }
+    catch (error) { logWindowsShutdown(`콜백 실패 ${label} ${error.message}`); console.error("종료 처리 실패", error); }
     logWindowsShutdown(`콜백 완료 ${label}`);
-  }
+  });
+  let timer;
+  try {
+    await Promise.race([Promise.all(pending), new Promise(resolve => { timer = setTimeout(resolve, 2400); })]);
+  } finally { clearTimeout(timer); }
+  flushPendingState();
+  clearGitStatusCache();
+  releaseServerLock();
   logWindowsShutdown("process.exit 시작");
   process.exit(0);
 }
-if (process.platform === "win32") {
-  process.on("SIGINT", () => shutdownWindows("SIGINT"));
-  process.on("SIGTERM", () => shutdownWindows("SIGTERM"));
-} else {
-  process.on("SIGINT", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
-  process.on("SIGTERM", () => { for (const stop of shutdownCapabilities) { try { stop(); } catch {} } process.exit(0); });
-}
+process.on("SIGINT", () => { void shutdown("SIGINT"); });
+process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
 startMemoryDiagnostics({ dir: path.join(IRIS_HOME, "diagnostics") });
 // Windows: 앱이 SIGTERM 대신 IPC 로 보내는 종료 요청. 앱이 먼저 꺼져 IPC 가 끊긴 경우도 같은 종료
 // macOS: IPC 채널 없음(process.send 없음)
 if (typeof process.send === "function") {
   process.on("message", (m) => {
     if (m && m.type === "iris:shutdown") {
-      if (process.platform === "win32") shutdownWindows("IPC");
-      else process.emit("SIGTERM", "SIGTERM");
+      void shutdown("IPC");
     }
   });
   process.on("disconnect", () => {
-    if (process.platform === "win32") shutdownWindows("disconnect");
-    else process.emit("SIGTERM", "SIGTERM");
+    void shutdown("disconnect");
   });
 }
 
@@ -702,17 +716,14 @@ function flushPendingState() {
   for (const persist of exitCapabilities) { try { persist(); } catch {} }
   if (flushed.length) console.log(`내려가기 전에 저장했습니다 — ${flushed.join(", ")}`);
 }
-for (const sig of ["exit", "SIGINT", "SIGTERM"]) {
-  process.on(sig, () => {
-    logWindowsShutdown(`상태 저장 시작 ${sig}`);
-    flushPendingState();
-    logWindowsShutdown("상태 저장 완료");
-    try { if (Number(String(fs.readFileSync(LOCK_PATH, "utf8")).trim()) === process.pid) fs.unlinkSync(LOCK_PATH); }
-    catch (error) { logWindowsShutdown(`잠금 해제 오류 ${error.code || error.message}`); }
-    if (process.platform === "win32") logWindowsShutdown(`잠금 해제 확인 ${fs.existsSync(LOCK_PATH) ? "남음" : "없음"}`);
-    if (sig !== "exit") process.exit(0);
-  });
-}
+process.on("exit", () => {
+  logWindowsShutdown("상태 저장 시작 exit");
+  flushPendingState();
+  logWindowsShutdown("상태 저장 완료");
+  clearGitStatusCache();
+  releaseServerLock();
+  if (process.platform === "win32") logWindowsShutdown(`잠금 해제 확인 ${fs.existsSync(LOCK_PATH) ? "남음" : "없음"}`);
+});
 
 // 포트가 이미 사용 중이면 종료하지 않고 대기한다. 잠금과 같은 이유로, 여기서 종료하면 launchd가
 // 10초마다 다시 실행해 같은 오류가 반복된다(확인 결과: server.log에 EADDRINUSE로

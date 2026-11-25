@@ -66,7 +66,7 @@ test("앱을 켤 때는 잠들지 않게 한 탭도 보고 있는 탭이 아니�
 test("표시와 메뉴 줄", async () => {
   const ka = await import("../web/js/browser/keep-awake.js");
   assert.equal(ka.keepAwakeMark(false), "");
-  assert.match(ka.keepAwakeMark(true), /class="ckeep"[^>]*aria-label="잠들지 않음"/);
-  assert.equal(ka.keepAwakeItem("s1", { id: "browser:a" }).label, "잠들지 않게 하기");
-  assert.equal(ka.keepAwakeItem("s1", { id: "browser:a", keepAwake: true }).label, "잠들지 않게 끄기");
+  assert.match(ka.keepAwakeMark(true), /class="ckeep"[^>]*aria-label="절전 제외"/);
+  assert.equal(ka.keepAwakeItem("s1", { id: "browser:a" }).label, "절전 제외 켜기");
+  assert.equal(ka.keepAwakeItem("s1", { id: "browser:a", keepAwake: true }).label, "절전 제외 끄기");
 });

@@ -23,7 +23,7 @@
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs web/js/browser/webview.js
 
 import {
-  aiRecentTabIds, getAiBusyTabs, getAiRecentKnown, getAiTargets, getAiTargetsKnown,
+  aiRecentTabIds, nextAiRecentExpiry, getAiBusyTabs, getAiRecentKnown, getAiTargets, getAiTargetsKnown,
 } from "./ai-state.js";
 import { bmActiveId, bmTabs, followsSharedSpace, getBrowserState } from "./state.js";
 import { callHook } from "../core/hooks.js";
@@ -99,14 +99,71 @@ export function qaOwnedTab(tabId) {
   return !!storedBrowserTab(tabId)?.tab?.qaRunId;
 }
 
-export function syncQaWebviewPlacement() {
-  let hasQa = false;
+// 사람에게 안 보이는 탭 가운데 뒤에 깔아 둘 탭: QA 회차 소유이거나 최근 AI 가 쓴 탭
+// - 보호 신호가 불명확(null)하면 일반 탭은 깔지 않는다. 전체를 깔면 메모리가 늘어서 QA 소유만 본다
+// - painted 가 거짓(크기 0)이면 깔지 않는다: 그려지지 않는 탭은 대체 크기 보정이 필요하다
+export function isKeptBehind({ active, qaOwned, aiProtected, tabId, painted = true }) {
+  if (active || !painted) return false;
+  return qaOwned || !!(aiProtected && aiProtected.has(tabId));
+}
+
+let lastBehindWcs = "";
+let behindRecheckTimer = null;
+let behindResizeWatched = false;
+let behindLayoutWatched = false;
+let behindVisibilityWatched = false;
+// 깔아 둘 탭에 class 를 붙이고(CSS 가 패널 크기로 배치), 그 탭의 wc 목록을 메인에 알린다.
+// - 붙인 뒤 실제 크기를 재서 0 이면 뗀다(메인이 숨은 탭 대체 크기를 걸도록 목록에서 뺀다)
+// - 보호가 끝나는 시각에 다시 판정하고, 칸 크기가 바뀌면(0 에서 실제 크기로) 다시 판정한다
+export function syncAiBehindPlacement(aiProtected = authoritativeAiProtection()) {
+  const activeId = activeBrowserId();
+  const candidates = [];
   for (const [tabId, rec] of getWebviewEntries()) {
-    const owned = qaOwnedTab(tabId);
-    rec.el?.classList.toggle("qa-owned", owned);
-    hasQa ||= owned;
+    const keep = !rec.renderGone && isKeptBehind({ active: tabId === activeId, qaOwned: qaOwnedTab(tabId), aiProtected, tabId });
+    rec.el?.classList.toggle("ai-behind", keep);
+    rec.el?.removeAttribute("data-ai-behind-pending");
+    if (keep && rec.el) candidates.push(rec);
   }
-  document.getElementById("wv-stack")?.classList.toggle("qa-keep", hasQa);
+  const stack = document.getElementById("wv-stack");
+  let painted = false;
+  let pending = false;
+  const wcs = [];
+  for (const rec of candidates) {
+    const box = rec.el.getBoundingClientRect();
+    if (!isKeptBehind({ active: false, qaOwned: true, painted: box.width > 0 && box.height > 0 })) {
+      rec.el.classList.remove("ai-behind");
+      rec.el.setAttribute("data-ai-behind-pending", "");
+      pending = true;
+      continue;
+    }
+    painted = true;
+    rec.el.removeAttribute("data-ai-behind-pending");
+    if (!rec.ready) continue;
+    try { const wc = rec.el.getWebContentsId(); if (wc) wcs.push(wc); } catch {}
+  }
+  stack?.classList.toggle("ai-keep", painted);
+  stack?.toggleAttribute("data-ai-keep-pending", pending);
+  if (stack && !behindResizeWatched && typeof ResizeObserver === "function") {
+    behindResizeWatched = true;
+    new ResizeObserver(() => syncAiBehindPlacement()).observe(stack);
+  }
+  if (stack?.parentElement && !behindLayoutWatched && typeof ResizeObserver === "function") {
+    behindLayoutWatched = true;
+    new ResizeObserver(() => syncAiBehindPlacement()).observe(stack.parentElement);
+  }
+  if (!behindVisibilityWatched && typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    behindVisibilityWatched = true;
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) syncAiBehindPlacement(); });
+  }
+  clearTimeout(behindRecheckTimer);
+  behindRecheckTimer = null;
+  const expiry = nextAiRecentExpiry();
+  if (expiry) behindRecheckTimer = setTimeout(() => { behindRecheckTimer = null; scheduleWebviewThrottling(); }, Math.max(0, expiry - Date.now()) + 50);
+  wcs.sort((x, y) => x - y);
+  const key = wcs.join(",");
+  if (key === lastBehindWcs) return;
+  lastBehindWcs = key;
+  try { window.acHost?.tabsBehind?.(wcs); } catch {}
 }
 
 // 살려 둘 기준은 "최근 5분 안에 AI 가 실제로 썼는가" 하나다. 점유 여부(held)나 영속 tab.ai 는
@@ -242,6 +299,7 @@ export function syncWebviewThrottling() {
   webviewThrottleTimer = null;
   if (!window.acHost || !acHost.setWebviewThrottleState) return;
   const aiProtected = authoritativeAiProtection();
+  syncAiBehindPlacement(aiProtected);
   const recent = recentWebviewIds();
   const webviews = [];
   for (const [tabId, rec] of getWebviewEntries()) {
@@ -307,7 +365,8 @@ export function sleepStoredTab(tabId, tab, sp) {
 
 export function wakeWebview(tabId) {
   if (!tabId || getWebview(tabId)) return getWebview(tabId) || null;
-  const stored = storedBrowserTab(tabId); if (!stored) return null;
+  const stored = storedBrowserTab(tabId);
+  if (!stored || (stored.tab.kind && stored.tab.kind !== "browser")) return null;
   const sleeping = getDiscardedWebview(tabId);
   // 잠든 탭은 잠들기 전 그 세션으로 돌아와야 한다. 여기서 지금의 기본 계정으로 다시 풀면, 그
   // 사이 스페이스 기본이 바뀌었거나 계정 목록이 잠깐 비어 있었을 때 다른 파티션에 붙는다.
@@ -328,9 +387,9 @@ export function wakeWebview(tabId) {
   // 알림은 실제로 떠 있다가 회수된 탭만. 처음부터 올리지 않은 탭(백그라운드 새 탭·복원 탭, discardedAt 0)은
   // 잃을 입력·스크롤이 없음
   if (sleeping && sleeping.discardedAt > 0) {
-    bNote.textContent = "잠자던 탭을 다시 여는 중… 입력·스크롤 상태는 페이지에 따라 복원되지 않을 수 있습니다.";
+    bNote.textContent = "절전 탭을 다시 여는 중… 입력·스크롤 상태는 페이지에 따라 복원되지 않을 수 있습니다.";
     bNote.hidden = false;
-    try { showToast("잠자던 탭을 다시 엽니다 · 페이지 입력/스크롤은 초기화될 수 있습니다.", { level: "info" }); } catch {}
+    try { showToast("절전 탭을 다시 엽니다 · 페이지 입력/스크롤은 초기화될 수 있습니다.", { level: "info" }); } catch {}
   }
   return rec;
 }
@@ -377,7 +436,7 @@ export function clearTabDialog(tabId) {
 // - 활성 탭 판정만 보면 판정이 어긋날 때 보이는 탭의 질문에 답할 수 없어 페이지가 멈춘 채로 남음
 //   (확인 결과: 확인창이 뜬 탭에서 클릭이 전부 동작하지 않음). 그래서 webview 가 실제로 그려지는지도 봄
 // - 숨긴 탭의 webview 는 display:none 이라 getClientRects 가 비어 있음
-// - 뒤에 깔린 QA 탭(qa-owned, 비활성)과 숨은 브라우저 칸(qa-keep)은 그려지지만 사람에게 안 보임
+// - 뒤에 깔린 AI 탭(ai-behind, 비활성)과 숨은 브라우저 칸(ai-keep)은 그려지지만 사람에게 안 보임
 // - 캡처 동안만 올린 탭(data-ac-held)도 그려지지만 1px 만 보임
 export function pendingDialogTabId() {
   const id = activeBrowserId();
@@ -387,7 +446,7 @@ export function pendingDialogTabId() {
     const el = webview && (webview.el || webview);
     if (!(el && el.getClientRects && el.getClientRects().length)) return false;
     if (el.dataset?.acHeld != null) return false;
-    if (el.classList?.contains("qa-owned") && !el.classList.contains("active")) return false;
+    if (el.classList?.contains("ai-behind") && !el.classList.contains("active")) return false;
     return !el.closest?.(".center-webviews[hidden]");
   }) || null;
 }

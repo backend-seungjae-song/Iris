@@ -212,6 +212,8 @@ function createCdpSession({
     } else {
       sessionPrimers.delete(id);
       if (existed) { bumpDocument(id, "destroy"); bumpDebugger(id, "destroy"); }
+      documentGenerations.delete(id);
+      debuggerGenerations.delete(id);
     }
     if (typeof childFn === "function") childPrimers.set(id, childFn);
     else if (typeof fn !== "function") childPrimers.delete(id);
@@ -295,7 +297,7 @@ function createCdpSession({
     let attached = false;
     try { attached = dbg.isAttached(); } catch {}
     if (!attached && !allowAttach(wc)) {
-      throw tagError(new Error("이 페이지에서는 CDP 를 붙이지 않습니다(로그인 호스트). CDP 없이 되는 명령만 쓰거나 사람에게 넘기세요(browser_ask_user)."), attachBlockedCode);
+      throw tagError(new Error("이 페이지에서는 CDP 를 연결하지 않습니다(로그인 호스트). CDP 없이 되는 명령만 쓰거나 사람에게 넘기세요(browser_ask_user)."), attachBlockedCode);
     }
     try { if (!attached) { dbg.attach("1.3"); pinWhileAttached(dbg); bumpDebugger(wc.id, "attach"); } }
     catch (e) { throw tagError(e, sessionDetachedCode); }
@@ -312,6 +314,8 @@ function createCdpSession({
           bumpDocument(wc.id, "destroy");
           bumpDebugger(wc.id, "destroy");
         }
+        documentGenerations.delete(wc.id);
+        debuggerGenerations.delete(wc.id);
         wired.delete(wc.id);
         refRegistry.clear(wc.id);
         observation.forget(wc.id);
@@ -324,7 +328,11 @@ function createCdpSession({
         frameOrigins.delete(wc.id);
         clearSessionGuards(wc.id);
       });
-      dbg.on("detach", () => { clearSessionGuards(wc.id); bumpDebugger(wc.id, "detach"); });
+      dbg.on("detach", () => {
+        if (!wired.has(wc.id) || wc.isDestroyed() || dbg.isAttached()) return;
+        clearSessionGuards(wc.id);
+        bumpDebugger(wc.id, "detach");
+      });
       // 닫힌 루프 QA용 상시 수집: 콘솔 API·미처리 예외·브라우저 로그(에러/경고)·네트워크 실패(4xx/5xx·loadingFailed).
       dbg.on("message", (_ev, method, params, sessionId = "") => {
         try {

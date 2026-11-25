@@ -1,10 +1,9 @@
-// worker 사본 · 원본 snapshot-engine.cjs 와 같은 입력에 같은 결과 (test/mcp-worker-snapshot-parity.mjs 가 대조)
-// 원본은 ⑧에서 지움
-// 원본과 다른 범위: findCursorInteractiveElements 의 요소 해석 부분 + resolveBackendIds·resolveBatched (CDP 왕복 묶기)
 // 접근성 스냅샷 엔진. Orca(src/main/browser/snapshot-engine.ts)에서 이식했다(CJS, 타입 제거, 로직 동일).
 // CDP Accessibility.getFullAXTree로 접근성 트리를 걷어 요소 ref(@e1…)를 부여하고, ARIA 없는
 // cursor:pointer/onclick/tabindex 요소(SPA 컨트롤)를 승격해 ref로 노출한다. AI가 비전 없이
 // "click @e5"로 요소를 지목할 수 있게 하는 핵심. sendCommand = webContents.debugger.sendCommand 래퍼.
+
+import { readFrameAXTrees } from "./frame-ax-trees.js";
 
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch",
@@ -23,41 +22,41 @@ const SKIP_ROLES = new Set(["none", "presentation", "generic"]);
 const SNAP_BUDGET = Number(process.env.IRIS_SNAPSHOT_BUDGET) || 20000;   // 바이트
 const KEEP_ROLES = new Set(["alert", "alertdialog", "status", "heading", "log"]);
 
-// opts.frames 는 교차 출처 iframe의 CDP 세션 목록 [{ sid, send }]이다. 그 안은 별도 타깃이라
-// 최상위 접근성 트리에 포함되지 않는다. 각각 순회해 뒤에 이어 붙이고, ref 번호는 이어서 매긴다.
-// 프레임마다 번호를 새로 매기면 같은 @e5가 두 곳을 가리킨다. 어느 프레임의 요소인지는 refMap의
-// sid가 보관하므로 이름에 표시할 필요가 없다(Orca와 같은 방식이다).
 async function buildSnapshot(sendCommand, opts) {
-  await sendCommand("Accessibility.enable");
-  const { nodes } = await sendCommand("Accessibility.getFullAXTree");
-  const nodeById = new Map();
-  for (const node of nodes) nodeById.set(node.nodeId, node);
-
   const entries = [];
-  let refCounter = 1;
-  const root = nodes[0];
-  if (!root) return { snapshot: "", refs: [], refMap: new Map() };
-
-  walkTree(root, nodeById, 0, entries, () => "e" + refCounter++);
-
-  // ARIA 없는 시각적 인터랙티브 요소(styled div 등) 승격.
-  const cursorInteractiveEntries = await findCursorInteractiveElements(sendCommand, entries);
-  for (const cie of cursorInteractiveEntries) { cie.ref = `@e${refCounter++}`; entries.push(cie); }
-
-  // 교차 출처 iframe은 접근성 트리를 자기 세션으로만 제공한다. 부모 트리 뒤에 이어 붙이고
-  // 그 구간의 ref가 어느 세션 것인지 기록한다. click·fill 이 그 세션으로 가야 하기 때문이다.
   const refSid = new Map();
-  for (const f of (opts && opts.frames) || []) {
+  let refCounter = 1;
+
+  // 같은 CDP 세션의 iframe은 부모와 같은 sid로 기록
+  async function appendSession(send, sid) {
+    await send("Accessibility.enable");
+    for await (const { nodes, frameId } of readFrameAXTrees(send)) {
+      if (!nodes.length) {
+        if (!sid && !frameId) return false;
+        continue;
+      }
+      const depth = sid || frameId ? 1 : 0;
+      const frameEntries = [];
+      const nodeById = new Map(nodes.map((node) => [node.nodeId, node]));
+      walkTree(nodes[0], nodeById, depth, frameEntries, () => "e" + refCounter++);
+      if (frameId || !sid) {
+        const cursorEntries = await findCursorInteractiveElements(send, frameEntries, frameId);
+        for (const entry of cursorEntries) {
+          frameEntries.push({ ...entry, ref: `@e${refCounter++}`, depth });
+        }
+      }
+      for (const entry of frameEntries) {
+        entries.push(entry);
+        if (sid && entry.ref) refSid.set(entry.ref, sid);
+      }
+    }
+    return true;
+  }
+
+  if (!await appendSession(sendCommand, null)) return { snapshot: "", refs: [], refMap: new Map() };
+  for (const { send, sid } of opts?.frames || []) {
     try {
-      await f.send("Accessibility.enable");
-      const r = await f.send("Accessibility.getFullAXTree");
-      const fnodes = (r && r.nodes) || [];
-      if (!fnodes.length) continue;
-      const fById = new Map();
-      for (const n of fnodes) fById.set(n.nodeId, n);
-      const start = refCounter;
-      walkTree(fnodes[0], fById, 1, entries, () => "e" + refCounter++);
-      for (let i = start; i < refCounter; i++) refSid.set(`@e${i}`, f.sid);
+      await appendSession(send, sid);
     } catch { /* 사라진 프레임은 건너뛴다 */ }
   }
 
@@ -167,7 +166,7 @@ function selectLines(entries, lines, o) {
       skippedKeep.slice(0, 40).map((x) => "  " + x).join("\n"));
   }
   if (cursor != null) {
-    parts.push(`\n\n[${budget}바이트에서 끊었다. 이어 보려면 cursor=${cursor} — ` +
+    parts.push(`\n\n[${budget}바이트에서 잘랐다. 이어서 보려면 cursor=${cursor}. ` +
       `또는 role·name·region으로 좁혀라. 전체를 다시 받으면 토큰만 는다]`);
   }
   text += parts.join("");
@@ -241,11 +240,16 @@ function formatLandmarkRole(role, name) {
 function ordinal(n) { const s = ["th", "st", "nd", "rd"]; const v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; }
 
 // cursor:pointer/onclick/tabindex/contenteditable 요소를 페이지 JS로 찾아 backendNodeId로 해석.
-async function findCursorInteractiveElements(sendCommand, existingEntries) {
+async function findCursorInteractiveElements(sendCommand, existingEntries, frameId) {
   const existingNodeIds = new Set(existingEntries.map((e) => e.backendDOMNodeId));
   const results = [];
   try {
-    const { result } = await sendCommand("Runtime.evaluate", {
+    // 하위 문서의 DOM 조회에 해당 프레임의 실행 컨텍스트 필요
+    const world = frameId && await sendCommand("Page.createIsolatedWorld", { frameId, worldName: "iris-snapshot" });
+    if (frameId && !world?.executionContextId) return results;
+    const evaluate = (params) => sendCommand("Runtime.evaluate",
+      world ? { ...params, contextId: world.executionContextId } : params);
+    const { result } = await evaluate({
       expression: `(() => {
         const SKIP_ROLES = new Set(['button','link','textbox','checkbox','radio','tab',
           'menuitem','option','switch','slider','combobox','searchbox','spinbutton','treeitem',
@@ -276,13 +280,13 @@ async function findCursorInteractiveElements(sendCommand, existingEntries) {
       returnByValue: true,
     });
     const elements = JSON.parse(result.value);
-    const backendIds = await resolveBackendIds(sendCommand, elements.length);
+    const backendIds = await resolveBackendIds(sendCommand, evaluate, elements.length);
     for (let i = 0; i < elements.length; i++) {
       const id = backendIds[i];
       if (id == null || existingNodeIds.has(id)) continue;
       results.push({ ref: "", role: "clickable", name: elements[i].text, backendDOMNodeId: id, depth: 0 });
     }
-    await sendCommand("Runtime.evaluate", { expression: "delete window.__acCursorInteractive", returnByValue: true });
+    await evaluate({ expression: "delete window.__acCursorInteractive", returnByValue: true });
   } catch { /* DOM 쿼리 실패는 비치명 */ }
   return results;
 }
@@ -290,14 +294,14 @@ async function findCursorInteractiveElements(sendCommand, existingEntries) {
 // worker 사본 전용 · 요소별 Runtime.evaluate → DOM.describeNode 2n회를 getProperties 1회 + describeNode 묶음 1회로 줄임
 // 묶음은 하나라도 실패하면 전체 실패(cdp.batch) → 실패하면 요소별로 하나씩 대체 · 결과(건너뜀 포함)는 옛 순차 경로와 같음
 // sendCommand.batch 는 최상위 sender 만 가짐(없으면 옛 순차 경로)
-async function resolveBackendIds(sendCommand, count) {
+async function resolveBackendIds(sendCommand, evaluate, count) {
   if (typeof sendCommand.batch === "function") {
-    try { return await resolveBatched(sendCommand, count); } catch { /* 처음부터 순차로 대체 */ }
+    try { return await resolveBatched(sendCommand, evaluate, count); } catch { /* 처음부터 순차로 대체 */ }
   }
   const ids = [];
   for (let i = 0; i < count; i++) {
     try {
-      const { result: objResult } = await sendCommand("Runtime.evaluate", { expression: `window.__acCursorInteractive[${i}]` });
+      const { result: objResult } = await evaluate({ expression: `window.__acCursorInteractive[${i}]` });
       if (!objResult.objectId) { ids.push(null); continue; }
       const { node } = await sendCommand("DOM.describeNode", { objectId: objResult.objectId });
       ids.push(node.backendNodeId);
@@ -305,8 +309,8 @@ async function resolveBackendIds(sendCommand, count) {
   }
   return ids;
 }
-async function resolveBatched(sendCommand, count) {
-  const { result: arr } = await sendCommand("Runtime.evaluate", { expression: "window.__acCursorInteractive" });
+async function resolveBatched(sendCommand, evaluate, count) {
+  const { result: arr } = await evaluate({ expression: "window.__acCursorInteractive" });
   const { result: props } = await sendCommand("Runtime.getProperties", { objectId: arr.objectId, ownProperties: true });
   const objectIds = new Array(count).fill(null);
   for (const p of props) {

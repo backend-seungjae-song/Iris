@@ -529,7 +529,7 @@ export function createWorkerRun(scenario, root, {
       if (noCdp) {
         effects.push(["detachAiSession"]);
         if (!CDP_FREE.includes(command)) {
-          throw coded("cdp_blocked", `로그인 호스트에서는 CDP 를 붙이지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: ${CDP_FREE.join(" ")}. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.`);
+          throw coded("cdp_blocked", `로그인 호스트에서는 CDP 를 연결하지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: ${CDP_FREE.join(" ")}. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.`);
         }
       }
       return { noCdp, ...gens };

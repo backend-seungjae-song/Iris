@@ -87,7 +87,7 @@ export async function afRefresh(reload) {
     body.innerHTML = `<div class="af-empty">
       <div class="af-empty-ic">${AF_ICON.key}</div>
       <h2>저장된 로그인이 없습니다</h2>
-      <p>계정 화면에서 Chrome 프로필의 로그인을 가져오면 여기에 사이트와 아이디가 나타납니다. 그다음 AI 가 채워도 되는 계정만 골라 허용합니다.</p>
+      <p>계정 화면에서 Chrome 프로필의 로그인을 가져오면 여기에 사이트와 아이디가 표시됩니다. 그다음 AI 가 채워도 되는 계정만 골라 허용합니다.</p>
       ${canGoAcct ? `<button class="af-btn" data-goacct="1">${AF_ICON.user}계정 화면에서 가져오기</button>` : ""}
     </div>`;
     return;
@@ -180,11 +180,11 @@ export async function afRefresh(reload) {
       </div>
     </nav>
     <section class="af-detail">
-      ${gap ? `<div class="af-warn">${AF_ICON.warn}<span>아직 안 가져온 Chrome 계정 ${gap}개: <b>${esc((src.missing || []).map((m) => m.account || m.label).join(" · "))}</b>. 그 계정에 저장된 로그인은 여기 없습니다.</span>
-        ${canGoAcct ? `<button class="af-btn" data-goacct="1">계정 페이지에서 가져오기${AF_ICON.arrow}</button>` : ""}</div>` : ""}
+      ${gap ? `<div class="af-warn">${AF_ICON.warn}<span>가져오지 않은 Chrome 계정 ${gap}개: <b>${esc((src.missing || []).map((m) => m.account || m.label).join(" · "))}</b>. 그 계정에 저장된 로그인은 여기 없습니다.</span>
+        ${canGoAcct ? `<button class="af-btn" data-goacct="1">계정 화면에서 가져오기${AF_ICON.arrow}</button>` : ""}</div>` : ""}
       ${detail}
       <div class="af-foot">
-        <p class="af-why">허용한 것만 <code>iris-browser login</code> 으로 채울 수 있습니다. 비밀번호 값은 AI 에게 전달되지 않고, 그 탭의 명령 결과에서도 가려집니다.</p>
+        <p class="af-why">허용한 계정만 <code>iris-browser login</code> 으로 채울 수 있습니다. 비밀번호 값은 AI 에게 전달되지 않고, 그 탭의 명령 결과에서도 가려집니다.</p>
         ${on ? `<button class="af-btn af-btn-danger" data-lockall="1">${AF_ICON.lock}허용한 계정 전체 잠금 (${on})</button>` : ""}
       </div>
     </section>
@@ -207,7 +207,7 @@ function wireAutofillAllowlist() {
     if (site) { afPick = site.dataset.afSite; afRefresh(false); return; }
     if (!window.acHost || !acHost.aiLoginSet) return;
     if (e.target.closest("[data-lockall]")) {
-      if (!(await askConfirm("허용해둔 계정을 전부 잠급니다. 계속할까요?"))) return;
+      if (!(await askConfirm("허용한 계정을 모두 잠급니다. 계속할까요?"))) return;
       for (const x of afList.filter((v) => v.allowed)) await acHost.aiLoginSet(x.origin, x.username, false);
       afRefresh(); return;
     }

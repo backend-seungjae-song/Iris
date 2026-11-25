@@ -14,3 +14,29 @@ test("서버 호출 없이 만든 앱 표면은 앞 표면의 서버 호출을 �
   assert.equal(out.ok, false);
   assert.match(out.error, /서버 호출이 연결되지 않았습니다/);
 });
+
+test("동시에 실패한 앱 대상도 자기 호출의 오류를 돌려준다", async () => {
+  let opens = 0;
+  const surface = createAppSurface({
+    currentSession: async () => "session-a",
+    call: async (cmd, args) => {
+      if (cmd === "app-devices") return { ok: true, data: { tabs: [] } };
+      if (cmd === "app-targets-get") return { ok: true, data: { devices: [] } };
+      if (cmd === "app-open") {
+        const id = ++opens;
+        await new Promise(resolve => setTimeout(resolve, id === 1 ? 20 : 0));
+        return { ok: false, error: `open-${id}` };
+      }
+      throw new Error(`unexpected app call: ${cmd}`);
+    },
+  });
+  const snapshot = surface.tools.find((tool) => tool.name === "app_snapshot");
+  const [alpha, beta] = await Promise.all([
+    snapshot.run({}),
+    snapshot.run({}),
+  ]);
+  assert.equal(alpha.ok, false);
+  assert.match(alpha.error, /open-1/);
+  assert.equal(beta.ok, false);
+  assert.match(beta.error, /open-2/);
+});

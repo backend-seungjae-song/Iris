@@ -49,7 +49,7 @@ function scanUsage(root, ids, exclude) {
     }
   };
   const st0 = (() => { try { return fs.statSync(root); } catch { return null; } })();
-  if (!st0) return { error: `부르는 자리를 찾을 폴더가 없습니다: ${root}` };
+  if (!st0) return { error: `호출부를 찾을 폴더가 없습니다: ${root}` };
   walk(st0.isDirectory() ? root : path.dirname(root));
   return { unused: [...left], scanned: seen, capped };
 }
@@ -121,9 +121,9 @@ export function nominalFault(label, text) {
     + bad.slice(0, 3).map((x) => `  서술형: ${x}`).join("\n")
     + (bad.length > 3 ? `\n  … 외 ${bad.length - 3}문장` : "")
     + "\n예: \"버튼이 안 눌렸다\" → \"버튼 미반응\" · \"사유가 비어 있다\" → \"사유 없음\"\n"
-    + "-임·-함·-음 같은 명사형 어미도 종결어미입니다. 여기서는 -다·-요만 막지만 그것도 걷어냅니다.\n"
+    + "-임·-함·-음 같은 명사형 어미도 종결어미입니다. 여기서는 -다·-요만 막지만 그것도 뺍니다.\n"
     + "근거 원문(quote)과 묻는 문장은 이 검사에서 빠집니다.\n"
-    + "뜻이 깎이면 문장으로 되돌리지 말고 줄을 더 쌓습니다 — 한 줄에 한 사실입니다.\n"
+    + "뜻이 빠지면 문장으로 되돌리지 말고 줄을 추가합니다. 한 줄에 사실 하나입니다.\n"
     + "  \"구매자는 앱을 열어 직접 봐야 한다\"\n"
     + "  → \"구매자 알림 없음\" / \"확인 경로: 앱에서 내 중고거래 직접 열기\"";
 }

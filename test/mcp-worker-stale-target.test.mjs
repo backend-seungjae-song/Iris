@@ -78,7 +78,7 @@ test("이동 전 snapshot ref 거절(stale_ref)은 다시 보내지 않는다", 
     command: "click", args: {}, token: token(1), refreshToken: async () => token(1),
     relayCall: async (command) => {
       calls.push(command);
-      return { ok: false, code: "stale_ref", error: "페이지가 이동되어 ref가 만료됐습니다 — 재-snapshot 필요.", commandState: "completed" };
+      return { ok: false, code: "stale_ref", error: "페이지가 이동되어 ref가 만료됐습니다. snapshot을 다시 실행하세요.", commandState: "completed" };
     },
     handler: async ({ base }) => (await base("input.click", { ref: "e3" }, { last: true })).response,
   });

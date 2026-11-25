@@ -11,7 +11,13 @@ export function createWorkerRuntime({ protocol = 1, deployId, workerGeneration, 
   const status = createWorkerStatus({ deployId, workerGeneration, activity, now });
   let secret = token, authorized = false, drained = false, stopped = false;
   let lifecycle = Promise.resolve();
-  const send = message => transport.connected && transport.send({ protocol, workerGeneration, ...message });
+  const send = message => {
+    if (!transport.connected) return false;
+    try {
+      transport.send({ protocol, workerGeneration, ...message }, () => {});
+      return true;
+    } catch { return false; }
+  };
   const result = (message, ok, output, error) => send({ type: replyType(message.type), requestId: message.requestId,
     ok, ...(ok ? { output } : { error: { code: error?.code || "INTERNAL", message: error?.message || String(error), retryable: false, details: error?.details || {} } }) });
 
@@ -46,7 +52,7 @@ export function createWorkerRuntime({ protocol = 1, deployId, workerGeneration, 
     stopped = true;
     stopAccepting();
     status.setState("stopping");
-    lock.release();
+    try { lock.release(); } catch (error) { console.error("worker 잠금 해제 실패", error); }
     if (notify) send({ type: "worker.stopped", deployId, pid: process.pid });
     exit(0);
   };
@@ -57,6 +63,9 @@ export function createWorkerRuntime({ protocol = 1, deployId, workerGeneration, 
       await activity.waitForIdle({ timeoutMs: 30000 });
     } finally { await shutdown({ notify: false }); }
   };
+  transport.on?.("error", (error) => {
+    if (error?.code === "EPIPE" || transport.connected === false) void parentGone();
+  });
   const handle = message => {
     if (!message || message.protocol !== protocol || message.workerGeneration !== workerGeneration) return;
     if (message.type === "host.response") return;

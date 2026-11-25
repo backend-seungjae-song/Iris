@@ -5,14 +5,17 @@
 
 export const actionId = (index) => `option-${index}`;
 
-// 앱의 답 → 선택지 순서. id 가 없거나 모르면 behavior 로 첫 선택지(deny 는 거절 역할, 나머지는 허용 쪽)
+// 줄 번호를 보내던 이전 화면의 거절 응답도 현재 거절 선택지에만 연결
 export function answerIndex(options, response) {
-  const m = /^option-(\d+)$/.exec(String(response?.selectedActionId ?? ""));
-  if (m) {
-    const i = Number(m[1]);
-    return i < options.length ? i : null;
+  const { selectedActionId, behavior } = response ?? {};
+  const match = /^option-(\d+)$/.exec(String(selectedActionId ?? ""));
+  if (match) {
+    const index = Number(match[1]);
+    const option = options[index];
+    if (!option || (behavior !== undefined && behavior !== (option.role === "deny" ? "deny" : "allow"))) return null;
+    return index;
   }
-  const want = response?.behavior === "deny" ? "deny" : "allow";
-  const i = options.findIndex((o) => (o.role === "deny" ? "deny" : "allow") === want);
-  return i >= 0 ? i : null;
+  if (behavior !== "deny" && !(selectedActionId == null && behavior === "allow")) return null;
+  const index = options.findIndex(option => option.role === behavior);
+  return index >= 0 ? index : null;
 }

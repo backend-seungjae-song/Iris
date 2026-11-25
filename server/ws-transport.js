@@ -35,18 +35,56 @@ export function initWsTransport(deps) {
   if (deps.isLocalRequest) isLocalRequest = deps.isLocalRequest;
 }
 
+const MAX_QUEUED_BYTES = 8 * 1024 * 1024;
+
+function terminate(ws) {
+  try { ws.terminate?.(); } catch {}
+}
+
+const originalSend = new WeakMap();
+
+function guardedSend(ws, args) {
+  let failure;
+  try {
+    if (ws.readyState !== 1) failure = new Error("WebSocket 연결이 닫혔습니다.");
+    else if (ws.bufferedAmount > MAX_QUEUED_BYTES) {
+      failure = new Error("WebSocket 전송 대기 한도를 초과했습니다.");
+      terminate(ws);
+    } else {
+      return (originalSend.get(ws) || ws.send).apply(ws, args);
+    }
+  } catch (error) {
+    failure = error;
+    terminate(ws);
+  }
+  const callback = args.at(-1);
+  if (typeof callback === "function") queueMicrotask(() => callback(failure));
+}
+
+export function sendFrame(ws, data) {
+  return guardedSend(ws, [data]);
+}
+
+function installSafeSend(ws) {
+  if (originalSend.has(ws) || typeof ws.send !== "function") return;
+  originalSend.set(ws, ws.send);
+  ws.send = (...args) => guardedSend(ws, args);
+}
+
 export function broadcast(msg) {
-  const data = JSON.stringify(msg);
+  let data;
+  try { data = JSON.stringify(msg); } catch { return; }
   for (const c of wss.clients) {
-    if (c.readyState === 1) c.send(data);
+    sendFrame(c, data);
   }
 }
 
 // 로컬(루프백) 클라이언트에만 전송한다. 실행 출력 등 민감할 수 있는 데이터의 원격 노출을 막는다.
 export function broadcastLocal(msg) {
-  const data = JSON.stringify(msg);
+  let data;
+  try { data = JSON.stringify(msg); } catch { return; }
   for (const c of wss.clients) {
-    if (c.readyState === 1 && c._local) c.send(data);
+    if (c._local) sendFrame(c, data);
   }
 }
 
@@ -61,7 +99,7 @@ export function startHeartbeat() {
       if (ws._alive === false) { try { ws.terminate(); } catch {} continue; } // 직전 ping에 답이 없었다
       ws._alive = false;
       try { ws.ping(); } catch {}
-      try { ws.send(JSON.stringify({ type: "hb", t: Date.now() })); } catch {}
+      sendFrame(ws, JSON.stringify({ type: "hb", t: Date.now() }));
     }
   }, heartbeatMs);
   heartbeatTimer.unref?.();
@@ -71,20 +109,40 @@ export function startHeartbeat() {
 // 연결마다 할 일은 조립부가 전달한다. 이 함수는 그 셋을 같은 순서로 호출한다.
 export function attachWs({ initialState, dispatch, onClose }) {
   wss.on("connection", (ws, req) => {
+    installSafeSend(ws);
+    ws.on("error", () => terminate(ws));
     ws._alive = true;
     ws.on("pong", () => { ws._alive = true; });
     ws.on("message", () => { ws._alive = true; });   // 프레임이 오면 살아 있는 연결이다
     // AC5: 로컬(루프백) 연결만 터미널 탭 생성 등 셸 관련 동작 허용. 원격(tailnet 폰)은 제외.
     ws._local = isLocalRequest(req);
-    initialState(ws);
+    try {
+      const pending = initialState(ws);
+      if (pending && typeof pending.then === "function") {
+        Promise.resolve(pending).catch((error) => {
+          sendFrame(ws, JSON.stringify({ type: "control-error", message: "초기 상태를 보낼 수 없습니다: " + String(error?.message || error) }));
+          terminate(ws);
+        });
+      }
+    } catch (error) {
+      sendFrame(ws, JSON.stringify({ type: "control-error", message: "초기 상태를 보낼 수 없습니다: " + String(error?.message || error) }));
+      terminate(ws);
+      return;
+    }
     ws.on("message", (data) => {
       let msg;
       try { msg = JSON.parse(data.toString()); } catch { return; }
       if (!msg || typeof msg.type !== "string") return;
       // 핸들러 예외를 격리한다. 잘못된 payload(예: 비문자열 path) 하나가 프로세스를 종료시키지 않게 한다(M1).
-      try { dispatch(ws, msg); }
-      catch (e) { try { if (ws.readyState === 1) ws.send(JSON.stringify({ type: "control-error", message: "요청 처리 오류: " + String(e && e.message || e) })); } catch {} }
+      try {
+        const pending = dispatch(ws, msg);
+        Promise.resolve(pending).catch((e) => {
+          sendFrame(ws, JSON.stringify({ type: "control-error", message: "요청 처리 오류: " + String(e && e.message || e) }));
+        });
+      } catch (e) {
+        sendFrame(ws, JSON.stringify({ type: "control-error", message: "요청 처리 오류: " + String(e && e.message || e) }));
+      }
     });
-    ws.on("close", () => onClose(ws));
+    ws.on("close", () => { try { onClose(ws); } catch {} });
   });
 }

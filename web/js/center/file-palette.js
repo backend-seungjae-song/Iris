@@ -114,7 +114,7 @@ function renderPaletteList() {
     const base = pathBasename(m.rel), dir = m.rel.slice(0, m.rel.length - base.length);
     return `<li class="pal-item${i === palSel ? " sel" : ""}" data-i="${i}"><span class="pal-name">${highlightMatch(base, m.pos, m.rel.length - base.length)}</span><span class="pal-dir">${esc(dir)}</span></li>`;
   }).join("") || `<li class="pal-empty">일치하는 파일 없음</li>`;
-  hint.textContent = `${palMatches.length}${palMatches.length >= 200 ? "+" : ""} 결과${palTrunc ? " · 목록 일부만(대형 트리)" : ""}`;
+  hint.textContent = `${palMatches.length}${palMatches.length >= 200 ? "+" : ""} 결과${palTrunc ? " · 목록 일부만 표시" : ""}`;
   const sel = palListEl.querySelector(".pal-item.sel"); if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 

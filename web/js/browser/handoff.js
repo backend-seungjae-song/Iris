@@ -49,7 +49,7 @@ export function initHandoff(deps) {
 let handoffBarEl = null, handoffStageHooked = false;
 const HANDOFF_STAGE = {
   launching: "연결된 Chrome 계정 프로필 여는 중…", seeding: "현재 탭 쿠키 옮기는 중…",
-  filling: "쳐 넣은 값 옮기는 중…",
+  filling: "입력값 옮기는 중…",
   waiting: "Chrome 창에서 로그인한 뒤 그 창을 닫으세요. 닫으면 가져옵니다",
   collecting: "창이 닫혔습니다. 쿠키 가져오는 중…", harvesting: "쿠키 가져오는 중…",
 };
@@ -59,11 +59,11 @@ const HANDOFF_SPIN_OFF = new Set(["waiting"]);
 
 // 이 탭을 연결된 실제 Chrome 계정 프로필로 넘길 수 있는가.
 export function handoffCheck(rec) {
-  if (!rec || !rec.el) return { ok: false, why: "넘길 탭이 없습니다." };
-  if (!host || !host.chromeAuth) return { ok: false, why: "이 빌드는 넘겨주기를 지원하지 않습니다." };
+  if (!rec || !rec.el) return { ok: false, why: "Chrome에서 열 탭이 없습니다." };
+  if (!host || !host.chromeAuth) return { ok: false, why: "이 빌드는 Chrome에서 열기를 지원하지 않습니다." };
   let url = rec.url || "";
   try { if (!url && rec.el.getURL) url = rec.el.getURL(); } catch (e) {}
-  if (!/^https?:/i.test(url)) return { ok: false, why: "http(s) 페이지만 넘길 수 있습니다." };
+  if (!/^https?:/i.test(url)) return { ok: false, why: "http(s) 페이지만 Chrome에서 열 수 있습니다." };
   const partition = rec.el.getAttribute("partition") || "";
   if (!partition) return { ok: false, why: "이 탭의 프로필을 알 수 없습니다." };
   let src = "";
@@ -109,7 +109,7 @@ const handoffRecent = new WeakMap();
 export function handoffToChrome(rec, reason, auto, now) {
   const chk = handoffCheck(rec);
   if (!chk.ok) { showToast(chk.why, { level: "warn" }); return; }
-  if (autofillBlocked(rec && rec.tabId)) { showToast("이 탭을 AI가 조작하는 중에는 넘길 수 없습니다.", { level: "warn" }); return; }
+  if (autofillBlocked(rec && rec.tabId)) { showToast("이 탭을 AI가 조작하는 중에는 Chrome에서 열 수 없습니다.", { level: "warn" }); return; }
   if (auto) {
     const last = handoffRecent.get(rec) || 0;
     if (Date.now() - last < 30000) return;   // 재시도 폭주로 창이 쏟아지지 않게
@@ -133,16 +133,51 @@ export function handoffToChrome(rec, reason, auto, now) {
   spin.style.display = (auto || now) ? "" : "none";
 
   const go = document.createElement("button");
-  go.textContent = "Chrome에서 열기";
+  go.textContent = "로그인을 Iris로 가져오기";
   go.className = "hoff-go";
   // 실패했을 때 다시 누를 자리를 만든다. 바로 여는 모드는 go를 처음엔 안 붙이므로 여기서 붙인다.
   const offerRetry = (label) => {
     if (bar.__spin) bar.__spin.style.display = "none";
     go.disabled = false; go.style.opacity = ""; go.textContent = label;
     if (!go.isConnected) bar.insertBefore(go, x);
+    offerBrowser();
+  };
+  let browserButton;
+  const offerBrowser = () => {
+    if (!host.openInChrome || browserButton?.isConnected) return;
+    browserButton = document.createElement("button");
+    browserButton.className = "hoff-go";
+    const browserName = { chrome: "Chrome", brave: "Brave", edge: "Edge" }[chk.src.split(":")[0]];
+    browserButton.textContent = (browserName || (chk.src ? "연결된 브라우저" : "기본 브라우저")) + "에서 계속";
+    let requireProfile = !!chk.src;
+    browserButton.onclick = async () => {
+      const current = handoffCheck(rec);
+      if (!current.ok || current.url !== chk.url || current.partition !== chk.partition || current.src !== chk.src || autofillBlocked(rec.tabId)) {
+        txt.textContent = "탭 상태가 바뀌었습니다. 현재 탭에서 다시 열어 주세요.";
+        return;
+      }
+      browserButton.disabled = true;
+      try {
+        const result = await host.openInChrome({ url: chk.url, source: requireProfile ? chk.src : "", partition: chk.partition, requireProfile });
+        if (result?.profileUnavailable) {
+          requireProfile = false;
+          browserButton.textContent = "기본 브라우저에서 계속";
+        }
+        if (!result?.ok) throw new Error(result?.error || "브라우저를 열지 못했습니다.");
+        const target = requireProfile ? browserName || "연결된 브라우저" : "기본 브라우저";
+        txt.textContent = target + "에 열기 요청을 보냈습니다. 페이지가 열리지 않으면 다시 열어 주세요.";
+        browserButton.textContent = "다시 열기";
+      } catch (error) {
+        txt.textContent = error.message;
+      } finally {
+        browserButton.disabled = false;
+      }
+    };
+    bar.insertBefore(browserButton, go.isConnected ? go : x);
   };
   const run = async () => {
-    if (autofillBlocked(rec && rec.tabId)) { txt.textContent = "이 탭을 AI가 조작하는 중에는 넘길 수 없습니다."; return; }
+    if (autofillBlocked(rec && rec.tabId)) { txt.textContent = "이 탭을 AI가 조작하는 중에는 Chrome에서 열 수 없습니다."; return; }
+    browserButton?.remove();
     go.disabled = true; go.style.opacity = "0.6"; go.textContent = "여는 중…";
     if (bar.__spin) bar.__spin.style.display = "";
     if (!handoffStageHooked && host.onChromeAuthStage) {
@@ -165,7 +200,11 @@ export function handoffToChrome(rec, reason, auto, now) {
     const dropped = snap.fields.length && !sameOrigin;
     try {
       const r = await host.chromeAuth(chk.url, chk.partition, chk.src, fields);
-      if (r && r.ok) {
+      if (r?.opened && r.cookieImport === false) {
+        spin.style.display = "none";
+        go.remove();
+        txt.textContent = "브라우저에서 페이지를 열었습니다. 그 창에서 계속하세요.";
+      } else if (r && r.ok) {
         const got = r.harvested || 0;
         // 값을 옮기지 못했으면 감추지 않는다. 왜 빈 칸인지 사용자가 알아야 한다.
         // 일부만 들어간 것도 알린다. 전부 옮겨졌다고 보면 빈 칸을 확인하지 못한다.
@@ -179,7 +218,7 @@ export function handoffToChrome(rec, reason, auto, now) {
         // 하면, 새로고침해도 여전히 로그아웃인 이유를 알 수 없다.
         const later = r.staged || 0;
         const head = later
-          ? `쿠키 ${got}개 중 ${r.live || 0}개를 가져왔습니다. 나머지 ${later}개는 앱을 다시 켜면 들어옵니다`
+          ? `쿠키 ${got}개 중 ${r.live || 0}개를 가져왔습니다. 나머지 ${later}개는 앱을 다시 시작하면 적용됩니다`
           : `가져왔습니다(쿠키 ${got}개)`;
         txt.textContent = `${head}${missed}. 탭을 새로고침합니다.`;
         go.remove();
@@ -189,23 +228,24 @@ export function handoffToChrome(rec, reason, auto, now) {
           if (!later && handoffBarEl === bar) { bar.remove(); handoffBarEl = null; }
         }, 1200);
       } else {
-        txt.textContent = "넘겨주기 실패: " + ((r && r.error) || "알 수 없는 오류");
+        txt.textContent = "Chrome에서 열기 실패: " + ((r && r.error) || "알 수 없는 오류");
         offerRetry("다시 시도");
       }
     } catch (e) {
-      txt.textContent = "넘겨주기 실패: " + (e && e.message ? e.message : String(e));
+      txt.textContent = "Chrome에서 열기 실패: " + (e && e.message ? e.message : String(e));
       offerRetry("다시 시도");
     }
   };
   go.onclick = run;
   // 바로 여는 경우엔 누르라고 하지 않는다. 막대는 진행 상황을 보여주는 자리로만 남는다.
-  if (!auto && !now) bar.appendChild(go);
+  if (!auto && !now && (chk.src && host.platform !== "win32" || !host.openInChrome)) bar.appendChild(go);
 
   const x = document.createElement("button");
   x.textContent = "닫기";
   x.className = "hoff-close";
   x.onclick = () => { bar.remove(); handoffBarEl = null; };
   bar.appendChild(x);
+  if (!auto && !now) offerBrowser();
   document.body.appendChild(bar);
   if (auto || now) run();
 }
@@ -254,7 +294,7 @@ export function webauthnNotice(m, tabUrl, partition, wv, rec) {
   }
   // 자동으로 창을 열지 않는다. 창이 저절로 열리고 닫히면 사용자가 무슨 일이 일어났는지 모른 채
   // 세션만 바뀐다. 왜 막혔는지 알리고, 여는 것은 사용자가 막대의 "Chrome에서 열기"로 정한다.
-  handoffHint(rec, (m.host || "이 페이지") + " 이(가) 패스키를 요구합니다. 이 창은 지문을 띄울 수 없습니다.");
+  handoffHint(rec, (m.host || "이 페이지") + " 이(가) 패스키를 요구합니다. 이 창은 지문 인증을 지원하지 않습니다.");
 }
 
 // 사람 확인(Cloudflare Turnstile) 실패. 패스키와 같은 알림 지점이지만 이유가 다르다.

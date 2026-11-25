@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 
-import { codexQuestionKeys, pendingCodexQuestion, pendingQuestion, questionAnswers, questionKeys, reviewKeys, showsQuestion, splitMultiSelectAnswer } from "../server/agent-chat-question.js";
+import { codexQuestionKeys, openAskAfter, pendingCodexQuestion, pendingQuestion, pendingToolInput, questionAnswers, questionKeys, reviewKeys, showsQuestion, splitMultiSelectAnswer } from "../server/agent-chat-question.js";
 import { extractPrompt } from "../server/remote/features/prompts.js";
 
 // 시험 pane 에서 찍은 Claude Code AskUserQuestion 화면(폭 49칸)
@@ -130,4 +130,42 @@ test("AskUserQuestion 선택지의 미리보기(preview)를 질문 카드에 넘
   const input = JSON.parse(fs.readFileSync(new URL("./fixtures/ask-question/ask-preview.json", import.meta.url), "utf8"));
   const got = pendingQuestion([ask("toolu_p", input.questions)]);
   assert.deepEqual(got.questions[0].options.map((o) => o.preview), input.questions[0].options.map((o) => o.preview || undefined));
+});
+
+const use = (id, name, input) => ({ type: "tool_use", id, name, input });
+const turn = (...content) => line({ type: "assistant", message: { content } });
+const done = (id) => line({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+
+test("승인 화면 위가 잘렸을 때 쓸, 기록 끝의 결과 없는 도구 호출 하나의 입력을 글로 만든다", () => {
+  const jql = "project = TEST\nAND labels = theta\nORDER BY created DESC";
+  assert.equal(pendingToolInput([turn(use("t1", "mcp__jira__jira_search", { jql, limit: 1 }))]),
+    "mcp__jira__jira_search\njql:\n  project = TEST\n  AND labels = theta\n  ORDER BY created DESC\nlimit: 1");
+  // 결과가 온 호출은 끝난 것, 사람 말이 나오면 그 앞은 끝난 것
+  assert.equal(pendingToolInput([turn(use("t1", "Bash", { command: "ls" })), done("t1")]), null);
+  assert.equal(pendingToolInput([turn(use("t1", "Bash", { command: "ls" })), line({ type: "user", message: { content: "다음 말" } })]), null);
+  // 결과 없는 호출이 둘 이상이면 어느 것을 묻는지 알 수 없어 쓰지 않음
+  assert.equal(pendingToolInput([turn(use("t1", "Bash", { command: "a" }), use("t2", "Bash", { command: "b" }))]), null);
+  // 앞의 것이 끝났으면 남은 하나
+  assert.equal(pendingToolInput([turn(use("t1", "Bash", { command: "a" }), use("t2", "Write", { file_path: "/x", content: "y" })), done("t1")]),
+    "Write\nfile_path: /x\ncontent: y");
+  // 객체 값은 JSON 한 줄
+  assert.equal(pendingToolInput([turn(use("t1", "X", { opts: { a: 1 } }))]), 'X\nopts: {"a":1}');
+  assert.equal(pendingToolInput(["깨진 줄"]), null);
+});
+
+test("새 기록 묶음을 이어 받으며 답 없는 AskUserQuestion 을 추적한다(herdr 가 blocked 를 놓쳐도 카드를 띄우는 근거)", () => {
+  const rec = (s) => JSON.parse(s);
+  let open = openAskAfter(null, [rec(ask("toolu_1", [COLOR]))]);
+  assert.equal(open, "toolu_1");
+  // 다른 기록이 와도 답이 오기 전까지 유지
+  open = openAskAfter(open, [rec(turn(use("t2", "Bash", { command: "ls" })))]);
+  assert.equal(open, "toolu_1");
+  // 그 질문의 답(tool_result)이 오면 없음
+  open = openAskAfter(open, [rec(done("toolu_1"))]);
+  assert.equal(open, null);
+  // 사람 말이 나오면 앞 질문은 끝난 것
+  open = openAskAfter(openAskAfter(null, [rec(ask("toolu_3", [COLOR]))]), [{ type: "user", message: { content: "다음 말" } }]);
+  assert.equal(open, null);
+  // 다른 도구의 결과는 질문을 끝내지 않음
+  assert.equal(openAskAfter("toolu_4", [rec(done("t9"))]), "toolu_4");
 });

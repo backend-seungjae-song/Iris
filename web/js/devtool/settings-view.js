@@ -38,7 +38,7 @@ export const SETTINGS_SECTIONS = [
   { id: "features", label: "편의 기능" },
   { id: "windows", label: "창 전환" },
   { id: "links", label: "링크 열기" },
-  { id: "artifacts", label: "부산물" },
+  { id: "artifacts", label: "생성 파일" },
   { id: "security", label: "보안" },
 ];
 
@@ -143,8 +143,8 @@ function keysPane(m, items) {
   // 충돌은 id 가 아니라 사람이 보는 이름과 쓰는 곳으로 적는다. id 는 화면 어디에도 없는 글자다.
   if (conflicts.length) {
     const title = conflicts.length === 1
-      ? `같은 조합이 ${countWord((conflicts[0].ids || []).length)} 곳에 걸렸습니다`
-      : "같은 조합이 여러 곳에 걸렸습니다";
+      ? `같은 조합이 ${countWord((conflicts[0].ids || []).length)} 곳에 지정됐습니다`
+      : "같은 조합이 여러 곳에 지정됐습니다";
     parts.push(`<div class="km-warn"><i class="km-warn-d"></i><span>${title}</span>${conflicts.map((c) => `<b>${esc(c.keys)}</b><span>${
       (c.ids || []).map((id) => {
         const it = byId.get(id);
@@ -176,7 +176,7 @@ function keysPane(m, items) {
   if (groups.length) {
     parts.push(`<div class="km-cols"><div>${group(groups[0])}</div><div>${groups.slice(1).map(group).join("")}</div></div>`);
   } else {
-    parts.push('<div class="km-empty">찾는 단축키가 없습니다.</div>');
+    parts.push('<div class="km-empty">검색 결과가 없습니다.</div>');
   }
   parts.push("</div></div>");
   return parts.join("");
@@ -243,7 +243,7 @@ function screensPane(allScreens, presets, motion, view, members) {
     return `${head}<div>${motionRow}</div><div class="km-empty">편의 기능 목록을 읽지 못했습니다.</div>`;
   }
   return head
-    + `<div class="km-note">설정은 이 설치본에 저장됩니다. 서버·네이티브는 재시작 전까지 실행됩니다. 다른 창의 변경은 다음 부팅에 읽습니다.</div>`
+    + `<div class="km-note">설정은 이 설치본에 저장됩니다. 서버·네이티브는 재시작 전까지 실행됩니다. 다른 창의 변경은 다음 실행 때 반영됩니다.</div>`
     + (lockNote ? `<div class="km-note">${esc(lockNote)}</div>` : "")
     // 모션은 기능 하나가 아니라 앱 전체의 설정이라 목록 맨 위에 둔다.
     + `<div>${motionRow}`
@@ -278,7 +278,7 @@ export function optInConfirmMarkup(optIn) {
 function switcherPane(model) {
   const esc = escapeHtml;
   if (!model || !Array.isArray(model.windows)) {
-    return `<section class="km-switcher"><div class="km-phead"><span class="km-h2">창 전환</span></div><div class="km-empty">창 목록을 읽는 중</div></section>`;
+    return `<section class="km-switcher"><div class="km-phead"><span class="km-h2">창 전환</span></div><div class="km-empty">창 목록 불러오는 중</div></section>`;
   }
 
   const status = model.status || {};
@@ -299,8 +299,8 @@ function switcherPane(model) {
 
   const parts = [`<section class="km-switcher">
     <div class="km-phead"><span class="km-h2">창 전환</span><span class="km-sp"></span>
-      <button class="km-btn" id="sw-refresh">다시 읽기</button></div>
-    <div class="km-note km-sw-intro">체크한 창들 사이만 ${escapeHtml(formatBinding(bindingOf("screen-toggle")))}으로 오갑니다. 묶은 창들은 한 번에 함께 뜹니다. 하나도 없으면 콘솔과 브라우저를 토글합니다.</div>`,
+      <button class="km-btn" id="sw-refresh">새로고침</button></div>
+    <div class="km-note km-sw-intro">체크한 창들 사이만 ${escapeHtml(formatBinding(bindingOf("screen-toggle")))}으로 전환합니다. 묶은 창들은 함께 표시됩니다. 하나도 없으면 콘솔과 브라우저를 전환합니다.</div>`,
     globalPriorityToggleMarkup(status)];
 
   const permissionUsesAppIcons = sharedReason === "화면 기록 권한 없음";
@@ -321,17 +321,17 @@ function switcherPane(model) {
   const groupLeft = switcherGroupLeftText(status.lastStep);
   if (!lastStep && groupLeft) parts.push(`<div class="km-note km-sw-last-step">${esc(groupLeft)}</div>`);
   if (Number(status.droppedOnRestart) > 0) {
-    parts.push(`<div class="km-note">재시작 뒤 못 찾아 뺀 창 ${esc(status.droppedOnRestart)}개</div>`);
+    parts.push(`<div class="km-note">재시작 후 찾지 못해 제외한 창 ${esc(status.droppedOnRestart)}개</div>`);
   }
 
   if (!rows.length) {
-    parts.push(`<div class="km-empty">고를 창이 없습니다</div>`);
+    parts.push(`<div class="km-empty">선택할 창이 없습니다</div>`);
   } else {
     if (sharedReason && !reasonCoveredByPermissionNotice) {
       parts.push(`<div class="km-note km-sw-list-note">${esc(sharedReason)}. 앱 아이콘으로 표시합니다.</div>`);
     }
     if (pickedRows.length) {
-      parts.push(`<div class="km-sh"><h3 class="km-sh-t">${escapeHtml(formatBinding(bindingOf("screen-toggle")))} 이 도는 순서</h3><span class="km-sh-n">${esc(pickedRows.length)}</span></div>`);
+      parts.push(`<div class="km-sh"><h3 class="km-sh-t">${escapeHtml(formatBinding(bindingOf("screen-toggle")))} 전환 순서</h3><span class="km-sh-n">${esc(pickedRows.length)}</span></div>`);
       const groups = switcherPickedGroups(pickedRows, model.picked);
       const selected = new Set(Array.isArray(model.selected) ? model.selected : []);
       parts.push(`<div class="km-sw-list km-sw-picked-list">${switcherStopsMarkup(
@@ -348,8 +348,8 @@ function switcherPane(model) {
     }
     if (windows.some((window) => window.switchBlocked === true)) {
       parts.push(`<div class="km-note km-sw-blocked-note">전환 안 됨<br>
-        ${isHostWindows() ? "Windows가" : "macOS 가"} 그 데스크톱으로 안 넘어감<br>
-        그 앱이 이 데스크톱에도 창을 갖고 있으면 그렇게 됨</div>`);
+        ${isHostWindows() ? "Windows가" : "macOS 가"} 그 데스크톱으로 전환하지 않음<br>
+        그 앱의 창이 이 데스크톱에도 있으면 발생</div>`);
     }
   }
   parts.push("</section>");
@@ -465,9 +465,9 @@ function switcherSelectionBar(rows, groups, selected) {
     .filter((item) => typeof item.row.pickKey === "string" && selected.has(item.row.pickKey));
   if (!chosen.length) return "";
   const anyGrouped = chosen.some((item) => item.group);
-  return `<div class="km-sw-selbar" role="region" aria-label="고른 창 묶기">
+  return `<div class="km-sw-selbar" role="region" aria-label="선택한 창 묶기">
     <span class="km-sw-selbar-n">${escapeHtml(chosen.length)}개 선택됨</span>
-    ${chosen.length < 2 ? '<span class="km-sw-selbar-hint">두 개 이상 고르면 묶을 수 있습니다</span>' : ""}
+    ${chosen.length < 2 ? '<span class="km-sw-selbar-hint">두 개 이상 선택하면 묶을 수 있습니다</span>' : ""}
     <span class="km-sp"></span>
     ${anyGrouped ? '<button class="km-btn" data-sw-sel-leave="">묶음에서 빼기</button>' : ""}
     <button class="km-btn ghost" data-sw-sel-clear="">취소</button>
@@ -480,7 +480,7 @@ function switcherGroupLeftText(lastStep) {
   const left = lastStep && Array.isArray(lastStep.left) ? lastStep.left : [];
   if (!left.length) return "";
   const why = left.every((reason) => reason === "other-desktop") ? "다른 데스크톱에 있어서" : "올리지 못해서";
-  return `마지막 전환에서 묶음 중 ${left.length}개 창은 ${why} 같이 띄우지 못했습니다`;
+  return `마지막 전환에서 묶음 중 ${left.length}개 창은 ${why} 함께 표시하지 못했습니다`;
 }
 
 function sameSwitcherPick(ref, window) {
@@ -529,12 +529,12 @@ function replacementReason(window, media, hasIcon) {
   const missing = media && Array.isArray(media.missing) ? media.missing : [];
   const item = missing.find((entry) => entry && entry.id != null && String(entry.id) === String(window.id));
   if (item && item.reason === "permission") return "화면 기록 권한 없음";
-  if (item && item.reason === "too-large") return "창 그림이 너무 큼";
-  if (item && item.reason === "empty-thumbnail") return "빈 창 그림";
-  if (item && item.reason === "capture-failed") return "창 그림 읽기 실패";
-  if (item && item.reason === "busy") return "창 그림 읽는 중";
-  if (item && item.reason === "not-found") return "창 그림 없음";
-  return media ? "창 그림 없음" : "아이콘 불러오는 중";
+  if (item && item.reason === "too-large") return "창 미리보기가 너무 큼";
+  if (item && item.reason === "empty-thumbnail") return "빈 창 미리보기";
+  if (item && item.reason === "capture-failed") return "창 미리보기 읽기 실패";
+  if (item && item.reason === "busy") return "창 미리보기 읽는 중";
+  if (item && item.reason === "not-found") return "창 미리보기 없음";
+  return media ? "창 미리보기 없음" : "아이콘 불러오는 중";
 }
 
 function switcherRowsMarkup(windows, status, media, reasons, sharedReason, options = {}) {
@@ -584,7 +584,7 @@ function switcherRowsMarkup(windows, status, media, reasons, sharedReason, optio
     const isSelected = selectable && options.selected && options.selected.has(window.pickKey);
     const selectBox = selectable
       ? `<input type="checkbox" data-sw-sel="${esc(window.pickKey)}"${isSelected ? " checked" : ""}
-          aria-label="${esc(`묶을 창으로 고르기 — ${label}`)}">` : "";
+          aria-label="${esc(`묶을 창으로 선택 — ${label}`)}">` : "";
     return `<article class="km-sw-row${visible ? "" : " dim"}" data-sw-app="${esc(appKey)}">
       <span class="km-sw-sel">${selectBox}</span>
       <div class="km-sw-visual">${visual}</div>
@@ -596,7 +596,7 @@ function switcherRowsMarkup(windows, status, media, reasons, sharedReason, optio
         <div class="km-sw-meta">
           <div class="km-sw-app" title="${esc(displayApp)}">${esc(displayApp)}</div>
           ${sharedReason || !reasons[index] ? "" : `<div class="km-sw-reason">${esc(reasons[index])}</div>`}
-          ${options.grouped && index === 0 ? '<div class="km-sw-reason" title="함께 뜬 뒤 이 창에 포커스가 갑니다">포커스</div>' : ""}
+          ${options.grouped && index === 0 ? '<div class="km-sw-reason" title="함께 표시된 뒤 이 창이 포커스를 받습니다">포커스</div>' : ""}
         </div>
       </div>
       ${orderControls}
@@ -611,22 +611,22 @@ function screenPermissionNotice(permission, usesAppIcons = false) {
   const messages = {
     denied: "화면 기록 권한이 꺼져 있습니다. Iris를 허용한 뒤 앱을 다시 켜야 할 수 있습니다.",
     restricted: "기기 정책이 화면 기록을 막고 있습니다. 관리자에게 허용을 요청하세요.",
-    "not-determined": "창 그림을 보려면 화면 기록 권한이 필요합니다. 허용한 뒤 앱을 다시 켜야 할 수 있습니다.",
+    "not-determined": "창 미리보기를 보려면 화면 기록 권한이 필요합니다. 허용한 뒤 앱을 다시 켜야 할 수 있습니다.",
     unknown: "화면 기록 권한 상태를 확인하지 못했습니다. 시스템 설정에서 상태를 확인하세요.",
   };
   const message = messages[permission] || messages.unknown;
-  const fallback = usesAppIcons ? " 창 그림 대신 앱 아이콘으로 표시합니다." : "";
+  const fallback = usesAppIcons ? " 창 미리보기 대신 앱 아이콘으로 표시합니다." : "";
   return `<div class="km-warn y km-sw-message"><i class="km-warn-d"></i><span>${escapeHtml(message)}${fallback}</span><span class="km-sp"></span>
     <button class="km-btn" id="sw-open-perm">설정 열기</button></div>`;
 }
 
 // 사유를 그대로 보여주면 이해하기 어렵다. 쉬운 말로 바꾼다.
 function switchFailureText(reason) {
-  if (reason === "desktop-unknown") return "그 창이 몇 번 데스크톱인지 못 읽음";
-  if (reason === "desktop-switch-failed") return "그 데스크톱으로 못 넘어감";
-  if (reason === "window-out-of-reach") return "데스크톱은 넘어갔는데 그 창이 안 뜸";
-  if (reason === "raise-did-not-land") return "불렀는데 안 올라옴";
-  if (reason === "고른 창이 없다") return "고른 창이 없음";
+  if (reason === "desktop-unknown") return "창의 데스크톱 번호 확인 실패";
+  if (reason === "desktop-switch-failed") return "데스크톱 전환 실패";
+  if (reason === "window-out-of-reach") return "데스크톱 전환 후 창이 표시되지 않음";
+  if (reason === "raise-did-not-land") return "창이 앞으로 오지 않음";
+  if (reason === "고른 창이 없다") return "선택한 창이 없음";
   return String(reason);
 }
 
@@ -651,7 +651,7 @@ function switcherRegistrationWarning(status) {
   // 고른 창이 없으면 이전 창 키는 등록하지 않는다(실패가 아니다).
   const prevFailed = !!status.pickedMode && status.registered?.prev === false;
   if (!nextFailed && !prevFailed) return "";
-  if (status.conflict === "internal:pick-mode") return "이 키는 요소 지목에 이미 쓰고 있습니다";
+  if (status.conflict === "internal:pick-mode") return "이 키는 요소 선택에 이미 쓰고 있습니다";
   if (status.conflict === "same-accelerator") return "다음 창 키와 이전 창 키가 같아 이전 창 키를 등록할 수 없습니다";
 
   const nextKey = acceleratorLabel(status.accelerators?.next, formatBinding(bindingOf("screen-toggle")));
@@ -694,13 +694,13 @@ function acceleratorLabel(value, fallback) {
 function linksPane(model) {
   const esc = escapeHtml;
   const head = `<div class="km-phead"><span class="km-h2">링크 열기</span><span class="km-sp"></span>
-    <button class="km-btn" id="lk-refresh">다시 읽기</button></div>
-    <div class="km-note">다른 앱에서 누른 웹 링크를 어디서 열지 고릅니다. 고른 앱이 macOS 기본 브라우저가 됩니다.</div>`;
-  if (!model || model.loading) return head + `<div class="km-empty">브라우저 목록을 읽는 중</div>`;
+    <button class="km-btn" id="lk-refresh">새로고침</button></div>
+    <div class="km-note">다른 앱에서 누른 웹 링크를 어디서 열지 선택합니다. 선택한 앱이 macOS 기본 브라우저가 됩니다.</div>`;
+  if (!model || model.loading) return head + `<div class="km-empty">브라우저 목록 불러오는 중</div>`;
   if (!model.ok) return head + `<div class="km-warn"><i class="km-warn-d"></i><span>${esc(model.error || "브라우저 목록을 읽지 못했습니다.")}</span></div>`;
   const parts = [head];
   if (model.requested) {
-    parts.push(`<div class="km-note">macOS 가 띄운 확인 창에서 고르면 적용됩니다.</div>`);
+    parts.push(`<div class="km-note">macOS 확인 창에서 선택하면 적용됩니다.</div>`);
   }
   const session = model.target === "session";
   // Iris 줄 아래에서 Iris 안의 받을 창을 고름. 기본 브라우저가 다른 앱이어도 미리 고를 수 있음
@@ -724,7 +724,7 @@ function linksPane(model) {
   if (!model.irisRegistered) {
     rows.unshift(`<div class="km-toggle top">
       <div class="km-tx"><div class="km-tn">Iris</div>
-        <div class="km-td">설치한 Iris 가 아직 웹 링크를 받도록 등록되지 않았습니다. 앱을 다시 설치하면 고를 수 있습니다.</div></div>
+        <div class="km-td">설치한 Iris 가 아직 웹 링크를 받도록 등록되지 않았습니다. 앱을 다시 설치하면 선택할 수 있습니다.</div></div>
     </div>`);
   }
   parts.push(`<div>${rows.join("")}</div>`);
@@ -742,7 +742,7 @@ function accountName(accounts, id) {
 export function linkHintMarkup({ draft, rules = [], accounts = [], draftAccount = "" } = {}) {
   const esc = escapeHtml;
   const text = String(draft || "").trim();
-  if (!text) return `<span class="lk-hint-t">예: github.com · jira.acme.com · github.com/acme. 주소를 통째로 붙여 넣어도 됩니다.</span>`;
+  if (!text) return `<span class="lk-hint-t">예: github.com · jira.acme.com · github.com/acme. 전체 주소를 붙여 넣어도 됩니다.</span>`;
   const p = parseLinkPattern(text);
   if (!p.ok) return `<span class="lk-hint-t err">${esc(p.error)}</span>`;
   const same = rules.find((r) => r.pattern === p.pattern);
@@ -766,17 +766,17 @@ function linkRulesPane(model) {
   const rules = Array.isArray(m.rules) ? m.rules : [];
   const accounts = Array.isArray(m.accounts) ? m.accounts : [];
   const head = `<div class="km-phead lk-head"><span class="km-h2">계정별로 열기</span></div>
-    <div class="km-note">링크·주소창·북마크·AI 도구로 연 주소가 아래 규칙에 맞으면 고른 계정으로 엽니다. 열린 탭이 다른 규칙의 주소로 이동하면 그 탭을 고른 계정으로 다시 엽니다.
+    <div class="km-note">링크·주소창·북마크·AI 도구로 연 주소가 아래 규칙에 맞으면 지정한 계정으로 엽니다. 열린 탭이 다른 규칙의 주소로 이동하면 그 탭을 지정한 계정으로 다시 엽니다.
       맞는 규칙이 여럿이면 가장 구체적인 규칙을 씁니다. 같은 규칙 안에서 이동하거나 새 탭을 열면 원래 탭의 계정을 그대로 씁니다.</div>`;
   if (accounts.length < 2) {
-    return head + `<div class="km-empty">계정이 하나뿐이라 고를 계정이 없습니다. 브라우저의 계정 화면에서 계정을 추가하면 규칙을 만들 수 있습니다.</div>`;
+    return head + `<div class="km-empty">계정이 하나뿐이라 선택할 계정이 없습니다. 브라우저의 계정 화면에서 계정을 추가하면 규칙을 만들 수 있습니다.</div>`;
   }
   const add = linkAddState({ draft: m.draft, rules });
   const form = `<div class="lk-add">
       <label class="km-search lk-input"><span class="lk-input-k">주소</span>
         <input id="lk-pattern" type="text" autocomplete="off" spellcheck="false" value="${esc(m.draft || "")}"
           placeholder="github.com 또는 주소 붙여 넣기" aria-describedby="lk-hint"></label>
-      <span class="lk-acct" data-lk-acct="" aria-label="열 계정"></span>
+      <span class="lk-acct" data-owned-children data-lk-acct="" aria-label="열 계정"></span>
       <button class="km-btn" id="lk-add"${add.disabled ? " disabled" : ""}>${add.label}</button>
     </div>
     <div class="lk-hint" id="lk-hint" aria-live="polite">${linkHintMarkup({ draft: m.draft, rules, accounts, draftAccount: m.draftAccount })}</div>`;
@@ -786,16 +786,16 @@ function linkRulesPane(model) {
   const list = sorted.length
     ? sorted.map((r) => `<div class="km-toggle lk-row${m.fresh === r.pattern ? " lk-fresh" : ""}" data-lk-row="${esc(r.pattern)}">
         <div class="km-tx"><div class="km-tn lk-pat">${esc(r.pattern)}</div><div class="km-td">${esc(describeLinkPattern(r.pattern))}</div></div>
-        <span class="lk-acct" data-lk-acct="${esc(r.pattern)}" aria-label="${esc(r.pattern)} 를 열 계정"></span>
+        <span class="lk-acct" data-owned-children data-lk-acct="${esc(r.pattern)}" aria-label="${esc(r.pattern)} 를 열 계정"></span>
         <button class="km-btn ghost danger" data-lk-del="${esc(r.pattern)}" aria-label="${esc(r.pattern)} 규칙 지우기">지우기</button>
       </div>`).join("")
-    : `<div class="km-empty">아직 규칙이 없습니다. 위에 주소를 넣고 계정을 고른 뒤 추가하세요.</div>`;
+    : `<div class="km-empty">아직 규칙이 없습니다. 위에 주소를 입력하고 계정을 선택한 뒤 추가하세요.</div>`;
   return head + form + undo + `<div class="lk-list">${list}</div>`;
 }
 
 function securityPane(toggles) {
   const esc = escapeHtml;
-  if (!toggles.length) return `<div class="km-empty">켜고 끌 것이 없습니다.</div>`;
+  if (!toggles.length) return `<div class="km-empty">설정할 항목이 없습니다.</div>`;
   return `<div class="km-phead"><span class="km-h2">보안</span></div><div>`
     + toggles.map((t) => `<div class="km-toggle top">
       <div class="km-tx">

@@ -60,7 +60,7 @@ test("서버는 종료 신호에서 여섯 축을 모두 민다", () => {
   // 부르고 browser-runtime port가 핸들·지목 두 축을 함께 반영하는지 본다. 하나라도 빠지면 그 축의
   // 마지막 변경이 조용히 사라진다.
   const src = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
-  const fn = sliceBetween(src, "function flushPendingState()", "for (const sig of", "종료 시 상태 비우기");
+  const fn = sliceBetween(src, "function flushPendingState()", 'process.on("exit"', "종료 시 상태 비우기");
   for (const mod of ["flushBrowserStateNow()", "spaceKey.flushNow()", "archive.flushNow()",
                      "flushBrowserRuntimeNow()", "flushMemoNow()"]) {
     assert.ok(fn.includes(mod), `종료 처리기가 ${mod}를 부르지 않는다`);
@@ -71,6 +71,6 @@ test("서버는 종료 신호에서 여섯 축을 모두 민다", () => {
     assert.ok(runtimeFlush.includes(owned), `browser-runtime flush port가 ${owned}를 부르지 않는다`);
   }
   // Windows 종료 기록 호출 한 줄만 flush 앞에 허용
-  assert.ok(/process\.on\(sig, \(\) => \{\s*(?:logWindowsShutdown\([^;]*\);\s*)?flushPendingState\(\);/.test(src),
+  assert.ok(/process\.on\("exit", \(\) => \{\s*(?:logWindowsShutdown\([^;]*\);\s*)?flushPendingState\(\);/.test(src),
     "flush가 자물쇠 해제·exit보다 먼저 와야 한다 — 뒤에 두면 exit(0)이 먼저 끝낸다");
 });

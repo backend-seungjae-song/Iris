@@ -41,7 +41,7 @@ import { callHook } from "../core/hooks.js";
 import { mayWriteSharedActive } from "./active-tab.js";
 import { keepAwakeItem, keepAwakeMark } from "./keep-awake.js";
 import { askConfirm } from "../explorer/context-menu.js";
-import { setHtml } from "../core/set-html.js";
+import { patchHtml, tabKey } from "../core/patch-html.js";
 
 let $, esc, cssEsc, showToast, showCtx, renderTabs, startTabRename, newBrowserTab;
 let BROWSER_MODE;
@@ -88,7 +88,7 @@ export function syncAiGlow() {
 function tabChip(t, act) {
   bmOrder.push(t.id);
   const st = getWebviewStatus(t.id) || {};
-  const asking = hasTabDialog(t.id) ? '<span class="cask" title="이 탭이 답을 기다립니다">?</span>' : "";
+  const asking = hasTabDialog(t.id) ? '<span class="cask" title="응답 대기 중">?</span>' : "";
   // 세션이 조작 중인 탭임을 탭 자체에 표시한다. 어느 탭을 AI 가 조작 중인지 화면에서 알 수 있어야 한다.
   // ● = 지금 이 탭을 조작 중. 끝나면 사라진다. 병렬로 여러 세션이 붙으면 개수까지 보인다
   // (고정 기준으로 판정하면 조작이 끝나도 남고, 마지막 세션 하나만 보인다).
@@ -96,8 +96,6 @@ function tabChip(t, act) {
   const ai = busy.length ? `<span class="cai" title="${esc(busy.join(", "))} 세션이 지금 이 탭을 조작 중">●${busy.length > 1 ? busy.length : ""}</span>` : "";
   // 저장되지 않은 편집이 있는 docx/sheet 탭은 앞에 동그라미(markTabDirty와 같은 표시)를 낸다. 그
   // 상태(_svDirty 등)는 sbState가 아니라 로컬 탭 객체에만 있어 여기서 직접 찾아야 한다. 이 함수는
-  // sbState 브로드캐스트마다 전체를 innerHTML로 새로 그리므로(그 자체에 dirty 표시가 없으면)
-  // markTabDirty로 나중에 DOM에 끼워 넣어도 다음 브로드캐스트에 곧바로 지워진다.
   const local = isFileKindId(t.kind) && getTabs(boundSpace()).find((x) => x.id === t.id);
   const dirty = local && isTabDirty(local);
   const cls = [t.id === act ? "active" : "", t.group ? "in-group" : "", selTabs.has(t.id) ? "selected" : "", st.loading ? "loading" : "", busy.length ? "ai-held" : "", dirty ? "dirty" : ""].filter(Boolean).join(" ");
@@ -165,7 +163,7 @@ export function renderBmTabs() {
   // 붙고, 창을 닫으면 그 창의 탭이 원래 위치로 돌아간다.
   html += `<div class="ctab-add" data-add="1" title="새 탭(구글)">+</div>`;
   if (!ownTabs && savedGroups().length) html += `<div class="ctab-add" data-saved="1" title="저장된 그룹 열기">📁</div>`;
-  setHtml(tabstrip, html);
+  patchHtml(tabstrip, html, (node) => tabKey(node) || (node.dataset.group && "group:" + node.dataset.group));
   // 펼치거나 접은 그룹 칩은 누른 자리에 그대로, 탭은 칩 뒤로 펼쳐짐. 활성 탭으로 스크롤하지 않음
   const anchored = groupAnchor && groups.find((g) => g.id === groupAnchor.id);
   let unfold = null;
@@ -393,7 +391,7 @@ function openSavedCtx(x, y) {
   }
   items.push({ sep: true });
   for (const s of list) {
-    items.push({ label: `✕ "${s.name}" 저장 삭제`, danger: true, act: async () => { if (await askConfirm(`저장된 그룹 "${s.name}"을 삭제할까요?`, "열려 있는 탭은 그대로입니다.")) bsMutate({ op: "saved.remove", id: s.id }); } });
+    items.push({ label: `✕ "${s.name}" 저장 삭제`, danger: true, act: async () => { if (await askConfirm(`저장된 그룹 "${s.name}"을 삭제할까요?`, "열려 있는 탭은 유지됩니다.")) bsMutate({ op: "saved.remove", id: s.id }); } });
   }
   showCtx(x, y, items);
 }

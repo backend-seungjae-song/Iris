@@ -34,7 +34,7 @@ function artifactsHome(stateDir) {
 }
 
 function artifactDir(kind, stateDir) {
-  if (!KIND_IDS.includes(kind)) throw new Error(`부산물 종류가 표에 없습니다 — ${kind}`);
+  if (!KIND_IDS.includes(kind)) throw new Error(`생성 파일 종류가 표에 없습니다 — ${kind}`);
   return path.join(artifactsHome(stateDir), kind);
 }
 

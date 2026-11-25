@@ -124,6 +124,7 @@ export const CAPABILITIES = [
     // 메모 창은 이 기능이 곧 그 창이라, 사용자가 껐어도 그 창에서는 로드해야 창이 성립한다.
     windows: ["main", "memo"],
     alwaysIn: ["memo"],
+    disableNote: "메인 창에서만 꺼집니다. 메모 창과 메모 서버는 유지됩니다",
     files: [
       "panel/memo-boot.js",
       "panel/memo.js",
@@ -159,7 +160,7 @@ export const CAPABILITIES = [
     windows: ["main", "browser"],
     files: ["browser/handoff.js"],
     css: ["22-handoff.css"],
-    label: "Chrome 넘기기",
+    label: "Chrome에서 열기",
     load: () => import("../browser/handoff.js"),
   },
   {
@@ -196,7 +197,7 @@ export const CAPABILITIES = [
     css: ["27-chrome-mirror.css"],
     native: true,
     server: ["native/electron/chrome-mirror-backend.cjs"],
-    label: "진짜 Chrome 미러",
+    label: "Chrome 미러",
     load: () => import("../browser/chrome-mirror-surface.js"),
   },
   {
@@ -216,7 +217,7 @@ export const CAPABILITIES = [
       title: "창 레이아웃 저장·복원을 켤까요?",
       items: [
         "다른 앱의 창을 옮기기 위해 손쉬운 사용 권한을 요청합니다",
-        "ctrl+alt+S 로 지금 배치를 저장하고 ctrl+alt+R 로 되돌립니다",
+        "ctrl+alt+S 로 현재 배치를 저장하고 ctrl+alt+R 로 복원합니다",
         "창 배치는 직접 저장할 때만 모니터 수별로 저장합니다",
         "Iris 를 다시 켜거나 모니터 수가 바뀌면 저장한 배치를 자동으로 복원합니다",
         "로그인할 때 Iris 가 자동으로 실행되고, 저장할 때 열려 있던 앱을 다시 엽니다",
@@ -259,7 +260,7 @@ export const CAPABILITIES = [
       "browser/pick-host.js", "browser/record.js",
     ],
     css: ["25-pick-record.css"],
-    label: "요소 지목·녹화",
+    label: "요소 선택·녹화",
     // 지목 버튼은 브라우저 툴바에 있다. 여기 적지 않으면 이 기능을 꺼도 그 버튼이 남아
     // 동작하지 않는 버튼이 된다. 설정 화면은 끈 기능이 화면에서 사라진다고 안내하므로
     // 이 영역도 함께 등록한다.
@@ -275,7 +276,7 @@ export const CAPABILITIES = [
     windows: ["main", "browser"],
     files: ["browser/detach-tab.js", "browser/tab-drag.js"],
     css: ["26-detach-tab.css"],
-    label: "탭을 창으로 빼기",
+    label: "탭을 창으로 분리",
     load: () => import("../browser/detach-tab.js"),
   },
   {
@@ -297,6 +298,15 @@ export const CAPABILITIES = [
     css: [],
     label: "공통 북마크",
     load: () => import("../browser/common-bookmarks.js"),
+  },
+  {
+    id: "formhistory",
+    label: "입력 기록",
+    windows: ["main", "browser"],
+    files: ["browser/form-history.js"],
+    css: ["45-form-history.css"],
+    native: true,
+    load: () => import("../browser/form-history.js"),
   },
   {
     id: "pagetranslate",
@@ -377,7 +387,7 @@ export const CAPABILITIES = [
       "chatcopy/boot.js", "chatcopy/copy-text.js", "chatcopy/edge-drag.js", "chatcopy/drop-path.js", "chatcopy/forward-copy.js",
     ],
     css: ["21-chat-copy.css"],
-    label: "채팅 복붙",
+    label: "채팅 복사·붙여넣기",
     load: () => import("../chatcopy/boot.js"),
   },
   {
@@ -385,9 +395,9 @@ export const CAPABILITIES = [
     // 없이 터미널 머리 단추 하나와 터미널 위의 덮개 판에 붙는다. 서브에이전트 줄을 누르면 그
     // 서브에이전트의 대화도 같은 판에 연다. 대화 목록은 Paseo 대화 화면(UI 코드만 빌드)이 그린다.
     id: "agentchat",
-    files: ["agentchat/boot.js", "agentchat/view-pref.js", "agentchat/chat-pick.js", "agentchat/resnapshot.js"],
+    files: ["agentchat/boot.js", "agentchat/view-pref.js", "agentchat/chat-pick.js", "agentchat/resnapshot.js", "agentchat/a2ui.js"],
     css: ["35-agent-chat.css"],
-    server: ["server/agent-chat.js", "server/paseo-ui/index.js"],
+    server: ["server/agent-chat.js", "server/paseo-ui/index.js", "server/paseo-ui/embedded-chat.js"],
     label: "에이전트 채팅 보기",
     load: () => import("../agentchat/boot.js"),
   },

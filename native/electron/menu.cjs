@@ -37,7 +37,7 @@ function createMenu({
       const r = await cookieImport.importCookiesFromFile(win);
       if (r.canceled) return;
       if (r.error) return dialog.showMessageBox(win, { type: "error", message: "쿠키 가져오기 실패", detail: r.error });
-      dialog.showMessageBox(win, { type: "info", message: "쿠키 가져오기 완료", detail: `${r.imported}개 주입 · ${r.skipped}개 건너뜀\n도메인: ${r.domains.slice(0, 20).join(", ")}` });
+      dialog.showMessageBox(win, { type: "info", message: "쿠키 가져오기 완료", detail: `${r.imported}개 가져옴 · ${r.skipped}개 건너뜀\n도메인: ${r.domains.slice(0, 20).join(", ")}` });
     } catch (e) { dialog.showMessageBox(win, { type: "error", message: "오류", detail: String(e && e.message || e) }); }
   }
   async function runImportChrome() {
@@ -53,7 +53,7 @@ function createMenu({
       if (profs.length > 1) {
         const pick = await dialog.showMessageBox(win, {
           type: "question", message: "어느 프로필에서 쿠키를 가져올까요?",
-          detail: platform === "win32" ? "Windows의 브라우저 암호화로 쿠키를 가져오지 못할 수 있습니다." : "Keychain 접근 프롬프트가 뜰 수 있습니다.",
+          detail: platform === "win32" ? "Windows의 브라우저 암호화로 쿠키를 가져오지 못할 수 있습니다." : "키체인 접근 확인 창이 열릴 수 있습니다.",
           buttons: [...profs.map((p) => p.label), "취소"], cancelId: profs.length,
         });
         if (pick.response >= profs.length) return;
@@ -61,7 +61,7 @@ function createMenu({
       }
       const r = await cookieImport.importCookiesFromChrome(chosen);
       if (r.error) return dialog.showMessageBox(win, { type: "error", message: "쿠키 가져오기 실패", detail: r.error });
-      dialog.showMessageBox(win, { type: "info", message: "쿠키 가져오기 완료", detail: `${chosen.label}\n${r.imported}/${r.total} 주입 · ${r.skipped} 건너뜀\n도메인 ${r.domains.length}개` });
+      dialog.showMessageBox(win, { type: "info", message: "쿠키 가져오기 완료", detail: `${chosen.label}\n${r.imported}/${r.total} 가져옴 · ${r.skipped} 건너뜀\n도메인 ${r.domains.length}개` });
     } catch (e) { dialog.showMessageBox(win, { type: "error", message: "오류", detail: String(e && e.message || e) }); }
   }
   function build() {

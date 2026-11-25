@@ -98,6 +98,97 @@ test("selected extension copy persists, restores only its profile, and can be di
   assert.deepEqual(JSON.parse(readFileSync(path.join(state, "browser-extensions/registry.json")))[BASE], []);
 });
 
+test("손상된 확장 저장 파일은 빈 목록으로 복구하고 기능 전체를 막지 않는다", async (t) => {
+  const { source, state } = fixture(t);
+  mkdirSync(path.join(state, "browser-extensions"), { recursive: true });
+  writeFileSync(path.join(state, "browser-extensions/registry.json"), "{broken");
+  const host = setup(state);
+  await host.manager.ready;
+  const record = await host.manager.install(BASE, { path: source });
+  assert.equal(record.enabled, true);
+  assert.equal(host.guest.session.registry.size, 1);
+  const backups = readdirSync(path.join(state, "browser-extensions")).filter((name) => name.startsWith("registry.json.corrupt-"));
+  assert.equal(backups.length, 1, "손상된 registry 원본을 백업");
+  assert.equal(readFileSync(path.join(state, "browser-extensions", backups[0]), "utf8"), "{broken");
+});
+
+test("같은 호스트의 동시 webview 생성은 첫 주소를 각각 보류한다", async (t) => {
+  const { source, state } = fixture(t);
+  const original = setup(state);
+  await original.manager.ready;
+  await original.manager.install(BASE, { path: source });
+
+  let resolveReady;
+  const appReady = new Promise((resolve) => { resolveReady = resolve; });
+  const app = new EventEmitter();
+  app.whenReady = () => appReady;
+  const restored = setup(state, new Map([[BASE, fakeSession()]]), { app });
+  const host = new EventEmitter();
+  host.getType = () => "window";
+  app.emit("web-contents-created", null, host);
+  const firstParams = { src: "https://one.example/", partition: BASE };
+  const secondParams = { src: "https://two.example/", partition: BASE };
+  host.emit("will-attach-webview", {}, { partition: BASE }, firstParams);
+  host.emit("will-attach-webview", {}, { partition: BASE }, secondParams);
+  const guest = (id) => ({
+    id, hostWebContents: host, getType: () => "webview", isDestroyed: () => false,
+    url: "", getURL() { return this.url; },
+    loadURL(url) { this.url = url; return Promise.resolve(); },
+  });
+  const firstGuest = guest(11), secondGuest = guest(12);
+  app.emit("web-contents-created", null, firstGuest);
+  host.emit("did-attach-webview", {}, firstGuest);
+  app.emit("web-contents-created", null, secondGuest);
+  host.emit("did-attach-webview", {}, secondGuest);
+  resolveReady();
+  await restored.manager.ready;
+  await Promise.resolve();
+  assert.equal(firstParams.src, "");
+  assert.equal(secondParams.src, "");
+  assert.equal(firstGuest.url, "https://one.example/");
+  assert.equal(secondGuest.url, "https://two.example/");
+});
+
+test("같은 호스트의 보류 webview는 partition이 맞는 항목을 소비하고 불일치 항목을 보존한다", async (t) => {
+  const { source, state } = fixture(t);
+  const sessions = new Map([[BASE, fakeSession()], [OTHER, fakeSession()]]);
+  const original = setup(state, sessions);
+  await original.manager.ready;
+  await original.manager.install(BASE, { path: source });
+  await original.manager.install(OTHER, { path: source });
+
+  let resolveReady;
+  const appReady = new Promise((resolve) => { resolveReady = resolve; });
+  const app = new EventEmitter();
+  app.whenReady = () => appReady;
+  const restoredSessions = new Map([[BASE, fakeSession()], [OTHER, fakeSession()]]);
+  const restored = setup(state, restoredSessions, { app });
+  const host = new EventEmitter();
+  host.getType = () => "window";
+  app.emit("web-contents-created", null, host);
+  const firstParams = { src: "https://base.example/", partition: BASE };
+  const secondParams = { src: "https://other.example/", partition: OTHER };
+  host.emit("will-attach-webview", {}, { partition: BASE }, firstParams);
+  host.emit("will-attach-webview", {}, { partition: OTHER }, secondParams);
+  const guest = (id, partition) => ({
+    id, hostWebContents: host, session: restoredSessions.get(partition), getType: () => "webview", isDestroyed: () => false,
+    getLastWebPreferences: () => ({ partition }), url: "", getURL() { return this.url; },
+    loadURL(url) { this.url = url; return Promise.resolve(); },
+  });
+  const firstGuest = guest(21, OTHER), secondGuest = guest(22, BASE);
+  app.emit("web-contents-created", null, firstGuest);
+  host.emit("did-attach-webview", {}, firstGuest);
+  app.emit("web-contents-created", null, secondGuest);
+  host.emit("did-attach-webview", {}, secondGuest);
+  resolveReady();
+  await restored.manager.ready;
+  await Promise.resolve();
+  assert.equal(firstParams.src, "");
+  assert.equal(secondParams.src, "");
+  assert.equal(firstGuest.url, "https://other.example/");
+  assert.equal(secondGuest.url, "https://base.example/");
+});
+
 test("restore waits for app readiness and newly hardened profiles restore their selection", async (t) => {
   const { source, state } = fixture(t);
   const original = setup(state, new Map([[OTHER, fakeSession()]]));

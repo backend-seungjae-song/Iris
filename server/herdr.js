@@ -110,8 +110,8 @@ export class HerdrClient extends EventEmitter {
   tabList(workspaceId) {
     return this.call("tab.list", { workspace_id: workspaceId }).then((r) => r.tabs || []);
   }
-  tabCreate(workspaceId, { focus = false } = {}) {
-    return this.call("tab.create", { ...(workspaceId ? { workspace_id: workspaceId } : {}), ...(focus ? { focus: true } : {}) });
+  tabCreate(workspaceId, { focus = false, cwd, env } = {}) {
+    return this.call("tab.create", { ...(cwd ? { cwd } : {}), ...(env ? { env } : {}), ...(workspaceId ? { workspace_id: workspaceId } : {}), ...(focus ? { focus: true } : {}) });
   }
   tabRename(tabId, label) {
     return this.call("tab.rename", { tab_id: tabId, label });

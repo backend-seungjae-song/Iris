@@ -77,19 +77,19 @@ export function artifactsPane(model) {
   const canTrash = m.canTrash !== false;
   const parts = [];
 
-  parts.push(`<div class="km-phead"><span class="km-h2">부산물</span><span class="km-sp"></span>
-    <button class="km-btn" id="art-refresh">다시 세기</button>
+  parts.push(`<div class="km-phead"><span class="km-h2">생성 파일</span><span class="km-sp"></span>
+    <button class="km-btn" id="art-refresh">새로고침</button>
     ${canTrash && total.count
-      ? `<button class="km-btn danger" id="art-empty-all">전부 비우기</button>`
+      ? `<button class="km-btn danger" id="art-empty-all">모두 비우기</button>`
       : ""}</div>`);
-  parts.push(`<div class="km-note">Iris 가 만든 파일입니다. 비우면 휴지통으로 갑니다 — ${
-    kinds.length ? `모두 ${esc(total.count)}개 · ${esc(humanBytes(total.bytes))}` : "세는 중"}</div>`);
+  parts.push(`<div class="km-note">Iris 가 만든 파일입니다. 비우면 휴지통으로 이동합니다. ${
+    kinds.length ? `모두 ${esc(total.count)}개 · ${esc(humanBytes(total.bytes))}` : "집계 중"}</div>`);
   if (!canTrash) {
-    parts.push(`<div class="km-note">이 창에서는 휴지통으로 보낼 수 없어 목록만 보여 줍니다.</div>`);
+    parts.push(`<div class="km-note">이 창에서는 휴지통으로 보낼 수 없어 목록만 표시합니다.</div>`);
   }
 
   if (!kinds.length) {
-    parts.push(`<div class="km-empty">부산물 목록을 읽는 중</div>`);
+    parts.push(`<div class="km-empty">생성 파일 목록 불러오는 중</div>`);
     return parts.join("");
   }
 
@@ -115,7 +115,7 @@ export function artifactsPane(model) {
 
 function dayRows(m, kind, canTrash) {
   const found = m.days && m.days.kind === kind.id ? m.days : null;
-  if (!found) return `<div class="art-days"><div class="km-empty">읽는 중</div></div>`;
+  if (!found) return `<div class="art-days"><div class="km-empty">불러오는 중</div></div>`;
   const days = Array.isArray(found.days) ? found.days : [];
   if (!days.length) return `<div class="art-days"><div class="km-empty">이 폴더는 비어 있습니다.</div></div>`;
   const out = ['<div class="art-days">'];
@@ -139,15 +139,15 @@ function dayRows(m, kind, canTrash) {
 
 function entryRows(m, kind, day, canTrash) {
   const found = m.day && m.day.kind === kind.id && m.day.date === day.date ? m.day : null;
-  if (!found) return `<div class="art-rows"><div class="km-empty">읽는 중</div></div>`;
+  if (!found) return `<div class="art-rows"><div class="km-empty">불러오는 중</div></div>`;
   const rows = Array.isArray(found.entries) ? found.entries : [];
-  if (!rows.length) return `<div class="art-rows"><div class="km-empty">이 날짜에 남은 것이 없습니다.</div></div>`;
+  if (!rows.length) return `<div class="art-rows"><div class="km-empty">이 날짜에 남은 파일이 없습니다.</div></div>`;
   const out = ['<div class="art-rows">'];
   for (const row of rows) {
     // 폴더 안의 파일을 열었을 때도 그 폴더 줄 아래에 표시한다. 그렇지 않으면 미리보기를 놓을 위치가 없다.
     const picked = under(m.preview, row.path);
     out.push(`<div class="art-row${picked ? " on" : ""}">
-      <button class="art-f" data-art-open="${esc(row.path)}" title="눌러서 봅니다">${esc(row.name)}${
+      <button class="art-f" data-art-open="${esc(row.path)}" title="미리보기">${esc(row.name)}${
         row.dir ? ` <span class="art-sub">${esc(row.count)}개</span>` : ""}</button>
       <span class="art-s">${esc(humanBytes(row.bytes))}</span>
       <span class="art-t">${esc(clock(row.mtime))}</span>
@@ -158,7 +158,7 @@ function entryRows(m, kind, day, canTrash) {
     if (m.dirPreview && m.dirPreview.path !== m.preview.path) out.push(previewBlock(m.dirPreview));
     out.push(previewBlock(m.preview));
   }
-  if (found.more) out.push(`<div class="km-empty">그 밖에 ${esc(found.more)}개가 더 있습니다. 이 날짜 비우기는 안 보이는 것까지 함께 보냅니다.</div>`);
+  if (found.more) out.push(`<div class="km-empty">그 밖에 ${esc(found.more)}개가 더 있습니다. 이 날짜 비우기는 표시되지 않은 파일도 함께 보냅니다.</div>`);
   out.push("</div>");
   return out.join("");
 }
@@ -179,7 +179,7 @@ function previewBlock(p) {
   }
   if (p.what === "text") {
     return `<div class="art-pv">${head}<pre class="art-pv-txt">${esc(p.text || "")}</pre>${
-      p.truncated ? `<div class="km-empty">앞부분만 보여 줍니다 — 모두 ${esc(humanBytes(p.bytes))}</div>` : ""}</div>`;
+      p.truncated ? `<div class="km-empty">앞부분만 표시합니다. 전체 ${esc(humanBytes(p.bytes))}</div>` : ""}</div>`;
   }
   if (p.what === "dir") {
     const rows = (p.entries || []).map((row) => `<div class="art-pv-row">
@@ -191,7 +191,7 @@ function previewBlock(p) {
       p.more ? `<div class="km-empty">그 밖에 ${esc(p.more)}개가 더 있습니다.</div>` : ""}</div>`;
   }
   if (p.what === "too-big") {
-    return `<div class="art-pv">${head}<div class="km-empty">${esc(humanBytes(p.bytes))} — 여기서 열기에는 너무 큽니다.</div></div>`;
+    return `<div class="art-pv">${head}<div class="km-empty">${esc(humanBytes(p.bytes))}. 미리 보기에는 너무 큽니다.</div></div>`;
   }
-  return `<div class="art-pv">${head}<div class="km-empty">이 종류는 여기서 못 보여 줍니다 — ${esc(humanBytes(p.bytes))}</div></div>`;
+  return `<div class="art-pv">${head}<div class="km-empty">미리 볼 수 없는 형식입니다. ${esc(humanBytes(p.bytes))}</div></div>`;
 }

@@ -90,7 +90,7 @@ test("떨어진 목록이 바뀌면 화면까지 다시 맞춘다", () => {
 
   const frame = read("web/js/main.js");
   assert.match(frame, /redrawBrowser:/, "틀이 다시 맞추기를 안 넘긴다");
-  assert.match(frame, /redrawBrowser: \(\) => \{ if \(BROWSER_MODE\) reconcileBrowserMode\(\)/,
+  assert.match(frame, /redrawBrowser: \(\) => \{\s*if \(BROWSER_MODE\) \{ reconcileBrowserMode\(\); reconcileDocTabs\(\);/,
     "다시 맞추기가 reconcileBrowserMode 를 안 부른다");
 });
 

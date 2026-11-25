@@ -16,6 +16,7 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import os from "node:os";
 import { projectClaudeDir } from "./agent-homes.js";
+import { INHERIT_COMMAND } from "./agent-chat-inherit.js";
 
 const MAX_COMMAND_FILES = 500;
 const MAX_WALK = 20000;
@@ -34,6 +35,11 @@ const CODEX_BUILTINS = [
   ["mention", "파일 언급"], ["model", "모델·추론 수준"], ["new", "새 대화"], ["quit", "끝내기"], ["review", "변경 검토"],
   ["status", "세션 상태"],
 ];
+const AGY_BUILTINS = [
+  ["clear", "대화 지우기"], ["compact", "대화 압축"], ["effort", "추론 수준"], ["exit", "끝내기"],
+  ["help", "도움말"], ["mcp", "MCP 서버"], ["mode", "실행 모드"], ["model", "모델 바꾸기"],
+  ["plan", "계획 모드"], ["quit", "끝내기"], ["skills", "스킬 목록"], ["usage", "사용량"],
+];
 
 // Claude CLI 초기화 응답의 commands → 내장 명령. 이름이 __ 로 시작하는 것은 서버 실행 세션 전용
 export function cliBuiltinCommands(commands) {
@@ -49,7 +55,53 @@ export function cliBuiltinCommands(commands) {
 const CLI_LIST_TTL_MS = 6 * 60 * 60 * 1000;   // Claude Code 업데이트를 따라가는 주기
 const CLI_RETRY_MS = 60 * 1000;
 const CLI_TIMEOUT_MS = 20 * 1000;
+const SERVER_ONLY_ENV = new Set(["PORT", "REMOTE", "IRIS_PORT", "IRIS_STATE_DIR", "ELECTRON_RUN_AS_NODE", "IRIS_BUNDLE_ID", "IRIS_MAIN_PID", "IRIS_SERVER_ROOT", "IRIS_APP_PATH"]);
+const AGENT_SESSION_ENV = /^(?:CLAUDECODE$|CLAUDE_CODE_|CLAUDE_PID$|CODEX_COMPANION_)/;
 let cliCache = { at: 0, ok: false, promise: null, list: null };
+
+export function cliExecutable(name, env, { platform = process.platform, extraDirs = [] } = {}) {
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
+  const dirs = [
+    ...String(env[pathKey] || "").split(path.delimiter),
+    path.join(os.homedir(), ".local", "bin"),
+    ...(platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin"] : []),
+    ...extraDirs,
+  ];
+  const suffixes = platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const suffix of suffixes) {
+      const candidate = path.join(dir, name + suffix);
+      try {
+        if (fs.statSync(candidate).isFile() && (platform === "win32" || fs.accessSync(candidate, fs.constants.X_OK) === undefined)) return candidate;
+      } catch {}
+    }
+  }
+  return name;
+}
+
+export function claudeInitializeEnv(source = process.env) {
+  const env = { ...source };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("HERDR_") || SERVER_ONLY_ENV.has(key) || AGENT_SESSION_ENV.test(key)) delete env[key];
+  }
+  return env;
+}
+
+export function claudeInitializeCommand(source = process.env, options = {}) {
+  return cliExecutable("claude", claudeInitializeEnv(source), options);
+}
+
+export function cliSpawnOptions(command, { platform = process.platform } = {}) {
+  return platform === "win32" && /\.(?:cmd|bat)$/i.test(command) ? { shell: true } : {};
+}
+
+export function cliSpawnInvocation(command, args, { platform = process.platform } = {}) {
+  const options = cliSpawnOptions(command, { platform });
+  return options.shell
+    ? { command: `"${command}"`, args, options }
+    : { command, args, options };
+}
 
 // 설치된 claude 에 초기화 요청만 보내 내장 명령 목록을 받음
 // - --safe-mode: 사용자 훅·스킬·MCP 를 띄우지 않음. 모델 호출·기록 파일 없음
@@ -69,10 +121,12 @@ export function resetClaudeBuiltinsForTest() { cliCache = { at: 0, ok: false, pr
 
 function runClaudeInitialize() {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env };
-    for (const k of Object.keys(env)) if (k.startsWith("HERDR_")) delete env[k];
-    const child = spawn("claude", ["-p", "--safe-mode", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"],
-      { cwd: os.homedir(), env, stdio: ["pipe", "pipe", "ignore"] });
+    const env = claudeInitializeEnv();
+    const command = claudeInitializeCommand();
+    const args = ["-p", "--safe-mode", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"];
+    const invocation = cliSpawnInvocation(command, args);
+    const child = spawn(invocation.command, invocation.args,
+      { cwd: os.homedir(), env, stdio: ["pipe", "pipe", "ignore"], ...invocation.options });
     let buf = "", done = false;
     const finish = (err, value) => {
       if (done) return;
@@ -153,10 +207,18 @@ function skillDirs(dir) {
 // cliBuiltins: claudeBuiltins() 결과(없으면 고정 목록만)
 // → [{ name, description, argumentHint, kind }] 이름 중복은 앞의 것(프로젝트 > 사용자 > CLI 내장 > 고정 내장)
 export function listCommands(kind, cwd, homes, cliBuiltins = null) {
-  const list = [];
+  const list = [{ name: INHERIT_COMMAND, description: "지목한 대화를 이 창에서 이어가기", kind: "builtin" }];
   if (kind === "codex") {
     for (const c of commandFiles(path.join(homes.codex, "prompts"))) list.push({ ...c, name: `prompts:${c.name}`, kind: "custom" });
     for (const [name, description, argumentHint = ""] of CODEX_BUILTINS) list.push({ name, description, argumentHint, kind: "builtin" });
+  } else if (kind === "agy") {
+    if (path.isAbsolute(cwd || "")) {
+      for (const c of skillDirs(path.join(cwd, ".agents", "skills"))) list.push({ ...c, kind: "skill" });
+    }
+    if (homes.agyConfig) {
+      for (const c of skillDirs(path.join(homes.agyConfig, "skills"))) list.push({ ...c, kind: "skill" });
+    }
+    for (const [name, description, argumentHint = ""] of AGY_BUILTINS) list.push({ name, description, argumentHint, kind: "builtin" });
   } else {
     if (path.isAbsolute(cwd || "")) {
       for (const c of commandFiles(projectClaudeDir(cwd, "commands"))) list.push({ ...c, kind: "custom" });

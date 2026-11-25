@@ -24,7 +24,8 @@ function isTrustedSender(event, expectedAppUrl) {
   try {
     const senderUrl = event && event.senderFrame && event.senderFrame.url;
     if (!senderUrl) return false;
-    if (new URL(senderUrl).origin !== new URL(expectedAppUrl).origin) return false;
+    const origin = new URL(senderUrl).origin;
+    if (origin === "null" || origin !== new URL(expectedAppUrl).origin) return false;
     return true;
   } catch {
     return false;

@@ -81,7 +81,7 @@ const MARK_IMG = Object.fromEntries([
   "mistral-vibe", "openclaude", "openclaw", "opencode", "qwen-code", "rovo", "trae",
 ].map((id) => [id, `/img/agents/${id}.png`]));
 // 같은 도구를 다른 이름으로 알리는 경우. herdr 는 Cursor 를 cursor-agent 로도 적는다.
-const MARK_ALIAS = { "claude-agent-teams": "claude", "cursor-agent": "cursor" };
+const MARK_ALIAS = { "claude-agent-teams": "claude", "cursor-agent": "cursor", agy: "antigravity" };
 // 목록에 없는 것은 첫 글자를 표시한다. 모르는 도구를 물음표로 그리면 오류처럼 보인다.
 function letterMark(key, size) {
   const ch = (key || "?").slice(0, 1).toUpperCase();

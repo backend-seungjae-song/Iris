@@ -45,7 +45,7 @@ export function initCapability(ctx) {
   // 콘솔 쪽 도착지. 분리 창에서 온 것도 여기로 들어온다.
   const deliverLocal = (s) => {
     if (!getCurTarget()) { showToast("먼저 왼쪽에서 에이전트(세션)를 선택하세요.", { level: "warn" }); return; }
-    if (callHook("agentchat.paste", sketchBlock(s))) { showToast("스케치를 채팅 입력창에 붙였습니다. 이어서 지시를 입력하고 보내세요.", { level: "ok" }); return; }
+    if (callHook("agentchat.paste", sketchBlock(s))) { showToast("스케치를 채팅 입력창에 넣었습니다. 이어서 지시를 입력하고 보내세요.", { level: "ok" }); return; }
     wsSend({ type: "pty.input", data: "\x1b[200~" + sketchBlock(s) + "\x1b[201~" });
     showToast("스케치 전달됨 → 터미널. 이어서 지시를 입력하고 Enter.", { level: "ok" });
     const xterm = getXterm();
@@ -77,7 +77,7 @@ export function initCapability(ctx) {
       img.onerror = () => res(false);
       img.src = url;
     });
-    if (!ok) { URL.revokeObjectURL(url); showToast("찍은 그림을 열지 못했습니다.", { level: "err" }); return; }
+    if (!ok) { URL.revokeObjectURL(url); showToast("캡처한 화면을 열지 못했습니다.", { level: "err" }); return; }
     const opened = openSketchCanvas({
       png: url,
       width: img.naturalWidth,
@@ -93,7 +93,7 @@ export function initCapability(ctx) {
   const startApp = async (app) => {
     let shot = null;
     try { shot = await app.shot(); } catch (e) { shot = null; }
-    if (!shot || !shot.bytes) { showToast("앱 화면을 찍지 못했습니다. 화면이 나온 뒤에 다시 시도하세요.", { level: "err" }); return; }
+    if (!shot || !shot.bytes) { showToast("앱 화면을 캡처하지 못했습니다. 화면이 표시된 뒤 다시 시도하세요.", { level: "err" }); return; }
     // 세로로 긴 휴대폰 화면은 폭에 맞추면 창을 넘친다. 전체가 보이게 연다.
     await openOn(shot.bytes, { url: "", title: shot.title || "앱 화면" }, "all");
   };
@@ -103,12 +103,12 @@ export function initCapability(ctx) {
     const app = callHook("emulator.sketchSource");
     if (app) { await startApp(app); return; }
     const r = activeWv();
-    if (!r || !r.wc) { showToast("찍을 브라우저 탭이 없습니다.", { level: "warn" }); return; }
+    if (!r || !r.wc) { showToast("캡처할 브라우저 탭이 없습니다.", { level: "warn" }); return; }
     if (!acHost || !acHost.sketchShot) { showToast("이 빌드는 스케치를 지원하지 않습니다.", { level: "warn" }); return; }
-    captureToastId = showToast("페이지 전체를 찍는 중…", { level: "progress", ttl: Date.now() + 120000 });
+    captureToastId = showToast("페이지 전체 캡처 중…", { level: "progress", ttl: Date.now() + 120000 });
     let shot = null;
     try { shot = await acHost.sketchShot(r.wc); } catch (e) { shot = null; }
-    if (!shot || !shot.ok || !shot.bytes) { showToast("이 탭을 찍지 못했습니다.", { level: "err", detail: String(shot && shot.error || "원인 불명"), id: captureToastId }); captureToastId = null; return; }
+    if (!shot || !shot.ok || !shot.bytes) { showToast("이 탭을 캡처하지 못했습니다.", { level: "err", detail: String(shot && shot.error || "원인 불명"), id: captureToastId }); captureToastId = null; return; }
     const completedToastId = captureToastId;
     captureToastId = null;
     showToast("페이지 전체를 열었습니다.", { level: "ok", id: completedToastId });

@@ -25,7 +25,7 @@
 import { provide } from "../core/hooks.js";
 import { bsMutate as mutateBrowserState } from "../browser/state.js";
 import { getCenterSpace } from "../center/tab-store.js";
-import { setHtml } from "../core/set-html.js";
+import { patchHtml } from "../core/patch-html.js";
 
 const runByPath = {}; // cwd → { scripts, pkgmgr, running, script, url, tail:[], autoOpened }
 let dom = null;
@@ -79,7 +79,7 @@ function renderRunThrottled() { if (runRenderT) return; runRenderT = setTimeout(
 function renderRun() {
   const body = dom("#run-body"); if (!body) return;
   const p = curRunPath();
-  if (!p) { body.innerHTML = '<div class="fempty">스페이스를 선택하세요.</div>'; const m0 = dom("#run-meta"); if (m0) m0.textContent = ""; return; }
+  if (!p) { patchHtml(body, '<div class="fempty">스페이스를 선택하세요.</div>'); const m0 = dom("#run-meta"); if (m0) m0.textContent = ""; return; }
   const r = runRec(p); const names = Object.keys(r.scripts || {});
   let html = "";
   if (!names.length) html = '<div class="fempty">package.json 스크립트 없음.</div>';
@@ -92,20 +92,20 @@ function renderRun() {
     const url = r.url ? `<div class="run-url-chip" data-open-url="${escapeHtml(r.url)}" title="브라우저에서 열기">${RUN_ICON.globe}<span class="run-url">${escapeHtml(r.url)}</span><span class="run-url-go">브라우저에서 열기</span></div>` : "";
     const out = r.tail && r.tail.length
       ? `<div class="run-out" id="run-out">${escapeHtml(r.tail.slice(-60).join("\n"))}</div>`
-      : `<div class="run-out run-out-empty">${r.running ? "출력을 기다리는 중…" : "스크립트를 실행하면 출력이 여기에 나옵니다."}</div>`;
+      : `<div class="run-out run-out-empty">${r.running ? "출력 대기 중…" : "스크립트를 실행하면 출력이 여기에 표시됩니다."}</div>`;
     html = `<div class="run-grid"><div class="run-scripts">${items}</div><div class="run-side">${url}${out}</div></div>`;
   }
   // 출력 중 200ms마다 불림. 맨 아래를 보던 사람만 새 출력으로 따라 내림
   // - 위로 올려 읽던 위치를 매번 맨 아래로 끌어내리던 결함(2026-11-07)
   const prev = dom("#run-out");
   const follow = !prev || prev.scrollHeight - prev.scrollTop - prev.clientHeight < 4;
-  setHtml(body, html, { keep: "#run-out" });
+  patchHtml(body, html, (node) => node.id || (node.classList.contains("run-item") && "script:" + node.dataset.script));
   body.dataset.path = p; // 이 패널이 어느 프로젝트로 렌더됐는지: 클릭 시 현재 스페이스와 대조(M3)
   const out = dom("#run-out"); if (out && follow) out.scrollTop = out.scrollHeight;
   // 접힌 머리 줄에도 지금 도는 스크립트와 패키지 관리자를 함께 보인다.
   const mt = dom("#run-meta");
-  if (mt) mt.innerHTML = (r.running ? `<span class="run-meta-on">▶ ${escapeHtml(r.script || "")}</span>` : "")
-    + (names.length ? `<span class="run-meta-pm">${escapeHtml(r.pkgmgr)}</span>` : "");
+  if (mt) patchHtml(mt, (r.running ? `<span class="run-meta-on">▶ ${escapeHtml(r.script || "")}</span>` : "")
+    + (names.length ? `<span class="run-meta-pm">${escapeHtml(r.pkgmgr)}</span>` : ""));
 }
 const RUN_ICON = {
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>',

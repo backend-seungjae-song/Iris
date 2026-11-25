@@ -91,6 +91,7 @@ export function createPinStore(options = {}) {
       try { await handle.sync(); } finally { await handle.close(); }
       await fsp.rename(temporary, pinFile);
       renamed = true;
+      if (process.platform === "win32") return;
       const directory = await fsp.open(remoteDir, "r");
       try { await directory.sync(); } finally { await directory.close(); }
     } catch (error) {

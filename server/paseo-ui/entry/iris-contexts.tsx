@@ -4,7 +4,7 @@
 // - Paseo 가 입력창을 다시 그려도 붙는 곳을 다시 찾음(MutationObserver)
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
-import { AppWindow, Bot, Check, Clipboard, Copy, FileText, Layers, Link2, ListOrdered, MessageSquare, MousePointerClick, PenLine, Smartphone, Table2, X } from "lucide-react-native";
+import { AppWindow, Bot, Check, Clipboard, Copy, FileText, Layers, Link2, ListOrdered, MessageSquare, MousePointerClick, PenLine, Save, Smartphone, Table2, X } from "lucide-react-native";
 import { describeContext } from "./iris-inline-tokens";
 
 export interface IrisContext { id: string; content: string; no?: number; kind?: string }
@@ -49,9 +49,12 @@ const CSS = `
 .iris-ctx-dlg header p { margin: 2px 0 0; color: var(--ictx-muted); font: 400 12.5px/1.3 system-ui, -apple-system, sans-serif;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .iris-ctx-dlg header > div { flex: 1; min-width: 0; }
-.iris-ctx-dlg pre { flex: 1; min-height: 0; margin: 0 14px; padding: 12px 14px; overflow: auto; border-radius: 10px;
-  background: var(--ictx-raised); border: 1px solid var(--ictx-border); color: var(--ictx-fg);
-  font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.iris-ctx-dlg textarea { flex: 1; min-height: 180px; margin: 0 14px; padding: 12px 14px; overflow: auto; border-radius: 10px; resize: none;
+  background: var(--ictx-raised); border: 1px solid var(--ictx-border); color: var(--ictx-fg); outline: none;
+  font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.iris-ctx-dlg footer .note { margin-right: auto; align-self: center; color: var(--ictx-muted); font: 400 12px/1.3 system-ui, -apple-system, sans-serif; }
+.iris-ctx-btn:disabled { opacity: 0.5; cursor: default; }
+.iris-ctx-btn.primary { background: var(--ictx-accent); border-color: var(--ictx-accent); color: var(--ictx-bg); }
 .iris-ctx-dlg footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 14px 14px; }
 .iris-ctx-btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--ictx-border); background: var(--ictx-control); color: var(--ictx-fg); font: 600 12.5px/1 system-ui, -apple-system, sans-serif;
@@ -129,20 +132,28 @@ export function useComposerSlot(enabled: boolean, order: number) {
   return slot;
 }
 
-function ContextDialog({ item, onClose }: { item: IrisContext; onClose: () => void }) {
+// 내용을 고쳐 저장할 수 있음. 저장하면 부모 창의 칩 내용이 바뀌고 보낼 때 고친 글이 들어감
+// - 고친 채 닫으면(Esc·바깥·X) 버림. 빈 내용은 저장하지 않음(칩을 빼려면 칩의 X)
+function ContextDialog({ item, onClose, onSave }: { item: IrisContext; onClose: () => void; onSave: (content: string) => void }) {
   const info = describeContext(item);
   const Icon = ICONS[info.kind] || FileText;
   const [copied, setCopied] = useState(false);
-  const closeRef = useRef<HTMLButtonElement>(null);
+  const [text, setText] = useState(item.content);
+  const editRef = useRef<HTMLTextAreaElement>(null);
+  const dirty = text !== item.content;
+  const canSave = dirty && text.trim() !== "";
   useEffect(() => {
-    closeRef.current?.focus();
+    editRef.current?.focus();
+    editRef.current?.setSelectionRange(0, 0);
+    editRef.current?.scrollTo(0, 0);
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); } };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
   }, [onClose]);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(item.content); setCopied(true); } catch { setCopied(false); }
+    try { await navigator.clipboard.writeText(text); setCopied(true); } catch { setCopied(false); }
   };
+  const save = () => { if (canSave) { onSave(text); onClose(); } };
   return createPortal(
     <div className="iris-ctx-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="iris-ctx-dlg" role="dialog" aria-modal="true" aria-labelledby="iris-ctx-title">
@@ -152,13 +163,20 @@ function ContextDialog({ item, onClose }: { item: IrisContext; onClose: () => vo
             <h2 id="iris-ctx-title">{info.label}</h2>
             <p>{info.summary}</p>
           </div>
-          <button ref={closeRef} type="button" className="iris-ctx-ib" aria-label="닫기" onClick={onClose}><X size={16} color="currentColor" /></button>
+          <button type="button" className="iris-ctx-ib" aria-label="닫기" onClick={onClose}><X size={16} color="currentColor" /></button>
         </header>
-        <pre>{item.content}</pre>
+        <textarea ref={editRef} value={text} aria-label={`${info.label} 내용`} spellCheck={false}
+          onChange={(e) => { setText(e.target.value); setCopied(false); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); } }} />
         <footer>
+          {dirty ? <span className="note">⌘Enter로 저장</span> : null}
           <button type="button" className="iris-ctx-btn" onClick={copy}>
             {copied ? <Check size={14} color="currentColor" /> : <Copy size={14} color="currentColor" />}
             {copied ? "복사됨" : "복사"}
+          </button>
+          <button type="button" className="iris-ctx-btn primary" disabled={!canSave} onClick={save}>
+            <Save size={14} color="currentColor" />
+            저장
           </button>
         </footer>
       </div>
@@ -171,7 +189,7 @@ function ContextDialog({ item, onClose }: { item: IrisContext; onClose: () => vo
 let openRequest: ((id: string) => void) | null = null;
 export function openContextDialog(id: string) { openRequest?.(id); }
 
-export function ContextChips({ items, colors, onRemove }: { items: IrisContext[]; colors: ContextColors; onRemove: (ids: string[] | null) => void }) {
+export function ContextChips({ items, colors, onRemove, onEdit }: { items: IrisContext[]; colors: ContextColors; onRemove: (ids: string[] | null) => void; onEdit: (id: string, content: string) => void }) {
   const slot = useComposerSlot(items.length > 0, 2);
   const [openId, setOpenId] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -210,7 +228,7 @@ export function ContextChips({ items, colors, onRemove }: { items: IrisContext[]
         </div>,
         slot,
       )}
-      {open ? <ContextDialog item={open} onClose={close} /> : null}
+      {open ? <ContextDialog key={open.id} item={open} onClose={close} onSave={(content) => onEdit(open.id, content)} /> : null}
     </>
   );
 }

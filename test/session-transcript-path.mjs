@@ -7,7 +7,14 @@ import test from "node:test";
 import { agentSessionPathFor, reportAgentSessionPath, resetAgentSessionPathsForTest,
   validateAgentSessionPath } from "../server/agent-session-path.js";
 import { runSessionCmd } from "../server/browser-commands.js";
-import { buildMonitorState, indexProjects } from "../server/join.js";
+import { agentKind, buildMonitorState, indexProjects } from "../server/join.js";
+
+test("herdr의 제공자 별칭을 Iris 채팅 제공자로 정규화한다", () => {
+  assert.equal(agentKind("claude-code"), "claude");
+  assert.equal(agentKind("codex-cli"), "codex");
+  assert.equal(agentKind("antigravity"), "agy");
+  assert.equal(agentKind("terminal"), null);
+});
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "iris-session-path-"));

@@ -876,7 +876,7 @@ function docxEditorBarsHtml() {
 }
 export function docxEditorShellHtml(t) {
   const conflict = t.docxDiskRevision != null
-    ? `<div class="fv-conflict">이 파일이 밖에서 바뀌었습니다. 내 편집이 남아 있어 자동으로 바꾸지 않았습니다.</div>`
+    ? `<div class="fv-conflict">이 파일이 외부에서 변경되었습니다. 편집 중이라 자동으로 반영하지 않았습니다.</div>`
     : "";
   return `<div class="docx-editor-shell"><div class="fv-bar"><span class="fv-name">${esc(t.label)}</span>${filePathBarHtml(t.path)}</div>
     <div class="gd-menu" role="menubar" aria-label="문서 메뉴"></div>

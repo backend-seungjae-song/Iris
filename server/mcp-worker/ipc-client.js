@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 
-export function createIpcClient({ protocol = 1, workerGeneration, send, events = new EventEmitter(), timeoutMs = null }) {
+export function createIpcClient({ protocol = 1, workerGeneration, send, events = new EventEmitter(), timeoutMs = 33 * 60_000 }) {
   if (typeof send !== "function") throw new Error("worker IPC 전송 함수가 필요합니다.");
   const pending = new Map();
   const relayListeners = new Set();

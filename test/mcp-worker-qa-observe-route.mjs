@@ -60,7 +60,13 @@ for (const scenario of SCENARIOS) {
     const worker = createWorkerRun(scenario, rootOf(scenario.name, "worker"));
     const { responses, effects, files } = await worker.run();
     assert.deepEqual(responses, recorded.responses);
-    assert.deepEqual(effects, recorded.effects);
+    if (scenario.cmd === "qa-target-resolve" && recorded.effects.some(([kind, method]) => kind === "cdp" && method === "Accessibility.getFullAXTree")) {
+      const isFrameLookup = ([kind, method]) => kind === "cdp" && method === "Page.getFrameTree";
+      assert.equal(effects.filter(isFrameLookup).length, 1);
+      assert.deepEqual(effects.filter((call) => !isFrameLookup(call)), recorded.effects);
+    } else {
+      assert.deepEqual(effects, recorded.effects);
+    }
     assert.deepEqual(files, recorded.files);
     // 단위 규칙: 단위마다 사용자 명령 이름 하나, 마지막 호출 표시는 많아야 하나이고 있으면 맨 끝
     const units = new Map();
@@ -225,7 +231,6 @@ test("반응 관찰 사본: 판정 본문은 원본과 같고 상태 보유·구
     patch(part(original, "const candidate=(state,code,description,rect,extra={})=>{", "  observation.subscribeEvents("), CLEARED_FROM, CLEARED_TO));
   sameBlock("  const install=async(state,send,sid=null)=>{", "  const stop=async(state)=>{");
   sameBlock("  const result=state=>({ok:true,id:state.id", "  const commands = {");
-  sameBlock("    async \"qa-target-resolve\"(send,_wc,args={}) {", "    async \"qa-background-observe\"(");
   // 시작 검사(기대 효과 형식 · 전제 검사)와 종료 판정
   const startBody = (text) => sliceBetween(text, "      const expect=args.expect;", "      active.set(id,state);").trim().replace(/\s+/g, " ");
   assert.equal(startBody(copy), startBody(original));

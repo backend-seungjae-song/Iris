@@ -81,7 +81,7 @@ check("잠자는 탭은 URL·프로필로 재생성", () => {
 // 알림이 뜨면 새 탭인데 깨웠다고 알리게 된다.
 check("깨움 알림은 실제로 회수됐던 탭에만", () => {
   const seg = sliceBetween(webview, "function wakeWebview", "function sweepIdleWebviews", "깨움 알림은 실제로 회수됐던 탭에만");
-  return /if \(sleeping && sleeping\.discardedAt > 0\) \{[\s\S]*잠자던 탭을 다시 엽니다/.test(seg);
+  return /if \(sleeping && sleeping\.discardedAt > 0\) \{[\s\S]*절전 탭을 다시 엽니다/.test(seg);
 });
 check("입력·스크롤이 LRU 최근성을 갱신", () => {
   const pre = read("native/electron/webview-preload.cjs");

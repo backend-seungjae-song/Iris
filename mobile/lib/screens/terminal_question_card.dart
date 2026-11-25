@@ -87,7 +87,7 @@ class _TerminalQuestionCardState extends State<TerminalQuestionCard> {
         showIrisToast(
           context,
           error.message.contains('화면이 바뀌')
-              ? '화면이 바뀌었습니다. 새로 고침하세요.'
+              ? '화면이 바뀌었습니다. 새로고침하세요.'
               : error.message,
           tone: IrisToastTone.error,
         );

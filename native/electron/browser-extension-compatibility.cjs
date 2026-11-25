@@ -142,17 +142,25 @@ const NAVIGATION_EVENTS = new Set(["onBeforeNavigate", "onCommitted", "onDOMCont
 const WEB_REQUEST_EVENTS = new Set(["onBeforeRequest", "onHeadersReceived", "onResponseStarted", "onCompleted", "onErrorOccurred"]);
 let nextRequestId = 0;
 
-function createExtensionCompatibility({ app, webContents, createTab, lifecyclePath, error = console.error }) {
+function createExtensionCompatibility({ app, webContents, createTab, lifecyclePath, error = console.error,
+  readManifestImpl = readManifest }) {
   const states = new Map();
   const guestListeners = new Map();
+  const manifestCache = new Map();
   const lifecycle = createLifecycle(lifecyclePath, error);
+
+  function manifestFor(directory) {
+    const key = path.resolve(directory);
+    if (!manifestCache.has(key)) manifestCache.set(key, readManifestImpl(key));
+    return manifestCache.get(key);
+  }
 
   function authorized(state, worker) {
     const url = new URL(worker.scriptURL);
     if (url.protocol !== "chrome-extension:") throw new Error("확장 서비스 워커가 아닙니다.");
     const extension = state.session.extensions.getExtension(url.hostname);
     if (!extension || !state.paths.has(path.resolve(extension.path))) throw new Error("사용 중인 Iris 확장이 아닙니다.");
-    return { extension, manifest: readManifest(extension.path), id: extension.id };
+    return { extension, manifest: manifestFor(extension.path), id: extension.id };
   }
 
   function hostAllowed(manifest, raw) {
@@ -364,8 +372,13 @@ function createExtensionCompatibility({ app, webContents, createTab, lifecyclePa
   app.on("web-contents-created", attachGuest);
   for (const wc of webContents.getAllWebContents()) attachGuest(null, wc);
 
-  function authorizePath(session, directory) { ensureSession(session).paths.add(path.resolve(directory)); }
+  function authorizePath(session, directory) {
+    const resolved = path.resolve(directory);
+    manifestCache.delete(resolved);
+    ensureSession(session).paths.add(resolved);
+  }
   function revokePath(session, directory) {
+    manifestCache.delete(path.resolve(directory));
     const state = states.get(session);
     if (!state) return;
     state.paths.delete(path.resolve(directory));
@@ -383,6 +396,7 @@ function createExtensionCompatibility({ app, webContents, createTab, lifecyclePa
       for (const subscription of state.workers.values()) { endTask(subscription.task); subscription.worker.ipc.removeHandler("iris-extension-compatibility"); }
     }
     states.clear();
+    manifestCache.clear();
   }
   return { ensureSession, authorizePath, revokePath, dispose };
 }

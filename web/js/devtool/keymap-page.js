@@ -28,10 +28,11 @@ import {
 import { artifactsClick, artifactsModel, enterArtifacts, initArtifacts } from "./artifacts-page.js";
 import { linkAddState, linkHintMarkup, optInConfirmMarkup, settingsMarkup, SETTINGS_SECTIONS } from "./settings-view.js";
 import { createDropdown } from "../core/dropdown.js";
-import { setHtml } from "../core/set-html.js";
+import { patchHtml } from "../core/patch-html.js";
 import { parseLinkPattern } from "../browser/link-rules.js";
 import { CAPABILITIES } from "../core/capabilities.js";
 import { callHook } from "../core/hooks.js";
+import { sessionMenuSettings } from "../herdr/session-providers.js";
 import { motionOn, setMotion } from "../core/motion.js";
 
 let $ = null, wsSend = null, showToast = null, getSecurityToggles = null, setSecurityToggle = null, clearSiteRecords = null;
@@ -54,7 +55,7 @@ let drawnView = "";          // 마지막으로 그린 분류·검색어
 let lkFreshTimer = null;
 let lkFresh = null;          // 방금 추가·변경한 규칙 주소(줄 강조)
 let lkSeen = "";             // 마지막으로 그린 규칙·계정 서명
-const lkDropdowns = [];
+const lkDropdowns = new Map();
 
 // 창 전환 단추가 가리키는 창의 host 용 { id } 또는 { key }
 // 단추에 data-ref-* 가 없으면 그 줄의 스위치 기준. 지금 목록에 없는 창이면 null
@@ -223,7 +224,7 @@ export function initKeymapPage(deps) {
         // 서버·네이티브 짝이 있는 것을 렌더러만 먼저 로드하면 절반만 적용되므로 재시작까지 미룬다.
         if (featureNeedsRestart(id)) { showToast && showToast(featureEnableNote(id), { level: "info" }); return; }
         const loadedNow = enableCapability ? await enableCapability(id) : false;
-        showToast && showToast(loadedNow ? featureEnableNote(id) : shortcutLabel("⌘⇧R 로 다시 읽으면 켜집니다"), { level: "info" });
+        showToast && showToast(loadedNow ? featureEnableNote(id) : shortcutLabel("⌘⇧R 로 새로고침하면 켜집니다"), { level: "info" });
       }
       return;
     }
@@ -359,14 +360,20 @@ function changeLinkRuleAccount(pattern, profile) {
 let pendingRules = null;
 
 function mountLinkDropdowns(body) {
-  while (lkDropdowns.length) { try { lkDropdowns.pop().destroy(); } catch {} }
+  for (const [slot, dd] of lkDropdowns) {
+    if (!slot.isConnected) { dd.destroy(); lkDropdowns.delete(slot); }
+  }
+  if (section !== "links") return;
   const { rules, accounts } = lkData();
   const items = accounts.map((a) => ({ value: a.id, label: a.name }));
   for (const slot of body.querySelectorAll("[data-lk-acct]")) {
     const pattern = slot.dataset.lkAcct;
     const rule = pattern ? rules.find((r) => r.pattern === pattern) : null;
+    const value = rule ? rule.profile : lkAccount(accounts);
+    const current = lkDropdowns.get(slot);
+    if (current) { current.setItems(items); current.setValue(value); continue; }
     const dd = createDropdown({
-      items, value: rule ? rule.profile : lkAccount(accounts), className: "lk-dd",
+      items, value, className: "lk-dd",
       ariaLabel: slot.getAttribute("aria-label") || "열 계정",
       onChange: (value) => {
         if (!pattern) { lkDraftAccount = value; updateLinkHint(); return; }
@@ -374,7 +381,7 @@ function mountLinkDropdowns(body) {
       },
     });
     slot.appendChild(dd.el);
-    lkDropdowns.push(dd);
+    lkDropdowns.set(slot, dd);
   }
 }
 
@@ -497,10 +504,8 @@ export function renderKeymapPage() {
   if (Array.isArray(featureRows)) items.push(...featureRows);
   // 화면은 settings-view 가 그린다. 앱을 켜지 않는 사본과 검사가 같은 함수를 부를 수 있어야
   // 배치를 두 벌로 적지 않는다.
-  const lkFocus = !!(document.activeElement && document.activeElement.id === "lk-pattern");
-  // 같은 내용이면 건드리지 않음(기능 분류의 iframe 이 다시 불려 비는 것 방지). 다시 그려도 안쪽 스크롤 위치 유지
   const sameView = drawnView === section + "\n" + query;   // 분류·검색어가 바뀌면 목록은 맨 위부터
-  const drew = setHtml(body, settingsMarkup({
+  const html = settingsMarkup({
     section, query, items, recording,
     changed: all.filter((x) => x.changed).length,
     conflicts: findConflicts(all).filter((c) => c.overlaps),
@@ -513,21 +518,20 @@ export function renderKeymapPage() {
     links,
     linkRules: section === "links" ? lkModel() : null,
     featureSections: featureSections(),
-  }), { keep: sameView ? ".km-nav-list, .km-scroll" : ".km-nav-list" });
+  });
+  patchHtml(body, html, (node) => node.id || node.dataset.fsFrame ||
+    (node.dataset.lkRow && "rule:" + node.dataset.lkRow));
+  const list = body.querySelector(".km-scroll");
+  if (list && !sameView) list.scrollTop = 0;
   drawnView = section + "\n" + query;
-  if (section === "links") {
-    lkSeen = lkSignature();
-    if (drew) mountLinkDropdowns(body);
-    if (lkFocus) { const lk = body.querySelector("#lk-pattern"); if (lk) { lk.focus({ preventScroll: true }); lk.setSelectionRange(lk.value.length, lk.value.length); } }
-  }
-  const inp = body.querySelector("#km-search");
-  if (inp && query) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  mountLinkDropdowns(body);
+  if (section === "links") lkSeen = lkSignature();
 }
 
 // 켜진 기능이 설정 화면에 채우는 분류. 꺼진 기능은 훅이 없어 빠짐
 function featureSections() {
   const agentchat = callHook("agentchat.settingsSection");
-  return agentchat && typeof agentchat === "object" ? [agentchat] : [];
+  return [sessionMenuSettings(), ...(agentchat && typeof agentchat === "object" ? [agentchat] : [])];
 }
 
 // 고른 창 목록에서 빠진 창은 선택에서도 지운다

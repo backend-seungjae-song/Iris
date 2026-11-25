@@ -662,8 +662,8 @@ async function main() {
     if (ob.planned) console.log(`관찰 ${ob.ran}/${ob.planned}${ob.notObserved.length ? ` — 못 본 것: ${ob.notObserved.slice(0, 8).join(", ")}${ob.notObserved.length > 8 ? " …" : ""}` : ""}`);
     if (summary.degraded.length) console.log(`강등된 매크로: ${summary.degraded.join(", ")}`);
     if (report.openCalls) console.log(`끝을 못 본 호출 ${report.openCalls}건 — 그 구간의 결과는 주장하지 않는다`);
-    console.log(`장부 ${report.journal}`);
-    if (keepOpen) console.log("회차는 열어 두었다 — 다른 계측기가 합류한 뒤 run end로 닫아라");
+    console.log(`기록 ${report.journal}`);
+    if (keepOpen) console.log("회차는 열어 두었다. 다른 측정 도구가 합류한 뒤 run end로 닫아라");
   }
   process.exit(summary.FAIL || summary.BLOCKED ? 1 : 0);
 }

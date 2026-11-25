@@ -71,7 +71,7 @@ export function renderGithubPrView(tab, { host, onRefresh, onLog, onDraft, onOpe
   const pr = tab.pr;
   if (!pr) {
     host.innerHTML = `<div class="gpr-page"><p class="${tab.error ? "gpr-error" : "gpr-empty"}" ${tab.error ? 'role="alert"' : ""}>
-      ${esc(tab.error || "PR을 불러오는 중…")}</p><button type="button" class="cc-btn" data-gpr-refresh>다시 읽기</button></div>`;
+      ${esc(tab.error || "PR을 불러오는 중…")}</p><button type="button" class="cc-btn" data-gpr-refresh>새로고침</button></div>`;
     host.querySelector("[data-gpr-refresh]").onclick = onRefresh;
     return;
   }

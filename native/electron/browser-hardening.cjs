@@ -1,12 +1,11 @@
 // 브라우저 정체성과 Google 인증 호환. Orca browser-session-ua.ts에서 이식.
-// 일반 사이트에는 실제 Electron 엔진의 UA·Client Hints를 유지한다. Google 인증 예외의 요청 헤더는
+// 일반 사이트에는 내장 Chromium 버전의 Chrome 호환 UA와 엔진의 Client Hints를 사용한다. Google 인증 예외의 요청 헤더는
 // google-auth-rules.cjs 의 내부 확장 규칙이, 페이지·기기 미리보기는 google-auth-user-agent.cjs 가 같은 값으로 맞춘다.
 const { googleAuthRules } = require("./google-auth-rules.cjs");
 
-// 모바일 판별 라이브러리가 Iris 제품명을 휴대폰으로 오인하므로 앱 토큰만 뺀다.
-// 실제 런타임인 Electron 토큰이나 엔진 버전은 바꾸지 않는다.
+// 사이트 호환 판정에 쓰이는 Chrome 버전은 실행 중인 Chromium에서 가져옴
 function cleanUserAgent(ua) {
-  return String(ua || "").replace(/\s+Iris\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
+  return String(ua || "").replace(/\b(?:Iris|Electron)\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
 }
 
 let nativeUserAgent = null;

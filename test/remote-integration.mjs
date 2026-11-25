@@ -77,6 +77,7 @@ test("실제 TLS+WS에서 챌린지·서명·caps·오류 뒤 중지가 연결�
     constructor() {
       super();
       this.connected = true;
+      this.connected = true;
       this.gateway = null;
       queueMicrotask(() => this.emit("message", { type: "hello", v: REMOTE_RPC_VERSION, serverInstance }));
     }
@@ -186,4 +187,66 @@ test("실제 TLS+WS에서 챌린지·서명·caps·오류 뒤 중지가 연결�
     new Promise((_, reject) => setTimeout(() => reject(new Error("connection did not close within one second")), 1_000)),
   ]);
   assert.equal(host.status().connections, 0);
+});
+
+test("rpc-host는 이미 종료된 child와 동기 SIGTERM 뒤 stop 타이머를 남기지 않는다", async () => {
+  const timers = [];
+  const cleared = new Set();
+  let child;
+  class Child extends EventEmitter {
+    constructor() {
+      super();
+      this.connected = true;
+      this.exitCode = null;
+      this.signalCode = null;
+      child = this;
+      setImmediate(() => this.emit("message", { type: "hello", v: REMOTE_RPC_VERSION, serverInstance: "1".repeat(32) }));
+    }
+    send(message, callback) {
+      if (message.type === "configure") queueMicrotask(() => this.emit("message", {
+        type: "listening", address: message.address, port: message.port, certHash: message.certHash,
+      }));
+      callback?.(null);
+      return true;
+    }
+    kill(signal) {
+      this.signalCode = signal;
+      this.exitCode = 0;
+      this.emit("exit", 0, signal);
+      return true;
+    }
+  }
+  const host = createRemoteRpcHost({ serverInstance: "1".repeat(32), fork: () => new Child(),
+    setTimer(fn, delay) { const timer = { fn, delay, unref() {} }; timers.push(timer); return timer; },
+    clearTimer(timer) { cleared.add(timer); } });
+  await host.start({ type: "configure", v: REMOTE_RPC_VERSION, serverInstance: "1".repeat(32), address: "127.0.0.1", port: 1, keyPem: "key", certPem: "cert", certHash: "2".repeat(64), tailscalePath: "/tailscale" });
+  child.exitCode = 0;
+  assert.equal(host.stop(), true);
+  assert.equal(timers.some((timer) => timer.delay === 3000 || timer.delay === 1000), false);
+  assert.equal([...cleared].every((timer) => timer.delay !== 3000), true);
+});
+
+test("rpc-host는 동기 SIGKILL 뒤 grace timer를 추가하지 않는다", async () => {
+  const timers = [];
+  let child;
+  class Child extends EventEmitter {
+    constructor() {
+      super(); this.exitCode = null; this.signalCode = null; child = this;
+      this.connected = true;
+      setImmediate(() => this.emit("message", { type: "hello", v: REMOTE_RPC_VERSION, serverInstance: "1".repeat(32) }));
+    }
+    send(message, callback) {
+      if (message.type === "configure") queueMicrotask(() => this.emit("message", { type: "listening", address: message.address, port: message.port, certHash: message.certHash }));
+      callback?.(null); return true;
+    }
+    kill(signal) { if (signal === "SIGKILL") { this.exitCode = 0; this.emit("exit", 0, signal); } return true; }
+  }
+  const host = createRemoteRpcHost({ serverInstance: "1".repeat(32), fork: () => new Child(),
+    setTimer(fn, delay) { const timer = { fn, delay, unref() {} }; timers.push(timer); return timer; }, clearTimer() {} });
+  await host.start({ type: "configure", v: REMOTE_RPC_VERSION, serverInstance: "1".repeat(32), address: "127.0.0.1", port: 1, keyPem: "key", certPem: "cert", certHash: "2".repeat(64), tailscalePath: "/tailscale" });
+  child.emit("error", new Error("gateway failed"));
+  timers.find((timer) => timer.delay === 3000)?.fn();
+  assert.equal(timers.filter((timer) => timer.delay === 3000).length, 1);
+  assert.ok(timers.filter((timer) => timer.delay === 1000).length <= 1);
+  host.stop();
 });

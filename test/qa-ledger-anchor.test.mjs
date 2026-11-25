@@ -198,7 +198,7 @@ test("앞선 서버 프로세스가 머리 해시 없이 남긴 마지막 한 �
   gone = true;
   await assert.rejects(first.append("run", { kind: "frame", mode: "agent_action", phase: "S4" }), /연결 끊김/);
   gone = false; afterWrite = false;
-  await assert.rejects(first.verify("run"), /머리 해시가 장부와 다릅니다/);
+  await assert.rejects(first.verify("run"), /머리 해시가 기록과 다릅니다/);
   assert.equal(await first.recoverUnanchored("run"), null);
   // 서버 재시작: 새 프로세스의 장부 객체
   const second = createQaLedger({ dir: path.join(dir, "ledger"), anchor: real });

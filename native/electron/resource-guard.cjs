@@ -122,7 +122,7 @@ function decideResourceAction({ memMB, swap, pressure, battery, drain, processes
     if (drain != null && drain >= policy.warnDrainPctPerHour) raise("warn", `배터리 시간당 ${drain}% 감소`);
   }
   const overCap = processes.filter((p) => p.dev && p.mb >= policy.devServerCapMB).sort((a, b) => b.mb - a.mb);
-  if (overCap.length) raise("warn", `상한 넘은 개발 서버 ${overCap.map((p) => `${p.pid} ${(p.mb / 1024).toFixed(1)}GB`).join(", ")}`);
+  if (overCap.length) raise("warn", `상한 초과 개발 서버 ${overCap.map((p) => `${p.pid} ${(p.mb / 1024).toFixed(1)}GB`).join(", ")}`);
   return { level, reasons, footprintMB, discardTabs: level === "critical", overCap };
 }
 

@@ -77,6 +77,7 @@ function walk(rel, out, want) {
 export function codeFiles() {
   const out = [];
   for (const r of CODE_ROOTS) walk(r, out, CODE_EXT);
+  walk("server/paseo-ui/entry", out, /\.tsx?$/);
   for (const r of ROOT_SHELL) if (existsSync(path.join(ROOT, r))) out.push(r);
   return [...new Set(out)].sort();
 }
@@ -171,8 +172,8 @@ function resolveSpec(fromRel, spec, known) {
   const dir = fromRel.includes("/") ? fromRel.slice(0, fromRel.lastIndexOf("/")) : ".";
   const base = norm(`${dir}/${spec}`);
   if (known.has(base)) return base;
-  for (const ext of [".js", ".mjs", ".cjs"]) if (known.has(base + ext)) return base + ext;
-  for (const ext of [".js", ".mjs", ".cjs"]) if (known.has(`${base}/index${ext}`)) return `${base}/index${ext}`;
+  for (const ext of [".js", ".mjs", ".cjs", ".ts", ".tsx"]) if (known.has(base + ext)) return base + ext;
+  for (const ext of [".js", ".mjs", ".cjs", ".ts", ".tsx"]) if (known.has(`${base}/index${ext}`)) return `${base}/index${ext}`;
   return null;
 }
 

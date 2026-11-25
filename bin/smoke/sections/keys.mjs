@@ -56,7 +56,7 @@ console.log("[10m] 키 — 수식키는 같은 인자로 들어오고, 누른 �
     // QA 입력의 기본 판정은 trusted(기존 동작)라 조립부가 판정 함수를 넘기지 않으면 보호가 없음
     check("QA 입력 조립부가 사용자 포커스 판정을 넘긴다", () =>
       /createQaInputCommands\(\{ prepareFocus: qaPrepareFocus, returnFocus: /.test(read("native/electron/cdp-control.cjs"))
-      && /async function qaPrepareFocus\(wc\)/.test(read("native/electron/cdp-control.cjs")));
+      && /async function qaPrepareFocus\(wc, action\)/.test(read("native/electron/cdp-control.cjs")));
     // 앱 셸은 게스트 pointerdown 으로 메뉴를 닫고 가운데 칸을 고름. AI 의 페이지 안 클릭(합성)은 보내지 않음
     check("게스트 누르기 알림은 진짜 누르기만 보낸다", () =>
       /addEventListener\("pointerdown", \(e\) => \{\n  [^\n]*\n  if \(!e \|\| !e\.isTrusted\) return;\n  try \{ ipcRenderer\.sendToHost\("ac-guest-pointerdown"\)/
@@ -89,9 +89,9 @@ console.log("[10m] 키 — 수식키는 같은 인자로 들어오고, 누른 �
       && /jsClickSel\(wc, args\.sel/.test(selClickBranch));
     check("보이지 않는 탭에는 넣지 않는다", () =>
       /if \(!isTabShown\(wc\.id\)\) \{/.test(bulk)
-      && /보이지 않는 탭에는 대량으로 넣지 않습니다/.test(bulk));
+      && /보이지 않는 탭에는 대량 입력을 하지 않습니다/.test(bulk));
     // 페이지로 넘기는 스크립트에 자리표시자가 그대로 남으면 그 안에서 문법 오류가 나고, 결과는
-    // "글을 넣지 못했습니다" 한 줄로만 돌아온다(확인 결과). 실제로 값이 끼워지는지 본다.
+    // "입력하지 못했습니다" 한 줄로만 돌아온다(확인 결과). 실제로 값이 끼워지는지 본다.
     check("페이지로 넘기는 값이 자리표시로 남지 않는다", () =>
       /const t = \$\{JSON\.stringify\(String\(text\)\)\};/.test(bulk)
       && /const key = \$\{JSON\.stringify\(mkey\)\}, vk = \$\{mvk\};/.test(bulk)
@@ -118,7 +118,7 @@ console.log("[10m] 키 — 수식키는 같은 인자로 들어오고, 누른 �
     check("중간에 실패하면 멈추고 몇 칸 들어갔는지 돌려준다", () =>
       /failed = \{ at: i \+ 1/.test(bulk)
       && /break;/.test(bulk)
-      && /앞 \$\{done\}칸은 이미 들어갔습니다/.test(bulk));
+      && /앞 \$\{done\}칸은 이미 입력됐습니다/.test(bulk));
   }
   check("이벤트만 보내고 끝내지 않는다 — 편집까지 한다", () =>
     /el\.value = el\.value\.slice\(0, s\) \+ typed \+ el\.value\.slice\(e\)/.test(cdp)

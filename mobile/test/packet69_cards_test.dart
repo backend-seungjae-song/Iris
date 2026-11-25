@@ -41,7 +41,7 @@ void main() {
       'browser-user': const BrowserUserRequestBody(
         title: '확인',
         text: '',
-        choices: ['다 했음', '못 하겠음'],
+        choices: ['완료', '할 수 없음'],
       ),
     };
     for (final kind in [
@@ -130,8 +130,8 @@ void main() {
             )
           : find.text(switch (kind) {
               'claude-permission' => '명령 실행 승인',
-              'browser-user' => '다 했음',
-              'question' => '대화창으로 이동',
+              'browser-user' => '완료',
+              'question' => '대화로 이동',
               _ => '터미널에서 답하기',
             });
       expect(action, findsOneWidget, reason: kind);

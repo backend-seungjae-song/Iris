@@ -197,7 +197,7 @@ console.log("\n[표 뷰어] 엑셀·CSV를 표로 연다");
     const tabTop = place(790), toolTop = place(145);
     return tabTop + 132 <= 812 && tabTop < 790 && toolTop === 167;
   });
-  check("고른 것을 아래에서 요약한다", () => /id="sv-stat"/.test(sheetRender) && /값 있는 칸/.test(sheetEdit));
+  check("고른 것을 아래에서 요약한다", () => /id="sv-stat"/.test(sheetRender) && /값 있는 셀/.test(sheetEdit));
   check("병합된 칸도 넘나든다", () => /function svAnchorOf\(t, r, c\)/.test(sheetModel) && /hidden\.set\(r \+ ","/.test(sheetModel));
   check("고정 경계가 선으로 보인다", () =>
     /\.sv-t td\.sv-fc-last, \.sv-t th\.sv-fc-last \{ border-right:2px solid/.test(css("13-sheet-view"))
@@ -242,7 +242,7 @@ console.log("\n[표 뷰어] 엑셀·CSV를 표로 연다");
     return true;
   });
   check("아직 안 옮긴 것은 그렇다고 말한다", () =>   // 아무 반응이 없으면 고장으로 보인다
-    sheetActions.includes('showToast("아직 안 옮긴 기능입니다: "'));
+    sheetActions.includes('showToast("아직 지원하지 않는 기능입니다: "'));
   check("색·테두리·숫자 서식은 목록에서 고른다", () =>
     /function svMenuAt\(anchor, html, onPick\)/.test(sheetActions) && /const GS_COLORS = \[/.test(sheetModel)
     && /function svBorder\(t, kind\)/.test(sheetActions) && /const GS_NUMFMT = \[/.test(sheetModel));
@@ -359,8 +359,8 @@ console.log("\n[표 뷰어] 엑셀·CSV를 표로 연다");
   check("고쳐 쓰기는 원본을 열어 그 칸만 간다", () => {
     const write = sliceFrom(sheet, "export async function writeWorkbook", sheet.length, "고쳐 쓰기는 원본을 열어 그 칸만 간다");
     const loader = sliceBetween(sheet, "async function loadWorkbook", "export async function readWorkbook", "고쳐 쓰기는 원본을 열어 그 칸만 간다");
-    return /const wb = await loadWorkbook\(filePath\)/.test(write)
-      && /await workbook\.xlsx\.readFile\(filePath\)/.test(loader)
+    return /const wb = await loadWorkbook\(filePath,/.test(write)
+      && /await workbook\.xlsx\.readFile\(filePath, options\)/.test(loader)
       && /cell\.value = coerce\(e\.v, e\.result\)/.test(write);
   });
   check("서식을 바꾸면 파일에도 들어간다", () =>

@@ -162,7 +162,7 @@ await (async () => {
   });
   check("완료는 작성자가 선언하지 않는다 — 원장이 닫혀야 회차가 닫힌다", () =>
     !call("run", { action: "end", ...R }).ok
-    && /안 밟은 경로/.test(String(call("run", { action: "end", ...R }).error)));
+    && /확인하지 않은 경로/.test(String(call("run", { action: "end", ...R }).error)));
   // 앱이 재시작되면 이 프로세스의 프레임 번호는 1로 돌아가는데 회차 폴더에는 앞서 찍은 장면이
   // 그대로 있다. 번호를 메모리에서만 이어가면 0001부터 덮어써서 장부가 가리키는 파일이 다른
   // 장면으로 바뀌고, 보고서는 그 장면을 그 줄의 증거로 싣는다.
@@ -626,8 +626,8 @@ await (async () => {
     const r = call("row", { action: "close", ...M, row: "T1", path: "정상", color: "gray",
       note: "구매자는 앱을 열어 직접 봐야 한다" });
     return !r.ok && /라벨체/.test(r.error)
-      && /문장으로 되돌리지 말고 줄을 더 쌓습니다/.test(r.error)
-      && /한 줄에 한 사실/.test(r.error);
+      && /문장으로 되돌리지 말고 줄을 추가합니다/.test(r.error)
+      && /한 줄에 사실 하나/.test(r.error);
   });
   check("부르는 자리가 없는 항목이 표시된다", () => {
     const proj = path.join(dir, "proj");

@@ -1,9 +1,11 @@
+import { sendFrame } from "./ws-transport.js";
 import { commandForPane } from "./windows-shell.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { agentArgv, shellCommand } from "./agent-launch.js";
+import { sessionTerminalArgv } from "./paseo-ui/index.js";
+import { shellCommand } from "./agent-launch.js";
 import { bindSpaceFolder } from "./browser-state-owner.js";
 import { requestRecompute as recompute } from "./runtime-state.js";
 
@@ -36,7 +38,7 @@ export function initWorkspaceHandlers(deps) {
 // 닫기는 그 스페이스의 모든 탭·pane이 종료되는 비가역 조작이라, 확인은 로컬 UI가 먼저 받는다.
 export function handleSpace(ws, msg) {
   // 스페이스 오류는 터미널이 아니라 화면에 표시해야 한다. 사용자가 눌러 시작한 동작이라 결과를 그 자리에서 확인한다.
-  const fail = (e) => ws.send(JSON.stringify({ type: "space-error", message: String(e && e.message || e) }));
+  const fail = (e) => sendFrame(ws, JSON.stringify({ type: "space-error", message: String(e && e.message || e) }));
   if (!ws._local) { fail(new Error("원격에서는 스페이스 조작 불가(AC5)")); return; }
   if (msg.type === "space.create") {
     // 사용자가 직접 입력하는 경로다. ~ 는 여기서 한 번만 확장한다.
@@ -59,7 +61,7 @@ export function handleSpace(ws, msg) {
       recompute();
       // 붙는 이름은 herdr가 정한다. 알림도 herdr가 반환한 이름을 그대로 사용한다.
       const named = res?.workspace?.label || label || path.basename(cwd);
-      ws.send(JSON.stringify({ type: "space-created", workspaceId: id, label: named, cwd }));
+      sendFrame(ws, JSON.stringify({ type: "space-created", workspaceId: id, label: named, cwd }));
     }).catch(fail);
   } else if (msg.type === "space.close") {
     if (!msg.workspaceId) return;
@@ -96,19 +98,28 @@ async function waitForTabPane(workspaceId, tabId) {
 // 터미널 탭 생성/이름(#6, #8): 생성은 셸 생성이라 원격(폰)에서 금지(AC5). 이름변경은 허용.
 export function handleTab(ws, msg) {
   if (msg.type === "tab.create") {
-    if (!ws._local) { ws.send(JSON.stringify({ type: "control-error", message: "원격에서는 터미널 탭 생성 불가(AC5)" })); return; }
+    if (!ws._local) { sendFrame(ws, JSON.stringify({ type: "control-error", message: "원격에서는 터미널 탭 생성 불가(AC5)" })); return; }
+    const forkId = typeof msg.forkId === "string" && msg.forkId.length <= 128 ? msg.forkId : null;
+    const forkReply = (ok, paneId, reason) => {
+      if (forkId) sendFrame(ws, JSON.stringify({ type: "agentchat.fork-opened", id: forkId, ok, paneId, reason }));
+    };
     const cwd = msg.cwd;
     if (cwd !== undefined && (typeof cwd !== "string" || !path.isAbsolute(cwd) || /[\r\n\0]/.test(cwd))) {
-      ws.send(JSON.stringify({ type: "control-error", message: "터미널 작업 폴더를 절대경로로 지정하세요" })); return;
+      sendFrame(ws, JSON.stringify({ type: "control-error", message: "터미널 작업 폴더를 절대경로로 지정하세요" })); return;
     }
     if (cwd !== undefined) {
       try {
         if (!fs.statSync(cwd).isDirectory()) throw new Error("폴더가 아닙니다");
       } catch {
-        ws.send(JSON.stringify({ type: "control-error", message: `폴더가 없습니다: ${cwd}` })); return;
+        sendFrame(ws, JSON.stringify({ type: "control-error", message: `폴더가 없습니다: ${cwd}` })); return;
       }
     }
     // 사용자가 연 탭이라 그 탭으로 화면을 옮긴다. 옮기지 않으면 새 탭을 만들어도 이전 탭이 계속 보인다.
+    const argv = sessionTerminalArgv(msg.launch);
+    if (msg.launch && !argv) {
+      sendFrame(ws, JSON.stringify({ type: "control-error", message: "이 제공자의 터미널 실행 명령이 등록되어 있지 않습니다" }));
+      return;
+    }
     herdr.tabCreate(msg.workspaceId, { focus: true }).then(async (res) => {
       // 생성 직후 이름 부여(#6): tab.create 반환에서 새 tab_id를 찾아 rename.
       const newId = res?.tab_id || res?.tab?.tab_id || res?.result?.tab_id;
@@ -116,12 +127,10 @@ export function handleTab(ws, msg) {
       // 새 탭에서 바로 세션을 실행한다. 탭을 만들고 명령을 입력하는 두 단계를 한 번으로 줄인다.
       // 실행 대상은 목록으로 제한한다. 임의 명령이 전달되면 원격 실행 경로가 된다.
       if (!newId && (msg.launch || cwd)) throw new Error("새 탭의 식별자를 받지 못했습니다");
-      const argv = newId ? agentArgv(msg.launch) : null;
+      const pane = newId && (argv || cwd || forkId) ? await waitForTabPane(msg.workspaceId, newId) : null;
       if (newId && (argv || cwd)) {
         try {
-          const pane = await waitForTabPane(msg.workspaceId, newId);
           if (!await waitForShell(pane.pane_id)) throw new Error("터미널 준비 시간을 초과했습니다");
-          // 제출은 raw "\r" 로 한다. 이름있는 키로 보내면 글자만 입력되고 실행되지 않는다(확인 결과).
           const commands = [];
           if (cwd) commands.push(shellCommand(["cd", "--", cwd]));
           if (argv) commands.push(shellCommand(argv));
@@ -129,11 +138,17 @@ export function handleTab(ws, msg) {
             ? await commandForPane(herdr, pane.pane_id, argv, cwd) : commands.join(" && ")) + "\r");
         } catch (e) {
           // 오류를 무시하면 명령만 입력된 탭이 남고 사용자는 이유를 알 수 없다.
-          ws.send(JSON.stringify({ type: "control-error", message: `세션 실행 실패: ${e.message || e}` }));
+          throw new Error(`세션 실행 실패: ${e.message || e}`);
         }
       }
+      forkReply(true, pane?.pane_id);
       recompute();
-    }).catch((e) => ws.send(JSON.stringify({ type: "control-error", message: String(e.message || e) })));
+    }).catch(e => {
+      const reason = String(e.message || e);
+      forkReply(false, null, reason);
+      recompute();
+      sendFrame(ws, JSON.stringify({ type: "control-error", message: reason }));
+    });
   } else if (msg.type === "tab.rename") {
     if (!msg.tabId || typeof msg.label !== "string") return;
     herdr.tabRename(msg.tabId, msg.label).then(() => recompute()).catch(() => {});
@@ -141,6 +156,6 @@ export function handleTab(ws, msg) {
     // 순서 바꾸기는 원격에서도 안전하다(셸을 만들거나 종료하지 않는다). 이름 변경과 같은 경계다.
     if (!msg.tabId || !Number.isInteger(msg.index) || msg.index < 0) return;
     herdr.tabMove(msg.tabId, msg.index).then(() => recompute())
-      .catch((e) => ws.send(JSON.stringify({ type: "control-error", message: String(e.message || e) })));
+      .catch((e) => sendFrame(ws, JSON.stringify({ type: "control-error", message: String(e.message || e) })));
   }
 }

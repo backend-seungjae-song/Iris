@@ -5,8 +5,8 @@
 import { noticeBlock } from "../panel/xterm-wiring.js";
 
 const MESSAGES = [
-  ['[data-testid="user-message"]', "내 말"],
-  ['[data-testid="assistant-message"]', "에이전트 답"],
+  ['[data-testid="user-message"]', "내 메시지"],
+  ['[data-testid="assistant-message"]', "에이전트 답변"],
   ['[data-testid="tool-call-badge"]', "도구"],
   ['[data-testid="turn-summary"]', "도구 묶음"],
 ];
@@ -23,7 +23,7 @@ export function chatPickUnit(el) {
   for (const [sel, name] of MESSAGES) {
     const msg = start.closest(sel);
     if (!msg) continue;
-    if (name === "에이전트 답") {
+    if (name === "에이전트 답변") {
       for (const [psel, pname] of PARTS) {
         const part = start.closest(psel);
         if (part && msg.contains(part)) return { el: part, kind: `${name} · ${pname}` };

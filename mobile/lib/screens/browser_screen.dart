@@ -148,7 +148,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _error = status.error == null
             ? null
             : switch (status.error) {
-                'browser-tab-unavailable' => '탭을 깨우지 못했습니다. 다시 연결하고 있습니다.',
+                'browser-tab-unavailable' => '탭을 열지 못했습니다. 다시 연결하고 있습니다.',
                 'browser-controller-unavailable' => '컴퓨터의 브라우저 연결을 기다리고 있습니다.',
                 _ => '화면을 받지 못했습니다. 자동으로 다시 시도하고 있습니다.',
               };
@@ -614,12 +614,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
                                       if (_error != null)
                                         _BrowserNotice(
                                           title: _frame == null
-                                              ? 'Mac 화면을 기다리는 중'
+                                              ? '컴퓨터 화면 대기 중'
                                               : _error!,
                                           detail: _frame == null
                                               ? (_reconnecting
                                                     ? '컴퓨터와 다시 연결하는 중'
-                                                    : '연결은 정상 · 화면만 받지 못했습니다')
+                                                    : '연결 정상 · 화면 수신 실패')
                                               : null,
                                           onRefresh: _retryFrame,
                                         ),
@@ -826,7 +826,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       );
       if (!mounted) return;
       widget.state.addBrowserDraft(_agentRef, draft);
-      setState(() => _result = '요소를 입력칸에 추가했습니다.');
+      setState(() => _result = '요소를 입력창에 추가했습니다.');
     } on Object catch (error) {
       if (!mounted) return;
       setState(
@@ -3547,7 +3547,7 @@ class _BrowserElementSheetState extends State<BrowserElementSheet> {
                 backgroundColor: context.iris.brand,
                 foregroundColor: context.iris.onBrand,
                 onPressed: _busy ? null : _send,
-                tooltip: _busy ? '넣는 중' : '입력칸에 넣기',
+                tooltip: _busy ? '넣는 중' : '입력창에 넣기',
               ),
             ],
           ),
@@ -4143,14 +4143,14 @@ class _DirectControls extends StatelessWidget {
                 ),
                 const Spacer(),
                 IrisButton(
-                  label: '못 하겠음',
+                  label: '할 수 없음',
                   height: 36,
                   expand: false,
                   onPressed: onUnable,
                 ),
                 const SizedBox(width: 8),
                 IrisButton(
-                  label: '다 했음',
+                  label: '완료',
                   icon: 'check',
                   height: 36,
                   tone: IrisButtonTone.primary,
@@ -4605,7 +4605,7 @@ class _SketchControls extends StatelessWidget {
                         letterSpacing: -0.17,
                       ),
                       decoration: InputDecoration(
-                        hintText: '그림과 함께 보낼 글',
+                        hintText: '스케치 설명',
                         counterText: '',
                         isDense: true,
                         filled: true,

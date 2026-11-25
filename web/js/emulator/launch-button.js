@@ -62,7 +62,7 @@ export function mountLaunchButton({ host, hasTab, onOpen }) {
     menu = document.createElement("div");
     menu.className = "emu-launch-menu";
     menu.setAttribute("role", "menu");
-    menu.append(item("기기 목록을 읽는 중…", "", null, true));
+    menu.append(item("기기 목록 불러오는 중…", "", null, true));
     const r = btn.getBoundingClientRect();
     menu.style.top = Math.round(r.bottom + 4) + "px";
     menu.style.left = Math.round(r.left) + "px";
@@ -74,7 +74,7 @@ export function mountLaunchButton({ host, hasTab, onOpen }) {
     if (menu !== mine) return;
     const devices = (res && res.ok && res.result && res.result.devices) || [];
     menu.replaceChildren();
-    if (!devices.length) { menu.append(item("발견된 기기가 없습니다", "", null, true)); return; }
+    if (!devices.length) { menu.append(item("기기가 없습니다", "", null, true)); return; }
     for (const d of devices) {
       menu.append(item(deviceLabel(d), [runtimeLabel(d.runtime), deviceReadiness(d)].filter(Boolean).join(" · "),
         () => { closeMenu(); onOpen(d); }, !deviceRunnable(d)));

@@ -29,7 +29,7 @@ function rig({ size = [0, 0], sizeFails = false } = {}) {
     return Promise.resolve({});
   };
   const viewport = createHiddenViewport({
-    isTabShown: () => false,
+    isTabShown: () => false, isBehindTab: () => false,
     shownStateKnown: () => true,
     hasExplicitDevice: () => false,
     navigationEpoch: () => 1,
@@ -86,7 +86,7 @@ function deferredRig() {
   };
   const state = { shown: false, explicit: false };
   const viewport = createHiddenViewport({
-    isTabShown: () => state.shown,
+    isTabShown: () => state.shown, isBehindTab: () => false,
     shownStateKnown: () => true,
     hasExplicitDevice: () => state.explicit,
     navigationEpoch: () => 1,
@@ -133,7 +133,7 @@ test("사람이 크기를 정한 탭의 표시 크기는 다른 탭에 물려줄
   const sent = [];
   const send = (method, params) => { sent.push({ method, params }); return Promise.resolve({}); };
   const viewport = createHiddenViewport({
-    isTabShown: () => false, shownStateKnown: () => true,
+    isTabShown: () => false, isBehindTab: () => false, shownStateKnown: () => true,
     hasExplicitDevice: (id) => id === 5, navigationEpoch: () => 1, now: () => Date.now(), isDisabled: () => false,
   });
   viewport.setDefaultViewport(1200, 800, 4);
@@ -146,7 +146,7 @@ test("retire 해제는 자동 viewport가 없으면 사람의 명시적 viewport
   const sent = [];
   const send = (method, params) => { sent.push({ method, params }); return Promise.resolve({}); };
   const viewport = createHiddenViewport({
-    isTabShown: () => false, shownStateKnown: () => true, hasExplicitDevice: () => true,
+    isTabShown: () => false, isBehindTab: () => false, shownStateKnown: () => true, hasExplicitDevice: () => true,
     navigationEpoch: () => 1, now: () => Date.now(), isDisabled: () => false,
   });
   await viewport.ensureReady(send, 7, "click");

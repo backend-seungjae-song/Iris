@@ -158,7 +158,7 @@ function card(item) {
   });
   if (wait && item.kind !== "waiting" && !item.expired) {
     const choices = item.kind === "approve" ? [item.approveLabel || "승인", item.denyLabel || "취소"]
-      : item.choices?.length ? item.choices : ["다 했어요", "못 하겠어요"];
+      : item.choices?.length ? item.choices : ["완료", "할 수 없음"];
     choices.forEach((choice, index) => {
       const button = addButton(actions, choice, () => {
         const sent = item.onAnswer?.(choice);
@@ -194,7 +194,7 @@ function render() {
   const focus = document.activeElement?.closest?.(".iris-notice");
   const focusAt = focus ? [focus, ...focus.querySelectorAll("button")].indexOf(document.activeElement) : -1;
   noticeList.replaceChildren();
-  if (waits.length) noticeList.append(el("div", "iris-notice-section", `답을 기다리는 것 · ${waits.length}`));
+  if (waits.length) noticeList.append(el("div", "iris-notice-section", `응답 대기 · ${waits.length}`));
   for (const item of waits) noticeList.append(card(item));
   if (rest.length && waits.length) noticeList.append(el("div", "iris-notice-section", "최근"));
   for (const item of (expanded ? rest : rest.slice(0, 1))) noticeList.append(card(item));

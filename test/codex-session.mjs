@@ -155,3 +155,11 @@ test("agent.list 가 준 항목이 있으면 codex pane 마다 pane.get 을 보�
   await attachCodexSessions(state, herdr, raw);
   assert.equal(state[0].sessionUuid, id);
 });
+
+test("Codex 제공자 별칭도 pane 세션을 채운다", async () => {
+  const id = "0199c2a6-3b4b-7d31-9b60-0a2f2d6a1b12";
+  const raw = [{ pane_id: "w1:p1", agent: "codex-cli", agent_session: { kind: "id", value: id } }];
+  const state = [{ paneId: "w1:p1", agent: "codex-cli" }];
+  await attachCodexSessions(state, { paneGet: async () => { throw new Error("pane.get 을 보내면 안 된다"); } }, raw);
+  assert.equal(state[0].sessionUuid, id);
+});

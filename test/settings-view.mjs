@@ -139,7 +139,7 @@ test("고른 창은 picked 순서대로 위 덩이에 서고 나머지는 아래
     },
   });
 
-  assert.equal(html.indexOf("⌥Tab 이 도는 순서") < html.indexOf("나중에 고른 창"), true);
+  assert.equal(html.indexOf("⌥Tab 전환 순서") < html.indexOf("나중에 고른 창"), true);
   assert.equal(html.indexOf("나중에 고른 창") < html.indexOf("먼저 고른 창"), true);
   assert.equal(html.indexOf("먼저 고른 창") < html.indexOf("고르지 않은 창"), true);
   assert.match(html, /class="km-sw-list km-sw-picked-list"/);
@@ -149,7 +149,7 @@ test("고른 창은 picked 순서대로 위 덩이에 서고 나머지는 아래
 test("고른 창이 없으면 위 덩이와 순서 안내를 그리지 않는다", () => {
   const html = markup([window({ picked: false })]);
 
-  assert.doesNotMatch(html, /km-sw-picked-list|⌥Tab 이 도는 순서/);
+  assert.doesNotMatch(html, /km-sw-picked-list|⌥Tab 전환 순서/);
   assert.match(html, /class="km-sw-list km-sw-rest-list"/);
 });
 
@@ -190,7 +190,7 @@ test("모든 행의 대체 사유가 같으면 목록 위에 한 번만 적는�
   });
 
   assert.equal((html.match(/class="km-note km-sw-list-note"/g) || []).length, 1);
-  assert.equal((html.match(/창 그림 없음/g) || []).length, 1);
+  assert.equal((html.match(/창 미리보기 없음/g) || []).length, 1);
   assert.equal((html.match(/class="km-sw-reason"/g) || []).length, 0);
 });
 
@@ -225,7 +225,7 @@ test("행마다 대체 사유가 다르면 해당 행에만 짧게 붙인다", (
   assert.doesNotMatch(html, /km-sw-list-note/);
   assert.equal((html.match(/class="km-sw-reason"/g) || []).length, 2);
   assert.match(html, /class="km-sw-reason">최소화<\/div>/);
-  assert.match(html, /class="km-sw-reason">창 그림이 너무 큼<\/div>/);
+  assert.match(html, /class="km-sw-reason">창 미리보기가 너무 큼<\/div>/);
 });
 
 test("최소화·안 보임·같은 제목 둘째 창의 배지와 전체 title을 남긴다", () => {
@@ -260,8 +260,8 @@ test("전환이 막힌 행은 흐리지 않고 전환 안 됨 배지와 안내�
   const html = markup([window({ switchBlocked: true })]);
 
   assert.match(html, />전환 안 됨<\/span>/);
-  assert.match(html, /macOS 가 그 데스크톱으로 안 넘어감/);
-  assert.match(html, /그 앱이 이 데스크톱에도 창을 갖고 있으면 그렇게 됨/);
+  assert.match(html, /macOS 가 그 데스크톱으로 전환하지 않음/);
+  assert.match(html, /그 앱의 창이 이 데스크톱에도 있으면 발생/);
   assert.doesNotMatch(html, /class="km-sw-row dim"/);
 });
 
@@ -322,7 +322,7 @@ test("창 그림이 있으면 행에는 앱 아이콘 대신 그림을 표시한
 
   assert.match(html, /class="km-sw-thumb" src="data:image\/png;base64,VEhVTUI="/);
   assert.doesNotMatch(html, /data:image\/png;base64,SUCONA==/);
-  assert.doesNotMatch(html, /창 그림 없음/);
+  assert.doesNotMatch(html, /창 미리보기 없음/);
 });
 
 test("화면 기록 권한이 granted면 권한 안내를 그리지 않는다", () => {
@@ -338,7 +338,7 @@ test("마지막 전환이 실패했으면 그 사실을 화면에 적는다", ()
   const failed = settingsMarkup({ section: "windows", items: [], toggles: [], screens: [], conflicts: [], changed: 0,
     switcher: { ...base, status: { permission: true, lastStep: { at: "x", how: "osascript", failed: "window-out-of-reach" } } } });
   assert.match(failed, /마지막 전환 실패/);
-  assert.match(failed, /데스크톱은 넘어갔는데 그 창이 안 뜸/);
+  assert.match(failed, /데스크톱 전환 후 창이 표시되지 않음/);
   assert.ok(!/window-out-of-reach/.test(failed), "사유를 그대로 보여주면 사람이 못 읽는다");
 
   const okOne = settingsMarkup({ section: "windows", items: [], toggles: [], screens: [], conflicts: [], changed: 0,
@@ -460,5 +460,5 @@ test("묶음 창을 같이 못 띄웠으면 그 수와 이유를 적는다", () 
     switcher: { windows: [window({ id: 1, picked: true })], picked: [{ id: 1 }],
       status: { permission: true, lastStep: { left: ["other-desktop", "other-desktop"] } } },
   });
-  assert.match(html, /묶음 중 2개 창은 다른 데스크톱에 있어서 같이 띄우지 못했습니다/);
+  assert.match(html, /묶음 중 2개 창은 다른 데스크톱에 있어서 함께 표시하지 못했습니다/);
 });

@@ -38,7 +38,15 @@ function createBrowserExtensions(deps) {
         throw new Error("확장 저장 파일 형식이 올바르지 않습니다.");
       }
     }
-  } catch (error) { if (error.code !== "ENOENT") throw error; }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      const backup = `${registryPath}.corrupt-${Date.now()}-${randomUUID()}`;
+      try { fs.renameSync(registryPath, backup); }
+      catch (backupError) { deps.error?.("[browser-extensions]", "손상된 확장 저장 파일 백업 실패", errorText(backupError)); }
+      records = {};
+      deps.error?.("[browser-extensions]", "확장 저장 파일을 읽지 못해 빈 목록으로 시작합니다.", errorText(error));
+    }
+  }
 
   function save() {
     fs.mkdirSync(root, { recursive: true });
@@ -161,8 +169,18 @@ function createBrowserExtensions(deps) {
       const src = String((params && params.src) || "");
       if (!/^https?:/i.test(src) || !needsExtensionWait(partition)) return;
       params.src = "";
-      heldByHost.set(host, { src, partition });
-      queueMicrotask(() => { if (heldByHost.get(host)?.src === src) heldByHost.delete(host); });
+      const held = { src, partition };
+      const pending = heldByHost.get(host) || [];
+      pending.push(held);
+      heldByHost.set(host, pending);
+      queueMicrotask(() => {
+        const current = heldByHost.get(host);
+        if (!current) return;
+        const index = current.indexOf(held);
+        if (index < 0) return;
+        current.splice(index, 1);
+        if (!current.length) heldByHost.delete(host);
+      });
     });
     host.on("did-attach-webview", (_event, guest) => {
       const held = heldByGuest.get(guest);
@@ -174,13 +192,23 @@ function createBrowserExtensions(deps) {
     });
   }
   if (typeof app.on === "function") {
+    function guestPartition(contents) {
+      try {
+        const partition = deps.partitionForSession?.(contents.session);
+        if (partition) return String(partition);
+      } catch {}
+      try { return String(contents.getLastWebPreferences?.()?.partition || ""); } catch { return ""; }
+    }
     app.on("web-contents-created", (_event, contents) => {
       if (!contents || typeof contents.getType !== "function") return;
       if (contents.getType() !== "webview") { observeHost(contents); return; }
       const host = contents.hostWebContents;
-      const held = host && heldByHost.get(host);
+      const pending = host && heldByHost.get(host);
+      const partition = guestPartition(contents);
+      const index = pending && (partition ? pending.findIndex((item) => item.partition === partition) : 0);
+      const held = pending && index >= 0 ? pending.splice(index, 1)[0] : null;
       if (!held) return;
-      heldByHost.delete(host);
+      if (!pending.length) heldByHost.delete(host);
       heldByGuest.set(contents, held);
     });
   }

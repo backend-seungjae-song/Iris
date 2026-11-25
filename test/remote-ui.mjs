@@ -292,8 +292,8 @@ test("PIN 때문에 멈춘 이전 사용자는 알림에서 원격 화면을 연
       type: "remote.state", status: "off", busy: false, pinConfigured: false,
       pausedForPin: true, devices: [],
     });
-    assert.equal(notice.title, "휴대폰 원격 제어가 멈췄습니다");
-    assert.equal(notice.body, "접속 PIN을 정하면 다시 켜집니다.");
+    assert.equal(notice.title, "휴대폰 원격 제어가 중지되었습니다");
+    assert.equal(notice.body, "접속 PIN을 설정하면 다시 켜집니다.");
     notice.action.run();
     activated({ id: nativeNotice.id });
     assert.equal(opened, 2);

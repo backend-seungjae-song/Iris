@@ -68,9 +68,9 @@ const FAILURE_WORDS = {
   "frame-did-not-land": "크기 조정 거부",
   "no-safe-grab-point": "잡을 곳 없음",
   "desktop-switch-failed": "데스크톱 전환 실패",
-  "window-did-not-follow": "창이 따라오지 않음",
+  "window-did-not-follow": "창 이동 안 됨",
   "window-gone": "창이 사라짐",
-  "desktop-missing": "그 데스크톱이 없음",
+  "desktop-missing": "데스크톱 없음",
   "time-budget": "시간 초과",
 };
 
@@ -220,7 +220,7 @@ function createHost(ctx) {
       const result = store.writeLayout(monitorCount, { windows: c.records, monitors: c.monitors }, { force: trigger === "shortcut" });
       if (result.written) await saveApps();
       if (trigger === "shortcut") {
-        centerNotice({ kind: "ok", title: "창 레이아웃 저장함", sub: `모니터 ${monitorCount}대 · 창 ${c.records.length}개` },
+        centerNotice({ kind: "ok", title: "창 레이아웃 저장 완료", sub: `모니터 ${monitorCount}대 · 창 ${c.records.length}개` },
           `저장했습니다: 모니터 ${monitorCount}대, 창 ${c.records.length}개`, "ok");
       }
       return { saved: !!result.written, reason: result.reason, monitorCount, windows: c.records.length };
@@ -228,7 +228,7 @@ function createHost(ctx) {
       state.consecutiveSaveFailures += 1;
       ctx.error && ctx.error("[desklayout] 저장 실패", e);
       if (state.consecutiveSaveFailures === CONSECUTIVE_SAVE_FAILURE_ALERT) notify("레이아웃 저장이 계속 실패하고 있습니다.", "err");
-      if (trigger === "shortcut") centerNotice({ kind: "err", title: "저장하지 못함", sub: e.message }, `저장하지 못했습니다: ${e.message}`, "err");
+      if (trigger === "shortcut") centerNotice({ kind: "err", title: "저장 실패", sub: e.message }, `저장하지 못했습니다: ${e.message}`, "err");
       return { saved: false, reason: "error" };
     }
   }
@@ -371,7 +371,7 @@ function createHost(ctx) {
     try {
       const c = await collect();
       if (!c.ok) {
-        centerNotice({ kind: "err", title: "복원하지 못함", sub: `창 목록 실패(${c.reason})` }, `복원하지 못했습니다: 창 목록 실패(${c.reason})`, "err");
+        centerNotice({ kind: "err", title: "복원 실패", sub: `창 목록 실패(${c.reason})` }, `복원하지 못했습니다: 창 목록 실패(${c.reason})`, "err");
         return { restored: false, reason: c.reason };
       }
       const { entries, missing } = planEntries(layout.latest, c);
@@ -408,7 +408,7 @@ function createHost(ctx) {
           .sort(([a], [b]) => (a === here ? -1 : b === here ? 1 : a - b))
           .map(([index, items]) => ({ index, items }));
         if (plan.length) {
-          centerNotice({ kind: "progress", title: "창 레이아웃 복원 중", sub: "마우스·키보드 잠시 금지" },
+          centerNotice({ kind: "progress", title: "창 레이아웃 복원 중", sub: "마우스·키보드 사용 금지" },
             "창을 옮기는 중입니다. 끝날 때까지 마우스와 키보드를 쓰지 마세요.", "info");
           const res = await mac.restoreAcrossDesktops({ order, visits: plan, budgetSeconds: MOVE_BUDGET_SECONDS });
           for (const v of plan) {
@@ -434,10 +434,10 @@ function createHost(ctx) {
       if (missing.length) lines.push(`실행 중이 아닌 창 ${missing.length}개`);
       // 가운데 알림은 요약. 옮기지 못한 창 이름 등 전체 내용은 Iris 알림 목록에도(가운데 알림은 몇 초 뒤 사라짐)
       const short = [`창 ${placed}개`];
-      if (failed.length) short.push(`못\u00a0옮긴\u00a0창 ${failed.length}개`);
-      if (missing.length) short.push(`안\u00a0열린\u00a0창 ${missing.length}개`);
+      if (failed.length) short.push(`이동\u00a0실패 ${failed.length}개`);
+      if (missing.length) short.push(`실행\u00a0안\u00a0됨 ${missing.length}개`);
       const partial = failed.length || skippedDesktop.length;
-      centerNotice({ kind: failed.length ? "warn" : "ok", title: "창 레이아웃 복원함", sub: short.join(" · ") }, lines.join("\n"), failed.length ? "warn" : "ok");
+      centerNotice({ kind: failed.length ? "warn" : "ok", title: "창 레이아웃 복원 완료", sub: short.join(" · ") }, lines.join("\n"), failed.length ? "warn" : "ok");
       if (hud && partial) notify(lines.join("\n"), failed.length ? "warn" : "ok");
       return { restored: true, placed, moved, failed: failed.length, missing: missing.length };
     } finally {

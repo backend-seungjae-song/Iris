@@ -98,31 +98,31 @@ export function initCapability(ctx) {
       },
       "target-pending": (m) => {
         if (m.kind === "element") {
-          if (!completePendingPick(m) && !m.ok) showToast(m.error || "요소 지목을 준비하지 못했습니다", { level: "err" });
+          if (!completePendingPick(m) && !m.ok) showToast(m.error || "요소 선택을 준비하지 못했습니다", { level: "err" });
           return;
         }
-        if (!m.ok) { showToast(m.error || "지목을 준비하지 못했습니다", { level: "err" }); return; }
+        if (!m.ok) { showToast(m.error || "선택을 준비하지 못했습니다", { level: "err" }); return; }
         if (m.kind === "tab") {
-          paste(noticeBlock("브라우저 탭 지목", [
+          paste(noticeBlock("브라우저 탭 선택", [
             `등록 구분자: ${m.delimiter}`,
             `탭: @${m.handle}${m.name ? "  " + m.name : ""}`,
             ...(m.title || m.url ? [`${m.title || ""}${m.title && m.url ? " · " : ""}${m.url || ""}`] : []),
             "이 메시지를 보내면 이 세션의 지정 탭으로 등록됩니다.",
           ]));
-          bNote.textContent = "채팅 입력에 탭 지목을 추가했습니다. 보내면 이 세션 대상으로 등록됩니다.";
+          bNote.textContent = "채팅 입력에 탭 선택을 추가했습니다. 보내면 이 세션 대상으로 등록됩니다.";
           return;
         }
         if (m.kind !== "group") return;
         const short = (u) => { try { const x = new URL(u); return x.host + (x.pathname !== "/" ? x.pathname.slice(0, 24) : ""); } catch { return String(u || "").slice(0, 40); } };
         const rows = (m.tabs || []).map((t) => `  @${t.handle}${t.name ? "  " + t.name : ""}`
           + (t.url ? `  — ${short(t.url)}` : "") + (t.showing ? "  (보임)" : ""));
-        paste(noticeBlock("브라우저 그룹 지목", [
+        paste(noticeBlock("브라우저 그룹 선택", [
           `등록 구분자: ${m.delimiter}`,
           `그룹: ${m.label} (${m.handle}) · 스페이스 ${m.space}`,
           rows.length ? "탭:\n" + rows.join("\n") : "탭: (없음)",
           "이 메시지를 보내면 이 세션의 지정 그룹으로 등록됩니다.",
         ]));
-        bNote.textContent = "채팅 입력에 그룹 지목을 추가했습니다. 보내면 이 세션 대상으로 등록됩니다.";
+        bNote.textContent = "채팅 입력에 그룹 선택을 추가했습니다. 보내면 이 세션 대상으로 등록됩니다.";
       },
     },
   };

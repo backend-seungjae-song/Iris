@@ -13,8 +13,9 @@ const TOKEN = { wcId: 7, documentGeneration: 2, debuggerGeneration: 3 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 // 메인 대역: 단위가 열려 있는 동안 단위 밖 명령은 단위 종료까지 기다림 (cdpQueues 와 같은 줄 서기)
-function fixture({ unitIdleMs = 60, openDialog = null } = {}) {
+function fixture({ unitIdleMs = 60, openDialog = null, data = {} } = {}) {
   const log = [];
+  const control = [];
   let unitOpen = false;
   let unitClosed = null;
   const execute = async (_target, input) => {
@@ -23,7 +24,7 @@ function fixture({ unitIdleMs = 60, openDialog = null } = {}) {
       if (!unitOpen) { unitOpen = true; unitClosed = Promise.withResolvers(); }
       log.push(`unit:${command}:${unit.phase}`);
       if (unit.phase === "last" || unit.phase === "end") { unitOpen = false; unitClosed.resolve(); }
-      return { ok: true, data: command };
+      return { ok: true, data: command in data ? data[command] : command };
     }
     log.push(`legacy:${command}:start`);
     if (unitOpen) await unitClosed.promise;
@@ -39,6 +40,8 @@ function fixture({ unitIdleMs = 60, openDialog = null } = {}) {
     raceDialog: async (_target, pending) => pending,
     currentDialog: () => openDialog,
     redact: async (value) => value,
+    markControl: (tabId) => control.push(`mark:${tabId}`),
+    releaseControl: (tabId) => control.push(`release:${tabId}`),
   });
   const ids = createHostIdentityAuthority();
   ids.allowSession("pane");
@@ -50,7 +53,7 @@ function fixture({ unitIdleMs = 60, openDialog = null } = {}) {
     commandId, callId: sequence, operation: "browser.executeWithDialog", identity: { session: "pane" },
     input: { tabId: "tab-1", targetToken: TOKEN, relay },
   });
-  return { log, call, execution, isOpen: () => unitOpen };
+  return { log, control, call, execution, isOpen: () => unitOpen };
 }
 
 const withTimeout = (promise, ms, label) => Promise.race([promise,
@@ -125,4 +128,30 @@ test("확인 창이 떠 있어도 dialog·dialogs 명령 단위의 모든 호출
     assert.equal(ended.commandState, "completed", `${name} end`);
   }
   assert.equal(f.execution.serial.size(), 0);
+});
+
+// 사람이 로그인하는 동안 그 탭이 AI 조작 중으로 남으면 저장된 계정 자동 완성이 막힘
+test("login 단위가 사람에게 넘기는 결과로 끝나면 끝난 뒤 그 탭의 조작 표시를 지운다", async () => {
+  const f = fixture({ data: { "login.fill": { ok: false, needUser: true, reason: "no-saved" } } });
+  await f.call("boot:1/l", { command: "login.fill", args: {}, unit: { command: "login", phase: "run" } });
+  await f.call("boot:1/l", { command: "cdp.sync", args: {}, unit: { command: "login", phase: "run" } });
+  assert.deepEqual(f.control, ["mark:tab-1", "mark:tab-1"], "단위가 끝나기 전에는 지우지 않음");
+  await f.call("boot:1/l", { command: "result.redact", args: {}, unit: { command: "login", phase: "last" } });
+  assert.deepEqual(f.control, ["mark:tab-1", "mark:tab-1", "mark:tab-1", "release:tab-1"]);
+});
+
+test("login 단위가 계정을 채우고 끝나면 조작 표시를 남긴다", async () => {
+  const f = fixture({ data: { "login.fill": { ok: true, filled: true } } });
+  await f.call("boot:1/l", { command: "login.fill", args: {}, unit: { command: "login", phase: "run" } });
+  await f.call("boot:1/l", { command: "result.redact", args: {}, unit: { command: "login", phase: "last" } });
+  assert.deepEqual(f.control, ["mark:tab-1", "mark:tab-1"]);
+});
+
+test("명령이 탭 잠금을 보유하는 동안 다이얼로그 조회와 응답이 진행된다", async () => {
+  const { HOST_OPERATION_DEFINITIONS: defs } = await import("../server/mcp-host/operations.js");
+  const context = { input: { tabId: "tab-1" } };
+  const held = defs["browser.executeWithDialog"].locks(context);
+  for (const name of ["browser.dialogState", "browser.dialogAnswer"]) {
+    assert.equal(defs[name].locks(context).some(key => held.includes(key)), false);
+  }
 });

@@ -107,10 +107,10 @@ class IrisAgentTile extends StatelessWidget {
 
 String _label(String status) => switch (status) {
   'working' => '작업 중',
-  'done' => '작업 완료',
-  'blocked' => '허용 대기',
+  'done' => '완료',
+  'blocked' => '답 필요',
   'question' => '질문 있음',
-  'idle' => '비활성화',
+  'idle' => '대기',
   _ => '상태 알 수 없음',
 };
 

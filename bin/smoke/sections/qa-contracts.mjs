@@ -86,10 +86,13 @@ if (!existsSync(homeTools)) {
     authz = T("tools/qa_authorize.py"); rollup = T("tools/qa_rollup.py");
     measure = T("tools/qa_measure.py"); val = T("tools/qa_manifest_validate.py");
     planSchema = T("specs/contracts/qa-plan.schema.json");
-  } catch { derive = grade = authz = rollup = measure = val = planSchema = ""; }
+  } catch (error) {
+    console.log(`  못 잼 (skipped: ${error.code || error.message}) — 홈 QA 도구 계약 21건`);
+    return;
+  }
 
   check("파생은 계획에서 단계를 만든다 — 로그에서 만들면 미수행이 사라진다", () =>
-    /반대 방향\(장부에서 단계를 만든다\)으로/.test(derive)
+    /반대 방향\(기록에서 단계를 만든다\)으로/.test(derive)
     && /not_run\.append/.test(derive));
   check("판정은 assertion에서만 나온다", () =>
     /`ok`는 명령이 실행됐다는 뜻이지 QA 판정이 아니다/.test(derive)
@@ -111,14 +114,14 @@ if (!existsSync(homeTools)) {
   check("검사를 통과하지 않은 회차는 등급이 없다", () =>
     /"mechanical_gate": "UNGRADED"/.test(grade));
   check("영수증 없는 통과·미이행·열린 호출을 막는다", () =>
-    /영수증 없는 통과/.test(grade) && /계획의 단계를 다 밟지 못했다/.test(grade)
-    && /끝을 못 본 호출이 있다/.test(grade));
+    /영수증 없는 통과/.test(grade) && /계획의 단계를 다 실행하지 못했다/.test(grade)
+    && /완료를 확인하지 못한 호출이 있다/.test(grade));
   check("권한은 붙어 봐서 상대 주소를 확인한다", () =>
     /s\.getpeername\(\)/.test(authz) && /is_loopback/.test(authz));
   check("나가지 않기로 한 것이 아니라 나가지 않았음을 본다", () =>
     /def probe_egress/.test(authz) && /"clean": not external/.test(authz));
-  check("장부를 안 주면 발급하지 않는다", () =>
-    /장부를 주지 않아 '나가지 않았음'을 재지 못했다/.test(authz));
+  check("기록을 안 주면 발급하지 않는다", () =>
+    /기록을 주지 않아 '나가지 않았음'을 확인하지 못했다/.test(authz));
   check("검사기가 규칙 권한의 전제를 실제로 본다", () =>
     /def check_authorization/.test(val)
     && /선언값으로 자기 자신을 허가한 것이다/.test(val)

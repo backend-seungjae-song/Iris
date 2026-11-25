@@ -234,9 +234,9 @@ test("안 쓰는 worktree 는 접힌 묶음에 모으고 눌러야 보인다", (
   assert.ok(groupOf(html,`${WT}/busy`));
   assert.ok(groupOf(html,`${WT}/made`));
   for(const name of ['old-a','old-b']) assert.doesNotMatch(html,new RegExp(`data-wt-path="${WT}/${name}"`));
-  assert.match(html,/data-worktree-action="idle-toggle"[^>]*aria-expanded="false">.*안 쓰는 worktree 2</);
+  assert.match(html,/data-worktree-action="idle-toggle"[^>]*aria-expanded="false">.*미사용 worktree 2</);
   const shown=showIdle(spaceId);
-  assert.match(shown,/aria-expanded="true">.*안 쓰는 worktree 2</);
+  assert.match(shown,/aria-expanded="true">.*미사용 worktree 2</);
   for(const name of ['old-a','old-b']) assert.ok(groupOf(shown,`${WT}/${name}`));
   assert.doesNotMatch(showIdle(spaceId),new RegExp(`data-wt-path="${WT}/old-a"`));
 });
@@ -247,7 +247,7 @@ test("대기 중인 세션은 같은 대화가 마지막으로 실행한 worktre
     [{paneId:'quiet',sessionUuid:'chat-1',cwd:'/fixture/last',status:'idle'}],{folder:'/fixture/last'});
   assert.match(groupOf(html,`${WT}/kept`),/data-target="quiet"/);
   assert.doesNotMatch(groupOf(html,'/fixture/last'),/data-target="quiet"/);
-  assert.match(html,/안 쓰는 worktree 1</,'다른 대화의 기록만 있는 worktree 는 안 쓰는 묶음');
+  assert.match(html,/미사용 worktree 1</,'다른 대화의 기록만 있는 worktree 는 안 쓰는 묶음');
   const moved=setup([primary('/fixture/moved'),wt('kept',{lastUsers:last}),wt('now',{running:[{kind:'agent',paneId:'quiet'}]})],
     [{paneId:'quiet',sessionUuid:'chat-1',cwd:'/fixture/moved',status:'working'}],{folder:'/fixture/moved'}).html;
   assert.match(groupOf(moved,`${WT}/now`),/data-target="quiet"/);
@@ -260,7 +260,7 @@ test("여러 worktree 에 작업 기록으로만 이어진 세션은 기본 묶�
     [{paneId:'audit',sessionUuid:'s',cwd:'/fixture/linked',status:'working'}],{folder:'/fixture/linked'});
   assert.match(groupOf(html,'/fixture/linked'),/data-target="audit"/);
   for(const name of ['qa-a','qa-b']) assert.doesNotMatch(html,new RegExp(`data-wt-path="${WT}/${name}"`));
-  assert.match(html,/안 쓰는 worktree 2</);
+  assert.match(html,/미사용 worktree 2</);
   const shown=showIdle(spaceId);
   for(const name of ['qa-a','qa-b']) assert.ok(groupOf(shown,`${WT}/${name}`));
 });

@@ -8,7 +8,7 @@
 //
 // 제공 API
 //   initAgents, Agents 렌더·reveal·이름변경 command, 이름변경 여부 query와 변경 표시 setter.
-//   explorer/tree.js 의 registerSpaceAgents 에 스페이스 id → { count, open, html } 과 이름 편집 중 여부를 등록한다.
+//   explorer/tree.js 의 registerSpaceAgents 에 스페이스 id → { count, open, html }를 등록한다.
 //
 // 의존 대상
 //   herdr snapshot·pane/space query는 herdr/state에서, 메뉴·입력·확인은 explorer/context-menu에서
@@ -29,7 +29,7 @@ import { agentMark } from "../core/glyphs.js";
 import { STATE_LABEL, agentState } from "../core/agent-state.js";
 import { createItems } from "../panel/herdr-tabs.js";
 import {
-  askConfirm, askText, registerAgentRenderer, registerSpaceRowClick, showCtx, spaceCtxItems,
+  askConfirm, askText, registerSpaceRowClick, showCtx, spaceCtxItems,
 } from "../explorer/context-menu.js";
 import { registerSpaceAgents } from "../explorer/tree.js";
 import {
@@ -58,9 +58,8 @@ export function initAgents(deps) {
     getIsLocal, getCurTarget, orderedSpaces, spk, saveCollapsed, selectSession,
     copyText, showToast, getSelectedSpaceId, collapsed, renderSpaces } = deps);
   agentList = $("#space-list");
-  registerAgentRenderer(renderAgents);
   registerSpaceRowClick(spaceRowClicked);
-  registerSpaceAgents({ rows: spaceAgents, hold: () => !!renaming });
+  registerSpaceAgents({ rows: spaceAgents });
 
   agentList.addEventListener("click", (e) => {
     if (e.target.closest(".rename-input")) return;
@@ -177,12 +176,12 @@ export function initAgents(deps) {
       ...(local && a.workspaceId ? createItems(a.workspaceId) : []),
       { sep: true },
       { label: why ? `접기 불가: ${why}` : "이 세션 접기(보관)", disabled: !local || !!why, act: async () => {
-        const busy = a.status === "working" ? "\n지금 작업 중입니다. 진행하던 것이 끊깁니다." : "";
-        if (!(await askConfirm(`"${nm}"을(를) 접을까요?${busy}\n마지막 화면 100줄과 되살릴 열쇠를 저장한 뒤 닫습니다.`))) return;
+        const busy = a.status === "working" ? "\n지금 작업 중입니다. 진행 중인 작업이 중단됩니다." : "";
+        if (!(await askConfirm(`"${nm}"을(를) 접을까요?${busy}\n마지막 화면 100줄과 세션 ID를 저장한 뒤 닫습니다.`))) return;
         wsSend({ type: "archive.agent", paneId: a.paneId });
       } },
       { label: "이 세션 닫기", danger: true, disabled: !local || !a.paneId || !a.terminalId, act: async () => {
-        if (!(await askConfirm(`"${nm}"을(를) 닫을까요?`, "되돌릴 수 없습니다. 접기와 달리 되살릴 열쇠를 남기지 않습니다."))) return;
+        if (!(await askConfirm(`"${nm}"을(를) 닫을까요?`, "되돌릴 수 없습니다. 접기와 달리 세션 ID를 저장하지 않습니다."))) return;
         wsSend({ type: "pane-close", paneId: a.paneId, terminalId: a.terminalId });
       } },
     ]);
@@ -197,7 +196,6 @@ function toggleAgentBranch(key) {
 
 // 목록 전체를 다시 그린다. 스페이스 줄을 그리는 쪽이 이 모듈의 줄을 받아 가므로 그쪽을 부른다.
 export function renderAgents() {
-  if (renaming) return; // 인라인 이름편집 중엔 리렌더 보류(포커스 유지)
   renderSpaces();
 }
 
@@ -214,8 +212,8 @@ function spaceRowClicked(spaceId, focus) {
   const id = spk(spaceId);
   const wasOpen = !collapsed.groups.has(id);
   const moved = spaceId !== getSelectedSpaceId();
-  focus(spaceId);
-  if (!agentsOfSpace(spaceId).length) return;
+  if (!agentsOfSpace(spaceId).length) { focus(spaceId); return; }
+  if (moved) focus(spaceId);
   if (moved && wasOpen) return;
   if (wasOpen) collapsed.groups.add(id); else collapsed.groups.delete(id);
   saveCollapsed();
@@ -264,7 +262,7 @@ function spaceAgents(spaceId) {
         <span class="srow-name">${esc(label)}</span>
         ${a.cross ? `<span class="x-badge">×</span>` : ""}
         ${agentMark(a.agent)}
-        ${chg ? `<span class="srow-chg" title="돌아와 보니 바뀐 세션"></span>` : ""}
+        ${chg ? `<span class="srow-chg" title="확인하지 않은 변경 있음"></span>` : ""}
       </div>${nativeRows}`;
     return { agent: a, root: root.agent, html };
   });
@@ -357,16 +355,19 @@ export function startInlineRename() {
   const nameEl = row?.querySelector(".srow-name");
   if (!nameEl) return;
   const cur = nameOf(a);
-  renaming = curTarget;
+  if (renaming?.isConnected) return;
+  renaming = row;
+  row.dataset.inlineEdit = "";
   nameEl.innerHTML = `<input class="rename-input" value="${esc(cur)}" />`;
   const inp = nameEl.querySelector("input");
-  inp.focus(); inp.select();
+  inp.focus({ preventScroll: true }); inp.select();
   let closed = false;
   const finish = (commit) => {
     if (closed) return; closed = true;
     const v = inp.value.trim();
+    delete row.dataset.inlineEdit;
     renaming = null;
-    if (commit && v && v !== cur) wsSend({ type: "tab.rename", tabId: a.tabId, label: v });
+    if (commit && agentByPane(curTarget)?.tabId === a.tabId && v && v !== cur) wsSend({ type: "tab.rename", tabId: a.tabId, label: v });
     renderAgents();
   };
   inp.addEventListener("keydown", (ev) => {
@@ -377,5 +378,5 @@ export function startInlineRename() {
   inp.addEventListener("blur", () => finish(true));
 }
 
-export function isAgentRenaming() { return !!renaming; }
+export function isAgentRenaming() { return !!renaming?.isConnected; }
 export function setChangedInfo(value) { changedInfo = value; }

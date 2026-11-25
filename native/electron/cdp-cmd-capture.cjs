@@ -224,7 +224,7 @@ function createCaptureCommands({
           }
         }
         }
-        if (!png || !png.length) throw new Error("이 탭은 지금 화면에 그려지지 않아 찍을 수 없습니다 — 그 탭을 앞으로 한 번 꺼내고 다시 시도하세요.");
+        if (!png || !png.length) throw new Error("이 탭은 지금 화면에 그려지지 않아 찍을 수 없습니다. 그 탭을 화면에 표시한 뒤 다시 시도하세요.");
         // 녹화 경로는 직전 프레임과 같으면 파일을 만들지 않는다. 만들어 두고 나중에 제거하는
         // 방식은 디스크와 정리 부담이 그대로라, 촬영 시점에 판정한다.
         if (args.sameAs && samePng(String(args.sameAs), png)) {
@@ -243,7 +243,7 @@ function createCaptureCommands({
           ...(dpr > deviceRatio ? { requestedDpr: dpr, dprNote: `이 화면의 기기 배율 ${deviceRatio}까지만 찍힘` } : {}),
           ...(fullVp ? { fullPage: fullVp } : {}),
           marked: drew ? drew.found : 0, missing: drew ? drew.missing : [], caption: caption || undefined,
-          zoomRestored: zoom.on ? `${zoom.bz || zoom.hz || zoom.bt} (원래대로 되돌림 — 배율은 dpr을 쓰세요)` : undefined };
+          zoomRestored: zoom.on ? `${zoom.bz || zoom.hz || zoom.bt} (원래대로 되돌림. 배율은 dpr을 쓰세요)` : undefined };
       } finally {
         if (drew) { try { await send("Runtime.evaluate", { expression: "(()=>{const n=document.getElementById('__ac_marks__');if(n)n.remove();return 1})()" }); } catch {} }
         if (zoom.on) await setZoom(send, zoom);
@@ -282,7 +282,7 @@ function createCaptureCommands({
       for (const s of want) {
         const key = String(s).trim();
         const wh = PRESETS[key] || (/^(\d+)x(\d+)$/.test(key) ? key.split("x").map(Number) : null);
-        if (!wh) { shots.push({ size: key, error: "모르는 크기 — 모바일·패드·데스크톱 또는 1024x768 형식" }); continue; }
+        if (!wh) { shots.push({ size: key, error: "모르는 크기. 모바일·패드·데스크톱 또는 1024x768 형식" }); continue; }
         await deviceEmulation.apply(wc, { width: wh[0], height: wh[1], dpr: Number(args.dpr) || 0 });
         await new Promise((r) => setTimeout(r, Number(args.settle) || 700));  // 반응형 전환이 끝날 틈
         const shot = await cdpExecRaw(webContentsMod(wc), wc.id, "screenshot", {

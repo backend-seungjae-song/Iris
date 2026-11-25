@@ -12,6 +12,7 @@ import http from "node:http";
 import { createSessionResolver, chooseHerdrPane } from "./iris-session.mjs";
 import readline from "node:readline";
 import fs from "node:fs";
+import lockfile from "proper-lockfile";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { stateHome } from "../server/state-home.cjs";
@@ -41,7 +42,7 @@ async function call(cmd, args = {}) {
     if (args.tab == null) delete args.tab;
     const payload = JSON.stringify({ cmd, args, session });
     const req = http.request(
-      { host: "127.0.0.1", port: PORT, path: "/browser-cmd", method: "POST",
+      { host: "127.0.0.1", port: PORT, path: "/browser-cmd", method: "POST", signal: AbortSignal.timeout(35 * 60_000),
         headers: { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
       (res) => {
         let body = "";
@@ -75,14 +76,14 @@ function absorbMoments(result) {
 const MAX_DEVICES = appSurface.MAX_DEVICES;
 // 요소 지정은 snapshot ref(@e5)와 CSS 선택자를 모두 받는다. 둘 다 없으면 서버가 거부한다.
 const TARGET = {
-  ref: { type: "string", description: "browser_snapshot이 준 참조(@e5). 스냅샷을 뜬 직후에만 유효." },
+  ref: { type: "string", description: "browser_snapshot이 준 참조(@e5). 스냅샷을 받은 직후에만 유효." },
   selector: { type: "string", description: "CSS 선택자. 스냅샷 없이 바로 쓸 수 있고 페이지가 바뀌어도 유효." },
 };
 const pickTarget = (a) => (a.ref ? { ref: String(a.ref) } : { sel: String(a.selector || "") });
 
 const TOOLS = [
   { name: "notify",
-    desc: "기다리지 않고 결과를 알린다. 같은 key는 기존 알림을 갱신하고, 짧은 시간에 많이 보내면 한 알림으로 합쳐진다. 사람이 확인할 보고서·화면을 탭에 띄워 두었으면 review:true와 그 tab을 준다. 그 알림은 사람이 닫을 때까지 남고, Iris가 뒤에 있으면 macOS 알림도 뜬다. 화면은 사람이 [그 탭으로]를 누를 때만 바뀐다. 이동하거나 닫은 것은 승인이 아니고 이 도구로 돌아오지도 않는다.",
+    desc: "기다리지 않고 결과를 알린다. 같은 key는 기존 알림을 갱신하고, 짧은 시간에 많이 보내면 한 알림으로 합쳐진다. 사람이 확인할 보고서·화면을 탭에 열어 두었으면 review:true와 그 tab을 준다. 그 알림은 사람이 닫을 때까지 남고, Iris가 뒤에 있으면 macOS 알림도 뜬다. 화면은 사람이 [그 탭으로]를 누를 때만 바뀐다. 이동하거나 닫은 것은 승인이 아니고 이 도구로 돌아오지도 않는다.",
     schema: {
       level: { type: "string", enum: ["ok", "info", "warn", "err"], description: "알림 수준" },
       title: { type: "string", maxLength: 60, description: "알림 제목(최대 60자)" },
@@ -91,7 +92,7 @@ const TOOLS = [
       tab: { type: "string", description: "관련 탭" },
       device: { type: "string", description: "관련 기기" },
       key: { type: "string", maxLength: 100, description: "같은 알림을 갱신할 키" },
-      review: { type: "boolean", description: "사람이 확인할 화면을 띄운 탭 알림. tab 필수" },
+      review: { type: "boolean", description: "사람이 확인할 화면을 연 탭의 알림. tab 필수" },
     }, req: ["level", "title"],
     run: async (a, C) => C("notify", { level: a.level, title: String(a.title), body: a.body, detail: a.detail, tab: a.tab,
       device: a.device ? (await appSurface.simTarget(a.device)) || a.device : a.device, key: a.key, review: a.review === true }) },
@@ -110,8 +111,8 @@ const TOOLS = [
     run: (a, C) => C("progress", { op: a.op, title: a.title, p: a.p, id: a.id, result: a.result, detail: a.detail, tab: a.tab, ttl: a.ttl }) },
   { name: "browser_snapshot",
     desc: "현재 페이지의 접근성 스냅샷(요소 참조 @e1… 포함). 무엇이 있는지 모를 때 가장 먼저 쓴다. "
-      + "큰 화면은 바이트 예산에서 끊기고 이어 볼 커서를 함께 준다 — 전체를 다시 받지 말고 커서로 잇거나 "
-      + "role·name·region으로 좁혀라. 끊겨도 잘린 구간의 경고·상태·제목은 요약으로 따라온다.",
+      + "큰 화면은 바이트 상한에서 잘리고 이어 볼 커서를 함께 준다. 전체를 다시 받지 말고 커서로 이어 받거나 "
+      + "role·name·region으로 좁혀라. 잘려도 그 구간의 경고·상태·제목은 요약으로 함께 온다.",
     schema: {
       role: { type: "string", description: "이 역할만(button·heading·alert·text input…). 부분 일치." },
       name: { type: "string", description: "이 이름을 포함하는 것만. 부분 일치." },
@@ -134,12 +135,12 @@ const TOOLS = [
   // 경우에 쓰이므로 두 단계로 나눈다. plan으로 무엇이 어디에 들어갈지 보고, 그 묶음
   // 그대로만 commit된다(값이 한 자라도 바뀌면 표가 달라지므로 토큰이 어긋난다).
   { name: "browser_bulk_fill",
-    desc: "지금 커서 자리에서부터 값을 한 칸씩 연달아 넣는다. 시트 열처럼 같은 동작을 수십·수백 번 반복해야 할 때만 쓴다 — "
+    desc: "지금 커서 위치부터 값을 한 칸씩 연달아 넣는다. 시트 열처럼 같은 동작을 수십·수백 번 반복해야 할 때만 쓰고, "
       + "그 외에는 browser_fill 을 쓴다. 먼저 커서를 넣을 첫 칸에 클릭으로 두고, action:\"plan\"으로 무엇이 들어갈지 확인한 뒤 "
       + "받은 token으로 action:\"commit\"한다. 로컬 주소는 그대로 들어가고, 원격 주소는 사람에게 보여 승인받은 뒤에만 들어간다.",
     schema: {
       action: { type: "string", enum: ["plan", "commit"], description: "기본 plan" },
-      tab: { type: "string", description: "넣을 탭. 반드시 명시한다 — 물려받지 않는다." },
+      tab: { type: "string", description: "넣을 탭. 반드시 명시한다(고정 탭을 쓰지 않는다)." },
       values: { type: "array", items: { type: "string" }, description: "칸 하나에 하나씩, 순서대로." },
       advance: { type: "string", enum: ["Enter", "Tab", "ArrowDown", "ArrowRight"], description: "한 칸 친 뒤 이동할 방향키. 기본 Enter(아래)." },
       token: { type: "string", description: "commit에 필요. plan이 준 값 그대로." },
@@ -150,7 +151,7 @@ const TOOLS = [
     req: ["tab", "values"],
     run: async (a, C) => {
       const tab = String(a.tab || "").trim();
-      if (!tab) return { ok: false, error: "tab 을 명시하세요 — 대량 기입은 어느 탭인지 물려받지 않습니다." };
+      if (!tab) return { ok: false, error: "tab 을 명시하세요. 대량 기입은 고정 탭을 쓰지 않습니다." };
       const values = Array.isArray(a.values) ? a.values.map((v) => String(v ?? "")) : [];
       const advance = String(a.advance || "Enter");
       const where = "web:" + tab;
@@ -172,7 +173,7 @@ const TOOLS = [
         const shot = await C("screenshot", { tab });
         return { ok: true, data: { ...preview, token,
           before: (shot && shot.data && (shot.data.shot || shot.data.path)) || null,
-          note: "커서가 첫 칸에 있는지 이 사진으로 확인하고, 같은 인자에 token을 실어 commit하세요." } };
+          note: "커서가 첫 칸에 있는지 이 사진으로 확인하고, 같은 인자에 token을 넣어 commit하세요." } };
       }
 
       if (String(a.token || "") !== token) {
@@ -209,7 +210,7 @@ const TOOLS = [
   { name: "browser_check", desc: "체크박스·라디오를 원하는 상태로 맞춘다. 클릭과 달리 지금 상태를 읽고 필요할 때만 누르므로, 같은 명령을 두 번 돌려도 결과가 같다.",
     schema: { ...TARGET, on: { type: "boolean", description: "켤지 여부. 생략하면 켠다. 라디오는 끌 수 없다" } },
     run: (a, C) => C("check", { ...pickTarget(a), value: a.on === false ? false : true }) },
-  { name: "browser_pdf", desc: "지금 페이지를 인쇄 레이아웃 그대로 PDF로 저장한다. 스크린샷과 다른 자리다 — 스크린샷은 화면에 보이는 픽셀이라 스크롤 밖이 잘리고 인쇄 전용 스타일이 안 걸린다. 여러 장짜리 표·주문서·영수증을 증거로 남길 때 쓴다.",
+  { name: "browser_pdf", desc: "지금 페이지를 인쇄 레이아웃 그대로 PDF로 저장한다. 스크린샷과 용도가 다르다. 스크린샷은 화면에 보이는 픽셀이라 스크롤 밖이 잘리고 인쇄 전용 스타일이 안 걸린다. 여러 장짜리 표·주문서·영수증을 증거로 남길 때 쓴다.",
     schema: { path: { type: "string", description: "저장 경로. 생략하면 앱 폴더에 만든다" },
       landscape: { type: "boolean", description: "가로 방향" },
       background: { type: "boolean", description: "배경색·배경이미지 포함(기본 포함). 끄면 표 음영이 사라진다" },
@@ -269,7 +270,7 @@ const TOOLS = [
     run: (a, C) => C("bg_eval", { url: String(a.url), expression: String(a.expression),
       ...(a.profile ? { profile: String(a.profile) } : {}), ...(a.out ? { out: String(a.out) } : {}) }) },
   { name: "figma_dump",
-    desc: "Figma 파일을 공유 숨은 탭에서 열어 노드와 그 아래 전체(깊이 제한 없음)를 JSON 파일로 저장한다. 크기·레이아웃·채우기·텍스트 스타일·컴포넌트·CSS 를 담는다. 이미지 원본, 디자이너가 내보내기를 지정한 노드, 아이콘은 같은 이름의 -assets 폴더에 파일로 저장하고 목록은 assets.json 에 적는다(실패한 항목은 errors).",
+    desc: "Figma 파일을 공유 숨은 탭에서 열어 노드와 그 아래 전체(깊이 제한 없음)를 JSON 파일로 저장한다. Figma 디자인대로 화면을 만들거나 맞출 때 수치의 원본으로 쓴다. 크기·간격·색·글자는 이 JSON 에서 읽고 스크린샷을 보고 짐작하지 않는다. 노드마다 위치와 크기(x, y, width, height), 자식 배치(layoutMode, padding*, itemSpacing), 화면이 커질 때 늘어나는지(layoutSizingHorizontal·Vertical 의 FIXED·HUG·FILL, constraints), 색·테두리·모서리·그림자(fills, strokes, cornerRadius, effects), 글자(characters, fontName, fontSize, lineHeight), 요약(css)이 있고, 최상위 variables·styles 에 디자인 토큰이 있다. 파일이 수 MB 라 jq 나 스크립트로 필요한 노드만 뽑아 읽는다. 이미지 원본, 디자이너가 내보내기를 지정한 노드, 아이콘은 같은 이름의 -assets 폴더에 파일로 저장하고 목록은 assets.json 에 적는다(실패한 항목은 errors).",
     schema: { url: { type: "string", description: "Figma 파일 주소. node-id 가 있으면 그 노드" },
       node: { type: "string", description: "노드 id(예: 163:17). url 에 node-id 가 없을 때" },
       profile: { type: "string", description: "Figma 에 로그인된 칸(프로필) 이름" },
@@ -280,9 +281,9 @@ const TOOLS = [
       ...(a.profile ? { profile: String(a.profile) } : {}), ...(a.export ? { export: String(a.export) } : {}),
       ...(a.assets === false ? { assets: false } : {}) }) },
   { name: "browser_screenshot",
-    desc: "화면을 PNG로 저장한다. mark로 볼 곳에 번호·테두리·설명을 얹을 수 있다. element면 해당 요소만, full이면 전체 페이지를 찍는다. 이 이미지는 QA 근거에 포함되지 않는다.",
+    desc: "화면을 PNG로 저장한다. mark로 볼 곳에 번호·테두리·설명을 표시할 수 있다. element면 해당 요소만, full이면 전체 페이지를 찍는다. 이 이미지는 QA 근거에 포함되지 않는다.",
     schema: {
-      caption: { type: "string", description: "이 장면이 증명하는 것 한 줄(화면 아래 띠로 박힌다)" },
+      caption: { type: "string", description: "이 장면이 증명하는 것 한 줄(화면 아래 띠에 표시된다)" },
       mark: { type: "array", description: "표시할 곳들. 각 항목 {sel|ref, label?, color?} — ref는 snapshot의 그 ref 그대로",
         items: { type: "object", properties: { sel: { type: "string" }, ref: { type: "string" }, label: { type: "string" }, color: { type: "string" } } } },
       mask: { type: "array", description: "가릴 곳(비밀·개인정보). 선택자 문자열 배열", items: { type: "string" } },
@@ -315,20 +316,20 @@ const TOOLS = [
   { name: "browser_trace",
     desc: "이 세션이 지금까지 한 조작(클릭·입력·이동)의 기록. 보고서 단계로 그대로 옮겨 쓸 수 있다. clear를 주면 읽고 비운다.",
     schema: { clear: { type: "boolean" } }, run: (a, C) => C("trace", { clear: !!a.clear }) },
-  { name: "browser_observe", desc: "닫힌 루프 QA: 스크린샷 + 콘솔 오류 + 예외 + 네트워크 실패 + 뜬 대화상자를 한 번에. 뭔가 안 될 때 원인을 찾는 첫 도구.",
+  { name: "browser_observe", desc: "스크린샷·콘솔 오류·예외·네트워크 실패·열린 대화상자를 한 번에 본다. 동작하지 않을 때 원인을 찾으려고 먼저 쓴다.",
     schema: { limit: { type: "number" }, level: { type: "string", enum: ["error", "warn", "all"] },
       screenshot: { type: "boolean", description: "false면 스크린샷 생략" } },
     run: (a, C) => C("observe", { limit: a.limit, level: a.level, screenshot: a.screenshot }) },
-  { name: "browser_dialogs", desc: "alert·confirm 자동 응답을 무장/해제한다. 기본은 해제 — 사람이 보고 누른다. 'ok'·'cancel'은 이후 전부, 'ok,cancel'처럼 쉼표로 주면 뜨는 순서대로 답하고 다 쓰면 다시 사람에게 넘긴다.",
+  { name: "browser_dialogs", desc: "alert·confirm 자동 응답을 켜거나 끈다. 기본은 꺼짐이고 사람이 보고 누른다. 'ok'·'cancel'은 이후 전부, 'ok,cancel'처럼 쉼표로 주면 뜨는 순서대로 답하고 다 쓰면 다시 사람에게 넘긴다.",
     schema: { plan: { type: "string", description: "off · ok · cancel · 쉼표로 이은 순서(예: ok,cancel,ok)" },
       promptText: { type: "string", description: "prompt 대화상자에 넣을 값" } },
     req: ["plan"], run: (a, C) => C("dialogs", { plan: String(a.plan), text: a.promptText }) },
   // 네이티브 창은 CDP 밖이다. 파일 선택·저장 패널은 뜨는 순간 사람이 누를 때까지 전부 멈춘다.
-  { name: "browser_upload", desc: "페이지에 로컬 파일을 넣는다(네이티브 파일 선택 창을 띄우지 않는다). 파일 입력칸을 알면 ref/sel로 지목하고, 버튼이 숨은 입력을 여는 형태면 지목 없이 먼저 부른 뒤 그 버튼을 누른다.",
+  { name: "browser_upload", desc: "페이지에 로컬 파일을 넣는다(네이티브 파일 선택 창을 열지 않는다). 파일 입력칸을 알면 ref/sel을 주고, 버튼이 숨은 입력을 여는 형태면 ref/sel 없이 먼저 부른 뒤 그 버튼을 누른다.",
     schema: { paths: { type: "array", items: { type: "string" }, description: "올릴 파일 절대경로" }, ref: { type: "string" }, sel: { type: "string" }, timeout: { type: "number" } },
     req: ["paths"],
     run: (a, C) => C("upload", { paths: a.paths, ref: a.ref, sel: a.sel, timeout: a.timeout }) },
-  { name: "browser_download", desc: "다운로드 저장 위치를 무장한다. 무장하면 네이티브 저장 창 없이 그 폴더에 저장된다. off면 사람이 고른다(기본).",
+  { name: "browser_download", desc: "다운로드 저장 위치를 미리 정한다. 정하면 네이티브 저장 창 없이 그 폴더에 저장된다. off면 사람이 고른다(기본).",
     schema: { dir: { type: "string", description: "절대경로 폴더, 또는 off" }, once: { type: "boolean", description: "다음 한 번만" } },
     run: (a, C) => C("download", { dir: a.dir, once: a.once }) },
   { name: "browser_native_windows", desc: "OS가 그린 창·시트를 본다(파일 패널·권한 시트·인쇄 창 등 CDP로는 안 보이는 층). 뭔가 멈춰 있는데 원인을 모를 때 확인한다.",
@@ -336,24 +337,24 @@ const TOOLS = [
   { name: "browser_native_click", desc: "네이티브 창·시트의 버튼을 이름으로 누른다. 먼저 browser_native_windows로 버튼 이름을 확인한다.",
     schema: { button: { type: "string" } }, req: ["button"],
     run: (a, C) => C("nativeclick", { button: a.button }) },
-  { name: "browser_dialog", desc: "지금 떠 있는 alert/confirm/prompt를 닫는다. 확인 창은 탭이 아니라 창에 붙어서, 뜬 채로 두면 그 창의 조작이 통째로 막힌다. 이 명령은 다른 명령이 그 창에 막혀 있어도 실행된다.",
+  { name: "browser_dialog", desc: "지금 떠 있는 alert/confirm/prompt를 닫는다. 확인 창은 탭이 아니라 창에 속해서, 닫지 않으면 그 창의 조작이 모두 막힌다. 이 명령은 다른 명령이 그 창에 막혀 있어도 실행된다.",
     schema: { answer: { type: "string", enum: ["ok", "cancel"] }, text: { type: "string" } },
     run: (a, C) => C("dialog", { answer: a.answer || "cancel", ...(a.text != null ? { text: a.text } : {}) }) },
   { name: "browser_login", desc: "저장된 로그인으로 이 페이지의 아이디/비밀번호 칸을 채운다. 사용자가 앱의 [🔑 로그인]에서 허용한 (사이트, 아이디)만 가능하다. 허용된 계정이 여럿이면 목록을 돌려주니 하나를 골라 다시 부른다. 비밀번호 값은 돌아오지 않고 이 탭의 명령 결과에서도 가려진다. 채운 뒤 로그인 버튼은 직접 눌러야 한다. 저장된 계정이 없거나 허용되지 않았으면 사용자에게 알림이 가고 사람이 로그인한다.",
     schema: { username: { type: "string", description: "허용된 계정이 여럿일 때 고를 아이디" } },
     run: (a, C) => C("login", a.username != null ? { username: a.username } : {}) },
-  { name: "browser_native_key", desc: "네이티브 창에 escape 또는 enter를 보낸다. 파일 열기·저장 패널은 버튼이 그룹 안에 중첩돼 이름으로 못 짚는 경우가 많은데 이 둘은 항상 통한다 — 뜬 창을 닫는 가장 확실한 길.",
+  { name: "browser_native_key", desc: "네이티브 창에 escape 또는 enter를 보낸다. 파일 열기·저장 패널은 버튼이 그룹 안에 중첩돼 이름으로 지정하지 못하는 경우가 많은데 이 두 키는 항상 동작한다. 열린 창을 닫는 가장 확실한 방법이다.",
     schema: { key: { type: "string", enum: ["escape", "enter"] } },
     run: (a, C) => C("nativekey", { key: a["key"] || "escape" }) },
-  { name: "browser_new_tab", desc: "이 세션이 쓸 탭을 확보한다. 이미 쓰던 탭이 있으면 새로 만들지 않고 그 탭을 쓴다(주소를 주면 거기로 이동) — 탭이 늘수록 사람의 브라우저가 어지러워진다. 정말 새 탭이 필요한 경우는 두 페이지를 동시에 살려둬야 할 때와 다른 계정·프로필로 열어야 할 때뿐이고, 그때만 parallel을 준다. 탭은 백그라운드로 열려 사용자 화면을 가로채지 않고, 정체성에 묶여 있어 앱 재시작 뒤에도 같은 탭이다. "
-      + "새로고침에는 쓰지 않는다 — 페이지를 그대로 다시 부르는 것은 browser_history {action:\"reload\"}다. 같은 흐름에서 다음 화면으로 넘어가는 것은 browser_goto이고, 이 도구는 '쓸 탭을 얻는' 자리에만 쓴다. "
-      + "사람이 지목해 준 탭에 다른 사이트를 실으려 하면 덮지 않고 어느 길인지 알려 준다.",
+  { name: "browser_new_tab", desc: "이 세션이 쓸 탭을 확보한다. 이미 쓰던 탭이 있으면 새로 만들지 않고 그 탭을 쓴다(주소를 주면 거기로 이동). 탭이 늘면 사용자가 탭을 찾기 어려워진다. 새 탭이 필요한 경우는 두 페이지를 동시에 열어 둬야 할 때와 다른 계정·프로필로 열어야 할 때뿐이고, 그때만 parallel을 준다. 탭은 백그라운드로 열려 사용자 화면을 바꾸지 않고, 고유 ID로 관리돼 앱 재시작 뒤에도 같은 탭이다. "
+      + "새로고침에는 쓰지 않는다. 페이지를 다시 읽는 것은 browser_history {action:\"reload\"}다. 같은 흐름에서 다음 화면으로 넘어가는 것은 browser_goto이고, 이 도구는 쓸 탭을 확보할 때만 쓴다. "
+      + "사람이 선택해 준 탭에 다른 사이트를 열려고 하면 덮어쓰지 않고 쓸 수 있는 방법을 알려 준다.",
     schema: { url: { type: "string", description: "열 주소(http/https). 생략하면 구글." },
-      title: { type: "string", description: "탭에 붙일 이름 — 사용자가 어느 에이전트의 탭인지 알아보게." },
-      parallel: { type: "boolean", description: "true면 쓰던 탭을 두고 하나 더 만든다. 두 화면이 동시에 살아 있어야 할 때만 — 예: 같은 사이트의 프론트와 어드민을 함께 보며 비교." },
-      profile: { type: "string", description: "로그인 칸(프로필) 이름. 같은 사이트에 다른 계정으로 로그인해야 할 때 필수 — 칸을 안 가르면 쿠키가 하나라 한쪽이 로그아웃된다. 쓸 수 있는 이름은 browser_tabs의 profiles에 있다. 없는 계정용 칸은 사람이 앱에서 만들어 로그인해야 한다." } },
+      title: { type: "string", description: "탭 이름. 사용자가 어느 에이전트의 탭인지 알아보는 데 쓴다." },
+      parallel: { type: "boolean", description: "true면 쓰던 탭을 두고 하나 더 만든다. 두 화면을 동시에 열어 둬야 할 때만 쓴다. 예: 같은 사이트의 프론트와 어드민을 함께 보며 비교." },
+      profile: { type: "string", description: "로그인 칸(프로필) 이름. 같은 사이트에 다른 계정으로 로그인해야 할 때 필수 — 칸을 나누지 않으면 쿠키가 하나라 한쪽이 로그아웃된다. 쓸 수 있는 이름은 browser_tabs의 profiles에 있다. 없는 계정용 칸은 사람이 앱에서 만들어 로그인해야 한다." } },
     run: (a, C) => C("newtab", { url: a.url, title: a.title, parallel: a.parallel, profile: a.profile }) },
-  { name: "browser_close_tab", desc: "이 세션이 연 탭을 닫는다. 작업이 끝나면 사용자가 볼 최종 산출물 탭만 남기고 중간에 쓴 탭은 닫는다. 사용자가 지목해 준 탭과 다른 세션의 탭은 닫지 않는다. 닫은 탭은 사용자가 ⌘⇧T로 되살릴 수 있다.",
+  { name: "browser_close_tab", desc: "이 세션이 연 탭을 닫는다. 작업이 끝나면 사용자가 볼 최종 산출물 탭만 남기고 중간에 쓴 탭은 닫는다. 사용자가 선택해 준 탭과 다른 세션의 탭은 닫지 않는다. 닫은 탭은 사용자가 ⌘⇧T로 되살릴 수 있다.",
     schema: { tab: { type: ["string", "array"], items: { type: "string" }, maxItems: 4, description: "닫을 탭 핸들(browser_tabs의 handle). 여러 개면 배열(최대 4)." } },
     req: ["tab"],
     run: (a, C) => C("closetab", { tab: Array.isArray(a.tab) ? a.tab.join(",") : String(a.tab) }) },
@@ -371,13 +372,13 @@ const TOOLS = [
       deny_label: { type: "string", description: "거절 답 글자" },
     }, req: ["title", "summary"],
     run: (a, C) => C("approve", { title: a.title, summary: a.summary, approve_label: a.approve_label, deny_label: a.deny_label }) },
-  { name: "browser_picks", desc: "사용자가 화면에서 직접 고른 요소들(최근 10개). 고르는 순간 그 탭은 이 세션이 만질 수 있게 열리지만(권한) 대상 탭이 바뀌지는 않는다 — 그 탭을 직접 다뤄야 할 때만 tab에 그 핸들을 넣어라. 터미널에 붙은 글은 사람이 읽는 형식이고, 이 도구는 선택자·대체 선택자·속성·소스 파일 같은 원본 필드를 준다.",
+  { name: "browser_picks", desc: "사용자가 화면에서 직접 고른 요소들(최근 10개). 고르는 순간 그 탭은 이 세션이 조작할 수 있게 되지만(권한) 대상 탭이 바뀌지는 않는다. 그 탭을 직접 다뤄야 할 때만 tab에 그 핸들을 넣어라. 터미널에 붙은 글은 사람이 읽는 형식이고, 이 도구는 선택자·대체 선택자·속성·소스 파일 같은 원본 필드를 준다.",
     schema: {}, run: (a, C) => C("picks") },
   // ── 모바일 앱(iOS·Android) ──
   ...appSurface.tools,
   { name: "browser_tabs", desc: "열린 브라우저 탭 목록(핸들·URL·제목)과 이 세션이 고정한 탭, 그리고 쓸 수 있는 로그인 칸(profiles).", schema: {}, run: (a, C) => C("tabs") },
-  { name: "browser_target", desc: "이 세션이 조종할 탭을 고정한다. 여러 번 부르면 최대 4개까지 들고 있고, 지정 없는 명령은 그중 마지막으로 쓴 탭으로 간다(전부에 돌리려면 각 도구의 tab에 목록을 준다). tab 없이 부르면 지금 들고 있는 것을 조회하고, clear로 놓는다 — clear와 tab을 함께 주면 그 하나만 놓는다.",
-    schema: { tab: { type: "string", description: "browser_tabs가 준 안정 핸들(예: claude-tab-a3f9k2). 여러 개를 들려면 하나씩 여러 번 부른다." }, clear: { type: "boolean" } },
+  { name: "browser_target", desc: "이 세션이 조종할 탭을 고정한다. 여러 번 부르면 최대 4개까지 고정하고, 지정 없는 명령은 그중 마지막으로 쓴 탭으로 간다(전부에 돌리려면 각 도구의 tab에 목록을 준다). tab 없이 부르면 지금 고정한 탭을 조회하고, clear로 고정을 푼다. clear와 tab을 함께 주면 그 하나만 푼다.",
+    schema: { tab: { type: "string", description: "browser_tabs가 준 안정 핸들(예: claude-tab-a3f9k2). 여러 개를 고정하려면 하나씩 여러 번 부른다." }, clear: { type: "boolean" } },
     run: (a, C) => (a.clear ? C("untarget", a.tab != null ? { tab: String(a.tab) } : {})
                             : C("target", a.tab != null ? { tab: String(a.tab) } : {})) },
 ];
@@ -547,7 +548,16 @@ function recordUse(t, a, r, extra) {
         met: d.met ?? null, waited_ms: d.waited_ms ?? null } : {}),
       ...extra };
     fs.mkdirSync(IRIS_HOME, { recursive: true });
-    try { if (fs.statSync(USE_LOG).size > USE_LOG_MAX) fs.renameSync(USE_LOG, USE_LOG + ".1"); } catch {}
+    if (fs.statSync(USE_LOG, { throwIfNoEntry: false })?.size > USE_LOG_MAX) {
+      let unlock;
+      try {
+        unlock = lockfile.lockSync(USE_LOG, { realpath: false });
+        if (fs.statSync(USE_LOG, { throwIfNoEntry: false })?.size > USE_LOG_MAX) {
+          fs.renameSync(USE_LOG, USE_LOG + ".1");
+        }
+      } catch { /* 회전 실패·경합 시에도 현재 파일에 추가 */ }
+      finally { if (unlock) unlock(); }
+    }
     fs.appendFileSync(USE_LOG, JSON.stringify(row) + "\n");
   } catch { /* 기록 실패가 도구 결과를 바꾸지 않는다 */ }
 }
@@ -598,6 +608,7 @@ const toolList = TOOLS.map((t) => ({
 //
 // 거절은 다음에 할 일을 함께 준다. 이름이 비슷하면 짚어 주고, 아니면 받는 이름을 다 편다.
 function argFault(t, a) {
+  if (!a || typeof a !== "object" || Array.isArray(a)) return "도구 인자는 객체여야 합니다";
   const s = schemaOf(t), names = Object.keys(s);
   for (const k of Object.keys(a)) {
     if (k.startsWith("_")) continue;            // 호출자가 붙이는 메타는 도구 인자가 아니다
@@ -611,6 +622,7 @@ function argFault(t, a) {
       + (near.length ? `혹시 ${near.join(" · ")}입니까?\n` : "")
       + `받는 이름: ${names.join(" · ")}`;
   }
+  for (const name of t.req || []) if (!Object.hasOwn(a, name) || a[name] == null) return `필수 인자가 없습니다: ${name}`;
   for (const [k, v] of Object.entries(a)) {
     const e = s[k] && s[k].enum;
     if (e && v != null && !e.includes(v)) {
@@ -694,12 +706,17 @@ const maybeExit = () => { if (closing && inFlight === 0) process.stdout.write(""
 // (변이 검사에서 확인했다).
 export { chooseHerdrPane };
 const RUN_AS_MAIN = process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+if (RUN_AS_MAIN) process.stdout.on("error", error => {
+  if (error.code === "EPIPE") process.exit(0);
+  throw error;
+});
 const rl = RUN_AS_MAIN ? readline.createInterface({ input: process.stdin }) : { on() {} };
 rl.on("line", async (line) => {
   const s = line.trim();
   if (!s) return;
   let m;
   try { m = JSON.parse(s); } catch { return; }
+  if (!m || typeof m !== "object" || Array.isArray(m)) return err(null, -32600, "JSON-RPC 객체가 필요합니다");
   const { id, method, params } = m;
   try {
     if (method === "initialize") {
@@ -709,13 +726,13 @@ rl.on("line", async (line) => {
         serverInfo: { name: "iris-mcp", version: "1.0.0" },
         // 항상 붙는 글이라 짧게. 도구 설명에 이미 있는 것은 넣지 않고, 도구 목록만 봐서는 모르는
         // 사실 하나만 남긴다. 로그인 벽에서 사람에게 그냥 넘기는 일을 막기 위한 것이다.
-        instructions: "사람이 쓰는 브라우저를 그대로 조종한다(로그인·쿠키 살아 있음). "
-          + "로그인 벽에서 사람에게 넘기기 전에 browser_login을 먼저 불러라 — 사용자가 허용한 계정은 네가 채울 수 있다. "
-          + "결제·본인확인처럼 사람이 해야만 하는 자리와 승인이 필요한 자리에서는 이 세션 대화에서 사용자에게 직접 묻는다. 이 도구들은 브라우저·폰 알림을 보내지 않는다. "
+        instructions: "사람이 쓰는 브라우저를 그대로 조종한다(로그인·쿠키 유지). "
+          + "로그인 화면에서 사람에게 넘기기 전에 browser_login을 먼저 불러라. 사용자가 허용한 계정은 네가 채울 수 있다. "
+          + "결제·본인확인처럼 사람이 직접 해야 하는 단계와 승인이 필요한 단계에서는 이 세션 대화에서 사용자에게 직접 묻는다. 이 도구들은 브라우저·폰 알림을 보내지 않는다. "
           + "페이지 확인 창(alert·confirm)이 뜨면 명령 결과에 그 내용이 오니 browser_dialog로 답한다. "
           + "작업이 끝나면 사용자가 볼 최종 산출물 탭만 남기고, 중간에 쓴 탭은 browser_close_tab으로 닫아라. "
           + "이 도구는 일반 사용을 위한 브라우저와 앱 조작 도구입니다. 공식 QA 회차·판정·보고서는 iris-qa로 진행합니다. "
-          + "모바일 앱은 Iris 에뮬레이터 탭의 기기에서만 확인한다 — simctl·emulator·open -a Simulator로 기기를 따로 켜지 마라. iOS 기기에 idb ui tap·text·swipe·key·button을 직접 부르지 마라 — Xcode 27에서는 그 뒤로 사람의 Iris 탭 터치가 앱에 닿지 않는다. 입력은 app_* 도구로 한다. "
+          + "모바일 앱은 Iris 에뮬레이터 탭의 기기에서만 확인한다. simctl·emulator·open -a Simulator로 기기를 따로 켜지 마라. iOS 기기에 idb ui tap·text·swipe·key·button을 직접 부르지 마라. Xcode 27에서는 그 뒤로 사람이 Iris 탭에서 한 터치가 앱에 전달되지 않는다. 입력은 app_* 도구로 한다. "
           + "사용자는 Iris 탭만 본다. app_* 도구가 이 세션에 할당된 기기가 없으면 다른 세션이 쓰지 않는 기기로 이 세션의 탭을 열고, 다른 기기가 필요하면 app_target이 그 탭을 바꾼다." });
     }
     if (method === "notifications/initialized" || method === "notifications/cancelled") return; // 알림은 응답 없음
@@ -725,6 +742,10 @@ rl.on("line", async (line) => {
       const t = byName.get(params && params.name);
       if (!t) return err(id, -32602, "알 수 없는 도구: " + (params && params.name));
       inFlight++;
+      const progressToken = params?._meta?.progressToken;
+      let progress = 0;
+      const ticker = progressToken == null ? null : setInterval(() =>
+        send({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken, progress: ++progress } }), 60000);
       try {
         const a = (params && params.arguments) || {};
         const fault = argFault(t, a);
@@ -757,7 +778,7 @@ rl.on("line", async (line) => {
           missVersion: MISS_VERSION } : {}),
           ...(hint ? { hinted: true } : {}) });
         ok(id, { content: [{ type: "text", text: out.text + moment + seen + (near ? near.text : "") + hint }], ...(out.isError ? { isError: true } : {}) });
-      } finally { inFlight--; maybeExit(); }
+      } finally { clearInterval(ticker); inFlight--; maybeExit(); }
       return;
     }
     if (id !== undefined) err(id, -32601, "지원하지 않는 메서드: " + method);

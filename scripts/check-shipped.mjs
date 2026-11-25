@@ -26,6 +26,8 @@ function filesUnder(dir) {
   for (const entry of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })
     .sort((a, b) => a.name.localeCompare(b.name))) {
     const rel = path.posix.join(dir.split(path.sep).join("/"), entry.name);
+    // Finder 가 연 폴더에 만드는 파일. electron-builder 가 기본으로 빼므로 앱에 없음(대화 화면 폴더 링크로 생김)
+    if (entry.name === ".DS_Store") continue;
     if (entry.isDirectory()) out.push(...filesUnder(rel));
     else if (entry.isFile()) out.push(rel);
   }

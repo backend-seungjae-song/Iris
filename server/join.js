@@ -301,10 +301,18 @@ function treeHasCodex(nodes) {
   return false;
 }
 
+export function agentKind(value) {
+  const name = String(value || "").toLowerCase();
+  if (name === "claude" || name.startsWith("claude-")) return "claude";
+  if (name === "codex" || name.startsWith("codex-")) return "codex";
+  if (name === "agy" || name.startsWith("agy-") || name === "antigravity" || name.startsWith("antigravity-")) return "agy";
+  return null;
+}
+
 export function buildMonitorState(agents) {
   const idx = lazyProjectIndex();
   return agents.map((a) => {
-    const isClaude = String(a.agent || "").toLowerCase() === "claude";
+    const isClaude = agentKind(a.agent) === "claude";
     const reported = isClaude ? agentSessionPathFor(a.pane_id, "claude") : null;
     const nativePath = isClaude && a.agent_session?.kind === "path"
       ? validateAgentSessionPath("claude", a.agent_session.value) : null;

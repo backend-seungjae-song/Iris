@@ -80,7 +80,7 @@ function windowsFixture(t) {
   const home = scratch(t);
   const app = path.join(home, "App with spaces O'Brien $() &", 'Iris.exe');
   const unpacked = path.join(path.dirname(app), 'resources', 'app.asar.unpacked');
-  const required = ['bin/agent-context.mjs','bin/iris-session.mjs','bin/agent-run.mjs','server/agent-lineage.js','server/agent-session-path.js','server/codex-session.js','server/env.cjs','server/herdr-session.cjs','server/herdr.js','server/prompt-targets.js','server/state-home.cjs'];
+  const required = ['bin/agent-context.mjs','bin/iris-session.mjs','bin/agent-run.mjs','server/worktree-handlers.js','server/agent-homes.js','server/artifacts-home.cjs','server/win-native.cjs','server/windows-powershell.cjs','server/runtime-state.js','server/agent-lineage.js','server/agent-session-path.js','server/codex-session.js','server/env.cjs','server/herdr-session.cjs','server/herdr.js','server/prompt-targets.js','server/state-home.cjs'];
   for (const rel of required) { const file = path.join(unpacked, rel); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, ''); }
   fs.writeFileSync(path.join(unpacked, 'package.json'), '{"type":"module"}');
   fs.writeFileSync(app, '', { mode: 0o755 });

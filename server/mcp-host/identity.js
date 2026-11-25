@@ -49,6 +49,13 @@ export function createHostIdentityAuthority() {
     return binding ? { session: binding.session, revision: binding.revision } : null;
   }
 
+  function assertRunKey({ session, run, key }) {
+    const binding = runs.get(String(run));
+    if (!binding || binding.session !== session) throw hostError("RUN_DENIED", "이 세션의 QA 회차가 아닙니다.");
+    if (!text(key) || !sameDigest(binding.keyDigest, key)) throw hostError("KEY_DENIED", "현재 QA 도구 연결의 key가 아닙니다.");
+    return true;
+  }
+
   function allowCandidate({ commandId, session, run, key }) {
     if (!text(commandId) || !sessions.has(session) || !text(run) || !text(key)) {
       throw hostError("INVALID_REQUEST", "회차 이어받기 후보 식별값이 올바르지 않습니다.");
@@ -82,6 +89,6 @@ export function createHostIdentityAuthority() {
     return { session: id.session, run: id.run, ...(id.lifecycle === true ? { lifecycle: true } : {}) };
   }
 
-  return { allowSession, denySession, bindRun, rotateRunKey: bindRun, releaseRun, bindingFor,
+  return { allowSession, denySession, bindRun, rotateRunKey: bindRun, releaseRun, bindingFor, assertRunKey,
     allowCandidate, clearCandidate, authorize };
 }

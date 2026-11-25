@@ -86,7 +86,7 @@ function createUploadController({
     if (aiDriving(wc.id)) {
       try { await setFiles([]); } catch {}
       recordUpload(wc.id, { ok: false, at: now(),
-        error: "파일 선택창이 떴는데 올릴 파일이 정해져 있지 않아 그냥 닫았습니다. browser_upload 로 파일을 먼저 정하고 다시 누르세요(사람이 골라야 하면 browser_ask_user)." });
+        error: "파일 선택창이 열렸지만 올릴 파일이 정해져 있지 않아 닫았습니다. browser_upload 로 파일을 먼저 정하고 다시 누르세요(사람이 골라야 하면 browser_ask_user)." });
       clearChooser(wc.id);
       return choice;
     }

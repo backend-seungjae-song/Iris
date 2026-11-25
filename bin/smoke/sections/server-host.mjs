@@ -46,8 +46,8 @@ export default async function run() {
     // 늦은 쪽의 unlink가 이미 획득한 쪽의 유효한 자물쇠를 지우고, 그 결과 서버 둘이
     // 같은 상태 파일을 쓴다(확인 결과). 실제 동작은 test/lock-handover-freshness.mjs가 확인한다.
     check("죽은 자물쇠 치우기는 배타 표로 직렬화된다", () =>
-      /function reapDeadLock\(deadPid\)/.test(srvLock)
-      && /fs\.openSync\(reap, "wx"\)/.test(srvLock)
+      /function reapDeadLock\(deadPid, tmp\)/.test(srvLock)
+      && /fs\.linkSync\(tmp, reap\)/.test(srvLock)
       && /if \(now !== deadPid\) return false;/.test(srvLock)
       // 자물쇠를 지우는 위치는 둘뿐이어야 한다. 잠금을 확보하고 만료를 재확인한 위치와, 종료할 때
       // 자기 자물쇠를 해제하는 위치다. 그 밖에 조건 없는 unlink가 하나라도 있으면 경합이 다시 생긴다.
@@ -71,7 +71,10 @@ export default async function run() {
     });
     check("앱이 나가면 자기가 띄운 서버도 데려간다", () =>
       /app\.on\("will-quit", \(\) => \{ try \{ serverHost\.stop\(\); \}/.test(mainHost)
-      && /if \(!child \|\| !this\.owned\) return;/.test(hostSrc));
+      && /if \(!child \|\| !this\.owned\) \{\s*this\.child = null;\s*this\.stopPromise = Promise\.resolve\(\);\s*return this\.stopPromise;\s*\}/.test(hostSrc)
+      && /this\.stopPromise = this\.stopChild\(child\);/.test(hostSrc)
+      && /child\.once\?\.\("exit", onExit\)/.test(hostSrc)
+      && /if \(exitedChild && this\.child !== exitedChild\) return;/.test(hostSrc));
     check("이미 떠 있는 서버는 죽이지 않고 붙는다", () =>
       // 서버는 사용자의 탭·계정·기록을 들고 있다. 앱을 켰다는 이유로 교체하면 그 상태가 사라진다.
       /const existing = await probe\(this\.port\)/.test(hostSrc)

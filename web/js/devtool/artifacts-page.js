@@ -166,7 +166,7 @@ export function artifactsClick(e) {
   }
   if (e.target.closest("#art-empty-all")) {
     const dirs = kinds.filter((k) => k.count).map((k) => k.dir);
-    if (dirs.length) void sendToTrash(dirs, (n) => `부산물 폴더 ${n}개를 휴지통으로 보냈습니다`);
+    if (dirs.length) void sendToTrash(dirs, (n) => `생성 파일 폴더 ${n}개를 휴지통으로 보냈습니다`);
     return true;
   }
   if (e.target.closest("#art-refresh")) {
@@ -197,14 +197,14 @@ async function sendToTrash(paths, done) {
     try {
       const res = await host.trashItems(paths);
       moved = (res && res.moved) || 0;
-      for (const f of (res && res.failed) || []) failed.push(f.error || "이유 없음");
+      for (const f of (res && res.failed) || []) failed.push(f.error || "원인 불명");
     } catch (err) { failed.push(String(err && err.message || err)); }
   } else {
     for (const p of paths) {
       try {
         const res = await host.trashItem(p);
         if (res && res.ok) moved += 1;
-        else failed.push(res && res.error ? res.error : "이유 없음");
+        else failed.push(res && res.error ? res.error : "원인 불명");
       } catch (err) { failed.push(String(err && err.message || err)); }
     }
   }
@@ -216,6 +216,6 @@ async function sendToTrash(paths, done) {
   // 못 보낸 수는 사유 수가 아니라 실제로 옮겨지지 않은 수다. 한 번에 보내다 통째로 실패하면
   // 사유는 하나여도 남아 있는 것은 전부다.
   const shortfall = paths.length - moved;
-  showToast && showToast(shortfall ? `${moved}개를 보내고 ${shortfall}개를 못 보냈습니다.` : done(moved),
-    { level: shortfall ? "err" : "ok", detail: shortfall ? String(failed[0] || "이유 없음") : undefined });
+  showToast && showToast(shortfall ? `${moved}개를 보내고 ${shortfall}개는 보내지 못했습니다.` : done(moved),
+    { level: shortfall ? "err" : "ok", detail: shortfall ? String(failed[0] || "원인 불명") : undefined });
 }

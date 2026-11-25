@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { extractPrompt, createPromptStore } from '../server/remote/features/prompts.js';
+import { extractPrompt, createPromptStore, promptCutLines } from '../server/remote/features/prompts.js';
 
 // 실제 Claude·Codex 화면(가짜 세션에서 캡처)을 유형별로 고정
 const read = name => fs.readFileSync(new URL(`./fixtures/remote-prompts/${name}.txt`, import.meta.url), 'utf8');
@@ -148,4 +148,44 @@ test('선택 목록이 없는 화면은 카드를 만들지 않고, 목록이 �
   };
   assert.equal(await run('메모리 최적화 방향을 이렇게 잡았는데 지금 진행할까요?\n\n❯ \n'), 0);
   assert.equal(await run('무엇인가요?\n  1. 가\n  2. 나\n'), 1);
+});
+
+test('Claude MCP 승인: 위아래 ╌ 선 사이의 도구 입력을 내용으로 읽는다', () => {
+  const p = prompt('31-claude-mcp-tall');
+  assert.equal(p.title, 'Do you want to proceed?');
+  assert.match(p.detail, /jql:/);
+  assert.match(p.detail, /ORDER BY created DESC/);
+  assert.equal(promptCutLines({ text: read('31-claude-mcp-tall') }, p), 0);
+});
+
+test('Claude MCP 승인이 짧은 화면에서 위가 잘려도 보이는 내용을 읽고, 스크롤 안내는 선택지에 섞지 않는다', () => {
+  const p = prompt('32-claude-mcp-cut');
+  assert.equal(p.title, 'Do you want to proceed?');
+  assert.match(p.detail, /AND labels = theta/);
+  assert.match(p.detail, /limit: 1/);
+  assert.match(p.detail, /Search Jira issues using JQL/);
+  assert.equal(labels(p).at(-1), 'No');
+  assert.equal(p.options.at(-1).description, '');
+  assert.equal(promptCutLines({ text: read('32-claude-mcp-cut') }, p), 8);
+});
+
+test('승인할 명령 글에 "여러 개" 같은 낱말이 있어도 여러 개 고르기로 보지 않는다', () => {
+  const text = [
+    '─'.repeat(60),
+    ' Bash command',
+    ' PR 만들기',
+    '╌'.repeat(60),
+    ' │ gh pr create --title "feat: 상품 여러 개를 골라 응모, select multiple, space to toggle"',
+    '╌'.repeat(60),
+    '',
+    ' Do you want to proceed?',
+    ' ❯ 1. Yes',
+    '   2. No',
+    '',
+    ' Esc to cancel · Tab to amend',
+  ].join('\n');
+  const p = extractPrompt({ text, hash: 'a'.repeat(64), columns: 100, rows: 40 });
+  assert.equal(p.multiSelect, false);
+  assert.match(p.detail, /상품 여러 개를 골라 응모/);
+  assert.deepEqual(labels(p), ['Yes', 'No']);
 });

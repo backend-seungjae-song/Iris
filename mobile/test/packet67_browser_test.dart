@@ -728,12 +728,12 @@ void main() {
     });
     await tester.pump();
     await tester.pump();
-    expect(find.textContaining('탭을 깨우지'), findsOneWidget);
+    expect(find.textContaining('탭을 열지'), findsOneWidget);
     f.wire.frame();
     await tester.pump();
     await tester.pump();
     await tester.pump();
-    expect(find.textContaining('탭을 깨우지'), findsNothing);
+    expect(find.textContaining('탭을 열지'), findsNothing);
     await finish(tester, f);
   });
   testWidgets('화면을 못 받으면 오류 화면과 대기 카드를 보이고 다시 시도가 구독을 다시 요청', (tester) async {
@@ -747,10 +747,10 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('browser-error-view')), findsOneWidget);
     expect(find.text('화면을 불러오지 못했습니다'), findsOneWidget);
-    expect(find.textContaining('탭을 깨우지'), findsOneWidget);
+    expect(find.textContaining('탭을 열지'), findsOneWidget);
     expect(find.text('browser-tab-unavailable'), findsOneWidget);
     expect(find.byKey(const Key('browser-frame-notice')), findsOneWidget);
-    expect(find.text('Mac 화면을 기다리는 중'), findsOneWidget);
+    expect(find.text('컴퓨터 화면 대기 중'), findsOneWidget);
     await tester.tap(find.byKey(const Key('browser-error-address')));
     await tester.pump();
     expect(

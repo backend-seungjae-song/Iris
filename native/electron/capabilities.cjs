@@ -4,9 +4,10 @@
 //   기능 하나가 네이티브에서 어느 모듈로 들어가는가. 그 진입점 목록 하나.
 //
 // 제공 API
-//   NATIVE_CAPABILITIES: { id, module, optIn? } 의 배열. id 는 렌더러 표(web/js/core/capabilities.js)의
+//   NATIVE_CAPABILITIES: { id, module, optIn?, partitionStore? } 의 배열. id 는 렌더러 표(web/js/core/capabilities.js)의
 //   id 와 같은 용어를 쓴다. 같은 기능이 두 이름을 가지면 양쪽을 연결해 볼 수 없다.
 //   optIn 은 사용자가 설정에서 켜야 로드되는 기본 꺼짐 기능이다. 렌더러 표의 optIn 과 같아야 한다(검사).
+//   partitionStore는 기능의 켜짐 여부와 관계없이 프로필 삭제에 함께 쓰는 암호화 파일 이름
 //
 // 의존 대상
 //   없다. 이 파일은 문자열만 갖는다. 여기서 require 를 하면 표를 읽는 순간 전부 로드된다.
@@ -32,6 +33,7 @@ const NATIVE_CAPABILITIES = [
   { id: "emulator", module: require.resolve("./emulator/emulator-host.cjs") },
   { id: "extensionloader", module: require.resolve("./extension-loader.cjs") },
   { id: "browserextensions", module: require.resolve("./browser-extensions.cjs") },
+  { id: "formhistory", module: require.resolve("./form-history.cjs"), partitionStore: "form-history.enc" },
   { id: "pagetranslate", module: require.resolve("./page-translate.cjs") },
   { id: "searchsuggest", module: require.resolve("./search-suggest.cjs") },
   { id: "sketch", module: require.resolve("./sketch-shot.cjs") },

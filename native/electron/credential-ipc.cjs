@@ -32,7 +32,7 @@
 //   현재 목록은 다음 명령으로 확인한다: node bin/importers.mjs native/electron/credential-ipc.cjs
 
 function createCredentialIpc({ ipcMain, credentialService, isTrustedSender, isProfilePartition, purgePartition, basePartition,
-  loginConvenienceOn = () => true }) {
+  beginPartitionPurge, loginConvenienceOn = () => true }) {
   function setCreds(partition, logins) {
     credentialService.set(partition, logins);
   }
@@ -70,7 +70,7 @@ function createCredentialIpc({ ipcMain, credentialService, isTrustedSender, isPr
         origin, username, password,
         url: typeof (arg && arg.url) === "string" && /^https?:\/\//.test(arg.url) ? arg.url : origin,
       });
-      return saved ? { ok: true } : { ok: false, error: "금고에 쓰지 못했습니다" };
+      return saved ? { ok: true } : { ok: false, error: "로그인을 저장하지 못했습니다" };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   });
   // 채우는 순간에 비번 하나만 꺼낸다. 파티션·origin·아이디를 다시 확인하고, 아니면 빈 문자열.
@@ -94,11 +94,15 @@ function createCredentialIpc({ ipcMain, credentialService, isTrustedSender, isPr
       return credentialService.summary(key);
     } catch { return { count: 0, accounts: [] }; }
   });
-  ipcMain.handle("ac-clear-creds", (e, partition) => {
+  ipcMain.handle("ac-clear-creds", (e, partition, deletingProfile) => {
     try {
       if (!isTrustedSender(e)) return { ok: false, error: "신뢰되지 않은 발신자" };
       const key = String(partition || ""); if (!isProfilePartition(key)) return { ok: false, error: "잘못된 파티션" };
-      credentialService.clear(key); return { ok: true };
+      if (deletingProfile === true && key === basePartition) return { ok: false, error: "잘못된 파티션" };
+      credentialService.clear(key);
+      // 렌더러가 프로필 행을 지우기 전에 입력 기록 차단과 재시도 목록 저장
+      if (deletingProfile === true) beginPartitionPurge(key);
+      return { ok: true };
     }
     catch (e2) { return { ok: false, error: String(e2 && e2.message || e2) }; }
   });

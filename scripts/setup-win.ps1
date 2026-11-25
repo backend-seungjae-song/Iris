@@ -361,7 +361,7 @@ try { Install-WindowsApp $exe $setup.FullName $stateLock }
 finally { Release-DeploymentLock $deploymentLock }
 if (!$appOnly) { foreach ($runtime in @('claude','codex')) { if (!(Agent-Mcp $runtime)) { $ok = $false } } }
 $contextArgs = @((Join-Path $root 'scripts\install-agent-context.mjs'),'--app',$exe)
-if (!$appOnly -and (Confirm-Step 'Claude Code와 Codex에 세션 기록·지목 등록 훅을 추가할까요?')) { $contextArgs += '--hooks' }
+if (!$appOnly -and (Confirm-Step 'Claude Code와 Codex에 세션 기록·대상 등록 훅을 추가할까요?')) { $contextArgs += '--hooks' }
 Run-Tool node $contextArgs
 Write-Host "설치 완료: $exe"
 Write-Host 'Codex 훅을 추가했다면 Codex의 /hooks에서 Iris 훅을 신뢰하세요.'

@@ -37,6 +37,8 @@ const gitStatusCache = new Map();
 const openedForEdit = new Map();
 const subscribers = new Set();
 const OPENED_MAX = 500;
+const GIT_CACHE_TTL_MS = 10 * 60 * 1000;
+const OPENED_TTL_MS = 30 * 60 * 1000;
 
 export function initRuntimeState(deps) {
   ({ scheduleRecompute } = deps);
@@ -66,30 +68,54 @@ export function subscribeRuntimeState(subscriber) {
 }
 
 export function getGitStatusCache(root) {
+  pruneGitStatusCache();
   return gitStatusCache.get(root);
 }
 
 export function setGitStatusCache(root, value) {
+  pruneGitStatusCache();
   gitStatusCache.set(root, value);
 }
 
 export function clearGitStatusCache(root) {
+  if (root == null) {
+    gitStatusCache.clear();
+    return true;
+  }
   gitStatusCache.delete(root);
+  return true;
+}
+
+function pruneGitStatusCache(now = Date.now()) {
+  for (const [root, value] of gitStatusCache) {
+    if (Number.isFinite(value?.at) && now - value.at > GIT_CACHE_TTL_MS) gitStatusCache.delete(root);
+  }
 }
 
 // 저장 경계를 워크스페이스 안으로만 잡아 두면, 사람이 뷰어로 열어 고친 파일을 저장하지 못한다.
 // 그렇다고 로컬의 임의 경로를 허용하지는 않고, 이 앱이 실제로 열어 준 파일만 예외로 추가한다.
 export function noteOpened(p) {
   try {
+    const now = Date.now();
+    pruneOpenedForEdit(now);
     const abs = path.resolve(p);
     openedForEdit.delete(abs);
-    openedForEdit.set(abs, Date.now());
+    openedForEdit.set(abs, now);
     while (openedForEdit.size > OPENED_MAX) openedForEdit.delete(openedForEdit.keys().next().value);
   } catch {}
 }
 
 function wasOpenedHere(p) {
-  try { return openedForEdit.has(path.resolve(p)); } catch { return false; }
+  try {
+    pruneOpenedForEdit();
+    return openedForEdit.has(path.resolve(p));
+  } catch { return false; }
+}
+
+function pruneOpenedForEdit(now = Date.now()) {
+  for (const [file, openedAt] of openedForEdit) {
+    if (now - openedAt > OPENED_TTL_MS) openedForEdit.delete(file);
+  }
 }
 
 export function saveAllowed(p) { return isPathAllowed(p) || wasOpenedHere(p); }
@@ -107,12 +133,19 @@ export async function requestRecompute() {
   }
   computing = true;
   try {
-    await scheduleRecompute();
+    while (true) {
+      dirty = false;
+      try {
+        await scheduleRecompute();
+      } catch (error) {
+        console.error("runtime state recompute failed", error);
+        if (!dirty) break;
+        continue;
+      }
+      if (!dirty) break;
+    }
   } finally {
     computing = false;
-    if (dirty) {
-      dirty = false;
-      requestRecompute();
-    }
+    dirty = false;
   }
 }

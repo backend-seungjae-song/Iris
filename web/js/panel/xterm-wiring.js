@@ -374,7 +374,7 @@ export function initXterm() {
               if (sp.kind !== "path") { openTerminalTarget(sp.text, ev); return; }
               if (wantsReveal(ev)) { revealTerminalPath(sp.text); return; }   // ⌘⇧ = Finder에서 보기
               openTerminalPath(sp.text);
-            } catch (err) { showToast("여는 중 오류", { level: "err", detail: String(err && err.message || err) }); }
+            } catch (err) { showToast("열기 실패", { level: "err", detail: String(err && err.message || err) }); }
           },
         }));
         cb(links.length ? links : undefined);

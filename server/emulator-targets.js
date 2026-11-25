@@ -11,7 +11,7 @@ export function handleEmulatorTargets(ws, msg) {
   const udid = String(msg.udid || "");
   if (!ws._local || !ws._ui || !ID_RE.test(pane) || !ID_RE.test(udid)) {
     try { ws.send(JSON.stringify({ type: "emulator.target-pending-result", ok: false,
-      request: msg.request || null, error: "기기 지목 요청이 허용되지 않았습니다" })); } catch {}
+      request: msg.request || null, error: "기기 지정 요청이 허용되지 않았습니다" })); } catch {}
     return true;
   }
   try {

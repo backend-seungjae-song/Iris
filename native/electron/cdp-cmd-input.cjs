@@ -62,10 +62,10 @@ function insertAtFocusExpression(text) {
       if (!inner) return { ok: false, crossFrame: true };
       el = inner;
     }
-    if (!el || el === el.ownerDocument.body) return { ok: false, why: "커서가 어디에도 없습니다" };
+    if (!el || el === el.ownerDocument.body) return { ok: false, why: "포커스된 요소가 없습니다" };
     const doc = el.ownerDocument;
     const field = el.matches && el.matches("input,textarea");
-    if (!field && !el.isContentEditable) return { ok: false, why: "글을 넣을 수 없는 요소입니다: " + el.tagName };
+    if (!field && !el.isContentEditable) return { ok: false, why: "입력할 수 없는 요소입니다: " + el.tagName };
     const before = field ? el.value : el.textContent;
     let put = false; try { put = doc.execCommand("insertText", false, t); } catch (e) {}
     if (!put || (t && (field ? el.value : el.textContent) === before)) {
@@ -141,7 +141,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       }
       // 여기까지 왔는데 프레임 안 요소면 누를 방법이 없다. 좌표로 내려가면 창 좌표계로 잘못
       // 계산돼 다른 곳을 누르고 성공으로 보고하므로 더 나쁘다.
-      if (sid) throw new Error("iframe 안 요소를 잡았지만 다룰 수 없습니다(프레임이 사라졌을 수 있음): " + ref);
+      if (sid) throw new Error("iframe 안 요소를 찾았지만 다룰 수 없습니다(프레임이 사라졌을 수 있음): " + ref);
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy });
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", clickCount });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount });
@@ -181,12 +181,12 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
           } catch {}
         }
         if (hits.length !== 1) {
-          throw new Error("커서가 다른 출처 iframe 안에 있어 칸을 정할 수 없습니다 — fill 로 칸을 지정하세요");
+          throw new Error("커서가 다른 출처 iframe 안에 있어 입력칸을 알 수 없습니다. fill 로 입력칸을 지정하세요");
         }
         v = await evalIn(hits[0]);
         if (v) v.frame = "iframe";
       }
-      if (!v || !v.ok) throw new Error((v && v.why) || "글을 넣지 못했습니다");
+      if (!v || !v.ok) throw new Error((v && v.why) || "입력하지 못했습니다");
       return { ok: true, via: v.via, ...(v.frame ? { frame: v.frame } : {}) };
     },
     // 되돌리기 어려운 자리에 쓰이므로 두 가지를 지킨다. 보이는 탭에서만 입력한다(아무도 보지 못하는
@@ -212,9 +212,9 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       // 되돌리기 어려운 자리에 쓰이므로 두 가지를 지킨다. 보이는 탭에서만 입력한다. 그리고 입력 뒤
       // 화면을 다시 읽어, 실제로 달라졌을 때만 성공으로 보고한다.
       const values = Array.isArray(args.values) ? args.values : [];
-      if (!values.length) throw new Error("넣을 값이 없습니다");
+      if (!values.length) throw new Error("입력할 값이 없습니다");
       if (!isTabShown(wc.id)) {
-        throw new Error("보이지 않는 탭에는 대량으로 넣지 않습니다 — 그 탭을 먼저 띄우세요.");
+        throw new Error("보이지 않는 탭에는 대량 입력을 하지 않습니다. 그 탭을 먼저 표시하세요.");
       }
       // 이동키는 넷뿐이다. 대량 입력 경로가 임의의 단축키를 누를 수 있으면 다른 도구가 된다.
       const MOVE = { Enter: ["Enter", 13], Tab: ["Tab", 9],
@@ -239,7 +239,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
           const t = ${JSON.stringify(String(text))};
           const key = ${JSON.stringify(mkey)}, vk = ${mvk};
           let el = document.activeElement;
-          if (!el || el === document.body) return { ok: false, why: "커서가 어디에도 없습니다" };
+          if (!el || el === document.body) return { ok: false, why: "포커스된 요소가 없습니다" };
           let via = null;
           if (el.isContentEditable) {
             try { el.focus(); } catch (e) {}
@@ -255,7 +255,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
             el.dispatchEvent(new Event("input", { bubbles: true }));
             via = "입력칸";
           } else {
-            return { ok: false, why: "글을 넣을 수 없는 요소입니다: " + el.tagName };
+            return { ok: false, why: "입력할 수 없는 요소입니다: " + el.tagName };
           }
           const init = { key, code: key, keyCode: vk, which: vk, bubbles: true, cancelable: true, composed: true };
           el.dispatchEvent(new KeyboardEvent("keydown", init));
@@ -263,7 +263,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
           return { ok: true, via };
         })()` });
         const v = r && r.result && r.result.value;
-        if (!v || !v.ok) throw new Error((v && v.why) || "글을 넣지 못했습니다");
+        if (!v || !v.ok) throw new Error((v && v.why) || "입력하지 못했습니다");
         return v.via;
       };
 
@@ -280,7 +280,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       }
       if (failed) {
         return { ok: false, typed: done, total: values.length, advance, stoppedAt: failed.at,
-          error: `${failed.at}번째("${String(failed.value).slice(0, 20)}")에서 멈췄습니다: ${failed.error} — 앞 ${done}칸은 이미 들어갔습니다.` };
+          error: `${failed.at}번째("${String(failed.value).slice(0, 20)}")에서 중단했습니다: ${failed.error}. 앞 ${done}칸은 이미 입력됐습니다.` };
       }
       // 마지막 값이 화면 글에서 보이면 확인된 것이다. 보이지 않더라도 화면이 달라졌으면 들어갔을
       // 수 있으므로(가상 스크롤·캔버스) 단정하지 않고 확인 못 함으로 돌려준다. 글이 한 글자도
@@ -300,12 +300,12 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
           why = r && r.result && r.result.value;
         } catch {}
         return { ok: false, typed: done, total: values.length, advance, landed: false, via, why,
-          error: `${done}칸을 쳤지만 화면이 한 글자도 달라지지 않았습니다 — 실제로는 들어가지 않았습니다.`
+          error: `${done}칸을 입력했지만 화면이 한 글자도 달라지지 않았습니다. 실제로는 입력되지 않았습니다.`
             + (why ? ` (커서 ${why.active || "없음"} · 문서 포커스 ${why.focus})` : "") };
       }
       return { ok: true, typed: done, total: values.length, advance, via,
         landed: seen ? "확인됨" : "확인 못 함",
-        ...(seen ? {} : { note: "화면은 달라졌지만 마지막 값을 글에서 찾지 못했습니다 — 눈으로 한 번 보세요." }) };
+        ...(seen ? {} : { note: "화면은 달라졌지만 마지막 값을 본문에서 찾지 못했습니다. 화면을 직접 확인하세요." }) };
     },
     // 키 하나. 수식키는 "Shift+Enter"처럼 앞에 붙여 한 인자로 준다.
     async key(send, _wc, args) {
@@ -332,7 +332,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       const mods = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
       for (const m of parts) {
         const b = bit[m.toLowerCase()];
-        if (!b) throw new Error(`모르는 수식키: "${m}" — shift·ctrl·alt·meta(cmd)만 됩니다`);
+        if (!b) throw new Error(`모르는 수식키: "${m}". shift·ctrl·alt·meta(cmd)만 됩니다`);
         mods[b] = true;
       }
       // 이름이 있는 키만 표를 쓴다. 글자·숫자·한글은 글자 자체에서 뽑는다. 표가 커지면 표에
@@ -360,7 +360,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
         // ctrl+a이고, 여기서 shift를 얹으면 Ctrl+Shift+A라는 다른 단축키가 된다.
         if (/^[A-Z]$/.test(name) && !parts.length) mods.shiftKey = true;
       } else {
-        throw new Error(`모르는 키: "${name}" — Enter·Tab·Escape·화살표·F1~F12·글자 하나 중 하나여야 합니다`);
+        throw new Error(`모르는 키: "${name}". Enter·Tab·Escape·화살표·F1~F12·글자 하나 중 하나여야 합니다`);
       }
       const r = await send("Runtime.evaluate", {
         expression: `(() => {
@@ -685,7 +685,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       });
       const v = (r.result && r.result.value) || {};
       if (v.ok === false) throw new Error(v.err || "비우기 실패");
-      if (v.left) throw new Error("비운 뒤에도 내용이 남아 있습니다(" + v.left + "자) — 페이지가 값을 되돌립니다.");
+      if (v.left) throw new Error("비운 뒤에도 내용이 남아 있습니다(" + v.left + "자). 페이지가 값을 되돌립니다.");
       return { ok: true, ref: args.ref, cleared: true };
     },
     // 체크박스·라디오를 원하는 상태로 맞춘다. 누르기로 하면 현재 상태를 모르는 채 뒤집는 것이라,
@@ -712,7 +712,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
             var now=(el.getAttribute('aria-checked')==='true');
             return {ok: now===want, was:cur, now:now, via:'aria'};
           }
-          if (t==='radio' && !want) return {ok:false,err:'라디오는 끌 수 없습니다 — 다른 항목을 켜세요'};
+          if (t==='radio' && !want) return {ok:false,err:'라디오는 끌 수 없습니다. 다른 항목을 켜세요'};
           var was=!!el.checked;
           if (was!==want) { el.click(); }
           if (!!el.checked!==want) { el.checked=want; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }
@@ -720,7 +720,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
       });
       const v = (r.result && r.result.value) || {};
       if (v.ok === false) throw new Error(v.err || "상태 지정 실패");
-      if (!v.ok) throw new Error("원하는 상태로 바뀌지 않았습니다(지금 " + (v.now ? "켜짐" : "꺼짐") + ") — 페이지가 되돌립니다.");
+      if (!v.ok) throw new Error("원하는 상태로 바뀌지 않았습니다(지금 " + (v.now ? "켜짐" : "꺼짐") + "). 페이지가 되돌립니다.");
       return { ok: true, ref: args.ref, was: v.was, now: v.now, via: v.via };
     },
     // <select> 드롭다운에서 옵션을 value 또는 표시 텍스트로 선택 + change 발화.
@@ -835,7 +835,7 @@ function createInputCommands({ withLayout, nodeFromArgs, insertTextInChunks, isT
           el.dispatchEvent(new Event("change",{bubbles:true}));
           const v=(el.value!==undefined?el.value:el.textContent)||""; return {ok:v===t, got:String(v).slice(0,200), contenteditable:!!el.isContentEditable};})()` });
       const fv = (forced && forced.result && forced.result.value) || {};
-      if (!fv.ok) throw new Error("입력이 반영되지 않았습니다" + (fv.err ? " — " + fv.err : "") + (fv.got !== undefined ? ` (현재 값: ${fv.got})` : ""));
+      if (!fv.ok) throw new Error("입력이 반영되지 않았습니다" + (fv.err ? ": " + fv.err : "") + (fv.got !== undefined ? ` (현재 값: ${fv.got})` : ""));
       if (fv.contenteditable) return { ok: true, ref: args.ref, via: "리치 편집기 직접 설정" };
       return { ok: true, ref: args.ref, via: "값 직접 설정" };
     },

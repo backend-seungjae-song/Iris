@@ -91,7 +91,7 @@ export const RAIL_ITEMS = [
   },
   {
     id: "usage", label: "사용량",
-    title: "사용량 상세·이력: 여태 쓴 토큰과 계정 상태",
+    title: "사용량 상세·이력: 누적 토큰과 계정 상태",
     icon: "<path d=\"M4 20V10\"/><path d=\"M10 20V4\"/><path d=\"M16 20v-7\"/><path d=\"M22 20H2\"/>",
     body: "usg-active", panel: "usage-panel", layout: "full",
     canDisable: true, disabledReason: "",

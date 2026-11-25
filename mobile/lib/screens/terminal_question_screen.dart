@@ -153,7 +153,7 @@ class _TerminalQuestionScreenState extends State<TerminalQuestionScreen> {
         showIrisToast(
           context,
           error.message.contains('화면이 바뀌')
-              ? '화면이 바뀌었습니다. 새로 고쳐 다시 고르세요'
+              ? '화면이 바뀌었습니다. 새로고침 후 다시 고르세요'
               : error.message,
           tone: IrisToastTone.error,
         );
@@ -617,7 +617,7 @@ class _TerminalQuestionScreenState extends State<TerminalQuestionScreen> {
       children: [
         ResponseAnswered(
           title: title,
-          detail: _sent ? '다음 질문이 있으면 이어서 표시합니다' : '답했거나 취소되어 질문이 닫혔습니다',
+          detail: _sent ? '다음 질문이 있으면 이어서 표시합니다' : '답했거나 취소된 질문입니다',
           badge: _sent ? '보냄' : '종료',
           kindLabel: '질문',
           kindIcon: 'check-circle',

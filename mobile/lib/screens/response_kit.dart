@@ -253,7 +253,7 @@ class ResponseFrame extends StatelessWidget {
           const SizedBox(width: 6),
           Flexible(
             child: Text(
-              '멈춤 · 답 필요 · $kind',
+              '답 필요 · $kind',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: style,
@@ -1182,8 +1182,8 @@ class _ResponseDiffState extends State<ResponseDiff> {
 // 닫힌 요청의 제목과 설명. 답한 것이 확인된 경우만 "이미 답했습니다"
 (String, String) responseGoneText(String gone) => switch (gone) {
   'expired' || 'gone-expired' => ('요청이 만료됐습니다', '에이전트가 더 기다리지 않습니다'),
-  'already-answered' => ('이미 답했습니다', '다른 곳에서 먼저 답해 요청이 닫혔습니다'),
-  _ => ('요청이 끝났습니다', '답했거나 취소되어 목록에서 사라졌습니다'),
+  'already-answered' => ('이미 답했습니다', '다른 곳에서 먼저 답했습니다'),
+  _ => ('요청이 끝났습니다', '답했거나 취소된 요청입니다'),
 };
 
 String responseGoneBadge(String gone) =>

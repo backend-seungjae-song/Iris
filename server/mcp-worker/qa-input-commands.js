@@ -1,7 +1,9 @@
-// worker 사본 · 원본 cdp-qa-input.cjs 와 같은 입력에 같은 결과 (test/mcp-worker-qa-input-route.mjs 가 대조)
+// worker QA 입력 처리기 · 같은 출처 iframe의 대상 조회와 입력 수신 지원
 // 원본은 ⑧에서 지움
 import { randomBytes } from "node:crypto";
 
+import { frameDisappeared, readFrameAXTrees, readFrameIds } from "./frame-ax-trees.js";
+import { inspectFrameHit } from "./qa-frame-hit.js";
 import { dispatchKey } from "./qa-keys.js";
 import { inIsolatedWorld, inspectLoginPage } from "./qa-login-page.js";
 
@@ -82,9 +84,11 @@ async function nodeMeta(send, backendNodeId, sid = null) {
     name: axValue(first, "name") || attr("aria-label") || "", tag, backendNodeId };
 }
 
-async function hit(send, point) {
-  await send("DOM.enable");
-  const located = await send("DOM.getNodeForLocation", { x: Math.round(point.x), y: Math.round(point.y), includeUserAgentShadowDOM: false });
+async function hit(send, point, located) {
+  if (!located) {
+    await send("DOM.enable");
+    located = await send("DOM.getNodeForLocation", { x: Math.round(point.x), y: Math.round(point.y), includeUserAgentShadowDOM: false });
+  }
   if (!located?.backendNodeId) throw new Error("QA 입력 좌표의 맨 위 요소를 찾지 못했습니다");
   const target = await nodeMeta(send, located.backendNodeId);
   const resolved = await send("DOM.resolveNode", { backendNodeId: located.backendNodeId });
@@ -121,23 +125,30 @@ async function sameTarget(send, current, expected) {
   if (current.role === expected?.role && current.name === expected?.name) return true;
   const text = typeof expected?.text === "string" ? expected.text : null;
   if (text == null && !(expected?.role && expected?.name)) return false;
-  const tree = await send("Accessibility.getFullAXTree").catch(() => null);
-  const outers = (tree?.nodes || []).filter((node) => !node.ignored && node.backendDOMNodeId && node.backendDOMNodeId !== current.backendNodeId
-    && (text != null ? axValue(node, "name").includes(text) : axValue(node, "role").toLowerCase() === expected.role.toLowerCase() && axValue(node, "name") === expected.name));
-  if (!outers.length) return false;
-  const innerId = (await send("DOM.resolveNode", { backendNodeId: current.backendNodeId }).catch(() => null))?.object?.objectId;
-  if (!innerId) return false;
+  let innerId;
   try {
-    for (const node of outers) {
-      const objectId = (await send("DOM.resolveNode", { backendNodeId: node.backendDOMNodeId }).catch(() => null))?.object?.objectId;
-      if (!objectId) continue;
-      try {
-        const out = await send("Runtime.callFunctionOn", { objectId, returnByValue: true, arguments: [{ objectId: innerId }],
-          functionDeclaration: "function(inner){ const element = this.nodeType === 3 ? this.parentElement : this; return { inside: !!element && element !== inner && element.contains(inner) }; }" });
-        if (out?.result?.value?.inside === true) return true;
-      } finally { await send("Runtime.releaseObject", { objectId }).catch(() => {}); }
+    for await (const { nodes } of readFrameAXTrees(send)) {
+      const outers = nodes.filter((node) => !node.ignored && node.backendDOMNodeId && node.backendDOMNodeId !== current.backendNodeId
+        && (text != null ? axValue(node, "name").includes(text) : axValue(node, "role").toLowerCase() === expected.role.toLowerCase() && axValue(node, "name") === expected.name));
+      if (!outers.length) continue;
+      innerId ||= (await send("DOM.resolveNode", { backendNodeId: current.backendNodeId }).catch(() => null))?.object?.objectId;
+      if (!innerId) return false;
+      for (const node of outers) {
+        const objectId = (await send("DOM.resolveNode", { backendNodeId: node.backendDOMNodeId }).catch(() => null))?.object?.objectId;
+        if (!objectId) continue;
+        try {
+          const out = await send("Runtime.callFunctionOn", { objectId, returnByValue: true, arguments: [{ objectId: innerId }],
+            functionDeclaration: "function(inner){ const element = this.nodeType === 3 ? this.parentElement : this; return { inside: !!element && element !== inner && element.contains(inner) }; }" });
+          if (out?.result?.value?.inside === true) return true;
+        } catch (error) {
+          // 서로 다른 문서의 노드는 같은 호출에 넘길 수 없음
+          if (!String(error.message).includes("same JavaScript world")) throw error;
+        } finally { await send("Runtime.releaseObject", { objectId }).catch(() => {}); }
+      }
     }
-  } finally { await send("Runtime.releaseObject", { objectId: innerId }).catch(() => {}); }
+  } finally {
+    if (innerId) await send("Runtime.releaseObject", { objectId: innerId }).catch(() => {});
+  }
   return false;
 }
 
@@ -204,18 +215,27 @@ async function armCapture(send, wc) {
   try {
     for (const sid of send.frames()) {
       try {
-        let contextId = null;
+        const frameSend = send.on(sid);
+        const frameIds = await readFrameIds(frameSend);
+        if (!frameIds.length) throw new Error("QA 이벤트 수신 프레임을 확인할 수 없습니다");
         if (binding) {
-          const frameTree = await send.on(sid)("Page.getFrameTree");
-          const frameId = frameTree?.frameTree?.frame?.id;
-          if (!frameId) throw new Error("QA 이벤트 수신 프레임을 확인할 수 없습니다");
-          await send.on(sid)("Runtime.addBinding", { name: binding, executionContextName: worldName });
-          const world = await send.on(sid)("Page.createIsolatedWorld", { frameId, worldName });
-          contextId = world?.executionContextId;
-          if (!contextId) throw new Error("QA 이벤트 수신 격리 영역을 만들지 못했습니다");
+          await frameSend("Runtime.addBinding", { name: binding, executionContextName: worldName });
         }
-        await evaluate(send, captureStart(binding), sid, contextId);
-        contexts.push([sid, contextId]);
+        // iframe에서 발생한 입력 이벤트는 부모 문서에서 받을 수 없음
+        for (const [index, frameId] of frameIds.entries()) {
+          let contextId = null;
+          try {
+            if (binding || index > 0) {
+              const world = await frameSend("Page.createIsolatedWorld", { frameId, worldName: worldName || "iris-qa-input" });
+              contextId = world?.executionContextId;
+              if (!contextId) throw new Error("QA 이벤트 수신 격리 영역을 만들지 못했습니다");
+            }
+            await evaluate(send, captureStart(binding), sid, contextId);
+            contexts.push([sid, contextId]);
+          } catch (error) {
+            if (index === 0 || !frameDisappeared(error)) throw error;
+          }
+        }
       } catch (error) {
         if (sid == null) throw error;
       }
@@ -265,11 +285,11 @@ async function mouse(send, type, point, extra = {}) {
 function sendCharsToTab(wc, text) {
   for (const ch of Array.from(String(text))) wc.sendInputEvent({ type: "char", keyCode: ch });
 }
-const FOCUS_GUARDED_ERROR = "사용자 포커스 보호: 이 QA 탭은 사용자가 쓰는 창에 있고 탭에 포커스를 줄 수 없어 진짜 클릭·키를 보내지 않습니다"
-  + " — 탭이 화면에 보이는지 확인한 뒤 다시 하세요";
+const FOCUS_GUARDED_ERROR = "사용자 포커스 보호: 이 QA 탭은 사용자가 쓰는 창에 있고 탭에 포커스를 줄 수 없어 실제 클릭·키를 보내지 않습니다"
+  + ". 탭이 화면에 보이는지 확인한 뒤 다시 하세요";
 
 const USER_TYPING_ERROR = "사용자 입력 보호: 사용자가 같은 창에서 계속 입력 중이라 포커스를 빌리지 않았습니다"
-  + " — 잠시 뒤 다시 하세요";
+  + ". 잠시 뒤 다시 하세요";
 
 // prepareFocus(wc): "trusted"(CDP 진짜 입력 사용 가능), "borrowed"(사용자 포커스를 입력 동안만 빌림),
 // "guarded"(빌리지 못함), "busy"(사용자가 계속 입력 중). 기본값은 trusted. 실제 조립부(cdp-control.cjs)가 user-focus.cjs 판정을 넘김
@@ -314,19 +334,27 @@ function createQaInputCommands({ prepareFocus = async () => "trusted", returnFoc
       const role = String(args.role || ""), name = String(args.name || "");
       if (!role || !name) throw new Error("QA 대상의 역할과 이름이 필요합니다");
       const size = await viewport(send);
-      const tree = await send("Accessibility.getFullAXTree");
-      const matches = (tree?.nodes || []).filter((node) => axValue(node, "role") === role && axValue(node, "name") === name && node.backendDOMNodeId && !node.ignored);
       const visible = [];
-      for (const node of matches) {
-        const box = await send("DOM.getBoxModel", { backendNodeId: node.backendDOMNodeId }).catch(() => null);
-        const quad = box?.model?.border;
-        if (!quad || quad.length !== 8) continue;
-        const point = { x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
-          y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4 };
-        try { requirePoint(point, size.width, size.height); visible.push({ backendNodeId: node.backendDOMNodeId, point }); } catch {}
+      for await (const { nodes, frameId } of readFrameAXTrees(send)) {
+        const matches = nodes.filter((node) => axValue(node, "role") === role && axValue(node, "name") === name && node.backendDOMNodeId && !node.ignored);
+        for (const { backendDOMNodeId: backendNodeId } of matches) {
+          const box = await send("DOM.getBoxModel", { backendNodeId }).catch(() => null);
+          const quad = box?.model?.border;
+          if (!quad || quad.length !== 8) continue;
+          const point = { x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
+            y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4 };
+          try { requirePoint(point, size.width, size.height); visible.push({ backendNodeId, frameId, point }); } catch {}
+        }
       }
       if (visible.length !== 1) throw new Error(visible.length ? "QA 대상이 여러 개입니다" : "화면에 보이는 QA 대상을 찾지 못했습니다");
-      const { backendNodeId, point } = visible[0];
+      const { backendNodeId, frameId, point } = visible[0];
+      const at = { x: Math.round(point.x), y: Math.round(point.y) };
+      if (frameId) {
+        const check = await inspectFrameHit(send, { frameId, backendNodeId, ...point });
+        if (!check?.inside) throw new Error("QA 대상 위에 다른 요소가 있습니다");
+        if (check.disabled) throw new Error("QA 대상이 비활성 상태입니다");
+        return { ok: true, ...at, at, target: await hit(send, point, check.located) };
+      }
       const top = await hit(send, point);
       const resolved = await send("DOM.resolveNode", { backendNodeId });
       const objectId = resolved?.object?.objectId;
@@ -336,7 +364,7 @@ function createQaInputCommands({ prepareFocus = async () => "trusted", returnFoc
         arguments: [{ value: point.x }, { value: point.y }] });
       if (!check?.result?.value?.top) throw new Error("QA 대상 위에 다른 요소가 있습니다");
       if (check.result.value.disabled) throw new Error("QA 대상이 비활성 상태입니다");
-      return { ok: true, x: Math.round(point.x), y: Math.round(point.y), at: { x: Math.round(point.x), y: Math.round(point.y) }, target: top };
+      return { ok: true, ...at, at, target: top };
     },
     // 지금 포커스가 있는 요소의 role·name. qa_play 가 이미 포커스된 입력칸을 다시 누를지 정할 때 씀
     async "qa-focused"(send) { return { ok: true, focused: await focusedAx(send) || await evaluate(send, FOCUS_META) }; },
@@ -364,7 +392,7 @@ function createQaInputCommands({ prepareFocus = async () => "trusted", returnFoc
       // 휠·마우스 이동은 포커스를 옮기지 않음(실측). 누르기·키·글자만 판정
       // 포커스를 빌리는 시간을 줄이려고 입력 기록 준비를 먼저 함
       const recorder = await armCapture(send, wc);
-      const focus = action === "hover" || action === "scroll" ? "trusted" : await prepareFocus(wc);
+      const focus = action === "hover" || action === "scroll" ? "trusted" : await prepareFocus(wc, action);
       const borrowed = focus === "borrowed", trusted = focus === "trusted" || borrowed;
       if (!trusted && !["type", "typeahead"].includes(action)) {
         await recorder.release();

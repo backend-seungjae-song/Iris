@@ -26,6 +26,7 @@ function fixture(overrides = {}) {
     async connect() { calls.push(["connect"]); return { ok: true, state: "connected", restored: 0 }; },
     async openTab(payload) { calls.push(["openTab", payload]); return { ok: true, id: "owned-1", owner: payload.owner, target: { kind: "owned-page", id: "owned-1" } }; },
     async command(id, command, args) { calls.push(["command", id, command, args]); return { ok: true }; },
+    async releaseTab(id) { calls.push(["releaseTab", id]); },
     async closeTab(id) { calls.push(["closeTab", id]); return { ok: true, id }; },
     async beginNativeInteraction(id) { calls.push(["native", id]); return { ok: true, mode: "native", id, target: { kind: "owned-page", id } }; },
     async disconnect() { calls.push(["disconnect"]); return { ok: true, state: "disconnected" }; },
@@ -191,5 +192,20 @@ test("마지막 renderer가 사라지면 제어 연결만 끊는다", async () =
   await f.invoke("ac-live-chrome-connect", sender);
   sender.destroy();
   await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(f.calls.at(-1), ["disconnect"]);
+});
+
+test("메인 문서를 다시 열면 이전 문서의 탭 소유권과 연결을 정리한다", async () => {
+  const f = fixture();
+  const sender = new FakeSender(15);
+  await f.invoke("ac-live-chrome-connect", sender);
+  await f.invoke("ac-live-chrome-open", sender, { url: "https://example.com" });
+  sender.emit("did-start-navigation", {}, "https://example.com", false, false);
+  assert.equal(f.manager.ownerByTab.size, 1);
+  sender.emit("did-start-navigation", {}, "https://example.com", false, true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.manager.ownerByTab.size, 0);
+  assert.equal(f.manager.clients.size, 0);
+  assert.equal(sender.listenerCount("destroyed"), 0);
   assert.deepEqual(f.calls.at(-1), ["disconnect"]);
 });

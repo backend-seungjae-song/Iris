@@ -62,7 +62,7 @@ export default async function run() {
         throw new Error(`크기 순회 끝에 { clear: true }로 원복하지 않는다(${JSON.stringify(applied)})`);
       }
       const unknown = result?.shots?.find((shot) => shot.size === "모르는값");
-      if (!unknown || unknown.path || unknown.error !== "모르는 크기 — 모바일·패드·데스크톱 또는 1024x768 형식") {
+      if (!unknown || unknown.path || unknown.error !== "모르는 크기. 모바일·패드·데스크톱 또는 1024x768 형식") {
         throw new Error("모르는 크기를 건너뛰고 한국어 사유를 남기지 않는다");
       }
       return true;

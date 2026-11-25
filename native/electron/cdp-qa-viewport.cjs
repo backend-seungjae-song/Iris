@@ -1,6 +1,5 @@
 // QA 탭의 화면 크기만 변경하고 UA·주소·새로고침은 유지
-// 사용자가 호스트별로 걸어 둔 확대(Cmd+-)는 페이지 CSS 크기와 배율을 바꾸므로 보정해서 요청한 크기·배율 유지.
-// 확대 설정 자체는 같은 호스트의 사용자 탭과 공유되어 바꾸지 않음
+// 탭 확대에 따라 달라지는 CSS 크기와 배율을 보정해 QA 요청값 유지
 function zoomOf(wc) {
   try { const z = typeof wc.getZoomFactor === "function" ? wc.getZoomFactor() : 1; return z > 0 ? z : 1; } catch { return 1; }
 }
@@ -17,7 +16,7 @@ function createQaViewportCommands({ notify, yieldViewport, viewportOwner }) {
     appliedZoom.set(wc, z);
     if (notify) notify(wc.id, { w, h, cls: "desktop" });
   };
-  // 이동 뒤 호스트 확대가 바뀐 경우 같은 크기로 다시 적용
+  // 탭 배율 변경 뒤에도 QA에서 지정한 화면 크기 유지
   const reconcile = async (send, wc) => {
     if (!appliedZoom.has(wc) || appliedZoom.get(wc) === zoomOf(wc)) return false;
     const state = read(wc);

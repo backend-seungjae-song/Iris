@@ -240,7 +240,7 @@ void main() {
             .length,
         1,
       );
-      expect(find.text('자동 따라가기'), findsOneWidget);
+      expect(find.text('자동 스크롤'), findsOneWidget);
       wire.emit({
         'type': 'terminal.frame',
         'agent': prior.a,
@@ -259,7 +259,7 @@ void main() {
         wire.sent.where((request) => request['type'] == 'terminal.mouse'),
         isEmpty,
       );
-      await tester.tap(find.text('자동 따라가기'));
+      await tester.tap(find.text('자동 스크롤'));
       await tester.pumpAndSettle();
       final painter =
           tester

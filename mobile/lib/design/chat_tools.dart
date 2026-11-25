@@ -48,7 +48,7 @@ class IrisToolRow {
   // 진행 중 줄 안내 글. 예: 명령 실행 중
   String get pendingLabel => switch (verb) {
     '읽기' => '읽는 중',
-    '수정' => '수정하는 중',
+    '수정' => '수정 중',
     '실행' => '명령 실행 중',
     '검색' => '검색 중',
     _ => '$tool 실행 중',

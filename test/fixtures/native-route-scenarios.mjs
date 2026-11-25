@@ -117,7 +117,7 @@ export const SCENARIOS = [
   // nativewin
   { name: "nativewin-sheet", cmd: "nativewin", args: {}, env: { ...shownEnv, ax: { window: { ok: true, windows: [{ kind: "sheet", name: "열기", buttons: ["취소", "열기"], text: "" }], blocking: [{ kind: "sheet", name: "열기" }], note: "시트가 떠 있습니다" } } } },
   { name: "nativewin-none", cmd: "nativewin", args: {}, env: { ...shownEnv, ax: { window: { ok: true, windows: [], blocking: [], note: "지금 막고 있는 네이티브 시트는 없습니다." } } } },
-  { name: "nativewin-access-denied", cmd: "nativewin", args: {}, env: { ...shownEnv, ax: { window: { ok: false, error: "접근성 접근 실패 — 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 허용해야 합니다." } } } },
+  { name: "nativewin-access-denied", cmd: "nativewin", args: {}, env: { ...shownEnv, ax: { window: { ok: false, error: "접근성 접근 실패. 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 허용해야 합니다." } } } },
   { name: "nativewin-blocked-host", cmd: "nativewin", args: {}, env: { ...shownEnv, blockedHost: true, ax: { window: { ok: true, windows: [], blocking: [], note: "x" } } } },
   // nativekey
   { name: "nativekey-escape", cmd: "nativekey", args: { key: "escape" }, env: { ...shownEnv, ax: { key: { ok: true, key: "escape" } } } },
@@ -359,7 +359,7 @@ export function createWorkerRun(scenario, root, {
       if (noCdp) {
         effects.push(["detachAiSession"]);
         if (!CDP_FREE.includes(command)) {
-          throw coded("cdp_blocked", `로그인 호스트에서는 CDP 를 붙이지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: ${CDP_FREE.join(" ")}. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.`);
+          throw coded("cdp_blocked", `로그인 호스트에서는 CDP 를 연결하지 않아 ${command} 를 실행할 수 없습니다. 쓸 수 있는 것: ${CDP_FREE.join(" ")}. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.`);
         }
       }
       return { noCdp, ...gens };

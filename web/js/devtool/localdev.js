@@ -147,7 +147,7 @@ async function killRoute(r) {
   if (busy.has(key)) return;
   const ok = askConfirm ? await askConfirm(`${r.name} 서버를 종료할까요?`, `포트 ${r.port}`) : false;
   if (!ok) return;
-  setBusy(key, "종료하는 중… 최대 8초", (x) => !x.up);
+  setBusy(key, "종료 중… 최대 8초", (x) => !x.up);
   const res = await sendAction("kill", r.name, r.port);
   if (!res.ok) { failBusy(key, res.error === "busy" ? "이미 처리 중" : "종료 실패"); return; }
   setBusy(key, "꺼짐 확인 중…", (x) => !x.up);
@@ -186,7 +186,7 @@ function routeRow(r, ip) {
   let act = "";
   // 상시 서비스(launchd)는 종료해도 곧 되살아나고 그 사이 쓰던 연결만 끊기므로 종료 버튼을 두지 않는다.
   if (st) act = progress(st);
-  else if (r.port && r.service) act = `<span class="ld-svc" title="launchd가 관리 — 종료해도 되살아납니다">${icon("svc")}상시 서비스</span>`;
+  else if (r.port && r.service) act = `<span class="ld-svc" title="launchd가 관리합니다. 종료해도 다시 실행됩니다">${icon("svc")}상시 서비스</span>`;
   else if (r.port) act = `<button class="ld-btn ld-kill" data-kill="${esc(r.name)}">${icon("stop")}종료</button>`;
   return `<tr class="${st ? "ld-busy" : ""}${r.up ? "" : " ld-dn"}">`
     + `<td><span class="ld-stt ${r.up ? "ld-up" : "ld-down"}"><span class="ld-led ${r.up ? "ld-on" : "ld-off"}"></span>${r.up ? "UP" : "DOWN"}</span></td>`

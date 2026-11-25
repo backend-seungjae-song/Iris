@@ -60,7 +60,7 @@ console.log("[13] 스냅샷 — 노드 수가 아니라 바이트로 끊는다")
     /KEEP_ROLES = new Set\(\["alert", "alertdialog", "status", "heading", "log"\]\)/.test(eng)
     && /잘린 구간의 경고·상태·제목/.test(eng));
   check("이어 볼 커서를 준다", () =>
-    /이어 보려면 cursor=\$\{cursor\}/.test(eng));
+    /이어서 보려면 cursor=\$\{cursor\}/.test(eng));
   check("ref는 자르기 전에 붙는다 — 조각마다 번호가 달라지지 않는다", () =>
     /질의·예산은 ref를 붙인 뒤에 적용한다/.test(eng));
   check("role·name·region으로 좁힐 수 있다", () =>

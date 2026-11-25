@@ -38,11 +38,11 @@ export function createRemoteFeatures(options) {
         const identifiers = [notice.session, notice.tabId];
         const created = requests.add({ agent: agent.ref, kind: "browser-user", createdAt: now(),
           expiresAt: now() + Math.max(1_000, Math.min(240_000, Number(notice.wait || 1) * 1000)),
-          body: { title: redactPrivateText(notice.title || "사람 차례", identifiers).slice(0, 60),
+          body: { title: redactPrivateText(notice.title || "사람이 할 일", identifiers).slice(0, 60),
             text: redactPrivateText(notice.text || "브라우저에서 작업을 마쳐 주세요.", identifiers).slice(0, 500),
-            choices: ["다 했음", "못 하겠음"], ...(tab ? { tab } : {}) } }, (answer) => {
+            choices: ["완료", "할 수 없음"], ...(tab ? { tab } : {}) } }, (answer) => {
           if (!listUserNotices().some((item) => item.id === notice.id && item.round === round)) return "failed";
-          deliverUserAnswer(notice.id, answer.choice === "done" ? "다 했음" : "못 했음");
+          deliverUserAnswer(notice.id, answer.choice === "done" ? "완료" : "할 수 없음");
           return "delivered";
         });
         asks.set(notice.id, { ref: created.ref, round });

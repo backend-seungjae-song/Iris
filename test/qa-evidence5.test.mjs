@@ -172,7 +172,7 @@ test("U5 체인 실패와 다른 세션의 장부는 내용과 사진을 요약�
   await ledger.begin({ runId: "foreign", session: "other", plan: qaPlan({ entries: [url] }), charter: { ...qaCharter(), scope: "다른 사람 비밀 내용" } });
   const result = await createQaSummary(ledger, ["tampered", "foreign"], { session: "owner" });
   assert.equal(result.verifiedRuns.length, 0); assert.equal(result.rejectedRuns.length, 2);
-  assert.match(result.rejectedRuns.find(item => item.runId === "tampered").reason, /장부 검증 실패: QA 장부 해시가 변조됐습니다/);
-  const html = fs.readFileSync(result.path, "utf8"); assert.match(html, /장부 검증 실패/); assert.doesNotMatch(html, /장부 비밀 내용|변조 비밀 내용|다른 사람 비밀 내용|<img/);
+  assert.match(result.rejectedRuns.find(item => item.runId === "tampered").reason, /기록 검증 실패: QA 기록 해시가 변조됐습니다/);
+  const html = fs.readFileSync(result.path, "utf8"); assert.match(html, /기록 검증 실패/); assert.doesNotMatch(html, /장부 비밀 내용|변조 비밀 내용|다른 사람 비밀 내용|<img/);
   for (const ids of [[], ["failed", "failed"], ["../outside"], "failed"]) await assert.rejects(createQaSummary(ledger, ids), /runIds/);
 });

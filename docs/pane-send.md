@@ -77,7 +77,7 @@ iris-pane-send <paneId> --check      # 보내지 않고 입력창 상태만 본�
 `/model` 은 입력 후 선택창에서 Enter 를 한 번 더 눌러야 확정된다. `/compact` 와 달리
 명령 입력만으로 완료되지 않으므로 Enter 도 함께 전송한다.
 
- herdr pane run <paneId> "/model fable" && sleep 2 && herdr pane send-keys <paneId> enter
+    herdr pane run <paneId> "/model fable" && sleep 2 && herdr pane send-keys <paneId> enter
 
 - 별칭만 지원한다. `opus`·`fable` 은 동작하지만 `claude-opus-5` 같은 전체 ID 에는 응답하지 않는다.
 - 모델 전환은 턴을 중단하지 않는다. 이 호출 이후의 도구 호출부터 새 모델을 사용한다. `/compact` 의
@@ -166,6 +166,14 @@ function sendTo(paneId, text) {
 보내기: iris-pane-send w18:p1Q "<명령>"
 ⟦/Iris⟧
 ```
+
+## 지목한 대화 이어가기
+
+같은 작업 폴더를 쓰는 Codex와 Claude Code 사이에서 대화를 가져올 수 있다. 이어갈
+창을 Iris의 **대화 보기**로 열고 `/inherit`를 입력한다. 세션 지목 모드에서 반대쪽
+에이전트의 세션을 고른 뒤 전송하면, 입력한 창이 가져온 대화로 바뀐다. Claude에서
+Codex로 가져올 때는 설치된 `~/.local/bin/to-codex`를 사용한다. 긴 대화에서는
+저장된 압축 요약과 최근 메시지를 가져온다. 전체 대화는 원본 세션에서 확인할 수 있다.
 
 ## 주의 사항
 

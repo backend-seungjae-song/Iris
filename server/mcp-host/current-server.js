@@ -25,6 +25,7 @@ import {
   partitionForProfile,
   profileNames,
   raceDialog,
+  releaseSessionControl,
   requestBgTab,
   requestCdp,
   resolveTarget,
@@ -136,12 +137,12 @@ export function createCurrentServerHostPorts({ targetTokenFor, executeRelay, del
       return { response: { ok: false, error: resolved.noSession
         ? "세션 식별자가 없어(HERDR_PANE_ID·IRIS_SESSION 둘 다 없음) 어느 탭을 쓸지 정할 수 없습니다. 임의로 고르지 않습니다 — herdr pane 안에서 실행하거나, 위임 프로세스라면 IRIS_SESSION에 부모 pane id(예: w3:pS)를 넘겨주세요."
         : resolved.noSpace
-          ? "이 세션의 스페이스를 알 수 없어 조작할 탭을 정할 수 없습니다 — 앱에서 탭을 지목해 고정해 주세요."
+          ? "이 세션의 스페이스를 알 수 없어 조작할 탭을 정할 수 없습니다 — 앱에서 탭을 선택해 고정해 주세요."
           : resolved.sharedBlocked
-            ? "공유 브라우저 창은 지목 없이 쓰지 않습니다 — 앱에서 그 탭을 직접 지목해 주세요."
+            ? "공유 브라우저 창의 탭은 사용자가 선택해야 쓸 수 있습니다 — 앱에서 그 탭을 직접 선택해 주세요."
             : resolved.space
-              ? `스페이스 ${resolved.space}에 열린 브라우저 탭이 없습니다 — 이 스페이스에서 브라우저를 열거나 탭을 지목해 고정하세요.`
-              : "제어할 브라우저 탭이 없습니다 — 앱에서 브라우저를 열거나, 탭을 지목해 고정하세요(`iris-browser tabs`)." } };
+              ? `스페이스 ${resolved.space}에 열린 브라우저 탭이 없습니다 — 이 스페이스에서 브라우저를 열거나 탭을 선택해 고정하세요.`
+              : "제어할 브라우저 탭이 없습니다 — 앱에서 브라우저를 열거나, 탭을 선택해 고정하세요(`iris-browser tabs`)." } };
     }
     return { target: await resolveForCommand(identity, { tabId: resolved.tabId }) };
   };
@@ -170,6 +171,7 @@ export function createCurrentServerHostPorts({ targetTokenFor, executeRelay, del
     resolveForCommand,
     ownerOf: qaOwner,
     markControl,
+    releaseControl: (tabId, label) => releaseSessionControl(label, tabId),
     execute: (target, input, request) => relay({ target, relay: input.relay || {
       command: input.command, args: input.args, timeoutMs: input.timeout,
     }, request }),
@@ -206,7 +208,7 @@ export function createCurrentServerHostPorts({ targetTokenFor, executeRelay, del
       if (!gate.ok) throw hostError("SESSION_DENIED", gate.why || "이 세션의 탭이 아닙니다.");
       wakeSleepingTab(tabId);
       const wcId = await waitForTabWc(tabId, Number(input.timeoutMs) || 12000);
-      if (!wcId) throw hostError("TIMEOUT", "탭을 깨우지 못했습니다.", { retryable: true });
+      if (!wcId) throw hostError("TIMEOUT", "절전 탭을 다시 열지 못했습니다.", { retryable: true });
       return resolveForCommand(identity, { tabId });
     },
     tabClose: async ({ identity, input }) => {

@@ -3,6 +3,7 @@ import { sliceBetween, sliceFrom } from "../bin/slice-anchor.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { patchHtml, tabKey } from "../web/js/core/patch-html.js";
 import vm from "node:vm";
 import { addTab, getActiveTabId, getCenterSpace, getCurrentTabs, getTabs, isTabVisible, replaceTabs, setActiveTab, setCenterSpace } from "../web/js/center/tab-store.js";
 import { paneActives, paneFocus, paneMove, paneRemove, paneTakeCollapsed, paneLayout, paneRestore, paneSnapshot, paneSync, paneSplit, paneTabs } from "../web/js/center/pane-store.js";
@@ -86,7 +87,7 @@ test("칸별 탭 줄은 자기 종류·활성 탭만 그림", () => {
     preserveRemainingPane() {}, lastByKind: new Map(), tabGroup: t => t.kind === 'browser' ? 'browser' : 'file', renderKindBar() {},
     isTabDirty: () => false, esc: x => x, aiBusyLabels: () => [], keepAwakeMark: () => "", TAB_KIND: {}, TAB_CLOSE: '',
     revealActiveTab() {}, syncAiGlow() {}, updateCenterVisibility() {},
-    setHtml: (el, html) => { el.innerHTML = html; return true; },
+    tabKey, patchHtml,
   });
   render();
   assert.match(rows[0].strip.innerHTML, /data-tab="f"/); assert.doesNotMatch(rows[0].strip.innerHTML, /data-tab="b"/);
@@ -238,7 +239,7 @@ test("렌더 소유자와 토큰은 칸별이며 오래된 비동기 렌더는 �
 test("종류 선택은 혼합 칸의 실제 소속에 따라 양쪽 버튼을 활성화", () => {
   const kindBar = { hidden: true, innerHTML: '' };
   const render = vm.runInNewContext(sliceBetween(source, 'function renderKindBar', 'export function renderTabs') + '\nrenderKindBar;', {
-    KIND_PICKS: [['file','파일'],['browser','브라우저']], TAB_KIND: {}, tabGroup: t => t.kind === 'browser' ? 'browser' : 'file',
+    patchHtml, KIND_PICKS: [['file','파일'],['browser','브라우저']], TAB_KIND: {}, tabGroup: t => t.kind === 'browser' ? 'browser' : 'file',
   });
   render(kindBar, true, [{kind:'file'},{kind:'browser'}], 'file');
   assert.doesNotMatch(kindBar.innerHTML, / disabled/);

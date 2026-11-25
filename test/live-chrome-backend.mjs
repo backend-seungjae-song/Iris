@@ -295,3 +295,17 @@ test("browser target API가 없는 connector 결과도 회수한다", async () =
   assert.equal((await backend.connect()).code, "connector-incompatible");
   assert.deepEqual(log, ["disconnect"]);
 });
+
+test("원래 Iris 문서가 사라지면 실제 Chrome 탭을 유지하고 다음 연결에서 다시 제어하지 않는다", async () => {
+  const log = [];
+  const browser = new FakeBrowser(log);
+  const backend = createLiveChromeBackend({ connectFn: async () => browser });
+  await backend.connect();
+  const opened = await backend.openTab({ url: "https://example.com/", owner: "tab-a" });
+  await backend.releaseTab(opened.id);
+  await backend.disconnect();
+  assert.equal((await backend.connect()).restored, 0);
+  assert.equal(log.some(entry => entry[1] === "Target.closeTarget"), false);
+  assert.equal(browser.root.detached, true);
+  await backend.disconnect();
+});

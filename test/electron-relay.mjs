@@ -23,7 +23,7 @@ const EXPECTED_COMMANDS = [
 
 function coded(code, message) { return Object.assign(new Error(message), { code }); }
 
-function harness({ currentUrl = "https://example.test/page", pendingUrl = "", generations, childOwner = 7 } = {}) {
+function harness({ currentUrl = "https://example.test/page", pendingUrl = "", generations, childOwner = 7, aiScope } = {}) {
   const attaches = [];
   const gates = [];
   const images = [];
@@ -99,7 +99,7 @@ function harness({ currentUrl = "https://example.test/page", pendingUrl = "", ge
   });
   const shell = { id: 1, isDestroyed: () => false, getType: () => "window", getURL: () => "http://127.0.0.1/" };
   const webContents = { fromId: (id) => Number(id) === 7 ? guest : Number(id) === 1 ? shell : null };
-  const ai = createAiCausality({ graceMs: 0 });
+  const ai = aiScope || createAiCausality({ graceMs: 0 });
   const upload = createUploadController({
     isAbsolute: () => true,
     existsSync: () => true,
@@ -879,4 +879,17 @@ test("⑦ 네이티브 조각: download.configure 는 폴더를 만들 수 없�
     command: "download.configure", args: { dir: `${blocker}/sub` } }),
   (error) => error.code === "INVALID_REQUEST" && /^폴더를 만들 수 없습니다: /.test(error.message));
   assert.equal(h.download.dir, null, "무장하지 않음");
+});
+
+test("ai.enter 는 뒤에 깐 탭의 포커스 보호가 켜진 뒤에 응답한다", async () => {
+  const causality = createAiCausality({ graceMs: 0 });
+  let arm; const armed = new Promise((r) => { arm = r; });
+  const h = harness({ aiScope: { ...causality, enter: (id) => causality.enter(id), leave: (t) => causality.leave(t), armed: () => armed } });
+  await h.relay.acceptGeneration("boot:1");
+  let answered = false;
+  const pending = h.request("ai.enter").then((r) => { answered = true; return r; });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(answered, false, "보호가 켜지기 전에 응답하면 첫 명령이 보호 없이 나감");
+  arm();
+  assert.ok((await pending).ticket);
 });

@@ -106,7 +106,7 @@ check("고른 요소의 그림을 그 자리에서 찍는다", () =>
 // 사이트는 이를 모바일로 인식한다. Chrome의 배경 탭은 크기를 유지하므로 발생하지 않는다.
 check("안 보이는 탭도 사람이 보는 창 크기를 갖는다", () => {
   const c = cdpHiddenViewportSource, wiring = read("native/electron/cdp-control.cjs");
-  return /if \(isTabShown\(id\) \|\| hasExplicitDevice\(id\)\) return false/.test(c)
+  return /if \(isTabShown\(id\) \|\| isBehindTab\(id\) \|\| hasExplicitDevice\(id\)\) return false/.test(c)
     && /Emulation\.setDeviceMetricsOverride/.test(c) && /mobile: false/.test(c)
     // 화면에 붙은 뒤에만 적용한다. 탭이 생성되는 순간에 적용하면 그릴 표면이 없어 Electron 이
     // SIGSEGV 로 종료된다. 어느 탭이 보이는지 모르는 동안에는 적용하지 않는다.
@@ -258,7 +258,7 @@ check("빈 프로필 Chrome 프로세스와 Dock 중복을 만드는 실행 경�
   !/--user-data-dir|isolated-v2|Target\.createTarget|remote-debugging/.test(realHandoff + authEntry));
 check("인증 URL은 프로세스 argv가 아니라 식별된 Chrome 창에만 전달한다", () => {
   const launch = sliceFrom(realHandoff, "spawn(browser.bin", 320, "인증 URL은 프로세스 argv가 아니라 식별된 Chrome 창에만 전달한다");
-  return /"about:blank"/.test(launch) && !/target\.href/.test(launch)
+  return /"--new-window", marker/.test(launch) && /about:blank#iris-/.test(realHandoff) && !/target\.href/.test(launch)
     && /set URL of active tab of window id/.test(realHandoff);
 });
 // 공유 브라우저 창도 자기 탭을 가진 스페이스다. herdr 스페이스 목록에 없어서 기본 계정 설정이
@@ -559,7 +559,7 @@ check("값을 채운 뒤에도 우리가 연 창의 실제 존재 여부로 종�
   && /const current = await windowIds\(browser\)/.test(realHandoff)
   && /!current\.includes\(windowId\)/.test(realHandoff));
 check("입력값은 AppleScript stdin으로만 전달되고 로그·argv에 실리지 않는다", () =>
-  /Buffer\.from\(fillJs\(fields, wantOrigin\)/.test(cauth)
+  /appleScriptString\(fillJs\(fields, wantOrigin\)/.test(cauth)
   && /spawn\("\/usr\/bin\/osascript", \["-"\]/.test(cauth)
   && /child\.stdin\.end\(script\)/.test(cauth)
   && !/logLine\("filling", \{ fields/.test(cauth));
@@ -631,7 +631,7 @@ check("패스키 감지는 알리기만 하고 창을 안 연다", () => {
     // 넘길 수 있는 탭이면 누를 버튼이 있는 막대를 띄운다. auto·now 를 넘기면 누르기 전에 창이 열린다.
     && /if \(handoffCheck\(rec\)\.ok\) \{ handoffToChrome\(rec, [^,()]+(\([^)]*\))?[^,()]*\); return; \}/.test(hint)
     && !/🪟/.test(browserHandoff)
-    && /if \(auto \|\| now\) run\(\);/.test(browserHandoff) && /if \(!auto && !now\) bar\.appendChild\(go\);/.test(browserHandoff);
+    && /if \(auto \|\| now\) run\(\);/.test(browserHandoff) && /if \(!auto && !now\) offerBrowser\(\);/.test(browserHandoff);
 });
 // 보고 있지 않은 탭이 막대를 띄우면 갑자기 튀어나온 것으로 보인다.
 check("안 보이는 탭은 조용하다", () =>

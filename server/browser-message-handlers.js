@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { timingSafeEqual } from "node:crypto";
 import { noteEmulatorReply } from "./emulator-bridge.js";
 import { snapshot } from "./runtime-state.js";
 import { issuePromptTarget } from "./prompt-targets.js";
@@ -65,7 +66,7 @@ import {
 //
 // 의존 대상
 //   browser-runtime·browser-state-owner·browser-commands owner, runtime-state snapshot(원격 스페이스 검증)과
-//   node child-process에 의존하며,
+//   Node의 child_process·crypto에 의존하며,
 //   broadcast는 composition root에서 주입받고 transport나 다른 handler를 import하지 않는다.
 //
 // 유지 조건
@@ -78,10 +79,23 @@ import {
 
 let broadcast;
 let broadcastLocal;
+let appToken;
 
 export function initBrowserMessageHandlers(deps) {
   broadcast = deps.broadcast;
   broadcastLocal = deps.broadcastLocal;
+  appToken = deps.appToken === undefined ? undefined : Buffer.from(deps.appToken);
+}
+
+function isAppConnection(ws) {
+  // Electron 부모가 토큰을 전달하지 않는 개발 서버의 루프백 동작
+  return ws._local && (appToken === undefined || ws._app === true);
+}
+
+function authenticateApp(ws, token) {
+  if (!ws._local || !appToken?.length || typeof token !== "string" || token.length !== appToken.length) return;
+  const candidate = Buffer.from(token);
+  if (candidate.length === appToken.length && timingSafeEqual(candidate, appToken)) ws._app = true;
 }
 
 // AC5: 원격은 브라우저 상태를 열람만 한다. 막을 op 를 나열하면 새 op·빠뜨린 op(북마크 주소·기록처럼
@@ -89,6 +103,10 @@ export function initBrowserMessageHandlers(deps) {
 const REMOTE_VIEW_OPS = new Set(["tab.switch", "space.active", "group.collapse"]);
 // 원격 창의 webview 는 탐색할 때마다 이 둘을 보낸다. 오류를 알리면 탐색마다 토스트가 뜬다.
 const REMOTE_SILENT_OPS = new Set(["tab.navigate", "history.push"]);
+const APP_TAB_REPORTS = new Set([
+  "browser-tab-wc", "browser-tab-gone", "browser-active-wc", "cdp-executor-register", "ai-login-note",
+  "browser-dialog-plan", "browser-frame-origins", "browser-dialog-open", "browser-dialog-closed", "browser-dialog-answer",
+]);
 // 원격 선택 op 는 이미 있는 스페이스·탭·그룹만 가리킬 수 있다. 저장 쪽 mutate 는 없는 스페이스 키에 빈
 // 배열을 만들고(__proto__ 면 맵의 프로토타입을 바꾼다), 없는 이름이 activeSpace 가 되면 로컬 분리 창의
 // 탭 조회가 배열이 아닌 값을 받아 렌더가 멈춘다. 조회만 하는 함수로 먼저 확인한다.
@@ -111,10 +129,9 @@ export function handleBrowserSync(ws, msg) {
     return;
   }
   if (!ws._local && !remoteTargetExists(m)) return;
+  // browser-state에서 주소·프로필·그룹이 사라지기 전에 닫은 탭의 복원 정보 확보
   if (m.op === "tab.close" && m.id) {
-    // 복원에 필요한 값은 여기서만 확보할 수 있다. 아래 bsMutate 가 실행되면 주소·프로필·그룹이 상태에서
-    // 사라진다. 닫기는 전부 이 한 지점으로 모이므로(브라우저 탭바·센터 탭·⌃W·컨텍스트 메뉴)
-    // 여기 하나만 잡으면 빠지는 경로가 없다.
+    if (!isAppConnection(ws)) return;
     if (recordClosedTab(m.id, m.navigationHistory)) broadcast(closedTabsWire());
     removeClosedTab(m.id);
   }
@@ -147,6 +164,8 @@ export function handleTabReopen(ws, msg) {
 }
 
 export function handleBrowserMessage(ws, msg) {
+  if (msg.type === "app-auth") return authenticateApp(ws, msg.token);
+  if (APP_TAB_REPORTS.has(msg.type) && !isAppConnection(ws)) return;
   if (msg.type === "ai-pick") {
     if (ws._local && msg.pane && msg.pick) noteBrowserPick(msg.pane, msg.tabId, msg.pick);
   }

@@ -55,6 +55,7 @@ async function bootActualNative(hiddenFile, t) {
     ipcMain: { handle: register, on: register },
     BrowserWindow: { getAllWindows: () => [] },
     stateDir: home,
+    openPartitionStore: () => ({}),
     stateHomeImpl: () => home,
     webContents: { getAllWebContents: () => [] },
     isTrustedSender: () => false,

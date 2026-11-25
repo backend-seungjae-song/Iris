@@ -360,7 +360,7 @@ export function renderFileViewBody(t, renderToken, pane = focusedPane()) {
   const sheetToggle = (fileKindOf(t.path) || {}).textForm?.(t.path) ? `<button data-sv="text" class="on">원문</button><button data-sv="table">표</button>` : "";
   // 외부에서 바뀌어도 여기서 확인하지 않는다. 편집 중이 아니면 교체하고, 편집 중이면 그대로 둔다.
   // VSCode 도 변경 시점에는 알리지 않고 저장하려는 순간에만 막는다(saveActiveFile 의 conflict).
-  const gone = t.gone ? `<div class="fv-conflict">이 파일이 디스크에서 사라졌습니다. 저장하면 다시 만들어집니다.</div>` : "";
+  const gone = t.gone ? `<div class="fv-conflict">이 파일이 디스크에서 삭제되었습니다. 저장하면 다시 만듭니다.</div>` : "";
   const barHtml = `<div class="fv-bar">`
     + `<span class="fv-modes">${mdToggle}${sheetToggle}</span>`
     + `<span class="fv-name">${esc(t.label)}${dirty ? " •" : ""}${t.gone ? " (삭제됨)" : ""}</span>`
@@ -428,7 +428,7 @@ function askOverwriteNow(name) {
     wrap.className = "askwrap";
     wrap.innerHTML = `<div class="dim"></div><div class="modal"><div class="mdl" role="dialog" aria-modal="true">
       <div class="tt">저장하지 못했습니다</div>
-      <div class="tb">${esc(name)}<br>이 파일이 밖에서 바뀌었습니다. 덮어쓰면 그 변경은 사라집니다.</div>
+      <div class="tb">${esc(name)}<br>이 파일이 외부에서 변경되었습니다. 덮어쓰면 그 변경은 사라집니다.</div>
       <div class="mdl-row"><span class="hint"><span class="kc">esc</span>취소</span><button data-act="cancel">취소</button><button class="primary" data-act="overwrite">덮어쓰기</button></div>
     </div></div>`;
     let settled = false;
@@ -460,7 +460,7 @@ function sendFileSave(t, space, snapshot, baselineRevision, overwrite) {
     const response = await pending;
     if (response && response.conflict) {
       if (t._saving === saving) t._saving = null;
-      if (!(await askOverwrite(t.label || t.path))) { showToast("저장하지 않았습니다. 밖에서 바뀐 내용을 그대로 뒀습니다", { level: "info" }); return response; }
+      if (!(await askOverwrite(t.label || t.path))) { showToast("저장하지 않았습니다. 외부에서 변경된 내용을 유지했습니다", { level: "info" }); return response; }
       // 기준은 그대로 들고 가고 덮어쓰기라고 밝힌다. 서버가 준 diskRevision 을 기준으로 삼으면
       // 그다음 평범한 저장이 남의 변경 위에 조용히 쓰게 된다.
       return await sendFileSave(t, space, snapshot, baselineRevision, true);

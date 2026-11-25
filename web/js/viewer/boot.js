@@ -168,7 +168,7 @@ export function initCapability(ctx) {
   return {
     ws: {
       "docx": (m, responseIoEntry) => handleDocxMessage(m, responseIoEntry, { showToast, renderDocxPanelBody }),
-      "sheet": (m, responseIoEntry) => handleSheetMessage(m, responseIoEntry, { showToast, browserMode, fileview, docxview }),
+      "sheet": (m, responseIoEntry) => handleSheetMessage(m, responseIoEntry, { showToast, browserMode }),
       "sheet-saved": (m, responseIoEntry) => handleSheetSavedMessage(m, responseIoEntry, { $, showToast }),
       // 결과 처리는 docxSaveTab 이 받은 응답으로 함. 등록이 없으면 응답이 저장 요청에 안 닿아 시간 초과까지 저장 중
       "docx-saved": () => {},
@@ -214,7 +214,7 @@ function handleDocxMessage(m, responseIoEntry, { showToast, renderDocxPanelBody 
   }
 }
 
-function handleSheetMessage(m, responseIoEntry, { showToast, browserMode, fileview, docxview }) {
+function handleSheetMessage(m, responseIoEntry, { showToast, browserMode }) {
   // 표 파일 응답. 실제 사용자 편집만 보호하고, 변경이 없는 탭은 외부 snapshot으로 즉시 바꾼다.
   const id = "file:" + m.path;
   if (responseIoEntry && responseIoEntry.reason === "discard") return;
@@ -229,29 +229,17 @@ function handleSheetMessage(m, responseIoEntry, { showToast, browserMode, filevi
       t.sheetError = null;
       // 저장하지 않은 편집이 있으면 덮지 않는다. 변경이 없으면 보던 시트는 유지하되 즉시 새 snapshot 으로 바꾼다.
       if (!svApplyResponseData(t, m.data)) {
-        showToast("이 파일이 밖에서 바뀌었습니다. 내 고침이 남아 있어 그대로 두었습니다", { level: "info" });
+        showToast("이 파일이 외부에서 변경되었습니다. 편집 중이라 반영하지 않았습니다", { level: "info" });
         continue;
       }
     }
   }
   if (touched && curTabs().some((x) => x.id === id && isTabVisible(getCenterSpace(), x.id))) {
-    // showActiveTab()은 분리창(browserMode)에서 그냥 return하는 no-op다(주석: "분리창은
-    // browserview를 항상 표시"). 분리 상태(sbState.docked=false)의 사용자가 실제로 보는
-    // 창이 바로 이 창이라, 응답이 도착해 t.sheet가 채워져도 화면은 그 순간 이미 그려 둔
-    // "불러오는 중…"에서 바뀌지 않는다(재현: t.sheet는 있는데 DOM에 #sv-grid가
-    // 없음). 다른 탭에 갔다 오면 표시되던 것도 같은 원인이다. 탭을
-    // 전환하면 sbState 브로드캐스트(bsMutate)가 reconcileDocTabs()를 다시 돌려
-    // renderedFileOwner가 이 탭이 아니게 됐다가 되돌아올 때 그 함수의 직접 렌더 호출로
-    // 렌더가 일어난 것뿐이다. docx 응답 핸들러는 showActiveTab을 쓰지 않고 직접
-    // withFileViewTransition을 불러 이 문제가 없다. docx는 즉시 표시되는 것으로
-    // 확인했다. 같은 직접 호출 방식을 sheet에도 적용한다.
     if (browserMode) {
-      const activeTab = curTabs().find((x) => x.id === id);
-      if (activeTab) withFileViewTransition(activeTab, {}, (renderToken) => {
-        fileview.hidden = activeTab.kind !== "file";
-        docxview.hidden = activeTab.kind !== "docx";
-        renderFileViewBody(activeTab, renderToken);
-      });
+      const activeTab = getRenderedFileOwner();
+      if (activeTab?.id === id && curTabs().includes(activeTab)) {
+        withFileViewTransition(activeTab, {}, token => renderFileViewBody(activeTab, token));
+      }
     } else showActiveTab();
   }
 }
@@ -293,7 +281,7 @@ function handleSheetSavedMessage(m, responseIoEntry, { $, showToast }) {
         cell.classList.toggle("sv-dirty", !!(t._svDirty && t._svDirty.has(svDirtyKey(t, +cell.dataset.r, +cell.dataset.c))));
       });
       svSaveBtn(t);
-      const note = $("#sv-note"); if (note) { note.textContent = `저장했습니다 (${m.saved}칸)`; setTimeout(() => { if (note.isConnected) note.textContent = ""; }, 2500); }
+      const note = $("#sv-note"); if (note) { note.textContent = `저장했습니다 (셀 ${m.saved}개)`; setTimeout(() => { if (note.isConnected) note.textContent = ""; }, 2500); }
     }
     renderTabs();
   }

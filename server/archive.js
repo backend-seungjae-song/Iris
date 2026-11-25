@@ -9,10 +9,11 @@
 // 보관 단위는 둘이다. 에이전트 하나(pane)만 보관하거나 스페이스를 통째로 보관한다. 스페이스를
 // 보관하면 그 안의 에이전트가 각각 항목으로 남아, 복원할 때 필요한 것만 골라 실행한다. 통째로
 // 복원하면 보관한 이유인 메모리 사용량이 그대로 돌아온다.
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { agentArgv } from "./agent-launch.js";
-import { claudeHome, codexHome } from "./agent-homes.js";
+import { agyHome, claudeHome, codexHome } from "./agent-homes.js";
 import { stateHome } from "./state-home.cjs";
 
 const DATA_DIR = stateHome();
@@ -68,6 +69,10 @@ function findTranscript(kind, uuid) {
         }
       }
     }
+    if (k === "agy" || k === "antigravity") {
+      const f = agyHome("brain", uuid, ".system_generated", "logs", "transcript.jsonl");
+      if (fs.existsSync(f)) return f;
+    }
   } catch {}
   return null;
 }
@@ -103,12 +108,31 @@ function codexLine(m) {
   return "";
 }
 
+function agyLine(m) {
+  if (!m || typeof m !== "object") return "";
+  if (m.type === "USER_INPUT" && (!m.source || m.source === "USER_EXPLICIT") && typeof m.content === "string") {
+    const hit = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/.exec(m.content);
+    const text = (hit ? hit[1] : m.content).trim();
+    return text ? `사용자: ${text}` : "";
+  }
+  if (m.type === "PLANNER_RESPONSE") {
+    const parts = [];
+    if (typeof m.content === "string" && m.content.trim()) parts.push(`어시스턴트: ${m.content.trim()}`);
+    if (Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) if (tc?.name) parts.push(`[도구 ${tc.name}]`);
+    }
+    return parts.join("\n");
+  }
+  if (m.type === "GENERIC" && m.source === "MODEL") return "[결과]";
+  return "";
+}
+
 export function transcriptTail(kind, uuid, maxLines = 200, knownFile = null) {
   const k = String(kind || "").toLowerCase();
   // 파일을 이미 아는 경우(codex 세션은 그 파일을 찾아 둔다) 다시 탐색하지 않는다.
   const file = knownFile && fs.existsSync(knownFile) ? knownFile : findTranscript(kind, uuid);
   if (!file) return null;
-  const lineOf = k === "codex" ? codexLine : claudeLine;
+  const lineOf = k === "codex" ? codexLine : (k === "agy" || k === "antigravity") ? agyLine : claudeLine;
   let out = [];
   try {
     for (const line of tailBytes(file, k === "codex" ? TAIL_BYTES_CODEX : TAIL_BYTES)) {
@@ -129,20 +153,28 @@ function newId() { return "ar" + Date.now().toString(36) + (++seq).toString(36);
 export function load() {
   try {
     const raw = JSON.parse(fs.readFileSync(ARCHIVE_PATH, "utf8"));
-    items = Array.isArray(raw?.items) ? raw.items : [];
-  } catch { items = []; }
+    if (!Array.isArray(raw?.items)) throw new SyntaxError("보관 목록 형식이 잘못되었습니다.");
+    items = raw.items;
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      if (!(error instanceof SyntaxError)) throw error;
+      fs.copyFileSync(ARCHIVE_PATH, ARCHIVE_PATH + ".corrupt-" + randomUUID(), fs.constants.COPYFILE_EXCL);
+      console.error("손상된 상태 파일을 백업했습니다", ARCHIVE_PATH);
+    }
+    items = [];
+  }
   return items;
 }
 
 let saveTimer = null;
 function writeItems() {
   fs.mkdirSync(path.dirname(ARCHIVE_PATH), { recursive: true });
-  fs.writeFileSync(ARCHIVE_PATH + ".tmp", JSON.stringify({ items }), { mode: 0o600 });
+  fs.writeFileSync(ARCHIVE_PATH + ".tmp", JSON.stringify({ items }), { mode: 0o600, flush: true });
   fs.renameSync(ARCHIVE_PATH + ".tmp", ARCHIVE_PATH);
 }
 function writeNow() {
   saveTimer = null;
-  try { writeItems(); } catch {}
+  try { writeItems(); return true; } catch (error) { console.error("보관 목록 저장 실패", error); return false; }
 }
 function persist() {
   clearTimeout(saveTimer);
@@ -153,8 +185,7 @@ function persist() {
 export function flushNow() {
   if (!saveTimer) return false;
   clearTimeout(saveTimer);
-  writeNow();
-  return true;
+  return writeNow();
 }
 
 export function list() { return items; }

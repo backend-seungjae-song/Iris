@@ -28,7 +28,7 @@ export function parseLinkPattern(input) {
   text = text.replace(/[?#].*$/, "");
   let [host, path] = splitHostPath(text);
   host = host.replace(/^[^@]*@/, "").replace(/:\d*$/, "").replace(/\.$/, "").toLowerCase().replace(/^www\./, "");
-  if (!host || !/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(host)) return { ok: false, error: "도메인을 알아볼 수 없습니다. 예: github.com" };
+  if (!host || !/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(host)) return { ok: false, error: "도메인 형식이 올바르지 않습니다. 예: github.com" };
   path = path.replace(/\/+$/, "");
   const pattern = host + path;
   if (pattern.length > MAX_PATTERN) return { ok: false, error: "주소가 너무 깁니다." };

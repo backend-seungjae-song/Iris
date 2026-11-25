@@ -152,7 +152,7 @@ test("AVD 정보 없는 옛 Android 시리얼 지정은 다른 기기를 선택�
   assert.equal(await app.simTarget(), null);
   const result = await app.tools.find((tool) => tool.name === "app_snapshot").run({});
   assert.equal(result.ok, false);
-  assert.match(result.error, /다시 지목/);
+  assert.match(result.error, /다시 지정/);
   assert.equal(asks.some((ask) => ask.kind === "open"), false);
   assert.equal(fs.readFileSync(targetFile, "utf8"), before);
 });

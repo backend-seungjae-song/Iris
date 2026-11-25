@@ -168,7 +168,7 @@ function chipHtml(scope, b) {
       + ` data-key="${esc(scope + "|f|" + b.folder)}" title="${esc(b.title)}">`
       + `<svg class="bmk-fi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>`
       + `<span class="bmk-t">${esc(b.title)}</span><span class="bmk-n">${(b.items || []).length}</span>`
-      + `<span class="bmk-e" title="이름 바꾸기">✎</span><span class="bmk-x" title="폴더 삭제. 안의 북마크는 폴더 자리에 남습니다">✕</span></span>`;
+      + `<span class="bmk-e" title="이름 바꾸기">✎</span><span class="bmk-x" title="폴더 삭제. 안의 북마크는 폴더가 있던 위치에 남습니다">✕</span></span>`;
   }
   return `<span class="bmk" draggable="true" data-key="${esc(scope + "|u|" + b.url)}" data-url="${esc(b.url)}" title="${esc(b.url)}">`
     + `<span class="bmk-t">${esc(b.title || b.url)}</span><span class="bmk-e" title="편집">✎</span><span class="bmk-x" title="삭제">✕</span></span>`;
@@ -276,7 +276,7 @@ function menuHtml(m) {
     + `<button class="bmf-ic" data-act="out" data-url="${esc(b.url)}" title="폴더에서 꺼내기">↥</button>`
     + `<button class="bmf-ic" data-act="del" data-url="${esc(b.url)}" title="삭제">✕</button></div>`).join("");
   return `<div class="bmf-h">${esc(f.title)}</div>`
-    + (rows || `<div class="bmf-empty">비어 있습니다. 북마크를 폴더 가운데로 끌어 놓으면 들어갑니다.</div>`)
+    + (rows || `<div class="bmf-empty">비어 있습니다. 북마크를 폴더 가운데로 끌어 놓으면 추가됩니다.</div>`)
     + `<div class="bmf-sep"></div>`
     + `<button class="bmf-act" data-act="add-page"${page && !has ? "" : " disabled"}>${has ? "현재 페이지가 이미 북마크에 있습니다" : "현재 페이지를 이 폴더에 추가"}</button>`;
 }

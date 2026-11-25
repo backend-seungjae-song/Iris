@@ -57,7 +57,7 @@ function allMissing(targets, reason) {
 function boundedSize(size, { maxWidth, maxHeight }) {
   const width = Number(size && size.width);
   const height = Number(size && size.height);
-  if (!(width > 0) || !(height > 0)) throw new Error("창 그림 크기가 올바르지 않다");
+  if (!(width > 0) || !(height > 0)) throw new Error("창 미리보기 크기가 올바르지 않다");
   const scale = Math.min(1, maxWidth / width, maxHeight / height);
   return {
     width: Math.max(1, Math.floor(width * scale)),

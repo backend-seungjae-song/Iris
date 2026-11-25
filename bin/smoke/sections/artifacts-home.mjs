@@ -241,8 +241,8 @@ export default async function run() {
     if (!dir.includes('data-art-open="/p/run1/journal.jsonl"')) throw new Error("폴더 안을 못 연다");
     const big = pane({ path: "/p/a.png", what: "too-big", name: "a.png", bytes: 20 * 1024 * 1024 });
     if (!big.includes("너무 큽니다")) throw new Error("너무 큰 것을 그대로 실으려 한다");
-    const bad = pane({ path: "/p/a.png", error: "부산물 폴더 안의 파일이 아닙니다" });
-    if (!bad.includes("부산물 폴더 안의 파일이 아닙니다")) throw new Error("거절 사유를 안 보여 준다");
+    const bad = pane({ path: "/p/a.png", error: "생성 파일 폴더 안의 파일이 아닙니다" });
+    if (!bad.includes("생성 파일 폴더 안의 파일이 아닙니다")) throw new Error("거절 사유를 안 보여 준다");
     return true;
   });
 

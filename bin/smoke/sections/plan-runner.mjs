@@ -33,7 +33,7 @@ console.log("[12] 계획 러너 — 대상은 하나로 좁혀질 때만 누른�
   check("locate가 몇 개 맞았는지 세고 판정까지 낸다", () =>
     /async locate\(send, _wc, args\)/.test(cdp)
     && /unique: reasons\.length === 0/.test(cdp)
-    && /개가 맞는다 — 어느 것을 뜻하는지 정해지지 않았다/.test(cdp));
+    && /개가 맞는다. 어느 것을 뜻하는지 정해지지 않았다/.test(cdp));
   check("보이지 않음·가려짐·비활성을 각각 본다", () =>
     /요소가 보이지 않는다/.test(cdp)
     && /다른 요소에 가려져 있다/.test(cdp)

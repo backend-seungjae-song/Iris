@@ -67,3 +67,29 @@ test("OOXML 00-prefixed cell colors stay visible", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("셀 하나를 저장해도 겹치는 입력 규칙의 범위와 순서를 보존한다", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "iris-sheet-validation-"));
+  try {
+    const file = path.join(dir, "ranges.xlsx");
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("표");
+    sheet.addRows([["첫째"], ["둘째"]]);
+    const zip = await JSZip.loadAsync(await workbook.xlsx.writeBuffer());
+    const part = "xl/worksheets/sheet1.xml";
+    const xml = await zip.file(part).async("string");
+    const refs = ["A1:A10000", "A2:A9000 B2:B9000"];
+    const rules = refs.map((ref, i) => `<dataValidation type="list" sqref="${ref}"><formula1>"값${i}"</formula1></dataValidation>`).join("");
+    zip.file(part, xml.replace("</worksheet>", `<dataValidations count="2">${rules}</dataValidations></worksheet>`));
+    fs.writeFileSync(file, await zip.generateAsync({ type: "nodebuffer" }));
+    const book = await readSheet(file);
+    const dv = book.sheets[0].dv;
+    assert.deepEqual(book.lists[dv["1,1"] - 1], ["값0"]);
+    assert.deepEqual(book.lists[dv["2,1"] - 1], ["값1"]);
+    await writeSheet(file, [{ sheet: "표", r: 1, c: 1, v: "변경" }]);
+    const saved = await JSZip.loadAsync(fs.readFileSync(file));
+    const output = await saved.file(part).async("string");
+    assert.deepEqual([...output.matchAll(/<dataValidation\b[^>]*\bsqref="([^"]+)"/g)].map(match => match[1]), refs);
+    assert.equal((await readSheet(file)).sheets[0].cells["1,1"][0], "변경");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

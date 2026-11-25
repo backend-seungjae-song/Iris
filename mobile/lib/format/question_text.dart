@@ -328,7 +328,7 @@ final _approvalLabels = <(RegExp, String Function(RegExpMatch))>[
       r'^no, and tell (?:claude|codex) what to do differently$',
       caseSensitive: false,
     ),
-    (_) => '아니요, 다르게 할 일 알리기',
+    (_) => '아니요, 다르게 지시하기',
   ),
   (
     RegExp(r'^tell claude what to change$', caseSensitive: false),

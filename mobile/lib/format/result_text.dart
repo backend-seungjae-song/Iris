@@ -15,7 +15,7 @@ String agentMessageResultText(String result) => switch (result) {
 };
 
 String agentStopResultText(String result) => switch (result) {
-  'sent' => '중지 요청을 보냄',
+  'sent' => '중지 요청함',
   'not-working' => '작업 중이 아님',
   'unsupported' => '지원하지 않음',
   _ => '알 수 없는 결과',

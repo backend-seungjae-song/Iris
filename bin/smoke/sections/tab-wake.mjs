@@ -64,7 +64,7 @@ await checkAsync("깨우지 못하면 그 사실을 알린다", async () => {
   });
   const result = await service.dispatch({ command: "text", args: { tab: "t2" },
     identity: { session: "smoke-tab-wake" }, commandId: "smoke-tab-wake-2" });
-  return result.ok === false && result.data?.sleeping === true && /깨우지 못했습니다/.test(result.error);
+  return result.ok === false && result.data?.sleeping === true && /다시 열지 못했습니다/.test(result.error);
 });
 
 // 새 탭도 만든 직후에는 활성 탭도 최근 명령 대상도 아니다. 깨우라고 알리지 않으면 사용자가 다른
@@ -110,7 +110,7 @@ check("깨울 창이 없으면 콘솔이 그 탭의 창을 뒤에 띄운다", ()
     && /sp === "__shared__"\) [^\n]*acHost\.openSharedBrowser\(\{ background: true \}\)/.test(body[0])
     && /else if \(!docked && liveSpace\) [^\n]*acHost\.openBrowser\(\{ background: true \}\)/.test(body[0])
     && /openSharedBrowser: \(opts\) => ipcRenderer\.send\("ac-open-shared-browser", opts \|\| null\)/.test(preloadSource)
-    && /ipcMain\.on\("ac-open-shared-browser", \(_e, opts\) => \{[^\n]*createBrowserModeWindow\(true, opts\)/.test(electronMainSource);
+    && /ipcMain\.on\("ac-open-shared-browser", \(_e, opts\) => \{\s*if \(!isTrustedSender\(_e\)\) return;\s*try \{ browserWindowManager\.createBrowserModeWindow\(true, opts\)/.test(electronMainSource);
 });
 
 // 창을 닫으면 그 안의 렌더러가 함께 사라져 탭이 사라졌다고 서버에 알리지 못한다. 서버는 죽은 wc 로
@@ -144,7 +144,7 @@ check("설치 중 교체를 포기하면 꺼진 앱을 다시 연다", () =>
 
 // 뒤늦게 뜬 분리 창은 앞서 보낸 알림을 받지 못했다. 탭 목록보다 먼저 받으면 대상 탭을 찾지 못한다.
 check("새로 연결된 창에 대기 중인 깨우기를 탭 목록 뒤에 다시 보낸다", () =>
-  /type: "browser-state", state: bsWire\(\) \}\)\);[\s\S]{0,200}?for \(const tabId of pendingWakeTabIds\(\)\) ws\.send\(JSON\.stringify\(\{ type: "wake-tab", tabId \}\)\)/
+  /type: "browser-state", state: bsWire\(\) \}\)\);[\s\S]{0,200}?for \(const tabId of pendingWakeTabIds\(\)\) sendFrame\(ws, JSON\.stringify\(\{ type: "wake-tab", tabId \}\)\)/
     .test(serverIndexSource)
   && /function pendingWakeTabIds\(\) \{\s*return \[\.\.\.tabWcWaiters\.keys\(\)\];/.test(browserRuntime));
 

@@ -63,7 +63,7 @@ export function accountsChromeBox(list, blocked = "") {
     const t = cp.target;
     const to = !t ? ""
       : t.isNew ? `<span class="acct-imp-to">새 프로필 <b>${esc(t.name)}</b> 을 만듭니다</span>`
-        : `<span class="acct-imp-to">가져갈 곳 <b>${esc(t.name)}</b></span>`;
+        : `<span class="acct-imp-to">대상 프로필 <b>${esc(t.name)}</b></span>`;
     return `<div class="acct-imp">
       <span class="acct-imp-l">${esc(cp.label)}</span>${to}
       <button class="acct-btn" data-imp-cid="${esc(cp.id)}" data-imp-label="${esc(cp.label)}">${ICON.down}가져오기</button>
@@ -118,9 +118,9 @@ export function accountsMarkup(model) {
       <div class="acct-used">${accountsUsedHtml(who)}</div>
       <div class="acct-ft">
         ${p.id
-          ? `<button class="acct-btn acct-btn-ghost" data-rename="${esc(p.id)}">이름변경</button>`
+          ? `<button class="acct-btn acct-btn-ghost" data-rename="${esc(p.id)}">이름 변경</button>`
             + `<button class="acct-btn acct-btn-ghost" data-del-prof="${esc(p.id)}">삭제</button>`
-          : `<span class="acct-lock">${ICON.lock}기본 프로필은 지울 수 없습니다</span>`}
+          : `<span class="acct-lock">${ICON.lock}기본 프로필은 삭제할 수 없습니다</span>`}
       </div>
     </div>`;
   };
@@ -128,7 +128,7 @@ export function accountsMarkup(model) {
   const chromeCount = Array.isArray(m.chromeProfiles) ? m.chromeProfiles.length : "";
 
   return `<div class="acct-main">
-      <p class="acct-why">프로필은 로그인 칸입니다. 탭마다 다른 프로필을 주면 같은 사이트에 다른 계정으로 동시에 로그인해 둘 수 있고, 쿠키와 저장된 로그인은 칸 밖으로 새지 않습니다.</p>
+      <p class="acct-why">프로필마다 로그인을 따로 저장합니다. 탭마다 다른 프로필을 지정하면 같은 사이트에 여러 계정으로 동시에 로그인할 수 있고, 쿠키와 저장된 로그인은 프로필끼리 공유되지 않습니다.</p>
       <div class="acct-shead"><h2>프로필 ${profiles.length}개</h2></div>
       <div class="acct-tiles" id="acct-prof-list">${profiles.map(tile).join("")}
         <div class="acct-tile acct-add">
@@ -139,7 +139,7 @@ export function accountsMarkup(model) {
     </div>
     <aside class="acct-side">
       <div class="acct-sec">
-        <div class="acct-sec-h"><h3>스페이스마다 쓰는 기본 계정</h3><span class="acct-n">${spaces.length}</span></div>
+        <div class="acct-sec-h"><h3>스페이스별 기본 계정</h3><span class="acct-n">${spaces.length}</span></div>
         <div class="acct-sec-b">
           ${spaces.length ? spaces.map((s) => `
             <div class="acct-srow">
@@ -153,7 +153,7 @@ export function accountsMarkup(model) {
         <div class="acct-sec-b">
           <label class="acct-lbl"><input type="checkbox" id="acct-with-pw"${m.withPasswords ? " checked" : ""} /><span class="acct-check">${ICON.tick}</span>저장된 아이디·비밀번호도 함께</label>
           <div class="acct-chrome" id="acct-chrome">${accountsChromeBox(m.chromeProfiles)}</div>
-          <p class="acct-note">가져오기는 그 Chrome 프로필의 로그인 세션(쿠키)을 이 프로필에 넣습니다. 위 칸을 켜야 저장된 아이디·비밀번호까지 가져오고, 그때만 Chrome 의 로그인 DB 를 복호화합니다. 가져온 비밀번호는 이 기기 Keychain 으로 암호화해 두고, 로그인 페이지에서 그 계정을 고른 순간에만 한 개씩 꺼내 채웁니다. Chrome 쪽 저장소는 읽기만 합니다.</p>
+          <p class="acct-note">가져오기는 그 Chrome 프로필의 로그인 세션(쿠키)을 이 프로필에 넣습니다. 위 항목을 선택해야 저장된 아이디·비밀번호까지 가져오고, 그때만 Chrome 의 로그인 DB 를 복호화합니다. 가져온 비밀번호는 이 기기 Keychain 으로 암호화해 저장하고, 로그인 페이지에서 그 계정을 선택할 때만 하나씩 입력합니다. Chrome 쪽 저장소는 읽기만 합니다.</p>
         </div>
       </div>
     </aside>`;

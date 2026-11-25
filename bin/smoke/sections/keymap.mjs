@@ -217,7 +217,7 @@ await checkAsync("창 전환 목록은 진입과 다시 읽기에서만 새로 �
   const model = { windows: [], status: { listRevision: 0 } };
   let refreshes = 0;
   let reloads = 0;
-  globalThis.document = { addEventListener() {} };
+  globalThis.document = { addEventListener() {}, createElement: () => ({}) };
   globalThis.window = { addEventListener() {} };
   globalThis.fetch = async (url, options = {}) => {
     if (url !== "/features" || (options.method || "GET") !== "GET") throw new Error(`예상하지 않은 요청: ${url}`);

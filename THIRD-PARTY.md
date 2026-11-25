@@ -47,13 +47,14 @@ SOFTWARE.
 
 ## 화면 표시 (`web/vendor/`)
 
-아래 넷은 저장소에 두지 않고 `pnpm build:vendor`가 의존성에서 그대로 만들어 낸다. `package.json`
+아래 구성 요소는 저장소에 두지 않고 `pnpm build:vendor`가 의존성에서 그대로 만들어 낸다. `package.json`
 이 범위로 적은 것(monaco-editor·JSZip)의 실제 설치 버전은 `pnpm-lock.yaml`이 고정한다.
 
 | 구성 요소 | 버전 | 라이선스 |
 | --- | --- | --- |
 | [@xterm/xterm](https://github.com/xtermjs/xterm.js) | 6.0.0 | MIT |
 | [@xterm/addon-fit](https://github.com/xtermjs/xterm.js) | 0.11.0 | MIT |
+| [morphdom](https://github.com/patrick-steele-idem/morphdom) | 2.7.8 | MIT |
 | [monaco-editor](https://github.com/microsoft/monaco-editor) | 0.52.x | MIT |
 | [JSZip](https://github.com/Stuk/jszip) | 3.10.x | MIT 또는 GPL-3.0-or-later 중 선택. 이 프로젝트는 MIT를 택한다 |
 
@@ -89,8 +90,8 @@ esbuild 등 만드는 도구라 나가지 않는다). 그 트리는 전부 허�
 
 | 라이선스 | 패키지 수 | 비고 |
 | --- | --- | --- |
-| MIT | 109 | |
-| ISC | 14 | |
+| MIT | 112 | |
+| ISC | 15 | |
 | Apache-2.0 | 9 | `@docx-editor.dev/core`, `@docx-editor.dev/i18n`, `@puppeteer/browsers`, `chromium-bidi`, `crc-32`, `emf-converter`, `puppeteer-core`, `readdir-glob`, `webdriver-bidi-protocol` |
 | BSD-3-Clause | 6 | `asn1js`, `bytestreamjs`, `devtools-protocol`, `duplexer2`, `ieee754`, `pkijs` |
 | 0BSD | 1 | `tslib` |
@@ -114,8 +115,7 @@ peer 인 `typescript` 는 실행 중에 불리지 않아 싣지 않는다. 패�
 전체 목록과 각 라이선스는 언제든 다시 낼 수 있다: `pnpm licenses list --prod`(배포분),
 `pnpm licenses list`(도구 포함).
 
-측정: 2026-10-06 설치된 런타임 의존성의 `package.json`을 재귀 조회해 이름·버전별 141개를 집계했고
-모든 버전이 `pnpm-lock.yaml`에 있음을 확인했다. 이때의 직접 의존성은 이것들이었다:
+2026-11-25에 `pnpm licenses list --prod --json`으로 이름과 버전이 다른 런타임 패키지 145개를 집계했다. 이때의 직접 의존성은 이것들이었다:
 `@docx-editor.dev/core`, `@xterm/addon-fit`, `@xterm/xterm`, `asn1js`, `exceljs`, `jszip`,
-`monaco-editor`, `node-pty`, `pkijs`, `puppeteer-core`, `tldts`, `uqr`, `ws`, `zod`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
+`monaco-editor`, `morphdom`, `node-pty`, `pkijs`, `proper-lockfile`, `puppeteer-core`, `tldts`, `uqr`, `ws`, `zod`. 이 목록이 `package.json`과 어긋나면 위 표는 낡은 것이므로
 smoke가 막는다(다시 재고 이 절과 목록을 함께 고칠 것).

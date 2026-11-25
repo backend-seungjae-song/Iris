@@ -50,7 +50,14 @@ for (const scenario of SCENARIOS) {
     const worker = createWorkerRun(scenario);
     const { response, effects } = await worker.run();
     assert.deepEqual(response, recorded.response);
-    assert.deepEqual(effects, recorded.effects);
+    const hasFrameLookup = ["input-click-expected-target-moved", "locate-found", "locate-none", "locate-covered", "locate-two"].includes(scenario.name);
+    if (hasFrameLookup) {
+      const isFrameLookup = ([kind, method]) => kind === "cdp" && method === "Page.getFrameTree";
+      assert.equal(effects.filter(isFrameLookup).length, recorded.effects.filter(isFrameLookup).length + 1);
+      assert.deepEqual(effects.filter((call) => !isFrameLookup(call)), recorded.effects.filter((call) => !isFrameLookup(call)));
+    } else {
+      assert.deepEqual(effects, recorded.effects);
+    }
     // 단위 규칙: 모든 호출이 사용자 명령 이름으로 묶이고 단위마다 마지막 호출 표시는 많아야 하나
     const units = new Map();
     for (const relay of worker.relays) {
@@ -136,7 +143,7 @@ test("처리기가 쓰는 옛 원문 순서가 cdp-control.cjs 에 있다(원본
     }
   };
   inOrder(CONTROL_SOURCE.indexOf("async function cdpExecRaw("), ["const noCdp = attachPolicy.blocked(wc.id)", "attachPolicy.touch(wc.id);", "const send = ensureAttached(wc);",
-    "const aiTicket = enterAiCommand(wc.id, cmd);", "cdpExecInner(send, wc, cmd, args, webContentsMod)"]);
+    "const aiTicket = await enterAiCommand(wc.id, cmd);", "cdpExecInner(send, wc, cmd, args, webContentsMod)"]);
   // cdpExecInner: QA 준비 → 창 그림 검사 → 붙잡기 → 실행 → 해제
   inOrder(CONTROL_SOURCE.indexOf("async function cdpExecInner("), ["await ensureQaReady(send, wc, cmd);", "paintableProbe(wc.id)", "captureHold(wc.id, true)",
     "runCdpCmd(send, wc, cmd, args, webContentsMod)", "captureHold(wc.id, false)"]);
@@ -147,11 +154,22 @@ test("처리기가 쓰는 옛 원문 순서가 cdp-control.cjs 에 있다(원본
   assert.match(CONTROL_SOURCE, /"worker-qa-input-commands"/);
 });
 
-test("worker 사본은 원본과 파일 내용이 같다(머리말·import/require·export 줄만 다름)", () => {
-  const stripWorker = (text) => text.replace(/^\/\/ worker 사본[^\n]*\n\/\/ 원본은 ⑧에서 지움\n/, "").replace(/^import [^;]*;\n/gm, "")
+test("iframe 대응을 추가한 QA 입력 코드 외의 사본은 원본과 같다", () => {
+  const stripWorker = (text) => text.replace(/^\/\/ worker [^\n]*\n\/\/ 원본은 ⑧에서 지움\n/, "").replace(/^import [^;]*;\n/gm, "")
     .replace(/export \{[^}]*\};/, "").replace(/\n{3,}/g, "\n\n").trim();
   const stripOriginal = (text) => text.replace(/^const \{? ?[^=]*\}? = require\([^)]*\);\n/gm, "").replace(/module\.exports = \{[^}]*\};/, "").replace(/\n{3,}/g, "\n\n").trim();
-  assert.equal(stripWorker(read("../server/mcp-worker/qa-input-commands.js")), stripOriginal(read("../native/electron/cdp-qa-input.cjs")));
+  const unchanged = (text) => {
+    const changed = [
+      ["async function hit(", "// 맨 위 요소가"],
+      ["async function sameTarget(", "// 안 보이는 탭의 선택 상자"],
+      ["async function armCapture(", "// 휠 아래 요소부터"],
+      ['    async "qa-locate"(', "    // 지금 포커스가 있는 요소"],
+    ];
+    for (const [start, end] of changed) text = text.replace(sliceBetween(text, start, end), "");
+    return text;
+  };
+  assert.equal(unchanged(stripWorker(read("../server/mcp-worker/qa-input-commands.js"))),
+    unchanged(stripOriginal(read("../native/electron/cdp-qa-input.cjs"))));
   assert.equal(stripWorker(read("../server/mcp-worker/qa-keys.js")), stripOriginal(read("../native/electron/cdp-qa-keys.cjs")));
   // 로그인 화면 조회 두 함수 (페이지에 주입되는 inspectLoginPage 는 문자열이 같아야 함)
   const functions = (text) => {
@@ -391,7 +409,7 @@ test("window_not_drawing 오류 code 와 문구가 옛 응답과 같다", async 
   const worker = createWorkerRun(scenarioOf("input-window-not-drawing"));
   const { response } = await worker.run();
   assert.equal(response.code, "window_not_drawing");
-  assert.match(response.error, /^이 탭을 담은 창이 최소화 상태라 화면을 그리지 않습니다 — qa-input 를 보내도 도달하지 않습니다\./);
+  assert.match(response.error, /^이 탭이 있는 창이 최소화 상태라 화면을 그리지 않습니다. qa-input 를 보내도 전달되지 않습니다\./);
   // 창 그림 검사에서 멈추면 capture hold·구독을 걸지 않음
   assert.equal(worker.relays.some((r) => ["hold.capture", "cdp.subscribe", "focus.prepare"].includes(r.command)), false);
 });

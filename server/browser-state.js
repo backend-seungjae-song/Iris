@@ -6,6 +6,7 @@
 // 라이브 webview는 창 사이 이동이 불가능하고 세션(persist:acbrowser)은 공유되므로, 브라우저의 정체성은
 // 탭 URL 목록과 활성 스페이스라는 가벼운 상태로 충분하다. 무거운 webview 인스턴스는 창별로
 // 그 상태로부터 다시 만든다(도킹/분리 전환 시 재생성).
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -73,6 +74,7 @@ export function load() {
   try {
     const raw = fs.readFileSync(STATE_PATH, "utf8");
     const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new SyntaxError("브라우저 상태 형식이 잘못되었습니다.");
     state = Object.assign(emptyState(), parsed);
     // 방어: 필드 타입 정규화
     if (!state.bookmarksBySpace || typeof state.bookmarksBySpace !== "object") state.bookmarksBySpace = {};
@@ -126,7 +128,14 @@ export function load() {
     }
     delete state.bookmarks; // 레거시 필드 제거(이후 bookmarksBySpace만 진실)
     if (profileMigrated) persist();
-  } catch { state = emptyState(); }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      if (!(error instanceof SyntaxError)) throw error;
+      fs.copyFileSync(STATE_PATH, STATE_PATH + ".corrupt-" + randomUUID(), fs.constants.COPYFILE_EXCL);
+      console.error("손상된 상태 파일을 백업했습니다", STATE_PATH);
+    }
+    state = emptyState();
+  }
   return state;
 }
 
@@ -145,9 +154,10 @@ function writeNow() {
   // 파싱에 실패해 빈 상태로 취급된다(=사용자가 쌓아둔 탭·북마크가 통째로 사라진다).
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(STATE_PATH + ".tmp", JSON.stringify(state));
+    fs.writeFileSync(STATE_PATH + ".tmp", JSON.stringify(state), { mode: 0o600, flush: true });
     fs.renameSync(STATE_PATH + ".tmp", STATE_PATH);
-  } catch {}
+    return true;
+  } catch (error) { console.error("브라우저 상태 저장 실패", error); return false; }
 }
 function persist() {
   if (saveTimer) return;
@@ -159,8 +169,7 @@ function persist() {
 export function flushNow() {
   if (!saveTimer) return false;
   clearTimeout(saveTimer);
-  writeNow();
-  return true;
+  return writeNow();
 }
 
 export function get() { return state; }

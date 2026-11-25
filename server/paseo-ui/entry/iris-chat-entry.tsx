@@ -8,13 +8,15 @@
 //   메시지 형식은 server/agent-chat-transcript.js 의 { id, role, blocks, ts }
 //   입력·중단·명령·파일 찾기는 부모 창에 postMessage 로 넘김(iris-chat.send·cancel·commands·files)
 //   모든 요청에 요청을 만든 때의 대화 key 를 넣음. 부모는 지금 보기와 key 가 다르면 거절
-import { SHIM_SERVER_ID, SHIM_WORKSPACE_ID, UPLOAD_LIMIT_BYTES, shimDaemon, type ShimItem } from "./iris-shim";
+import { SHIM_SERVER_ID, SHIM_WORKSPACE_ID, UPLOAD_LIMIT_BYTES, shimDaemon, type EmbeddedSettings, type ShimItem } from "./iris-shim";
+import type { AgentPermissionRequest, AgentTimelineItem } from "@getpaseo/protocol/agent-types";
+import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
 import "./src/polyfills/install-early";
 import "./src/styles/unistyles";
 import "@expo/metro-runtime";
 import { registerRootComponent } from "expo";
 import { Component, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
-import { View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PortalProvider } from "@gorhom/portal";
@@ -25,23 +27,27 @@ import { UnistylesRuntime } from "react-native-unistyles";
 import { LucideProvider } from "lucide-react-native";
 import { queryClient } from "@/data/query-client";
 import { APP_SETTINGS_KEY, APP_SETTINGS_QUERY_KEY } from "@/hooks/use-settings/storage";
-import { ChatSection } from "@/screens/settings/chat/chat-section";
+import { ChatSettingsPanel } from "./iris-chat-settings";
 import { I18nProvider } from "@/i18n/provider";
 import { ToastProvider } from "@/contexts/toast-context";
 import { SessionProvider } from "@/contexts/session-context";
 import { PaneFocusProvider, PaneProvider, createPaneFocusContextValue } from "@/panels/pane-context";
 import { AgentConversationPanel } from "@/panels/agent-panel";
+import { MobilePanelsProvider } from "@/mobile-panels/provider";
 import { AgentStreamView } from "@/agent-stream/view";
 import { ComposerEditingSessionsProvider } from "@/composer/editing-session";
 import { CommandCenterProvider } from "@/command-center/provider";
 import { FloatingPanelPortalHost } from "@/components/ui/floating-panel-portal";
 import { KeyboardActionDispatcherProvider, useKeyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher-context";
 import { resolveKeyboardFocusScope } from "@/keyboard/focus-scope";
-import { dispatchTopWebOverlayKeyDown, keyBelongsToDomPopover } from "@/lib/overlay-root";
+import { dispatchTopOverlayKeyDown } from "@/keyboard";
+import { keyBelongsToDomPopover } from "@/keyboard/internal/dom-popover";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { KeyboardShiftProvider } from "@/keyboard/shift";
 import { WindowChromeProvider } from "@/utils/desktop-window";
-import { getHostRuntimeStore, useHostRuntimeClient } from "@/runtime/host-runtime";
+import { WindowLayoutProvider } from "@/window-layout";
+import { getHostRuntimeStore, HostRuntimeStore, useHostRuntimeClient } from "@/runtime/host-runtime";
+import { managedChat, managedPrompt } from "./iris-managed-socket";
 import { SheetPaneHostProvider } from "@/screens/workspace/sheet-pane/host";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { DiffDocumentWorkspaceCacheProvider } from "@/git/diff-document/workspace-cache";
@@ -59,14 +65,27 @@ import { useDirectoryDemand } from "@/hooks/use-directory-demand";
 import { collectPluginThemes } from "@/plugins/themes";
 import { PLUGIN_THEME_NAMES, ICON_STROKE_WIDTH } from "@/styles/theme";
 import { persistAttachmentFromBlob } from "@/attachments/service";
-import { ContextChips, openContextDialog, type IrisContext } from "./iris-contexts";
+import { createPortal } from "react-dom";
+import { useComposerSlot, ContextChips, openContextDialog, type IrisContext } from "./iris-contexts";
 import { TaskBar, cleanOutput, type IrisTask, type TaskReader } from "./iris-tasks";
 import { attachmentText, expandText, insertAtCaret } from "./iris-inline-tokens";
 import { patchUserRow } from "./iris-user-images";
 import { PENDING_SEND_CSS, dropRewound, pinPendingLast, poppedSends, rewoundLastId, staleSends } from "./iris-pending-sends";
 import { StashButton, stashNow, type StashHost } from "./iris-stash";
 import { installCodeCopy } from "./iris-code-copy";
+
+if (managedChat) {
+  const registry = new Map<string, string>();
+  Reflect.set(globalThis, "__paseoHostRuntimeStore", new HostRuntimeStore({ storage: {
+    getItem: async (key) => registry.get(key) ?? null,
+    setItem: async (key, value) => { registry.set(key, value); },
+    removeItem: async (key) => { registry.delete(key); },
+  } }));
+}
 import { installLinkTail, openableUrl } from "./iris-link-tail";
+import { installPathLinks } from "./iris-path-links";
+import { installPreviewArt } from "./iris-preview-art";
+import { installBlurDismiss } from "./iris-blur-dismiss";
 // 빌드 때 web/js/panel/url-token.js 를 복사한 파일(server/paseo-ui/index.js SHARED_FILES). 저장소 entry 폴더에는 없음
 import { terminalUrlToken } from "./iris-url-token";
 import { installInlineChips, syncContexts, writeComposer } from "./iris-inline-chips";
@@ -88,27 +107,41 @@ type Block =
   | { type: "tool-result"; id: string | null; output: string; isError?: boolean; off?: number; images?: { i: number; j: number }[] }
   | { type: "task-notification"; text: string };
 interface IrisMessage { id: string; role: "user" | "assistant" | "tool" | "reasoning"; blocks: Block[]; ts?: number | null; parent?: string }
+interface EmbeddedChatState extends Partial<Omit<EmbeddedSettings, "currentModeId">> {
+  provider: string;
+  status: AgentSnapshotPayload["status"];
+  activeTurn?: AgentSnapshotPayload["activeTurn"];
+  timeline: AgentTimelineItem[];
+  timelineRows?: { item: AgentTimelineItem; seqStart: number; timestamp?: string; turnId?: string }[];
+  permissions: AgentPermissionRequest[];
+  modeId?: EmbeddedSettings["currentModeId"];
+  models?: IrisModelDefinition[];
+}
 interface ChatState {
   key: string;
   paneId: string;
   agentId: string | null;
-  kind: "claude" | "codex";
+  kind: "claude" | "codex" | "agy";
   cwd: string;
   file: string | null;
   gen: string | null;
   messages: IrisMessage[];
+  embedded?: EmbeddedChatState;
   hasOlder: boolean;
   loadingOlder: boolean;
   running: boolean;
   // 원격(폰) 웹뷰는 늘 true. 입력창을 그리지 않고 첨부도 올리지 않음(원격 전송은 막혀 있음)
   readOnly?: boolean;
+  cliAvailable?: boolean;
+  hasA2ui?: boolean;
   theme: "dark" | "light";
   // Iris 요소 선택 칩(부모가 pane 마다 보관). 보낼 때 글 앞에 붙음
   contexts?: IrisContext[];
   // 지금 모델·effort·모드·사용량(서브에이전트 보기는 null). 화면은 Paseo 것을 쓰고 값만 넣음
   agent?: IrisAgentMeta | null;
-  // kind codex 일 때만. Paseo AgentModelDefinition 목록
+  // kind codex·agy 일 때만. Paseo AgentModelDefinition 목록
   codexModels?: IrisModelDefinition[] | null;
+  agyModels?: IrisModelDefinition[] | null;
   // 그 pane 이 답을 기다리는 동안의 질문
   prompt?: IrisPrompt | null;
   // 터미널 입력줄에 쓰다 만 글. 입력 칸이 안 보이면 null
@@ -383,6 +416,7 @@ shimDaemon.host = {
     remember(full);
     return sendText(key, id, full, ctx.map((c) => c.id));
   },
+  openCli(key) { post({ type: "iris-chat.open-cli", key }); },
   cancel(key) { post({ type: "iris-chat.cancel", key }); },
   loadOlder() {
     post({ type: "iris-chat.older" });
@@ -410,6 +444,10 @@ shimDaemon.host = {
     const r = await ask("iris-chat.mode", { key, modeId }, MODE_TIMEOUT_MS);
     return r ? { ok: r.ok !== false, reason: r.reason || "" } : { ok: false, reason: "Iris 창이 답하지 않았습니다" };
   },
+  async setting(key, setting, value) {
+    const r = await ask("iris-chat.setting", { key, setting, value }, MODE_TIMEOUT_MS);
+    return r ? { ok: r.ok === true, notice: r.notice, reason: r.reason || "" } : { ok: false, reason: "Iris 창이 답하지 않았습니다" };
+  },
   async answer(key, promptId, row) {
     const r = await ask("iris-chat.answer", { key, promptId, row }, ANSWER_TIMEOUT_MS);
     return r ? { ok: r.ok !== false, reason: r.reason || "" } : { ok: false, reason: "Iris 창이 답하지 않았습니다" };
@@ -418,6 +456,10 @@ shimDaemon.host = {
     const r = await ask("iris-chat.answer", { key, promptId, ...(answers ? { answers } : { dismiss: true }) }, ANSWER_TIMEOUT_MS);
     return r ? { ok: r.ok !== false, reason: r.reason || "" } : { ok: false, reason: "Iris 창이 답하지 않았습니다" };
   },
+  async permission(key, requestId, response) {
+    const r = await ask("iris-chat.permission", { key, requestId, response }, ANSWER_TIMEOUT_MS);
+    return r ? { ok: r.ok === true, reason: r.reason || "" } : { ok: false, reason: "Iris 창이 답하지 않았습니다" };
+  },
 };
 
 // Paseo 클라이언트 명령(/clear·/new·/exit·/quit 등)을 터미널의 같은 명령으로 보냄
@@ -425,6 +467,7 @@ shimDaemon.host = {
 // - 입력창이 받기 전(document capture 단계)에 Enter·보내기 단추를 가로채 글 그대로 iris-chat.send 로 보냄
 // - 명령 목록은 Paseo resolveClientSlashCommand 를 그대로 씀. Paseo 가 명령을 늘리면 함께 따라감
 let currentKey: string | null = null;
+let currentCwd = "";
 let currentContexts: IrisContext[] = [];
 
 // 답변의 웹 링크. Paseo 는 window.open 으로 여는데 iframe 안이라 Electron 이 창을 띄우지 않음 → 부모가 Iris 브라우저 탭으로 엶
@@ -470,15 +513,15 @@ function pressMods() {
   const { at, ...mods } = lastPress;
   return Date.now() - at < 1500 ? mods : { shiftKey: false, metaKey: false, ctrlKey: false };
 }
-// 답변의 / 로 끝나는 폴더 경로 ⌘⇧클릭 → 부모가 Finder 로 엶(파일 경로와 같은 요청)
-// - Paseo 는 폴더를 자기 탐색기 사이드바·데스크톱 앱으로만 보내 Iris 에서는 아무 일도 없음. 보통 클릭은 Paseo 그대로
+// 답변의 / 로 끝나는 폴더 경로 클릭 → 부모에 파일 경로와 같은 요청. 부모가 폴더 창으로 엶(⌘⇧ 는 Finder 에서 위치 보기)
+// - Paseo 는 폴더를 자기 탐색기 사이드바·데스크톱 앱으로만 보내 Iris 에서는 아무 일도 없음
 // - Paseo 가 경로로 알아본 글만: 누를 수 있는 code(cursor pointer)
 document.addEventListener("click", (e) => {
-  if (!e.metaKey || !e.shiftKey || e.button !== 0 || !currentKey) return;
+  if (e.button !== 0 || !currentKey) return;
   const code = (e.target as Element | null)?.closest?.("code");
   const text = code?.textContent?.trim() ?? "";
   if (!code || !/^\S+\/$/.test(text) || getComputedStyle(code).cursor !== "pointer") return;
-  post({ type: "iris-chat.open-file", key: currentKey, path: text, mods: { shiftKey: true, metaKey: true, ctrlKey: e.ctrlKey } });
+  post({ type: "iris-chat.open-file", key: currentKey, path: text, mods: { shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey } });
 }, true);
 function composerTextarea(): HTMLTextAreaElement | null {
   return document.querySelector('[data-testid="message-input-root"] textarea');
@@ -664,7 +707,7 @@ function usePendingSendsLast(agentId: string | undefined) {
 // 입력창 임시 저장(iris-stash.tsx)이 쓰는 입력창·칩
 // - 칩 되살리기는 부모의 칩 추가와 같음. 부모가 지금 칩 다음 번호를 차례로 매기므로 저장 목록의 번호 규칙과 맞음
 const STASH_HOST: StashHost = {
-  draftKey: () => (currentKey ? buildDraftStoreKey({ serverId: SHIM_SERVER_ID, agentId: currentKey }) : null),
+  draftKey: () => (currentKey ? buildDraftStoreKey({ serverId: managedChat?.serverId ?? SHIM_SERVER_ID, agentId: managedChat?.agentId ?? currentKey }) : null),
   text: () => composerTextarea()?.value ?? "",
   setText: (text) => { writeComposer(text); },
   contexts: () => currentContexts,
@@ -674,6 +717,8 @@ const STASH_HOST: StashHost = {
     for (const c of items) if (currentKey) post({ type: "iris-chat.context-add", key: currentKey, content: c.content, ...(c.kind ? { kind: c.kind } : {}) });
   },
 };
+managedPrompt.expand = (text) => ({ text: expandText(text, { contexts: currentContexts }), contextIds: currentContexts.map((context) => context.id) });
+managedPrompt.accepted = (ids) => { if (currentKey) post({ type: "iris-chat.context-remove", key: currentKey, ids }); };
 // ⌘⇧Enter: 입력창 지금 내용을 임시 저장
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || !e.metaKey || !e.shiftKey || e.isComposing || e.target !== composerTextarea()) return;
@@ -720,7 +765,7 @@ function branchWhole(key: string) {
     console.warn("[iris-chat] 분기하지 못함", e);
   }
 }
-useWorkspaceAttachmentsStore.subscribe((s) => {
+if (!managedChat) useWorkspaceAttachmentsStore.subscribe((s) => {
   for (const f of forkDrafts(s.attachmentsByScope)) {
     useWorkspaceAttachmentsStore.getState().clearWorkspaceAttachments({ scopeKey: f.scopeKey });
     requestFork(f.sourceKey, f.attachment);
@@ -762,9 +807,15 @@ function installClientCommandBridge() {
     runClientCommand(text);
   }, true);
 }
-installClientCommandBridge();
+if (!managedChat) installClientCommandBridge();
 installCodeCopy();
 installLinkTail(terminalUrlToken);
+installPreviewArt();
+installBlurDismiss({ menuLabel: () => i18n.t("menu.backdrop") });
+installPathLinks({
+  getCwd: () => currentCwd,
+  onMenu: (m) => { if (currentKey) post({ type: "iris-chat.link-menu", key: currentKey, ...m }); },
+});
 installInlineChips({ post, openContext: openContextDialog, mods: pressMods });
 
 // 그리다 실패하면 부모에 알림. 부모는 첫 화면이 실패한 새 빌드면 이전 빌드로 되돌림
@@ -774,20 +825,51 @@ function reportError(error: unknown) {
 // - 처리 안 된 Promise 거절은 보고하지 않음. 지원하지 않는 요청 하나로 멀쩡한 빌드가 되돌려지지 않게
 window.addEventListener("error", (e) => reportError(e.error || e.message));
 
+// - 실패하면 빈 화면 대신 다시 표시 단추. 빈 화면은 새로고침 전까지 검게 남아 대화 화면이 망가진 것으로 보임
 class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   componentDidCatch(error: unknown) { reportError(error); }
-  render() { return this.state.failed ? null : this.props.children; }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 10 }}>
+        <Text style={{ color: "#9aa4b2", fontSize: 13 }}>대화 화면 표시 오류</Text>
+        <Pressable accessibilityRole="button" onPress={() => this.setState({ failed: false })}
+          style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 4, borderWidth: 1, borderColor: "#3a4350" }}>
+          <Text style={{ color: "#d6dbe2", fontSize: 13 }}>다시 표시</Text>
+        </Pressable>
+      </View>
+    );
+  }
 }
 
 // 부모 창 상태 → shim. 받은 상태를 돌려줌
+function embeddedItems(state: EmbeddedChatState, key: string, since: number): ShimItem[] {
+  if (Array.isArray(state.timelineRows)) {
+    return state.timelineRows.map(({ item, seqStart, timestamp, turnId }, index) => ({
+      item, key: `${key}:timeline:${seqStart}`, ts: (timestamp && Date.parse(timestamp)) || since + index, turnId,
+    }));
+  }
+  return (state.timeline ?? []).map((item, index) => ({ item, key: `${key}:timeline:${index}`, ts: since + index }));
+}
+
 function useParentState() {
   const [state, setState] = useState<ChatState | null>(null);
   useEffect(() => {
+    let history: Pick<ChatState, "key" | "messages"> | null = null;
+    let embedded: { key: string; state: EmbeddedChatState; items: ShimItem[]; since: number } | null = null;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin || e.source !== window.parent) return;
       const type = e.data?.type;
+      if (type === "iris-chat.a2ui-action" && managedChat && e.data.key === managedChat.key && typeof e.data.text === "string") {
+        const client = getHostRuntimeStore().getClient(managedChat.serverId);
+        if (!client) return;
+        void client.sendMessage(managedChat.agentId, e.data.text).catch((error) => {
+          post({ type: "iris-chat.a2ui-action-error", key: managedChat.key, reason: String(error?.message || error) });
+        });
+        return;
+      }
       if (type === "iris-chat.insert" || type === "iris-chat.focus") {
         if (e.data.key !== currentKey) return;
         if (type === "iris-chat.insert") focusComposer(String(e.data.text || ""));
@@ -804,14 +886,34 @@ function useParentState() {
         replies.delete(id);
         return;
       }
-      const next = e.data.state as ChatState;
+      const incoming = e.data.state as Omit<ChatState, "messages"> & { messages?: IrisMessage[] };
+      if (managedChat && incoming.key !== managedChat.key) return;
+      if (Array.isArray(incoming.messages)) history = { key: incoming.key, messages: incoming.messages };
+      if (!history || history.key !== incoming.key) return;
+      if (incoming.embedded) {
+        const since = embedded?.key === incoming.key ? embedded.since : Date.now();
+        embedded = { key: incoming.key, state: incoming.embedded, items: embeddedItems(incoming.embedded, incoming.key, since), since };
+      } else if (embedded?.key !== incoming.key) embedded = null;
+      const next: ChatState = { ...incoming, messages: history.messages, embedded: embedded?.state };
+      const updateEmbedded = incoming.embedded || currentKey !== next.key || currentCwd !== next.cwd;
       currentKey = next.key;
+      currentCwd = typeof next.cwd === "string" ? next.cwd : "";
       currentContexts = next.readOnly ? [] : (Array.isArray(next.contexts) ? next.contexts : []);
       syncContexts(currentKey, currentContexts);
       applyIrisTheme(next.theme === "light" ? "light" : "dark");
-      const kind = next.kind === "codex" ? "codex" : "claude";
+      if (managedChat) { setState(next); return; }
+      if (embedded) {
+        const { provider, status, activeTurn, permissions, controls, availableModes, modeId, model, models, thinkingOptionId } = embedded.state;
+        if (updateEmbedded) shimDaemon.setAgent({ id: next.key, provider, cwd: next.cwd || "/", title: null,
+          running: next.running, status, activeTurn, permissions, embeddedModels: models,
+          embeddedSettings: { controls, features: embedded.state.features, options: embedded.state.options, availableModes: availableModes ?? [], currentModeId: modeId ?? null,
+            model: model ?? null, lastUsage: embedded.state.lastUsage, thinkingOptionId } }, embedded.items, false, false);
+        setState(next);
+        return;
+      }
+      const kind = next.kind === "codex" ? "codex" : next.kind === "agy" ? "agy" : "claude";
       shimDaemon.setAgent(
-        { id: next.key, provider: kind, cwd: next.cwd || "/", title: null, running: !!next.running, meta: next.agent ?? null, codexModels: Array.isArray(next.codexModels) ? next.codexModels : null, prompt: next.prompt ?? null, subagents: Array.isArray(next.subagents) ? next.subagents : [] },
+        { id: next.key, provider: kind, cliAvailable: next.cliAvailable, cwd: next.cwd || "/", title: null, running: !!next.running, meta: next.agent ?? null, codexModels: Array.isArray(next.codexModels) ? next.codexModels : null, agyModels: Array.isArray(next.agyModels) ? next.agyModels : null, prompt: next.prompt ?? null, subagents: Array.isArray(next.subagents) ? next.subagents : [] },
         toTimeline(withoutRewound(next), next.running, next.cwd, window.location.origin, (b) => `${window.location.origin}${imageUrl(next, b)}&j=${b.j}`, Array.isArray(next.tasks) ? next.tasks : []),
         !!next.hasOlder, !!next.loadingOlder,
       );
@@ -821,7 +923,7 @@ function useParentState() {
       if (!next.readOnly) { lastTerminal.set(next.key, { running: !!next.running, draft: next.draft?.text ?? "" }); dropStaleSends(next.key); }
     };
     window.addEventListener("message", onMessage);
-    post({ type: "iris-chat.ready" });
+    post({ type: "iris-chat.ready", reuseMessages: true });
     return () => window.removeEventListener("message", onMessage);
   }, []);
   return state;
@@ -889,11 +991,11 @@ function useUserImages(state: ChatState | null) {
 
 // 이 대화를 화면에 보이는 대화로 등록. 앱의 시트 패널(sheet-pane.tsx)과 같은 방식
 // - 등록해야 앱이 대화 기록을 받아 오고(fetch_agent_timeline) 실시간 구독을 시작함
-function VisibleAgent({ agentId }: { agentId: string }) {
-  const sync = useSessionStore((s) => s.sessions[SHIM_SERVER_ID]?.viewedTimelineSync ?? null);
+function VisibleAgent({ serverId, agentId }: { serverId: string; agentId: string }) {
+  const sync = useSessionStore((s) => s.sessions[serverId]?.viewedTimelineSync ?? null);
   useEffect(() => {
-    void getHostRuntimeStore().prepareAgentTimeline(SHIM_SERVER_ID, agentId).catch(() => undefined);
-  }, [agentId]);
+    void getHostRuntimeStore().prepareAgentTimeline(serverId, agentId).catch(() => undefined);
+  }, [serverId, agentId]);
   useLayoutEffect(() => {
     if (!sync) return;
     sync.replaceVisibleAgentIds("iris-chat", [agentId]);
@@ -934,19 +1036,19 @@ function ReadOnlyStream({ state }: { state: ChatState }) {
 // 이 대화의 기록이 앱 저장소에 들어오면(화면에 그릴 준비가 되면) 부모에 한 번 알림
 // - 부모는 이것으로 새 빌드가 정상인지 판정. iris-chat.ready 는 이보다 일찍 감
 let healthySent = false;
-function useHealthySignal(key: string | null) {
+function useHealthySignal(serverId: string, key: string | null) {
   useEffect(() => {
     if (!key || healthySent) return;
     const check = () => {
       if (healthySent) return;
-      const status = selectAgentTimelineState(useSessionStore.getState().sessions[SHIM_SERVER_ID], key).status;
+      const status = selectAgentTimelineState(useSessionStore.getState().sessions[serverId], key).status;
       if (status !== "synced") return;
       healthySent = true;
       post({ type: "iris-chat.healthy" });
     };
     check();
     return useSessionStore.subscribe(check);
-  }, [key]);
+  }, [serverId, key]);
 }
 
 // 서브에이전트 줄에서 항목을 누르면 Paseo 는 작업공간 탭 저장소에 provider_subagent 탭을 엶
@@ -988,12 +1090,22 @@ const SHEET_HOST = {
 // - 그 단축키를 다는 Paseo useKeyboardShortcuts 는 expo-router 가 있어야 해서 이 화면에 없음
 // - 거르는 조건은 Paseo 와 같음: 맨 위 오버레이·열린 팝오버·IME 조합 중이면 넘기고, 입력창·그 밖 포커스에서만
 // - 중단 여부(돌고 있는가·받아쓰기 취소)는 입력창 처리기가 판단
+// 맨 위 오버레이(이미지 확대 등)에 넘기는 키. 모양은 Paseo 키 입력원(keyboard/internal/sources/dom.web.ts)과 같음
+// - Paseo 0.16 에서 웹 전용 dispatchTopWebOverlayKeyDown 이 빠짐. 빠진 이름을 부르면 Esc 마다 오류로 대화 화면이 비었음
+function overlayKey(e: KeyboardEvent) {
+  return {
+    key: e.key, code: e.code, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, repeat: e.repeat,
+    isComposing: e.isComposing || e.keyCode === 229,
+    preventDefault: () => e.preventDefault(),
+    stopPropagation: () => e.stopImmediatePropagation(),
+  };
+}
 function useEscapeInterrupt() {
   const dispatcher = useKeyboardActionDispatcher();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (dispatchTopWebOverlayKeyDown(e) || keyBelongsToDomPopover(e) || isImeComposingKeyboardEvent(e)) return;
+      if (keyBelongsToDomPopover(e) || isImeComposingKeyboardEvent(e) || dispatchTopOverlayKeyDown(overlayKey(e))) return;
       const scope = resolveKeyboardFocusScope({ target: e.target, commandCenterOpen: false });
       if (scope !== "message-input" && scope !== "other") return;
       dispatcher.dispatch({ id: "agent.interrupt", scope: "global" });
@@ -1005,14 +1117,17 @@ function useEscapeInterrupt() {
 
 function IrisChat() {
   const state = useParentState();
+  const serverId = managedChat?.serverId ?? SHIM_SERVER_ID;
+  const workspaceId = managedChat?.workspaceId ?? SHIM_WORKSPACE_ID;
+  const agentId = managedChat?.agentId ?? state?.key;
   useEscapeInterrupt();
-  useEffect(() => useWorkspaceLayoutStore.subscribe(reportOpenedSubagents), []);
-  useUserImages(state);
-  usePendingSendsLast(state && !state.readOnly ? state.key : undefined);
-  useHealthySignal(state?.key ?? null);
-  const client = useHostRuntimeClient(SHIM_SERVER_ID);
+  useEffect(() => managedChat ? undefined : useWorkspaceLayoutStore.subscribe(reportOpenedSubagents), []);
+  useUserImages(managedChat || state?.embedded ? null : state);
+  usePendingSendsLast(state && !state.readOnly && !managedChat && !state.embedded ? state.key : undefined);
+  useHealthySignal(serverId, agentId ?? null);
+  const client = useHostRuntimeClient(serverId);
   // 사이드바가 없으므로 에이전트·워크스페이스 목록 구독을 여기서 요청
-  useDirectoryDemand(SHIM_SERVER_ID);
+  useDirectoryDemand(serverId);
 
   useEffect(() => {
     void getHostRuntimeStore().boot();
@@ -1020,9 +1135,10 @@ function IrisChat() {
     if (/[?&]check=1\b/.test(location.search)) (window as any).__irisDebug = { runtime: getHostRuntimeStore(), session: useSessionStore };
   }, []);
 
+  const a2uiSlot = useComposerSlot(!!state?.hasA2ui && !state.readOnly, 3);
   const pane = useMemo(() => state && ({
-    serverId: SHIM_SERVER_ID, workspaceId: SHIM_WORKSPACE_ID, host: "main", tabId: `iris-chat:${state.key}`,
-    target: { kind: "agent", agentId: state.key },
+    serverId, workspaceId, host: "main", tabId: `iris-chat:${state.key}`,
+    target: { kind: "agent", agentId },
     openTab: noop, openPreferredTarget: noop, closeCurrentTab: noop, retargetCurrentTab: noop,
     setCurrentTabState: noop, openImportSheet: noop,
     // 답변의 파일 경로 링크. 부모가 터미널 경로 링크와 같게 엶
@@ -1030,27 +1146,34 @@ function IrisChat() {
       const loc = req?.location;
       if (typeof loc?.path === "string" && loc.path) post({ type: "iris-chat.open-file", key: state.key, path: loc.path, mods: pressMods() });
     },
-  } as any), [state?.key]);
+  } as any), [state?.key, serverId, workspaceId, agentId]);
 
-  if (!state || !client || !pane) return <View style={{ flex: 1 }} />;
+  if (!state || !client || !pane || !agentId) return <View style={{ flex: 1 }} />;
   return (
-    <SessionProvider serverId={SHIM_SERVER_ID} client={client}>
+    <SessionProvider serverId={serverId} client={client}>
       <DiffDocumentWorkspaceCacheProvider>
       <SheetPaneHostProvider value={SHEET_HOST}>
-      <VisibleAgent agentId={state.key} />
+      <VisibleAgent serverId={serverId} agentId={agentId} />
       <ComposerEditingSessionsProvider>
         <CommandCenterProvider>
         <PaneProvider value={pane}>
           <PaneFocusProvider value={PANE_FOCUS}>
             <View style={{ flex: 1 }}>
               {state.readOnly ? <ReadOnlyStream state={state} /> : <AgentConversationPanel key={state.key} />}
-              {state.readOnly ? null : (
+              {state.readOnly || managedChat || state.embedded ? null : (
                 <TaskBar tasks={Array.isArray(state.tasks) ? state.tasks : []} colors={IRIS_THEMES[state.theme === "light" ? "light" : "dark"].colors} read={readTask} />
               )}
-              {state.readOnly ? null : <StashButton host={STASH_HOST} scope={buildDraftStoreKey({ serverId: SHIM_SERVER_ID, agentId: state.key })} />}
+              {a2uiSlot && state.hasA2ui && createPortal(
+                <div className="iris-task-bar" style={{ justifyContent: "flex-end", padding: 0, marginBottom: -8 }}>
+                  <button type="button" className="iris-task-btn" onClick={() => post({ type: "iris-chat.open-a2ui", key: state.key })}>
+                    A2UI 다시 열기
+                  </button>
+                </div>, a2uiSlot)}
+              {state.readOnly ? null : <StashButton host={STASH_HOST} scope={buildDraftStoreKey({ serverId, agentId })} />}
               {state.readOnly ? null : (
                 <ContextChips items={state.contexts || []} colors={IRIS_THEMES[state.theme === "light" ? "light" : "dark"].colors}
-                  onRemove={(ids) => post({ type: "iris-chat.context-remove", key: state.key, ...(ids ? { ids } : {}) })} />
+                  onRemove={(ids) => post({ type: "iris-chat.context-remove", key: state.key, ...(ids ? { ids } : {}) })}
+                  onEdit={(id, content) => post({ type: "iris-chat.context-edit", key: state.key, id, content })} />
               )}
               {/* / 명령·@ 파일 목록 같은 떠 있는 패널이 그려지는 자리. 앱 레이아웃(_layout.tsx)과 같음 */}
               <FloatingPanelPortalHost />
@@ -1065,25 +1188,10 @@ function IrisChat() {
   );
 }
 
-// Iris 설정 > 대화 화면에 띄우는 Paseo 채팅 설정(?panel=chat-settings). 항목·기본값·저장은 Paseo 것
+// Iris 설정 > 대화 화면 iframe(?panel=chat-settings). 그리는 쪽은 iris-chat-settings.tsx
 // - 저장소는 같은 출처 localStorage(@paseo:app-settings). 대화 화면은 storage 이벤트로 다시 읽음
 const PANEL = new URLSearchParams(window.location.search).get("panel");
-function ChatSettingsPanel() {
-  useEffect(() => {
-    const root = window.parent?.document?.documentElement;
-    const sync = () => applyIrisTheme(root?.getAttribute("data-theme") === "light" ? "light" : "dark");
-    sync();
-    const themeWatch = root ? new MutationObserver(sync) : null;
-    themeWatch?.observe(root!, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => { themeWatch?.disconnect(); };
-  }, []);
-  // 부모가 iframe 높이를 내용 높이에 맞춤. body 는 창 높이를 채우므로 내용을 감싼 View 로 잼
-  return (
-    <View onLayout={(e) => post({ type: "iris-chat.panel-size", panel: PANEL, height: Math.ceil(e.nativeEvent.layout.height) })}>
-      <ChatSection />
-    </View>
-  );
-}
+const postPanelHeight = (height: number) => post({ type: "iris-chat.panel-size", panel: PANEL, height });
 // 다른 iframe(설정)에서 바꾼 Paseo 설정을 바로 반영
 window.addEventListener("storage", (e) => {
   if (e.key === APP_SETTINGS_KEY) void queryClient.invalidateQueries({ queryKey: APP_SETTINGS_QUERY_KEY });
@@ -1097,6 +1205,7 @@ function Root() {
           <GestureHandlerRootView style={{ flex: 1 }}>
             <LucideProvider strokeWidth={ICON_STROKE_WIDTH}>
               <KeyboardActionDispatcherProvider>
+                <WindowLayoutProvider>
                 <WindowChromeProvider>
                   <KeyboardProvider>
                     <KeyboardShiftProvider>
@@ -1104,7 +1213,9 @@ function Root() {
                         <PortalProvider>
                           <BottomSheetModalProvider>
                             <Boundary>
-                              {PANEL === "chat-settings" ? <ChatSettingsPanel /> : <IrisChat />}
+                              {PANEL === "chat-settings" ? <ChatSettingsPanel onHeight={postPanelHeight} /> : (
+                                <MobilePanelsProvider><IrisChat /></MobilePanelsProvider>
+                              )}
                             </Boundary>
                           </BottomSheetModalProvider>
                         </PortalProvider>
@@ -1112,6 +1223,7 @@ function Root() {
                     </KeyboardShiftProvider>
                   </KeyboardProvider>
                 </WindowChromeProvider>
+                </WindowLayoutProvider>
               </KeyboardActionDispatcherProvider>
             </LucideProvider>
           </GestureHandlerRootView>

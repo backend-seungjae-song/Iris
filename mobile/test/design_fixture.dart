@@ -503,7 +503,7 @@ RemoteRequest designHumanRequest() => RemoteRequest(
   body: const BrowserUserRequestBody(
     title: '카드 인증 화면은 직접 진행해 주세요',
     text: '에이전트는 기다리는 중입니다. 탭을 열어 인증을 마친 뒤 결과를 골라 주세요.',
-    choices: ['다 했음', '못 하겠음'],
+    choices: ['완료', '할 수 없음'],
     tab: browserTabRef,
   ),
 );
@@ -1390,7 +1390,7 @@ Map<String, Object?> _requestsMessage() => {
       'body': {
         'title': '카드 인증 화면은 직접 진행해 주세요',
         'text': '에이전트는 기다리는 중입니다. 탭을 열어 인증을 마친 뒤 결과를 골라 주세요.',
-        'choices': ['다 했음', '못 하겠음'],
+        'choices': ['완료', '할 수 없음'],
         'tab': browserTabRef,
       },
     },

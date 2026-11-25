@@ -49,7 +49,7 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
     if (settings != null && !await _connectionKeyExists()) {
       await _store.removeRegistration(_connectionKey);
       settings = null;
-      notice = '연결 키가 새로 바뀌어 다시 페어링해야 합니다. 컴퓨터에서 이 폰을 지우고 QR 을 다시 스캔하세요.';
+      notice = '연결 키가 바뀌어 다시 등록해야 합니다. 컴퓨터에서 이 폰을 삭제하고 QR을 다시 스캔하세요.';
     }
     if (!mounted) return;
     setState(() {
@@ -142,7 +142,7 @@ class _IrisRemoteAppState extends State<IrisRemoteApp> {
       _initialConnection = null;
       _pairingError = serverRemoved
           ? null
-          : '컴퓨터의 기기 목록에서는 지우지 못했습니다. Mac의 Iris 원격 화면에서 이 폰을 직접 삭제하세요.';
+          : '컴퓨터의 기기 목록에서는 삭제하지 못했습니다. 컴퓨터의 Iris 원격 화면에서 이 폰을 직접 삭제하세요.';
     });
   }
 

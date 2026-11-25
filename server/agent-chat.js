@@ -28,23 +28,36 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
-import { claudeHome, codexHome } from "./agent-homes.js";
+import { agyHome, claudeHome, codexHome } from "./agent-homes.js";
 import { indexProjects } from "./join.js";
+import { resolveAgySession } from "./agy-session.js";
 import { resolveCodexSession } from "./codex-session.js";
-import { snapshot } from "./runtime-state.js";
+import { agentSessionPathFor } from "./agent-session-path.js";
+import { snapshot, subscribeRuntimeState } from "./runtime-state.js";
 import { LIMITS, completeEnd, imageFromRecord as recordImage, readForward, readTailWindow } from "./agent-chat-transcript.js";
-import { isLoopbackRequest } from "./http-handler.js";
+import { applyA2uiMessages, extractA2uiBlocks, extractSurfacesFromMessages, stripA2uiFromMessages } from "./agent-chat-a2ui.js";
+import { isLoopbackRequest, originAllowed } from "./http-handler.js";
 import { claudeBuiltins, listCommands, suggestFiles } from "./agent-chat-tools.js";
+import { importPickedSession, inheritPick, resumeFromPick } from "./agent-chat-inherit.js";
 import { TASK_ID_RE, claudeTmpRoot, emptyTaskIndex, readTaskOutput, scanTaskFile, taskList, taskOutputSize, taskTail, tasksDirFor } from "./agent-chat-tasks.js";
-import { claudeFooter, claudeMeta, codexConfiguredModel, codexMeta, codexModelsFromCache } from "./agent-chat-meta.js";
+import { agyDefaultModels, agyFooter, agyMeta, claudeFooter, claudeMeta, codexConfiguredModel, codexFooter, codexMeta, codexModelsFromCache } from "./agent-chat-meta.js";
 import { clearKeys, terminalDraft } from "./agent-chat-draft.js";
-import { codexQuestionKeys, optionLabel, pendingCodexQuestion, pendingQuestion, questionAnswers, questionKeys, reviewKeys, showsQuestion } from "./agent-chat-question.js";
+import { codexQuestionKeys, openAgyAskAfter, openAskAfter, optionLabel, pendingAgyQuestion, pendingCodexQuestion, pendingQuestion, pendingToolInput, questionAnswers, questionKeys, reviewKeys, showsQuestion } from "./agent-chat-question.js";
 export { optionLabel };
 // 권한·질문 화면 해석은 폰 기능의 것을 그대로 씀(같은 화면, 같은 판정)
-import { extractPrompt } from "./remote/features/prompts.js";
+import { extractPrompt, promptCutLines } from "./remote/features/prompts.js";
 import { terminalSelection } from "./remote/features/terminal.js";
-import { initPaseoUi, paseoUiStatus, reportPaseoUiBroken, requestPaseoUi, stopPaseoUi } from "./paseo-ui/index.js";
+import { initPaseoUi, paseoUiStatus, releasedRuntime, reportPaseoUiBroken, requestPaseoUi, stopPaseoUi } from "./paseo-ui/index.js";
 import { IMAGE_TYPES } from "./paseo-ui/plan.js";
+import { currentEmbeddedProvider } from "./paseo-ui/index.js";
+import { watchEmbeddedChat, closeEmbeddedChat } from "./paseo-ui/embedded-chat.js";
+import { managedPane } from "./paseo-ui/managed-pane.js";
+import { connectManagedChat } from "./paseo-ui/managed-chat-relay.js";
+import { createManagedA2ui, createSnapshotA2ui } from "./paseo-ui/managed-a2ui.js";
+import { loadManagedChatPermissions } from "./paseo-ui/managed-paseo-runtime.mjs";
+import { discoverSharedCodexForPane } from "./paseo-ui/codex-shared-daemon.mjs";
+
+import { attachChatTerminal } from "./pty.js";
 
 const POLL_MS = 1000;
 const WATCH_DEBOUNCE_MS = 40;
@@ -65,19 +78,22 @@ const META_TAIL_BYTES = 1024 * 1024;  // 지금 값은 기록 끝 쪽에 있음.
 const MODE_MAX_STEPS = 6;             // Shift+Tab 으로 모드를 도는 최대 횟수
 
 let herdr = null;
+let canRelayManagedChat = (ws) => ws._local;
 const subsByWs = new Map();   // ws → Map(key → sub)
 const sendQueues = new Map(); // paneId → Promise. 같은 pane 에 보내는 글이 섞이지 않게 차례로
 
 export function initAgentChat(ctx) {
   herdr = ctx.herdr || null;
+  canRelayManagedChat = ctx.canRelayManagedChat ?? ((ws) => ws._local);
   // paseoUi: false — 화면 빌드 관리를 켜지 않음(테스트). 켜면 상태 폴더를 정리하고 네트워크로 빌드함
   if (ctx.paseoUi !== false) initPaseoUi({ onStatus: (st) => ctx.broadcastLocal?.({ type: "agentchat.ui", ...st }) });
-  ctx.onShutdown?.(() => { stopAgentChat(); });
+  ctx.onShutdown?.(stopAgentChat);
 }
 
 export function stopAgentChat() {
   stopPaseoUi();
   for (const ws of [...subsByWs.keys()]) dropAll(ws);
+  return closeEmbeddedChat();
 }
 
 // 재연결한 창은 구독을 다시 보내야 한다. 서버는 연결이 끊기면 구독을 모두 버린다.
@@ -96,9 +112,21 @@ export function handleAgentChat(ws, msg) {
   if (!ws._local) { send(ws, { type: "agentchat.frame", key: String(msg.key || ""), kind: "error", reason: "원격 연결에서는 대화 기록을 열 수 없습니다" }); return true; }
   const key = typeof msg.key === "string" ? msg.key.slice(0, 200) : "";
   if (!key) return true;
-  // 내장 명령 목록은 열 때 미리 받음. 첫 / 입력 때 claude 실행(약 5초)을 기다리지 않게
-  if (msg.type === "agentchat.open") { requestPaseoUi(); open(ws, key, msg); if (kindOf(agentOf(String(msg.paneId || ""))) === "claude") claudeBuiltins(); }
+  if (msg.type === "agentchat.open") { requestPaseoUi(); open(ws, key, msg); }
   else if (msg.type === "agentchat.close") drop(ws, key);
+  else if (msg.type === "agentchat.cli") handleChatTerminal(ws, key, msg);
+  else if (msg.type === "agentchat.managed-relay") relayManaged(ws, key, msg);
+  else if (msg.type === "agentchat.seen") acknowledgeSeen(ws, key, msg.session);
+  else if (msg.type === "agentchat.a2ui-dismiss") dismissA2ui(ws, key, msg);
+  else if (subsByWs.get(ws)?.get(key)?.embedded && ["agentchat.send", "agentchat.cancel", "agentchat.permission", "agentchat.terminal", "agentchat.setting", "agentchat.commands", "agentchat.files"].includes(msg.type)) relayEmbedded(ws, key, msg);
+  else if (subsByWs.get(ws)?.get(key)?.opening) {
+    const sub = subsByWs.get(ws).get(key);
+    void sub.opening.then(() => { if (!sub.closed) handleAgentChat(ws, msg); });
+  }
+  else if (msg.type === "agentchat.ui-broken" && typeof msg.build === "string") reportPaseoUiBroken(msg.build.slice(0, 100), String(msg.reason || ""));
+  else if (msg.type === "agentchat.stall") logStall(key, msg);
+  else if (subsByWs.get(ws)?.get(key)?.embedded) return true;
+  else if (subsByWs.get(ws)?.get(key)?.managed) return true;
   else if (msg.type === "agentchat.older") older(ws, key);
   else if (msg.type === "agentchat.send") sendToPane(ws, key, msg);
   else if (msg.type === "agentchat.cancel") cancelPane(ws, key);
@@ -106,8 +134,6 @@ export function handleAgentChat(ws, msg) {
   else if (msg.type === "agentchat.answer") answerPrompt(ws, key, msg);
   else if (msg.type === "agentchat.mode") setMode(ws, key, msg);
   else if (msg.type === "agentchat.taskread") readTask(ws, key, msg);
-  else if (msg.type === "agentchat.ui-broken" && typeof msg.build === "string") reportPaseoUiBroken(msg.build.slice(0, 100), String(msg.reason || ""));
-  else if (msg.type === "agentchat.stall") logStall(key, msg);
   return true;
 }
 
@@ -126,7 +152,43 @@ function kindOf(agent) {
   const name = String(agent?.agent || "").toLowerCase();
   if (name === "claude" || name.startsWith("claude")) return "claude";
   if (name === "codex" || name.startsWith("codex")) return "codex";
+  if (name === "agy" || name.startsWith("agy") || name.startsWith("antigravity")) return "agy";
   return null;
+}
+
+function relayEmbedded(ws, key, msg) {
+  const sub = subsByWs.get(ws)?.get(key);
+  if (!sub) return;
+  const type = msg.type === "agentchat.send" ? "agentchat.sent" : msg.type;
+  const reply = payload => send(ws, { type, key, id: msg.id, ...payload });
+  Promise.resolve().then(async () => {
+    const current = agentOf(sub.paneId);
+    if (sub.closed || !canRelayManagedChat(ws) || (current?.sessionUuid !== sub.uuid && !(sub.sharedCodex && current?.terminalId === sub.terminalId))) throw new Error("대화 세션이 변경되었습니다");
+    const connection = await sub.embedded;
+    if (!connection || sub.closed) throw new Error("대화 연결이 닫혔습니다");
+    if (msg.type === "agentchat.files") return suggestFiles(agentOf(sub.paneId).cwd, String(msg.query ?? "").slice(0, 200), 50);
+    if (msg.type === "agentchat.send" && (typeof msg.text !== "string" || msg.text.length > MAX_SEND_TEXT)) throw new Error("보낼 글을 확인하세요");
+    const result = await connection.action(msg);
+    if (msg.type === "agentchat.commands") return { commands: result };
+    if (msg.type === "agentchat.setting") return { notice: result ?? null };
+    return {};
+  }).then(result => reply({ ok: true, ...result }), error => reply({ ok: false, reason: error.message, error: error.message }));
+}
+
+async function discoverNativeCodexAgent(agent) {
+  if (!herdr?.paneGet || !herdr.call || !agent?.paneId || !agent.terminalId) return null;
+  let pane;
+  try { pane = await herdr.paneGet(agent.paneId); }
+  catch { return null; }
+  if (pane?.pane_id && pane.pane_id !== agent.paneId) return null;
+  if (pane?.terminal_id !== agent.terminalId || kindOf(pane) !== "codex" || typeof pane.cwd !== "string") return null;
+  let processInfo;
+  try { processInfo = await herdr.call("pane.process_info", { pane_id: agent.paneId }); }
+  catch { return null; }
+  return discoverSharedCodexForPane({ terminalId: pane.terminal_id, cwd: pane.cwd,
+    threadId: pane.agent_session?.kind === "id" ? pane.agent_session.value : null,
+    rawTitle: pane.terminal_title_stripped || pane.terminal_title,
+    processInfo, paneId: agent.paneId, workspaceId: pane.workspace_id });
 }
 
 function inside(root, file) {
@@ -177,6 +239,7 @@ async function liveClaudeSession(paneId) {
 async function resolveTarget(sub) {
   const agent = agentOf(sub.paneId);
   if (!agent) return { reason: "이 pane 을 herdr 목록에서 찾지 못했습니다" };
+  if (sub.session && agent.sessionUuid !== sub.session) return { reason: "터미널에서 다른 대화를 열었습니다" };
   const kind = kindOf(agent);
   const sessionUuid = (kind === "claude" ? await liveClaudeSession(sub.paneId) : null) || agent.sessionUuid || null;
   // 세션 id 가 그대로면 찾은 파일도 그대로다. 색인(모든 프로젝트 폴더 읽기)을 5초마다 다시 만들지 않는다.
@@ -203,7 +266,13 @@ async function resolveTarget(sub) {
     // 새로 띄운 Codex 도 첫 메시지 전까지 rollout 파일이 없음(2026-11-10 확인). Claude 새 대화처럼 빈 대화
     return file ? { file, kind } : { fresh: true, kind, reason: "Codex 기록 파일이 아직 없습니다(첫 메시지를 보내면 생깁니다)" };
   }
-  return { reason: "Claude Code·Codex pane 만 채팅으로 볼 수 있습니다" };
+  if (kind === "agy") {
+    let file = agent.sessionFile || null;
+    if (!file && herdr) file = (await resolveAgySession(herdr, sub.paneId))?.file || null;
+    file = file ? inside(agyHome("brain"), file) : null;
+    return file ? { file, kind } : { fresh: true, kind, reason: "Antigravity 기록 파일이 아직 없습니다(첫 메시지를 보내면 생깁니다)" };
+  }
+  return { reason: "Claude Code·Codex·Antigravity pane 만 채팅으로 볼 수 있습니다" };
 }
 
 function fileSource(fd, size) {
@@ -231,9 +300,229 @@ function open(ws, key, msg) {
   }
   const sub = { ws, key, paneId, agentId, file: null, kind: null, ino: 0, start: 0, end: 0, missing: 0,
     nextResolve: 0, pollTimer: null, watcher: null, watchTimer: null, watchSince: 0, busy: false, closed: false,
-    meta: null, metaEnd: 0, metaAt: 0, metaSent: "", prompt: null, promptGen: 0, screen: null };
+    meta: null, metaEnd: 0, metaAt: 0, metaSent: "", prompt: null, promptGen: 0, screen: null, a2ui: new Map() };
   subs.set(key, sub);
-  tick(sub);
+  const agent = agentOf(paneId);
+  const ordinary = !agentId && !agent?.embeddedProvider && !agent?.managedProvider && !!agent?.terminalId;
+  let terminalProvider = null;
+  if (ordinary) {
+    const { chatProviders, chatProviderAliases } = paseoUiStatus();
+    const name = String(agent.agent).toLowerCase();
+    const provider = chatProviders.includes(name) ? name : Object.hasOwn(chatProviderAliases, name) ? chatProviderAliases[name] : null;
+    if (provider && (provider === "antigravity" ? "agy" : provider) !== kindOf(agent)) terminalProvider = provider;
+  }
+  const ordinaryCodex = ordinary && !terminalProvider && kindOf(agent) === "codex";
+  sub.session = ordinaryCodex ? (msg.session || null) : (msg.session || agent?.sessionUuid || null);
+  sub.terminalId = agent?.terminalId || null;
+  sub.nativeProvider = ordinary && (terminalProvider || kindOf(agent)) ? agent.agent : null;
+  if (ordinaryCodex) {
+    sub.opening = Promise.resolve().then(async () => {
+      const binding = await discoverNativeCodexAgent(agent);
+      const routed = binding ? { ...agent, sessionUuid: binding.threadId, sessionFile: null, embeddedProvider: "codex", sharedCodex: true } : agent;
+      if (binding) sub.sharedCodex = true;
+      sub.session = msg.session || routed.sessionUuid || null;
+      sub.opening = null;
+      startOpen(sub, routed, false);
+    }).catch(error => {
+      sub.opening = null;
+      if (sub.closed) return;
+      send(ws, { type: "agentchat.frame", key, kind: "error", reason: error.message });
+      drop(ws, key);
+    });
+    return;
+  }
+  startOpen(sub, agent, agent?.sessionUuid ? terminalProvider : null);
+}
+
+function startOpen(sub, agent, terminalProvider) {
+  const { ws, key, agentId, paneId } = sub;
+  if (sub.closed) return;
+  if (sub.session && agent?.sessionUuid !== sub.session) {
+    send(ws, { type: "agentchat.frame", key, kind: "error", reason: "터미널에서 다른 대화를 열었습니다" });
+    drop(ws, key);
+    return;
+  }
+  sub.nativeControls = process.platform !== "win32" && !!sub.nativeProvider && !agent?.embeddedProvider && canRelayManagedChat(ws);
+  send(ws, { type: "agentchat.cli-available", key, available: sub.nativeControls });
+  if (agent?.embeddedProvider || terminalProvider) {
+    sub.uuid = agent.sessionUuid;
+    const onError = error => {
+      if (!sub.closed) send(ws, { type: "agentchat.frame", key, kind: "error", reason: error.message });
+    };
+    sub.embedded = Promise.resolve().then(async () => {
+      if (sub.closed || agentId || !canRelayManagedChat(ws)) throw new Error("이 창에서 대화를 열 수 없습니다");
+      const watch = terminalProvider ? (await import("./paseo-ui/herdr-chat.mjs")).watchHerdrChat : agent.sharedCodex ? (await import("./paseo-ui/codex-chat.mjs")).watchSharedCodex : watchEmbeddedChat;
+      const updateSurfaces = createSnapshotA2ui(sub.a2ui, () => pushA2ui(sub));
+      const connection = await watch({ agent, herdr, release: agent.sharedCodex ? currentEmbeddedProvider("codex") : null, onError,
+        readUsage(file) {
+          const path = file && inside(codexHome("sessions"), file);
+          if (!path) return undefined;
+          try {
+            const usage = codexMeta(readRecords(path, 0).records).usage;
+            if (usage) return { contextWindowUsedTokens: usage.used, ...(usage.max ? { contextWindowMaxTokens: usage.max } : {}) };
+          } catch (error) {
+            if (error.code !== "ENOENT") console.warn("Codex 사용량을 읽지 못했습니다", error.message);
+          }
+        },
+        onFrame(frame) {
+        if (sub.closed) return;
+        updateSurfaces(frame);
+        send(ws, { ...frame, timeline: frame.timelineRows ? undefined : frame.timeline, type: "agentchat.frame", kind: "snapshot", embedded: true, key,
+          provider: agent.embeddedProvider ?? terminalProvider ?? agent.agent, sessionUuid: sub.uuid });
+      } });
+      if (sub.closed) connection.close();
+      else sub.closeEmbedded = connection.close;
+      return connection;
+    }).catch(onError);
+    return;
+  }
+  const managed = !agent?.managedProvider && !ownsLivePane(agent) ? managedPane(paneId, undefined, agent?.terminalId) : null;
+  if (agent?.managedProvider || (managed && !managed.agentId)) {
+    sub.managed = true;
+    openManaged(sub);
+  } else {
+    tick(sub);
+  }
+}
+
+function ownsLivePane(agent) {
+  return !!agent?.agent && agent.agent !== "iris-paseo" && !agent.managedProvider;
+}
+
+function matchingManagedPane(pane, agent) {
+  return pane?.agentId && pane.agentId === agent?.sessionUuid && pane.provider === agent?.managedProvider
+    && (pane.boundTerminalId == null || pane.boundTerminalId === agent.terminalId);
+}
+
+function acknowledgeSeen(ws, key, session) {
+  const sub = subsByWs.get(ws)?.get(key);
+  if (!sub || sub.agentId || !herdr?.agentFocus || typeof session !== "string" || !session) return;
+  const agent = agentOf(sub.paneId);
+  if (agent?.status !== "done" || agent.sessionUuid !== session || sub.seen === agent) return;
+  sub.seen = agent;
+  void herdr.agentFocus(sub.paneId).catch((error) => {
+    sub.seen = null;
+    send(ws, { type: "agentchat.seen-error", key, session, reason: String(error?.message || error) });
+  });
+}
+
+async function openManaged(sub) {
+  if (!canRelayManagedChat(sub.ws) || sub.agentId) {
+    send(sub.ws, { type: "agentchat.frame", key: sub.key, kind: "error", reason: "이 창에서 대화를 열 수 없습니다" });
+    return;
+  }
+  try {
+    const agent = agentOf(sub.paneId);
+    if (ownsLivePane(agent)) {
+      open(sub.ws, sub.key, { paneId: sub.paneId, agentId: sub.agentId, session: sub.session });
+      return;
+    }
+    const pane = managedPane(sub.paneId, undefined, agent?.terminalId);
+    if (pane?.startupError) throw new Error(pane.startupError);
+    if (!matchingManagedPane(pane, agent) || !pane.serverId || !pane.workspaceId || !pane.build) {
+      sub.pollTimer = setTimeout(() => openManaged(sub), POLL_MS);
+      sub.pollTimer.unref?.();
+      return;
+    }
+    const release = releasedRuntime(pane.build);
+    if (!release) throw new Error("Paseo 런타임을 찾지 못했습니다");
+    ({ requiredPermissionForInbound: sub.requiredPermissionForInbound } = await loadManagedChatPermissions(release.dir));
+    if (sub.closed) return;
+    sub.managedPane = { ...pane, cwd: agent.cwd, boundTerminalId: agent.terminalId };
+    sub.managedA2ui = createManagedA2ui(pane.agentId, sub.a2ui, () => pushA2ui(sub));
+    send(sub.ws, { type: "agentchat.managed", key: sub.key, agentId: pane.agentId, serverId: pane.serverId, workspaceId: pane.workspaceId, build: pane.build });
+  } catch (error) {
+    if (!sub.closed) send(sub.ws, { type: "agentchat.frame", key: sub.key, kind: "error", reason: String(error?.message || error) });
+  }
+}
+
+function relayManaged(ws, key, msg) {
+  const sub = subsByWs.get(ws)?.get(key);
+  if (!sub?.managedPane || !canRelayManagedChat(ws) || typeof msg.socketId !== "string" || !ID_RE.test(msg.socketId)) return;
+  if (!matchingManagedPane(sub.managedPane, agentOf(sub.paneId))) {
+    for (const relay of sub.relays?.values() ?? []) relay.close();
+    sub.relays?.clear();
+    send(ws, { type: "agentchat.managed-relay", key, socketId: msg.socketId, event: "close", code: 1008 });
+    return;
+  }
+  if (msg.event === "connect") {
+    sub.relays ??= new Map();
+    if (sub.relays.has(msg.socketId) || sub.relays.size >= 4) return;
+    if (msg.clientNamespace != null && !ID_RE.test(msg.clientNamespace)) return;
+    sub.clientNamespace ??= crypto.randomUUID();
+    const relay = connectManagedChat({ ...sub.managedPane, clientNamespace: msg.clientNamespace ?? sub.clientNamespace }, sub.requiredPermissionForInbound, (event) => {
+      if (sub.closed || !sub.relays.has(msg.socketId)) return;
+      if (!matchingManagedPane(sub.managedPane, agentOf(sub.paneId))) {
+        sub.relays.get(msg.socketId).close();
+        sub.relays.delete(msg.socketId);
+        send(ws, { type: "agentchat.managed-relay", key, socketId: msg.socketId, event: "close", code: 1008 });
+        return;
+      }
+      send(ws, { type: "agentchat.managed-relay", key, socketId: msg.socketId, ...event });
+      if (event.event === "message" && !event.binary) sub.managedA2ui(event.data);
+      if (event.event === "close") sub.relays.delete(msg.socketId);
+    });
+    sub.relays.set(msg.socketId, relay);
+  } else if (msg.event === "message") sub.relays?.get(msg.socketId)?.send(msg);
+  else if (msg.event === "close") {
+    sub.relays?.get(msg.socketId)?.close();
+    sub.relays?.delete(msg.socketId);
+  }
+}
+
+function closeChatTerminal(sub) {
+  const proc = sub.chatTerminal;
+  sub.chatTerminal = null;
+  sub.stopWatchingTerminal?.();
+  sub.stopWatchingTerminal = null;
+  if (proc) proc.kill();
+}
+
+function chatTerminalMatches(sub) {
+  const agent = agentOf(sub.paneId);
+  return agent?.terminalId === sub.terminalId && agent.agent === sub.nativeProvider && (agent.sessionUuid || null) === sub.session;
+}
+
+function handleChatTerminal(ws, key, msg) {
+  const sub = subsByWs.get(ws)?.get(key);
+  if (!sub?.nativeControls || !canRelayManagedChat(ws)) return;
+  const reply = extra => send(ws, { type: "agentchat.cli", key, id: msg.id, ...extra });
+  if (sub.chatTerminal && sub.chatTerminalId !== msg.id) return;
+  if (msg.action === "close" || !chatTerminalMatches(sub)) {
+    closeChatTerminal(sub);
+    if (msg.action !== "close") reply({ ended: true });
+    return;
+  }
+  try {
+    const proc = sub.chatTerminal;
+    if (msg.action === "input") {
+      if (typeof msg.data === "string" && msg.data.length <= MAX_SEND_TEXT) proc?.write(msg.data);
+      return;
+    }
+    if (![msg.cols, msg.rows].every(n => Number.isInteger(n) && n > 0 && n <= 1000)) return;
+    if (msg.action === "resize") { proc?.resize(msg.cols, msg.rows); return; }
+    if (msg.action !== "open" || proc) return;
+    const terminal = attachChatTerminal(sub.terminalId, msg.cols, msg.rows);
+    sub.chatTerminal = terminal;
+    sub.chatTerminalId = msg.id;
+    sub.stopWatchingTerminal = subscribeRuntimeState(() => {
+      if (chatTerminalMatches(sub)) return;
+      closeChatTerminal(sub);
+      reply({ ended: true });
+    });
+    terminal.onData(bytes => {
+      if (sub.chatTerminal === terminal) reply({ bytes: Buffer.from(bytes).toString("base64") });
+    });
+    terminal.onExit(({ exitCode }) => {
+      if (sub.chatTerminal !== terminal) return;
+      sub.chatTerminal = null;
+      closeChatTerminal(sub);
+      reply({ ended: true, reason: exitCode ? "Herdr가 터미널 연결을 종료했습니다" : undefined });
+    });
+  } catch (error) {
+    closeChatTerminal(sub);
+    reply({ ended: true, reason: error.message });
+  }
 }
 
 function drop(ws, key) {
@@ -241,6 +530,9 @@ function drop(ws, key) {
   const sub = subs?.get(key);
   if (!sub) return;
   sub.closed = true;
+  closeChatTerminal(sub);
+  sub.closeEmbedded?.();
+  for (const relay of sub.relays?.values() ?? []) relay.close();
   clearTimeout(sub.pollTimer);
   clearTimeout(sub.watchTimer);
   try { sub.watcher?.close(); } catch {}
@@ -276,16 +568,41 @@ function watchFile(sub) {
   } catch { sub.watcher = null; }
 }
 
+function pushA2ui(sub) {
+  if (!sub || sub.closed) return;
+  send(sub.ws, { type: "agentchat.a2ui", key: sub.key, surfaces: [...sub.a2ui.values()] });
+}
+
+function dismissA2ui(ws, key, msg) {
+  const sub = subsByWs.get(ws)?.get(key);
+  const surfaceId = typeof msg.id === "string" ? msg.id : "";
+  if (!sub || !surfaceId) return;
+  if (sub.a2ui.delete(surfaceId)) pushA2ui(sub);
+}
+
+function applyMessagesA2ui(sub, messages) {
+  const extracted = [];
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (!m || m.role !== "assistant" || !Array.isArray(m.blocks)) continue;
+    for (const b of m.blocks) {
+      if (b?.type === "text" && typeof b.text === "string") extracted.push(...extractA2uiBlocks(b.text));
+    }
+  }
+  return extracted.length ? applyA2uiMessages(sub.a2ui, extracted) : false;
+}
+
 function snapshotFrame(sub, kind) {
   // 기록을 처음부터 다시 그리면 메타도 새 파일 끝에서 다시 읽음. 다른 세션 파일로 바뀐 뒤 이전 모델·사용량이 남지 않게
-  sub.meta = null; sub.metaEnd = 0; sub.metaAt = 0;
+  sub.meta = null; sub.metaEnd = 0; sub.metaAt = 0; sub.agyToolQueue = [];
   withFd(sub.file, (fd, st) => {
     const src = fileSource(fd, st.size);
     const end = completeEnd(src);
-    const win = readTailWindow(src, { end, want: LIMITS.initial, kind: sub.kind });
+    const win = readTailWindow(src, { end, want: LIMITS.initial, kind: sub.kind, pendingToolIds: sub.agyToolQueue });
     sub.ino = st.ino; sub.start = win.start; sub.end = end;
-    send(sub.ws, { type: "agentchat.frame", key: sub.key, kind, messages: win.messages, hasOlder: win.hasOlder,
+    sub.a2ui = new Map(extractSurfacesFromMessages(win.messages).map((s) => [s.surfaceId, s]));
+    send(sub.ws, { type: "agentchat.frame", key: sub.key, kind, messages: stripA2uiFromMessages(win.messages), hasOlder: win.hasOlder,
       source: sub.kind, file: path.basename(sub.file), gen: String(st.ino) });
+    pushA2ui(sub);
   });
 }
 
@@ -310,7 +627,10 @@ async function tick(sub) {
       if (!hit.file) {
         const frame = noFileFrame(sub, hit);
         if (frame) send(sub.ws, { type: "agentchat.frame", key: sub.key, ...frame });
-        if (hit.fresh) { if (sub.freshUuid !== sub.uuid || sub.file) { sub.meta = null; sub.metaEnd = 0; sub.metaAt = 0; } sub.freshUuid = sub.uuid; sub.kind = hit.kind; }
+        if (hit.fresh) {
+          if (sub.freshUuid !== sub.uuid || sub.file) { sub.meta = null; sub.metaEnd = 0; sub.metaAt = 0; sub.a2ui.clear(); pushA2ui(sub); }
+          sub.freshUuid = sub.uuid; sub.kind = hit.kind;
+        }
         sub.file = null;
         if (hit.fresh) await refreshMeta(sub);
         sub.missing++;
@@ -338,14 +658,17 @@ async function tick(sub) {
     if (st.ino !== sub.ino || st.size < sub.end) snapshotFrame(sub, "replacement");
     else if (st.size > sub.end) {
       withFd(sub.file, (fd, cur) => {
-        const got = readForward(fileSource(fd, cur.size), sub.end, sub.kind);
+        const got = readForward(fileSource(fd, cur.size), sub.end, sub.kind, sub.agyToolQueue);
         if (got.end === sub.end) return;
         sub.end = got.end;
         if (got.messages.length > LIMITS.append) {
           snapshotFrame(sub, "replacement");   // 한꺼번에 많이 쌓였으면 처음부터 다시 그리는 편이 싸다
           return;
         }
-        if (got.messages.length) send(sub.ws, { type: "agentchat.frame", key: sub.key, kind: "append", messages: got.messages });
+        if (got.messages.length) {
+          applyMessagesA2ui(sub, got.messages) && pushA2ui(sub);
+          send(sub.ws, { type: "agentchat.frame", key: sub.key, kind: "append", messages: stripA2uiFromMessages(got.messages) });
+        }
       });
     }
     await refreshMeta(sub);
@@ -412,7 +735,7 @@ function older(ws, key) {
     withFd(sub.file, (fd, st) => {
       const win = readTailWindow(fileSource(fd, st.size), { end: sub.start, want: LIMITS.older, kind: sub.kind });
       sub.start = win.start;
-      send(ws, { type: "agentchat.older", key, messages: win.messages, hasOlder: win.hasOlder });
+      send(ws, { type: "agentchat.older", key, messages: stripA2uiFromMessages(win.messages), hasOlder: win.hasOlder });
     });
   } catch (e) {
     send(ws, { type: "agentchat.older", key, messages: [], hasOlder: false, reason: String(e?.message || e) });
@@ -439,9 +762,74 @@ export function draftBlockReason(draft) {
 }
 
 // 화면에서 읽은 입력 칸 글. 입력 칸이 안 보이면(질문 화면 등) null
-async function readDraft(paneId, kind) {
+async function readInputScreen(paneId) {
   const value = await herdr.paneRead(paneId, "visible", "ansi", false);
-  return terminalDraft(String(value?.text ?? (typeof value === "string" ? value : "")), kind);
+  return String(value?.text ?? (typeof value === "string" ? value : ""));
+}
+
+async function readDraft(paneId, kind) {
+  return terminalDraft(await readInputScreen(paneId), kind);
+}
+
+async function liveTransferPane(paneId) {
+  const pane = await herdr.paneGet(paneId);
+  const kind = kindOf(pane);
+  if (!kind) return null;
+  let record;
+  if (kind === "claude") {
+    const sessionId = await liveClaudeSession(paneId);
+    const reported = agentSessionPathFor(paneId, "claude");
+    record = {
+      uuid: sessionId,
+      file: reported?.sessionId === sessionId ? reported.file : claudeSessionRec(sessionId)?.file,
+    };
+  } else if (kind === "agy") {
+    record = await resolveAgySession(herdr, paneId, pane);
+  } else {
+    record = await resolveCodexSession(herdr, paneId, pane);
+  }
+  return {
+    paneId, kind, sessionId: record?.uuid, file: record?.file, terminalId: pane.terminal_id,
+    cwd: pane.foreground_cwd || pane.cwd, idle: ["idle", "done"].includes(pane.agent_status),
+  };
+}
+
+async function requireTransferDraft(sub, target) {
+  const draft = await readDraft(target.paneId, target.kind);
+  if (sub.closed || !draft || draft.text || draft.pasted || draft.cut) {
+    throw new Error("명령을 보낸 창의 터미널 입력줄을 비운 뒤 다시 실행하세요");
+  }
+}
+
+async function verifySessionInput(sub) {
+  const current = agentOf(sub.paneId);
+  if (sub.closed || (sub.session && current?.sessionUuid !== sub.session) ||
+      (sub.terminalId && current?.terminalId !== sub.terminalId)) throw new Error("대화 세션이 변경되었습니다");
+  if (sub.terminalId) {
+    const pane = await herdr.paneGet(sub.paneId);
+    if (sub.closed || pane.terminal_id !== sub.terminalId ||
+        (sub.session && pane.agent_session?.kind === "id" && pane.agent_session.value !== sub.session)) {
+      throw new Error("터미널에서 다른 대화를 열었습니다");
+    }
+  }
+}
+
+async function sendSessionInput(sub, text) {
+  await verifySessionInput(sub);
+  return herdr.paneSendText(sub.paneId, text);
+}
+
+async function resumeTransferInPane(sub, target, sessionId) {
+  await requireTransferDraft(sub, target);
+  const command = `/resume ${sessionId}`;
+  await sendSessionInput(sub, command);
+  await new Promise((r) => setTimeout(r, ENTER_DELAY_MS));
+  if ((await herdr.paneGet(target.paneId)).terminal_id !== target.terminalId) {
+    throw new Error("명령을 보낸 터미널이 바뀌어 재개하지 않았습니다");
+  }
+  const draft = await readDraft(target.paneId, target.kind);
+  if (draft?.text !== command) throw new Error("터미널 입력이 바뀌어 재개하지 않았습니다");
+  await sendSessionInput(sub, "\r");
 }
 
 // Claude 서브에이전트에 보낼 글을 부모 에이전트에게 전달 부탁으로 감쌈
@@ -469,6 +857,9 @@ function sendToPane(ws, key, msg) {
   if (!sub) { reply(false, "보낼 대상이 없습니다"); return; }
   if (!raw.trim() || raw.length > MAX_SEND_TEXT) { reply(false, "보낼 글이 비었거나 너무 깁니다"); return; }
   if (!herdr?.paneSendText) { reply(false, "터미널에 연결되지 않았습니다"); return; }
+  let pick;
+  try { pick = inheritPick(raw); } catch (error) { reply(false, error.message); return; }
+  if (pick && sub.agentId) { reply(false, "부모 세션 창에서 계승하세요"); return; }
   const text = sub.agentId
     ? subagentRelayText({ agentId: sub.agentId, description: findSubagent(agentOf(sub.paneId)?.subagents, sub.agentId)?.description || "", text: raw })
     : raw;
@@ -476,17 +867,32 @@ function sendToPane(ws, key, msg) {
   const kind = sub.kind || kindOf(agentOf(paneId)) || "claude";
   const prev = sendQueues.get(paneId) || Promise.resolve();
   const next = prev.catch(() => {}).then(async () => {
+    if (pick) {
+      await resumeFromPick(paneId, pick, {
+        current: liveTransferPane,
+        importSession: async (source, target) => {
+          await requireTransferDraft(sub, target);
+          return importPickedSession(source, target);
+        },
+        resume: (target, id) => resumeTransferInPane(sub, target, id),
+      });
+      return;
+    }
     let draft = null;
     try { draft = await readDraft(paneId, kind); } catch {}
     const blocked = draftBlockReason(draft);
     if (blocked) throw new Error(blocked);
+    if (draft && !draft.text && herdr.agentSend) {
+      await verifySessionInput(sub);
+      return herdr.agentSend(paneId, text);
+    }
     const [clear, payload, enter] = inputChunks(text, draft?.lines ?? null);
     // 지우는 키는 따로. 글과 한 번에 보내면 Claude Code 가 묶음 전체를 붙여넣기로 받아 지우지 않음
-    await herdr.paneSendText(paneId, clear);
+    await sendSessionInput(sub, clear);
     await new Promise((r) => setTimeout(r, CLEAR_DELAY_MS));
-    await herdr.paneSendText(paneId, payload);
+    await sendSessionInput(sub, payload);
     await new Promise((r) => setTimeout(r, ENTER_DELAY_MS));
-    await herdr.paneSendText(paneId, enter);
+    await sendSessionInput(sub, enter);
   });
   sendQueues.set(paneId, next);
   next.then(() => reply(true), (e) => reply(false, String(e?.message || e)))
@@ -504,7 +910,7 @@ function inputTools(ws, key, msg) {
   if (!sub) { send(ws, { type: msg.type, key, id, error: "대상이 없습니다" }); return; }
   if (msg.type === "agentchat.commands") {
     const kind = sub.kind || kindOf(agent) || "claude";
-    const homes = { claude: claudeHome(), codex: codexHome() };
+    const homes = { claude: claudeHome(), codex: codexHome(), agyConfig: path.join(path.dirname(agyHome()), "config") };
     (kind === "claude" ? claudeBuiltins() : Promise.resolve(null))
       .then((cli) => send(ws, { type: msg.type, key, id, commands: listCommands(kind, cwd, homes, cli) }));
     return;
@@ -518,7 +924,7 @@ function inputTools(ws, key, msg) {
 function cancelPane(ws, key) {
   const sub = subsByWs.get(ws)?.get(key);
   if (!sub || sub.agentId || !herdr?.paneSendText) return;
-  herdr.paneSendText(sub.paneId, "\x1b").catch(() => {});
+  sendSessionInput(sub, "\x1b").catch(() => {});
 }
 
 // ── 입력창 아래 표시값·권한 요청 ────────────────────────────────────────────
@@ -591,21 +997,28 @@ async function refreshMeta(sub, force = false) {
   try {
     const got = sub.file ? readRecords(sub.file, sub.metaEnd) : null;
     if (got) {
-      if (got.end < sub.metaEnd) sub.meta = null;   // 파일이 바뀜
+      if (got.end < sub.metaEnd) { sub.meta = null; sub.openAsk = null; }   // 파일이 바뀜
       sub.metaEnd = got.end;
-      sub.meta = mergeMeta(sub.meta || emptyMeta(), sub.kind === "codex" ? codexMeta(got.records) : claudeMeta(got.records));
+      if (sub.kind === "claude") sub.openAsk = openAskAfter(sub.openAsk || null, got.records);
+      else if (sub.kind === "agy") sub.openAsk = openAgyAskAfter(sub.openAsk || null, got.records);
+      sub.meta = mergeMeta(sub.meta || emptyMeta(),
+        sub.kind === "codex" ? codexMeta(got.records)
+          : sub.kind === "agy" ? agyMeta(got.records)
+            : claudeMeta(got.records));
     }
   } catch {}
   const agent = agentOf(sub.paneId);
   let prompt = null;
   if (herdr?.paneRead && herdr?.call && agent) {
-    const waiting = agent.status === "blocked";
-    if (sub.kind === "claude" || waiting) {
+    // herdr 가 질문 중에도 blocked 로 보고하지 않을 때가 있어 기록의 답 없는 AskUserQuestion 도 대기로 봄(폰 원격과 같은 기준)
+    const waiting = agent.status === "blocked" || !!sub.openAsk;
+    if (sub.kind === "claude" || sub.kind === "agy" || waiting) {
       try {
         const frame = await readScreen(sub.paneId);
         if (sub.closed) return;
         sub.screen = frame;
         if (sub.kind === "claude") sub.meta = mergeMeta(sub.meta || emptyMeta(), claudeFooter(frame.text));
+        else if (sub.kind === "agy") sub.meta = mergeMeta(sub.meta || emptyMeta(), agyFooter(frame.text));
         if (waiting) {
           const p = extractPrompt(frame);
           const choices = cardChoices(p);
@@ -620,7 +1033,7 @@ async function refreshMeta(sub, force = false) {
           } else if (choices.length) {
             sub.answered = null;
             const id = promptIdOf(sub, p);
-            prompt = { id, title: p.title || null, question: p.question, detail: p.detail || null, variant: p.variant || null,
+            prompt = { id, title: p.title || null, question: p.question, detail: cardDetail(sub, frame, p), variant: p.variant || null,
               options: choices.map((o) => ({ row: o.row, text: optionLabel(o.text), role: o.role })), selectedRow: p.selectedRow };
             sub.prompt = { id, choiceRows: choices.map((o) => o.row) };
           }
@@ -633,13 +1046,18 @@ async function refreshMeta(sub, force = false) {
   let draft = null;
   if (herdr?.paneRead && agent && agent.status !== "blocked") {
     try {
-      const d = await readDraft(sub.paneId, sub.kind);
+      const screen = await readInputScreen(sub.paneId);
       if (sub.closed) return;
+      if (sub.kind === "codex") {
+        const live = codexFooter(screen, codexModels());
+        if (live) sub.meta = mergeMeta(sub.meta || emptyMeta(), live);
+      }
+      const d = terminalDraft(screen, sub.kind);
       if (d) draft = { text: d.text, pasted: d.pasted, cut: d.cut };
     } catch {}
   }
   // Codex 모델 목록은 Claude 대화에도 실음. 부모가 미리 갖고 있어야 Codex 대화로 처음 바꿀 때 모델 칸이 "오류"가 되지 않음
-  const payload = { agent: sub.meta || emptyMeta(), prompt, codexModels: codexModels(), draft };
+  const payload = { agent: sub.meta || emptyMeta(), prompt, codexModels: codexModels(), agyModels: agyDefaultModels(), draft };
   const json = JSON.stringify(payload);
   if (json === sub.metaSent) return;
   sub.metaSent = json;
@@ -665,9 +1083,23 @@ function transcriptTail(file) {
 function askedQuestion(sub, p) {
   if (!p || !sub.file) return null;
   let q = null;
-  try { q = (sub.kind === "codex" ? pendingCodexQuestion : pendingQuestion)(transcriptTail(sub.file)); } catch { return null; }
+  try {
+    const picker = sub.kind === "codex" ? pendingCodexQuestion
+      : sub.kind === "agy" ? pendingAgyQuestion
+        : pendingQuestion;
+    q = picker(transcriptTail(sub.file));
+  } catch { return null; }
   if (!q || sub.answeredQuestion === q.toolUseId) return null;
   return p.variant === "review" || q.questions.some((x) => showsQuestion(p, x)) ? q : null;
+}
+
+// 카드 내용. 화면이 짧아 승인 상자 위가 잘렸으면("↑ N more lines") 기록의 결과 없는 도구 입력 전체
+// - 카드 id(promptIdOf)는 화면 내용으로 셈. 답할 때 다시 읽는 화면과 같아야 해서 여기서만 바꿈
+function cardDetail(sub, frame, p) {
+  if (sub.kind === "claude" && sub.file && promptCutLines(frame, p) > 0) {
+    try { const full = pendingToolInput(transcriptTail(sub.file)); if (full) return full; } catch {}
+  }
+  return p.detail || null;
 }
 
 // 권한 카드로 보일 선택지. 여러 개 고르기·직접 입력은 화살표+Enter 로 답할 수 없음 → 카드 없이 터미널 안내만(부모 창 hint)
@@ -709,7 +1141,7 @@ function answerPrompt(ws, key, msg) {
     const row = cardChoices(now)[want.choiceRows.indexOf(msg.row)]?.row;
     const diff = row == null ? null : terminalSelection(frame.text, row);
     if (diff == null) throw new Error("선택지를 찾지 못했습니다");
-    await herdr.paneSendText(paneId, (diff < 0 ? "\x1b[A" : "\x1b[B").repeat(Math.abs(diff)) + "\r");
+    await sendSessionInput(sub, (diff < 0 ? "\x1b[A" : "\x1b[B").repeat(Math.abs(diff)) + "\r");
     return JSON.stringify(promptContent(now));
   });
   sendQueues.set(paneId, next);
@@ -733,7 +1165,7 @@ function answerQuestion(sub, msg, reply) {
   const screen = async () => extractPrompt(await readScreen(paneId));
   const prev = sendQueues.get(paneId) || Promise.resolve();
   const next = prev.catch(() => {}).then(async () => {
-    if (!parsed.answers) { await herdr.paneSendText(paneId, "\x1b"); return; }
+    if (!parsed.answers) { await sendSessionInput(sub, "\x1b"); return; }
     const screenNow = await screen();
     // 앞 질문이 이미 답해졌으면(앞서 보내다 멈춤·터미널에서 답함) 지금 화면의 질문부터
     const start = want.questions.findIndex((q) => showsQuestion(screenNow, q));
@@ -744,11 +1176,11 @@ function answerQuestion(sub, msg, reply) {
       if (!showsQuestion(p, q)) throw new Error("터미널 질문 화면이 예상과 달라 멈췄습니다. 남은 답은 터미널에서 해 주세요");
       const keys = (sub.kind === "codex" ? codexQuestionKeys : questionKeys)(p, q, parsed.answers[i]);
       if (keys.error) throw new Error(keys.error);
-      for (const chunk of keys.chunks) { await herdr.paneSendText(paneId, chunk); await pause(QUESTION_STEP_MS); }
+      for (const chunk of keys.chunks) { await sendSessionInput(sub, chunk); await pause(QUESTION_STEP_MS); }
       await pause(QUESTION_SETTLE_MS);
     }
     const review = reviewKeys(await screen());
-    for (const chunk of review || []) { await herdr.paneSendText(paneId, chunk); await pause(QUESTION_STEP_MS); }
+    for (const chunk of review || []) { await sendSessionInput(sub, chunk); await pause(QUESTION_STEP_MS); }
   });
   sendQueues.set(paneId, next);
   next.then(() => {
@@ -759,24 +1191,27 @@ function answerQuestion(sub, msg, reply) {
     .finally(() => { if (sendQueues.get(paneId) === next) sendQueues.delete(paneId); });
 }
 
-// agentchat.mode { key, id, modeId } — Claude 는 Shift+Tab 으로 돌며 화면 아래줄이 목표 모드가 되면 멈춤
+// agentchat.mode { key, id, modeId } — Claude·Antigravity 는 Shift+Tab 으로 돌며 화면 아래줄이 목표 모드가 되면 멈춤
 const CLAUDE_MODES = new Set(["default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
+const AGY_MODES = new Set(["default", "acceptEdits", "auto", "plan"]);
 function setMode(ws, key, msg) {
   const sub = subsByWs.get(ws)?.get(key);
   const reply = (ok, reason = "") => send(ws, { type: "agentchat.moded", key, id: msg.id ?? null, ok, ...(reason ? { reason } : {}) });
   if (!sub || sub.agentId || !herdr?.paneSendText || !herdr?.paneRead) { reply(false, "보낼 대상이 없습니다"); return; }
-  if (sub.kind !== "claude") { reply(false, "Codex 는 터미널에서 바꿔 주세요"); return; }
+  if (sub.kind !== "claude" && sub.kind !== "agy") { reply(false, "Codex 는 터미널에서 바꿔 주세요"); return; }
   const target = String(msg.modeId || "");
-  if (!CLAUDE_MODES.has(target)) { reply(false, "알 수 없는 모드입니다"); return; }
+  const allowed = sub.kind === "agy" ? AGY_MODES : CLAUDE_MODES;
+  if (!allowed.has(target)) { reply(false, "알 수 없는 모드입니다"); return; }
   const paneId = sub.paneId;
+  const readFooter = sub.kind === "agy" ? agyFooter : claudeFooter;
   const prev = sendQueues.get(paneId) || Promise.resolve();
   const next = prev.catch(() => {}).then(async () => {
     for (let step = 0; step <= MODE_MAX_STEPS; step++) {
-      const { mode } = claudeFooter((await readScreen(paneId)).text);
+      const { mode } = readFooter((await readScreen(paneId)).text);
       if (mode === target) return;
       if (!mode) throw new Error("터미널 화면에서 지금 모드를 읽지 못했습니다");
       if (step === MODE_MAX_STEPS) break;
-      await herdr.paneSendText(paneId, "\x1b[Z");
+      await sendSessionInput(sub, "\x1b[Z");
       await new Promise((r) => setTimeout(r, 300));
     }
     throw new Error("이 세션에서 고를 수 없는 모드입니다");
@@ -922,5 +1357,51 @@ export function handleAgentChatFile(req, res) {
       res.setHeader("x-file-mtime", st.mtime.toISOString());
       sendImage(res, mime, bytes);
     });
+  });
+}
+
+// POST /agentchat-a2ui — 로컬 에이전트·MCP 가 대화 창에 선언형 UI 를 직접 띄우는 엔드포인트
+const MAX_A2UI_BODY = 256 * 1024;
+export function handleAgentChatA2ui(req, res) {
+  const contentType = req.headers?.["content-type"];
+  const fetchSite = String(req.headers?.["sec-fetch-site"] || "").trim().toLowerCase();
+  const jsonBody = contentType == null || /^application\/json\s*(?:;|$)/i.test(String(contentType).trim());
+  if (!isLoopbackRequest(req) || !originAllowed(req) || fetchSite === "cross-site" || !jsonBody) { res.writeHead(403).end('{"ok":false,"error":"local only"}'); return; }
+  const chunks = [];
+  let size = 0, over = false;
+  req.on("data", (c) => {
+    if (over) return;
+    size += c.length;
+    if (size <= MAX_A2UI_BODY) { chunks.push(c); return; }
+    over = true;
+    req.pause?.();
+    chunks.length = 0;
+    if (!res.headersSent) {
+      res.writeHead(413, { connection: "close", "content-type": "application/json" });
+      res.end('{"ok":false,"error":"payload too large"}', () => {
+        try { req.destroy?.(); } catch {}
+      });
+    }
+  });
+  req.on("error", () => { if (!res.headersSent) res.writeHead(400).end(); });
+  req.on("end", () => {
+    if (over) return;
+    let body;
+    try { body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); } catch {
+      res.writeHead(400).end('{"ok":false,"error":"bad json"}');
+      return;
+    }
+    const paneId = typeof body?.paneId === "string" ? body.paneId.slice(0, 100) : "";
+    const list = Array.isArray(body?.messages) ? body.messages : body?.message ? [body.message] : [];
+    if (!paneId || !list.length) { res.writeHead(400).end('{"ok":false,"error":"paneId and message required"}'); return; }
+    let updated = 0;
+    for (const subs of subsByWs.values()) {
+      for (const sub of subs.values()) {
+        if (sub.paneId !== paneId || sub.agentId) continue;
+        if (applyA2uiMessages(sub.a2ui, list)) { pushA2ui(sub); updated++; }
+      }
+    }
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, updated }));
   });
 }

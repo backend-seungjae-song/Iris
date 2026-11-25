@@ -1,9 +1,12 @@
 // worker 사본 · 원본 cdp-qa-reaction.cjs 에서 반응 상태를 명령 단위 밖(worker)에 두도록 바꾼 것 (test/mcp-worker-qa-observe-route.mjs 가 대조)
 // 원본은 ⑧에서 지움
-// 같은 본문: reactionWatch · matchesPattern · ingest · 효과 판정 · qa-target-resolve · 시작 검사 · 종료 판정
+// 같은 본문: reactionWatch · matchesPattern · ingest · 효과 판정 · 시작 검사 · 종료 판정
 // 다른 점: 메인의 observation.subscribeEvents 대신 io.subscribe(장기 구독) · 장면 촬영은 io.capture(별도 단위) · 진단은 io.diagSince(obs.since) · 정리는 최신 명령 단위의 send·io
 // 원본에 없는 수정: 새로고침·이동으로 지워진 실행 환경을 끝 조회에서 뺌(test/qa-reaction-reload-context.test.mjs)
 import { createHash, randomBytes } from "node:crypto";
+
+import { readFrameAXTrees } from "./frame-ax-trees.js";
+import { inspectFrameHit } from "./qa-frame-hit.js";
 
 const BINDING = "__irisQaReaction";
 const WORLD = "iris-qa-reaction";
@@ -310,19 +313,40 @@ function createQaReactionCommands({ now=Date.now, sleep=ms=>new Promise(resolve=
     async "qa-target-resolve"(send,_wc,args={}) {
       const target=args.target||{}, valid=typeof target.text==="string"&&target.text.trim() || typeof target.role==="string"&&target.role.trim()&&typeof target.name==="string"&&target.name.trim();
       if(!valid)throw Error("대상의 role과 name 또는 text가 필요합니다");
-      const tree=await send("Accessibility.getFullAXTree"), nodes=(tree.nodes||[]).filter(n=>!n.ignored&&n.backendDOMNodeId);
       const value=(n,k)=>String(n[k]?.value||"");
       // 이미지 role 은 Chrome 버전에 따라 img·image 로 갈림. qa_snapshot 에 보인 어느 쪽이든 같은 대상
       const roleKey=r=>{const lower=String(r).toLowerCase();return lower==="image"?"img":lower;};
-      let matches=nodes.filter(n=>target.text!=null?value(n,"name").includes(target.text):roleKey(value(n,"role"))===roleKey(target.role)&&value(n,"name")===target.name);
-      if(target.text!=null){const ids=new Set(matches.map(n=>n.nodeId));matches=matches.filter(n=>!(n.childIds||[]).some(id=>ids.has(id)));}
+      const matches = [];
+      for await (const { nodes, frameId } of readFrameAXTrees(send)) {
+        let inFrame = nodes.filter(n => !n.ignored && n.backendDOMNodeId && (target.text != null
+          ? value(n, "name").includes(target.text) : roleKey(value(n, "role")) === roleKey(target.role) && value(n, "name") === target.name));
+        if (target.text != null) {
+          const ids = new Set(inFrame.map(n => n.nodeId));
+          inFrame = inFrame.filter(n => !(n.childIds || []).some(id => ids.has(id)));
+        }
+        for (const node of inFrame) matches.push({ node, frameId });
+      }
       const shown=[];
+      let viewport;
       // 비활성·pointer-events:none 대상은 클릭 지점의 맨 위가 감싼 부모로 잡힘. 가림이 아니라 입력 단계가 비활성으로 멈춤
       // 맨 위가 문서 바닥이면 페이지가 포인터 입력을 막은 상태(닫히는 대화상자의 body pointer-events:none). 누르면 html 에 들어가므로 inert 로 알림
-      for(const node of matches){
+      for(const { node, frameId } of matches){
         const box=await send("DOM.getBoxModel",{backendNodeId:node.backendDOMNodeId}).catch(()=>null);let q=box?.model?.border;if(!q){const quads=await send("DOM.getContentQuads",{backendNodeId:node.backendDOMNodeId}).catch(()=>null);q=quads?.quads?.[0];}
         if(!q||q.length!==8)continue;
         const x=(q[0]+q[2]+q[4]+q[6])/4,y=(q[1]+q[3]+q[5]+q[7])/4;
+        if (frameId) {
+          const inspected = await inspectFrameHit(send, { frameId, backendNodeId: node.backendDOMNodeId, x, y });
+          if (!inspected?.displayed) continue;
+          if (!viewport) {
+            const metrics = await send("Page.getLayoutMetrics");
+            viewport = metrics.cssVisualViewport || metrics.visualViewport;
+          }
+          // 하위 문서와 탭의 뷰포트에서 스크롤 방향 확인
+          const offscreen = y < 0 ? "위" : y >= viewport.clientHeight ? "아래"
+            : x < 0 ? "왼쪽" : x >= viewport.clientWidth ? "오른쪽" : inspected.offscreen;
+          shown.push({ node, x, y, ...inspected, offscreen });
+          continue;
+        }
         const resolved=await send("DOM.resolveNode",{backendNodeId:node.backendDOMNodeId}),objectId=resolved.object?.objectId;if(!objectId)continue;
         let inspected;
         try{const out=await send("Runtime.callFunctionOn",{objectId,returnByValue:true,arguments:[{value:x},{value:y}],functionDeclaration:"function(x,y){const element=this.nodeType===3?this.parentElement:this,d=element.ownerDocument,e=d.elementFromPoint(x,y),b=element.getBoundingClientRect(),s=getComputedStyle(element);const sel=n=>n?.id?'#'+CSS.escape(n.id):n?.localName||null;return {displayed:b.width>0&&b.height>0&&s.display!=='none'&&s.visibility!=='hidden',offscreen:y<0?'위':y>=innerHeight?'아래':x<0?'왼쪽':x>=innerWidth?'오른쪽':null,occluded:!e||!(e===element||element.contains(e)||e.contains(element)&&(element.disabled===true||s.pointerEvents==='none')),inert:s.pointerEvents==='none'&&element.disabled!==true&&(e===d.documentElement||e===d.body),sel:sel(element),blocker:e?{sel:sel(e),text:String(e.innerText||e.textContent||'').trim().slice(0,1000)}:null};}"});inspected=out.result?.value;}finally{await send("Runtime.releaseObject",{objectId});}
@@ -336,7 +360,7 @@ function createQaReactionCommands({ now=Date.now, sleep=ms=>new Promise(resolve=
       if(!nth&&!hits.length&&shown.length)return {found:false,offscreen:shown[0].offscreen,count:shown.length};
       if(nth?!shown[nth-1]:hits.length!==1)return {found:false,...(hits.length&&!nth?{ambiguous:true,count:hits.length}:{}),...(nth?{count:shown.length}:{})};
       const hit=nth?shown[nth-1]:hits[0];let blocker=null,topNode=null;
-      {const located=await send("DOM.getNodeForLocation",{x:Math.round(hit.x),y:Math.round(hit.y),includeUserAgentShadowDOM:false}).catch(()=>null);if(located?.backendNodeId){const ax=await send("Accessibility.getPartialAXTree",{backendNodeId:located.backendNodeId,fetchRelatives:false}).catch(()=>null);topNode=ax?.nodes?.find(n=>n.backendDOMNodeId===located.backendNodeId)||ax?.nodes?.[0];}}
+      {const located=hit.located??await send("DOM.getNodeForLocation",{x:Math.round(hit.x),y:Math.round(hit.y),includeUserAgentShadowDOM:false}).catch(()=>null);if(located?.backendNodeId){const ax=await send("Accessibility.getPartialAXTree",{backendNodeId:located.backendNodeId,fetchRelatives:false}).catch(()=>null);topNode=ax?.nodes?.find(n=>n.backendDOMNodeId===located.backendNodeId)||ax?.nodes?.[0];}}
       if(hit.occluded)blocker={...hit.blocker,role:value(topNode||{},"role"),name:value(topNode||{},"name"),at:now()};
       return {found:true,x:hit.x,y:hit.y,occluded:hit.occluded,inert:hit.inert===true,blocker,target:{role:value(!hit.occluded&&topNode?topNode:hit.node,"role"),name:value(!hit.occluded&&topNode?topNode:hit.node,"name"),text:value(hit.node,"name")},selector:hit.sel};
     },

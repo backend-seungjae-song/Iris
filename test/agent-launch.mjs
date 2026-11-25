@@ -17,6 +17,7 @@ after(() => {
 });
 
 test("기본 argv는 새 세션과 재개 명령을 구분한다", () => {
+  assert.deepEqual(launch.newTerminalArgv("gemini"), ["gemini"]);
   assert.deepEqual(launch.agentArgv("claude"), ["claude"]);
   assert.deepEqual(launch.agentArgv("claude", { resumeSession: "claude-id" }), ["claude", "--resume", "claude-id"]);
   assert.deepEqual(launch.agentArgv("codex"), ["codex"]);
@@ -86,4 +87,35 @@ test("새 탭과 보관 복원은 같은 모양의 명령을 셸에 입력한다
   assert.equal(restored.paneId, "restored-pane");
   await new Promise((resolve) => setImmediate(resolve));
   archive.flushNow();
+});
+
+test("Paseo가 준비된 새 탭은 등록된 CLI를 일반 셸에서 한 번 실행한다", async () => {
+  const root = path.join(stateDir, "paseo-ui");
+  const build = "0.17.4-aaaaaaaa";
+  const bundle = path.join(root, "builds", build);
+  const runtime = path.join(root, "embedded", build);
+  for (const dir of [bundle, runtime]) fs.mkdirSync(dir, { recursive: true });
+  const providers = ["codex", "claude", "antigravity", "pi"];
+  fs.writeFileSync(path.join(bundle, "terminal-commands.json"), JSON.stringify(providers));
+  fs.writeFileSync(path.join(runtime, "providers.json"), JSON.stringify(providers.map(id => ({ id }))));
+  fs.writeFileSync(path.join(runtime, "native-handoff-commands.json"), JSON.stringify({ claude: { start: ["claude"] } }));
+  fs.writeFileSync(path.join(root, "current.json"), JSON.stringify({ current: { version: "0.17.4", recipe: "aaaaaaaa" } }));
+  const { initPaseoUi, currentEmbeddedProvider, stopPaseoUi } = await import("../server/paseo-ui/index.js");
+  initPaseoUi();
+  try {
+    assert.ok(currentEmbeddedProvider("codex"));
+    const { handleTab, initWorkspaceHandlers } = await import("../server/workspace-handlers.js");
+    for (const provider of providers) {
+      const sent = await new Promise((resolve, reject) => {
+        initWorkspaceHandlers({ herdr: {
+          tabCreate: async (_, opts) => { assert.deepEqual(opts, { focus: true }); return { tab_id: "tab" }; },
+          paneList: async () => [{ tab_id: "tab", pane_id: "pane" }],
+          paneRead: async () => ({ text: "$" }),
+          paneSendText: async (id, text) => resolve([id, text]),
+        } });
+        handleTab({ readyState: 1, _local: true, send: reject }, { type: "tab.create", launch: provider, conversation: true });
+      });
+      assert.deepEqual(sent, ["pane", (provider === "antigravity" ? "agy" : provider) + "\r"]);
+    }
+  } finally { await stopPaseoUi(); }
 });

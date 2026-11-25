@@ -35,7 +35,7 @@ export function escapeHtml(s) {
 export function closedMenuMarkup(list) {
   const esc = escapeHtml;
   const rows = (list || []).slice(0, 12);
-  if (!rows.length) return `<div class="wvc-empty">되살릴 닫힌 탭이 없습니다.</div>`;
+  if (!rows.length) return `<div class="wvc-empty">최근 닫은 탭이 없습니다.</div>`;
   return `<div class="wvc-h">최근 닫은 탭<span class="wvc-key">${shortcutLabel("⌘⇧T")}</span></div>`
     + rows.map((t) => {
       const name = t.title || t.label || t.url || t.path || "(제목 없음)";

@@ -116,7 +116,7 @@ export const SCENARIOS = [
   { name: "text-nocdp-exec-fails", cmd: "text", args: {}, env: { ...shownEnv, blockedHost: true, exec: () => { throw new Error("nope"); } }, page: () => capturePage() },
   { name: "locate-unique", cmd: "locate", args: { sel: "#save" }, env: shownEnv,
     page: () => capturePage({ evaluate: (expr) => (expr.includes("const spec") ? jsonValue({ how: "css", total: 1, visibleCount: 1, count: 1, url: "https://example.test/a", title: "예시", tag: "button", role: "button", name: "저장", visible: true, inViewport: true, occluded: false, text: "저장", disabled: false }) : null) }) },
-  { name: "locate-empty", cmd: "locate", args: {}, env: shownEnv, page: () => capturePage({ evaluate: (expr) => (expr.includes("const spec") ? jsonValue({ error: "locator가 비어 있다 — testid·role/name·sel 중 하나가 필요하다" }) : null) }) },
+  { name: "locate-empty", cmd: "locate", args: {}, env: shownEnv, page: () => capturePage({ evaluate: (expr) => (expr.includes("const spec") ? jsonValue({ error: "locator가 비어 있다. testid·role/name·sel 중 하나가 필요하다" }) : null) }) },
   { name: "locate-iframe-ambiguous", cmd: "locate", args: { role: "button", name: "결제" }, frames: ["frame-1"], env: shownEnv,
     page: () => capturePage({ evaluate: (expr, sid) => (expr.includes("const spec") ? jsonValue({ how: "role+name", total: 1, visibleCount: 1, count: 1, url: "https://example.test/a", title: "예시", tag: "button", role: "button", name: sid ? "결제" : "결제 취소", visible: true, inViewport: true, occluded: false, text: "", disabled: false }) : null) }) },
   { name: "observe-default", cmd: "observe", args: {}, env: { ...shownEnv, observed: { console: [{ level: "error", text: "x" }], exceptions: [], network: [], dialogs: [], moments: [], fileChooser: null, counts: { consoleErrors: 1 } } }, page: () => capturePage() },
@@ -362,7 +362,7 @@ export function createWorkerRun(scenario, root, { blockAt = null, blockCommand =
         if (noCdp) {
           effects.push(["detachAiSession"]);
           if (!CDP_FREE.includes(baseArgs.command)) {
-            return fail(`로그인 호스트에서는 CDP 를 붙이지 않아 ${baseArgs.command} 를 실행할 수 없습니다. 쓸 수 있는 것: ${CDP_FREE.join(" ")}. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.`, "cdp_blocked");
+            return fail(`로그인 호스트에서는 CDP 를 연결하지 않아 ${baseArgs.command} 를 실행할 수 없습니다. 쓸 수 있는 것: ${CDP_FREE.join(" ")}. 사람이 로그인해야 하면 browser_ask_user 로 넘기세요.`, "cdp_blocked");
           }
           return done({ noCdp: true, ...gens() });
         }

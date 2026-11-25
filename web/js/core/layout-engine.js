@@ -296,7 +296,7 @@ function drawEdit() {
   const add = (n) => { app.appendChild(n); editEls.push(n); return n; };
 
   const bar = el("div", "lay-bar");
-  bar.append(el("span", "lay-bar-text", "배치 편집: 영역 이름을 끌어 다른 영역의 위·아래·왼쪽·오른쪽에 놓으면 그쪽으로 나뉘고, 가운데에 놓으면 같은 자리에 겹칩니다."));
+  bar.append(el("span", "lay-bar-text", "배치 편집: 영역 이름을 끌어 다른 영역의 위·아래·왼쪽·오른쪽에 놓으면 그쪽으로 나뉘고, 가운데에 놓으면 같은 영역에 겹칩니다."));
   const btn = (label, fn, cls) => { const b = el("button", "lay-btn" + (cls ? " " + cls : ""), label); b.type = "button"; b.addEventListener("click", fn); return b; };
   bar.append(
     btn("기본 배치로", () => { tree = normalizeTree(migratedDefault(), { registered: registered() }); editing.pick = new Map(); relayout(); }),
@@ -312,14 +312,14 @@ function drawEdit() {
     name.title = "끌어서 옮기기";
     name.addEventListener("mousedown", (e) => startMove(e, id));
     ov.append(name);
-    if (!last.realVisible(id)) ov.append(el("div", "lay-ov-empty", "지금 비어 있음"));
+    if (!last.realVisible(id)) ov.append(el("div", "lay-ov-empty", "비어 있음"));
     add(ov);
   }
   // 겹친 자리: 편집 중에 어느 쪽을 보일지 고른다. 고른 쪽의 이름을 끌면 그 영역을 옮긴다.
   for (const st of last.stacks) {
     const box = el("div", "lay-stack");
     Object.assign(box.style, { left: st.rect.x + 8 + "px", top: st.rect.y + 40 + "px" });
-    box.append(el("span", "lay-stack-title", "겹친 자리"));
+    box.append(el("span", "lay-stack-title", "겹친 영역"));
     st.members.forEach((ids, i) => {
       const b = btn(ids.map(labelOf).join(" · "), () => { editing.pick.set(st.path.join("."), i); relayout(); }, i === st.pick ? "on" : "");
       box.append(b);

@@ -6,7 +6,7 @@
 export const STATE_LABEL = {
   working: "작업 중",
   done: "작업 완료",
-  idle: "비활성화",
+  idle: "대기 중",
   blocked: "멈춤(답 대기)",
   question: "질문 있음",
 };

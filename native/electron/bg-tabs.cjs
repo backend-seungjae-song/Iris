@@ -58,7 +58,10 @@ function createBgTabs({ BrowserWindow, webContents, webviewPreloadPath, guardWeb
       webPreferences.backgroundThrottling = false;
       webPreferences.transparent = false;
     });
-    host.on("closed", () => { host = null; hostReady = null; });
+    const owner = host;
+    host.on("closed", () => {
+      if (host === owner) { host = null; hostReady = null; }
+    });
     hostReady = host.loadURL(HOST_HTML).then(() => host);
     if (!sweep) {
       sweep = setIntervalFn(() => { for (const key of idleKeys(entries, now(), idleMs)) void close(key); }, 15000);
@@ -136,6 +139,10 @@ function createBgTabs({ BrowserWindow, webContents, webviewPreloadPath, guardWeb
     if (why) throw new Error(why);
     const key = bgTabKey(url, partition);
     let entry = entries.get(key), fresh = false;
+    if (entry && (entry.guest.isDestroyed() || entry.guest.isCrashed?.())) {
+      await close(key);
+      entry = entries.get(key);
+    }
     if (!entry) {
       if (!opening.has(key)) opening.set(key, create(key, String(url), String(partition)).finally(() => opening.delete(key)));
       entry = await opening.get(key);
@@ -153,10 +160,12 @@ function createBgTabs({ BrowserWindow, webContents, webviewPreloadPath, guardWeb
   }
 
   // 조각 끝이 서로게이트 쌍 가운데면 한 글자 앞에서 자름 · 쌍이 갈리면 UTF-8 로 바꿀 때 글자가 깨짐
-  function readPart(entry, ref, off) {
-    return entry.guest.executeJavaScript(`(() => { const t = ${ref}.text; let e = Math.min(t.length, ${off + READ_CHUNK});
+  async function readPart(entry, ref, off) {
+    const part = await entry.guest.executeJavaScript(`(() => { const t = ${ref}.text; let e = Math.min(t.length, ${off + READ_CHUNK});
       if (e < t.length && e > ${off + 1}) { const c = t.charCodeAt(e - 1); if (c >= 0xD800 && c <= 0xDBFF) e--; }
       return t.slice(${off}, e); })()`);
+    if (typeof part !== "string" || !part.length) throw new Error("저장 중 페이지 결과가 변경되었습니다.");
+    return part;
   }
 
   // 페이지 안 작업 결과(window.__irisJobs[jobId].text)를 파일로 · base64 면 디코딩해 씀 · 이미 있는 파일은 덮지 않음
@@ -177,19 +186,24 @@ function createBgTabs({ BrowserWindow, webContents, webviewPreloadPath, guardWeb
         let text = "";
         for (let off = 0; off < length;) { const part = await readPart(entry, ref, off); text += part; off += part.length; }
         const buf = Buffer.from(text, "base64");
-        await fh.write(buf);
+        await fh.writeFile(buf);
         bytes = buf.length;
       } else {
         for (let off = 0; off < length;) {
           const part = await readPart(entry, ref, off);
           off += part.length;
           const buf = Buffer.from(part, "utf8");
-          await fh.write(buf);
+          await fh.writeFile(buf);
           bytes += buf.length;
         }
       }
-    } finally {
       await fh.close();
+    } catch (error) {
+      try { await fh.close(); } catch (cleanupError) { log("[bg-tab] 파일 닫기 실패", cleanupError.message); }
+      try { await fs.promises.unlink(file); } catch (cleanupError) {
+        if (cleanupError.code !== "ENOENT") log("[bg-tab] 부분 파일 삭제 실패", cleanupError.message);
+      }
+      throw error;
     }
     try { await entry.guest.executeJavaScript(`(() => { if (window.__irisJobs) delete window.__irisJobs[${JSON.stringify(jobId)}]; return 1; })()`); } catch {}
     return { path: file, bytes };

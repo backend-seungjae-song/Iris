@@ -109,15 +109,16 @@ console.log("\n[10j] 보고 있지 않은 탭도 QA 대상");
     for (const cmd of ["click", "fill", "type", "key", "goto", "select"]) {
       if (new RegExp('"' + cmd + '"').test(body)) throw new Error(cmd + " 은 페이지를 건드리는데 읽기로 샜다");
     }
-    return /function enterAiCommand\(wcId, cmd\) \{ return READ_ONLY_CMDS\.has\(cmd\) \? null : causality\.enter\(wcId\); \}/.test(cdp)
-      && /const aiTicket = enterAiCommand\(wc\.id, cmd\);/.test(cdp);
+    return /async function enterAiCommand\(wcId, cmd\) \{\n  if \(READ_ONLY_CMDS\.has\(cmd\)\) return null;\n  const ticket = aiScope\.enter\(wcId\);\n  if \(ticket != null\) await aiScope\.armed\(ticket\);/.test(cdp)
+      && /const aiScope = createAiFocusGuard\(\{ causality, /.test(cdp)
+      && /const aiTicket = await enterAiCommand\(wc\.id, cmd\);/.test(cdp);
   });
   check("팝업 판정 근거가 인과다", () =>
     /const toFront = aiDriving \? !aiDriving\(openerWcId\) : true;/.test(webviewLifecycleSource)
     && !/isShown/.test(webviewLifecycleSource)
     // 숨긴 채로 만든 창은 표시하는 경로가 있어야 한다. 팝업과 그 팝업이 다시 여는 창 모두.
     && /presentPopup\(wc\.id, childWin\)/.test(webviewLifecycleSource)
-    && /cwc\.on\("did-create-window", \(grandWin\) => presentPopup\(cwc\.id, grandWin\)\)/.test(webviewLifecycleSource));
+    && /cwc\.on\("did-create-window", \(grandWin\) => attachPopup\(cwc, grandWin\)\)/.test(webviewLifecycleSource));
   // showInactive 는 창을 뒤에 두지 않는다. 확인 결과 그렇게 띄운 창이 다른 앱의 활성 창 위에
   // 표시됐다. 같은 앱 안이면 직전 맨 위 창을 다시 올려 되돌릴 수 있지만, 다른 앱이 앞일 때는 되돌릴
   // 대상이 없다. 가능한 방법은 층위를 한 칸 내리는 것으로, 확인 결과 다른 앱 활성 창 아래에 놓인 채

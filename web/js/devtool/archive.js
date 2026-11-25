@@ -69,7 +69,7 @@ export function initArchive(deps) {
       const keep = mine.filter((a) => a.sessionUuid);
       const lost = mine.length - keep.length;
       const warn = lost ? `\n세션 id가 없는 ${lost}개는 기록되지 않고 함께 닫힙니다.` : "";
-      if (!(await askConfirm(`"${name}"을(를) 접을까요?\n세션 ${keep.length}개의 되살릴 열쇠와 마지막 화면을 저장한 뒤 실제로 닫습니다.${warn}`))) return;
+      if (!(await askConfirm(`"${name}"을(를) 접을까요?\n세션 ${keep.length}개의 복원 정보와 마지막 화면을 저장한 뒤 실제로 닫습니다.${warn}`))) return;
       send({ type: "archive.space", workspaceId: id });
     },
   }));
@@ -94,7 +94,7 @@ export function initArchive(deps) {
     if (forgetSpace) {
       const cwd = forgetSpace.dataset.arForgetSpace;
       const n = archives.filter((x) => (x.kind === "space" ? x.cwd : x.spaceCwd) === cwd).length;
-      if (!(await askConfirm(`이 스페이스의 보관 항목 ${n}개를 전부 지울까요?`, "세션 자체는 남지만 여기서 되살릴 수는 없게 됩니다."))) return;
+      if (!(await askConfirm(`이 스페이스의 보관 항목 ${n}개를 전부 지울까요?`, "세션은 남지만 여기서 되살릴 수 없습니다."))) return;
       send({ type: "archive.forgetSpace", spaceCwd: cwd });
       return;
     }
@@ -104,7 +104,7 @@ export function initArchive(deps) {
     if (forget) {
       const it = archives.find((x) => x.id === forget.dataset.arForget);
       const nm = it ? (it.label || it.name || it.agent || "이 항목") : "이 항목";
-      if (!(await askConfirm(`"${nm}"을(를) 보관함에서 지울까요?`, "세션 자체는 남지만 여기서 되살릴 수는 없게 됩니다."))) return;
+      if (!(await askConfirm(`"${nm}"을(를) 보관함에서 지울까요?`, "세션은 남지만 여기서 되살릴 수 없습니다."))) return;
       send({ type: "archive.forget", id: forget.dataset.arForget });
     }
   });
@@ -185,13 +185,13 @@ function arCard(e, q, inTail, groupCwd) {
         <button type="button" class="ar-btn ar-btn-sm ar-btn-txt" data-ar-restore="${id}">되살리기</button>
         ${tail ? `<button type="button" class="ar-btn ar-btn-sm ar-btn-txt" data-ar-more="${id}">${open ? "접기" : "더 보기"}</button>` : ""}
         <span class="ar-sp"></span>
-        <button type="button" class="ar-btn ar-btn-sm ar-btn-txt ar-btn-dz" data-ar-forget="${id}">잊기</button>
+        <button type="button" class="ar-btn ar-btn-sm ar-btn-txt ar-btn-dz" data-ar-forget="${id}">지우기</button>
       </div>
     </div>`;
 }
 const keyOf = (p) => (p ? String(p).replace(/\/+$/, "") : "");
 function arSpaceState(g) {
-  return g.head ? { cls: "shut", short: "스페이스째 접힘", long: "스페이스째 접힘" }
+  return g.head ? { cls: "shut", short: "스페이스 전체 접힘", long: "스페이스 전체 접힘" }
     : { cls: "open", short: "열려 있음", long: "스페이스는 열려 있음" };
 }
 // 고른 스페이스의 상세. 되살리기는 머리에 한 번만 두고, 세션별 조작은 각 세션 아래에 둔다.
@@ -208,7 +208,7 @@ function arGroupDetail(g, q, m) {
       <div class="ar-dh-acts">
         <button type="button" class="ar-btn ar-btn-pri" data-ar-restore-space="${cwd}">되살리기${g.kids.length ? ` (세션 ${g.kids.length}개 포함)` : ""}</button>
         <span class="ar-sp"></span>
-        <button type="button" class="ar-btn ar-btn-txt ar-btn-dz" data-ar-forget-space="${cwd}">전부 잊기</button>
+        <button type="button" class="ar-btn ar-btn-txt ar-btn-dz" data-ar-forget-space="${cwd}">전부 지우기</button>
       </div>
     </div>
     <div class="ar-kids">${kids.length
@@ -227,7 +227,7 @@ function arLooseDetail(e, q, m) {
       <div class="ar-dh-acts">
         <button type="button" class="ar-btn ar-btn-pri" data-ar-restore="${id}">되살리기</button>
         <span class="ar-sp"></span>
-        <button type="button" class="ar-btn ar-btn-txt ar-btn-dz" data-ar-forget="${id}">잊기</button>
+        <button type="button" class="ar-btn ar-btn-txt ar-btn-dz" data-ar-forget="${id}">지우기</button>
       </div>
     </div>
     <div class="ar-kids"><div class="ar-sess">
@@ -239,7 +239,7 @@ function arRender() {
   const list = dom("#ar-list"), detail = dom("#ar-detail"); if (!list || !detail) return;
   const q = arQuery.trim().toLowerCase();
   const busy = dom("#ar-busy");
-  const busyText = arBusy ? `되살리는 중 ${arBusy.done + 1}/${arBusy.total} — ${arBusy.name || ""}` : "";
+  const busyText = arBusy ? `되살리는 중 ${arBusy.done + 1}/${arBusy.total} · ${arBusy.name || ""}` : "";
   const busyWidth = arBusy ? `${Math.round((arBusy.done / arBusy.total) * 100)}%` : "";
   // 진행 중이면 글자·막대만 갱신: 통째로 다시 만들면 돌던 스피너가 처음부터 다시 돎
   if (busy && arBusy && busy.querySelector(".ar-busy")) {
@@ -247,7 +247,7 @@ function arRender() {
     busy.querySelector(".ar-busy-bar i").style.width = busyWidth;
   } else if (busy) busy.innerHTML = arBusy ? `<div class="ar-busy">
       <span class="ar-spin"></span>
-      <span class="ar-busy-t">되살리는 중 ${arBusy.done + 1}/${arBusy.total} — ${escapeHtml(arBusy.name || "")}</span>
+      <span class="ar-busy-t">되살리는 중 ${arBusy.done + 1}/${arBusy.total} · ${escapeHtml(arBusy.name || "")}</span>
       <span class="ar-busy-bar"><i style="width:${Math.round((arBusy.done / arBusy.total) * 100)}%"></i></span>
     </div>` : "";
   const cnt = dom("#ar-count");
@@ -255,9 +255,9 @@ function arRender() {
     if (cnt) cnt.textContent = "";
     list.innerHTML = "";
     detail.innerHTML = `<div class="ar-empty">
-      <h3 class="ar-dh-name">접어둔 것이 없습니다</h3>
-      <p class="ar-empty-desc">에이전트나 스페이스를 우클릭해 접기를 고르면, 세션 복원에 필요한 정보와 마지막 화면을 저장한 뒤
-      실제로 닫아 메모리를 놓습니다.</p></div>`;
+      <h3 class="ar-dh-name">보관한 항목이 없습니다</h3>
+      <p class="ar-empty-desc">에이전트나 스페이스를 우클릭해 접기를 선택하면, 세션 복원에 필요한 정보와 마지막 화면을 저장한 뒤
+      실제로 닫아 메모리를 해제합니다.</p></div>`;
     return;
   }
   // 그룹은 폴더로 잡는다. 스페이스를 통째로 보관했든 세션만 따로 보관했든, 같은 스페이스 것이면
@@ -301,7 +301,7 @@ function arRender() {
         <span class="ar-l1"><span class="ar-kind">${escapeHtml(e.agent || "세션")}</span><span class="ar-name">${escapeHtml(e.name || e.agent || "(이름 없음)")}</span><span class="ar-when">${escapeHtml(arWhen(e.at))}</span></span>
         <span class="ar-l2"><span>스페이스를 알 수 없는 세션</span></span>
       </button>`;
-  }).join("") : `<div class="ar-none">"${escapeHtml(arQuery)}"에 걸리는 항목이 없습니다.</div>`);
+  }).join("") : `<div class="ar-none">"${escapeHtml(arQuery)}" 검색 결과가 없습니다.</div>`);
 
   const sel = rows.find((r) => r.key === arSel);
   setHtml(detail, !sel ? "" : sel.g ? arGroupDetail(sel.g, q, m) : arLooseDetail(sel.e, q, m));
@@ -313,7 +313,7 @@ export function handleArchiveMessage(m) {
     archives = Array.isArray(m.items) ? m.items : [];
     arRender();
   } else if (m.type === "archive-error") {
-    showToast("보관 조작 실패", { level: "err", detail: String(m.message || "원인 불명"), id: arToastId });
+    showToast("보관 작업 실패", { level: "err", detail: String(m.message || "원인 불명"), id: arToastId });
     arToastId = null;
   } else if (m.type === "archive-note") {
     showToast(m.message, { level: "info" });

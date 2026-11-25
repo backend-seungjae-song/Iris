@@ -13,7 +13,6 @@ import { isHostWindows, normalizePath, pathDirname, pathBasename, pathWithin, re
 //   tab-store·tab-close 는 같은 center 도메인 모듈에서 import 한다.
 //   $·esc·wsSend·toast/clipboard와 현재 로컬 여부·선택 Space는 main 이 소유해 init 에서 받는다.
 //   Agents 상태는 herdr/state에서, Explorer DOM·캐시 갱신은 explorer/tree 에서 import 한다.
-//   Agents 재렌더는 herdr/agents가 registerAgentRenderer로 등록한다.
 //
 // 유지 조건
 //   selectedSpaceId·isLocal·lastAgents 는 호출 때마다 접근자로 읽고, fs.op 전송 모양과
@@ -39,7 +38,7 @@ import { getLastAgents } from "../herdr/state.js";
 let $, esc, wsSend, showToast, copyText, isFileLikeKind;
 let getIsLocal, getSelectedSpaceId, orderedSpaces, saveOrder;
 let focusSpace;
-let renderAgents = () => {};
+
 let ctxmenu;
 let fileClip = null; // { path, mode: 'cut'|'copy' }
 let dragId = null;
@@ -52,7 +51,6 @@ export function initContextMenu(deps) {
   wireContextMenu();
 }
 
-export function registerAgentRenderer(renderer) { renderAgents = renderer; }
 // 스페이스 줄을 눌렀을 때 그 아래 에이전트 줄을 접고 펴는 것은 접힘 상태를 가진 herdr/agents 가 한다.
 // 포커스 이동이 접힌 그룹을 펴므로, 누르기 전 상태를 알고 포커스를 옮긴 뒤 뒤집어야 한다.
 let spaceRowClick = null;
@@ -287,7 +285,7 @@ export function askText(title, def = "", note = "") {
     const inp = wrap.querySelector("input");
     inp.value = def;
     let done = false;
-    const finish = (v) => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(v); };
+    const finish = (v) => { if (done) return; done = true; wrap.remove(); previous?.focus?.({ preventScroll: true }); resolve(v); };
     wrap.addEventListener("click", (e) => {
       if (e.target === wrap || e.target.classList?.contains("dim")) return finish(null); // 바깥 클릭 = 취소
       const b = e.target.closest("button"); if (!b) return;
@@ -317,7 +315,7 @@ export function askConfirm(title, note = "") {
       <div class="mdl-row"><span class="hint"><span class="kc">esc</span>취소</span><button data-a="cancel">취소</button><button class="primary" data-a="ok">확인</button></div>
     </div></div>`;
     let done = false;
-    const finish = (v) => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(v); };
+    const finish = (v) => { if (done) return; done = true; wrap.remove(); previous?.focus?.({ preventScroll: true }); resolve(v); };
     wrap.addEventListener("click", (e) => {
       if (e.target === wrap || e.target.classList?.contains("dim")) return finish(false);
       const b = e.target.closest("button"); if (!b) return;
@@ -343,7 +341,7 @@ export function askInfo(title, note = "") {
       <div class="mdl-row"><span class="hint"><span class="kc">esc</span>닫기 <span class="kc">⏎</span>확인</span><button class="primary" data-a="ok">확인</button></div>
     </div></div>`;
     let done = false;
-    const finish = () => { if (done) return; done = true; wrap.remove(); previous?.focus?.(); resolve(); };
+    const finish = () => { if (done) return; done = true; wrap.remove(); previous?.focus?.({ preventScroll: true }); resolve(); };
     wrap.addEventListener("click", (e) => { if (e.target === wrap || e.target.classList?.contains("dim") || e.target.closest("button")) finish(); });
     wrap.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); finish(); } e.stopPropagation(); });
     document.body.appendChild(wrap);
@@ -425,7 +423,7 @@ function wireContextMenu() {
     const r = e.target.closest(".space-row"); if (!r || !dragId) return;
     const list = orderedSpaces(); const from = list.findIndex((s) => s.id === dragId); const to = list.findIndex((s) => s.id === r.dataset.space);
     if (from < 0 || to < 0) return;
-    const [m] = list.splice(from, 1); list.splice(to, 0, m); saveOrder(list); dragId = null; renderSpaces(); renderAgents();
+    const [m] = list.splice(from, 1); list.splice(to, 0, m); saveOrder(list); dragId = null; renderSpaces();
   });
 }
 

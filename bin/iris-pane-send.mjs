@@ -23,6 +23,7 @@ import fs from "node:fs";
 
 const run = promisify(execFile);
 const RULE = /─{10,}/;
+const BOX_KINDS = new Set(["agy", "gemini", "iris-embedded"]);
 const SGR = /\x1b\[([0-9;]*)m/g;
 const OTHER_ESC = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
@@ -69,6 +70,16 @@ function inputLines(lines, kind) {
     for (let i = start + 1; i < lines.length && clean(strip(lines[i])); i++) box.push(lines[i]);
     return { lines: box, glyph: "›", start };
   }
+  if (BOX_KINDS.has(kind)) {
+    let bottom = -1;
+    lines.forEach((l, i) => { if (RULE.test(strip(l))) bottom = i; });
+    let start = -1;
+    for (let i = bottom - 1; i >= 0 && !RULE.test(strip(lines[i])); i--) {
+      if (/^>/.test(strip(lines[i]))) { start = i; break; }
+    }
+    if (start < 0) return null;
+    return { lines: lines.slice(start, bottom), glyph: ">", start };
+  }
   return null;
 }
 
@@ -96,7 +107,7 @@ export function echoCount(screen, kind, text) {
 }
 
 async function herdr(args) {
-  const { stdout } = await run("herdr", args, { maxBuffer: 8 << 20 });
+  const { stdout } = await run(process.env.HERDR_BIN_PATH || process.env.HERDR_BIN || "herdr", args, { timeout: 15000, maxBuffer: 8 << 20 });
   return stdout;
 }
 
@@ -132,7 +143,7 @@ async function main(argv) {
   if (before.state === "unknown" && !force) { report({ sent: false, ...before, reason: "입력창을 찾지 못했다(--force 로 보낼 수 있다)" }); return 4; }
   const echoed = echoCount(beforeScreen, kind, text);
   const wasWorking = info?.result?.pane?.agent_status === "working";
-  await herdr(["pane", "run", pane, text]);
+  await herdr(["pane", "run", pane, "--", text]);
   // 0.5초 간격으로 6초까지 확인. 보내기 전 입력창이 비어 있었으므로 1초 넘게 남은 글은 이번에 보낸 글이고, Enter 를 한 번 더 보냄
   let after = before, evidence = null, retriedEnter = false, draftSince = null;
   for (let i = 1; i <= 12 && !evidence; i++) {

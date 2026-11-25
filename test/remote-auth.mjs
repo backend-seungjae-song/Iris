@@ -262,6 +262,18 @@ test("10분 안 인증 실패 다섯 번 뒤 IP를 30분 차단하고 만료 뒤
   assert.equal(value.open(OTHER_CONN_ID).ok, true);
 });
 
+test("정상 인증 활동에서도 만료된 인증 실패 기록을 prune한다", () => {
+  const value = fixture();
+  for (let index = 0; index < 4; index++) {
+    const connId = (index + 10).toString(16).padStart(32, "c");
+    const opened = value.open(connId);
+    value.auth.authenticate(connId, value.response(opened.challenge, keyPair().privateKey, { signed: { connId } }));
+  }
+  value.clock.advance(10 * 60_000);
+  assert.equal(value.open(OTHER_CONN_ID).ok, true);
+  assert.deepEqual(value.auth.activeBlocks(), []);
+});
+
 test("인증 세션은 전체 6개와 기기당 2개를 넘지 않는다", async () => {
   const perDevice = fixture();
   for (let index = 0; index < 2; index++) {

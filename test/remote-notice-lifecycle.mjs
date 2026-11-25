@@ -81,7 +81,7 @@ test("같은 id의 새 round는 만료된 요청을 이어 새 요청을 한 번
   f.advance(2_000);
   assert.deepEqual(f.store.list(), []);
   assert.equal(f.issuedRefs.size, 2);
-  assert.deepEqual(f.delivered, [{ id: "ask-login", answer: "다 했음" }]);
+  assert.deepEqual(f.delivered, [{ id: "ask-login", answer: "완료" }]);
 });
 
 test("새 round가 시작되면 이전 round의 아직 남은 요청으로 답할 수 없다", async (t) => {
@@ -93,7 +93,7 @@ test("새 round가 시작되면 이전 round의 아직 남은 요청으로 답�
   assert.notEqual(second.ref, first.ref);
   assert.equal(await f.store.answer(first.ref, { choice: "done" }), "expired");
   assert.equal(await f.store.answer(second.ref, { choice: "unable" }), "delivered");
-  assert.deepEqual(f.delivered, [{ id: "ask-login", answer: "못 했음" }]);
+  assert.deepEqual(f.delivered, [{ id: "ask-login", answer: "할 수 없음" }]);
 });
 
 test("못 하겠음 버튼은 브라우저 호출이 해석하는 못 했음 값을 전달한다", async (t) => {
@@ -102,7 +102,7 @@ test("못 하겠음 버튼은 브라우저 호출이 해석하는 못 했음 값
   assert.equal(await f.store.answer(first.ref, { choice: "unable" }), "delivered");
   f.advance(1_000);
   assert.equal(f.issuedRefs.size, 1);
-  assert.deepEqual(f.delivered, [{ id: "ask-login", answer: "못 했음" }]);
+  assert.deepEqual(f.delivered, [{ id: "ask-login", answer: "할 수 없음" }]);
 });
 
 test("답한 알림도 새 round에서는 다시 답할 수 있다", async (t) => {
@@ -114,7 +114,7 @@ test("답한 알림도 새 round에서는 다시 답할 수 있다", async (t) =
   const second = f.store.list()[0];
   assert.notEqual(second.ref, first.ref);
   assert.equal(await f.store.answer(second.ref, { choice: "unable" }), "delivered");
-  assert.deepEqual(f.delivered.map((item) => item.answer), ["다 했음", "못 했음"]);
+  assert.deepEqual(f.delivered.map((item) => item.answer), ["완료", "할 수 없음"]);
 });
 
 test("동기화 전에 round가 바뀌어도 이전 질문의 답을 새 호출에 전달하지 않는다", async (t) => {

@@ -69,3 +69,41 @@ export function staleSends(sends, { running, draftText, now, minAge }) {
   const draft = norm(draftText);
   return (sends || []).filter((s) => now - (s.at ?? now) >= minAge && !(draft && norm(s.text) && draft.includes(norm(s.text)))).map((s) => s.id);
 }
+
+// 보낸 글과 기록 사용자 행 짝짓기 → Map(행 key → 보낸 글 id)
+// - 기록 글은 보낸 글과 글자가 다를 수 있음: 이미지 경로가 [Image #n] 으로, 붙여넣기 감싸기·줄바꿈, 긴 글은 잘림(…)
+//   글자 완전 일치만 보면 짝을 못 지어 기록 행과 흐린 "보내는 중" 말풍선이 함께 남음
+// - 1차: 같은 글. 2차: 남은 보낸 글을 보낸 순서대로, 보낸 뒤 처음 생긴 사용자 행과
+// - rows: [{ key, user, text, ts }] 기록 순서. sends: [{ id, agent, text, seen, lastKey, at }] 보낸 순서. known: 이미 짝지은 행
+const IMAGE_REF = /\[Image #\d+\]|(?:~|\/)[^\s]*\.(?:png|jpe?g|gif|webp|heic|bmp|tiff?)\b/gi;
+const sendForm = (s) => norm(String(s ?? "").replace(IMAGE_REF, "\u0001"));
+function sameSend(sent, row) {
+  const a = sendForm(sent);
+  const b = sendForm(row);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // 기록 쪽 글자 수 제한으로 잘린 행
+  return b.endsWith("…") && b.length > 1 && a.startsWith(b.slice(0, -1).trimEnd());
+}
+// 다른 대화에서 보내 기준 행이 없는 글은 보낸 시각보다 이 이상 앞선 행과 순서로 짝짓지 않음(시계·기록 시각 차이)
+const ORDER_SLACK_MS = 2000;
+export function pairSends(rows, sends, agentId, known) {
+  const pairs = new Map();
+  const list = rows || [];
+  const index = new Map(list.map((r, n) => [r.key, n]));
+  const open = (sends || []).filter((s) => s.agent === agentId);
+  const after = (s, r, n) => !s.seen.has(r.key) && (s.lastKey === null || n > (index.get(s.lastKey) ?? -1));
+  const free = (r) => r.user && !known.has(r.key) && !pairs.has(r.key);
+  list.forEach((r, n) => {
+    if (!free(r)) return;
+    const k = open.findIndex((s) => after(s, r, n) && sameSend(s.text, r.text));
+    if (k < 0) return;
+    pairs.set(r.key, open[k].id);
+    open.splice(k, 1);
+  });
+  for (const s of open) {
+    const n = list.findIndex((r, i) => free(r) && after(s, r, i) && (s.lastKey !== null || (r.ts ?? 0) >= s.at - ORDER_SLACK_MS));
+    if (n >= 0) pairs.set(list[n].key, s.id);
+  }
+  return pairs;
+}

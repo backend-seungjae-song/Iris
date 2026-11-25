@@ -106,7 +106,7 @@ body.right-collapsed #right-restore { display:block; }
 .askbox button.primary { background:var(--accent); border-color:transparent; color:var(--pal-ink); font-weight:600; }
 .askbox button.primary:hover { background:var(--focus); color:var(--pal-ink); }
 
-.ctxmenu { position:fixed; z-index:300; min-width:190px; padding:4px; background:var(--raised); border:1px solid var(--line-strong);
+.ctxmenu { position:fixed; z-index:300; max-height:calc(100vh - 12px); overflow-y:auto; min-width:190px; padding:4px; background:var(--raised); border:1px solid var(--line-strong);
   border-radius:var(--r); box-shadow:0 10px 28px color-mix(in srgb, var(--pal-ink) 85%, transparent); font-size:var(--fs); user-select:none; }
 .ctxmenu .ci { height:var(--row); display:flex; align-items:center; gap:6px; padding:0 8px; border-radius:var(--r-s);
   color:var(--fg-2); white-space:nowrap; cursor:pointer; }

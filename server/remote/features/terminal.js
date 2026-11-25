@@ -49,6 +49,8 @@ const ACTION_LINE = /^\s+(?:[›❯]\s*)?(?:submit|next|done|제출|다음|완�
 // 목록 아래 키 안내 줄
 export const KEY_HINT = /^(?:press\s+)?(?:enter|esc|tab|shift\+tab|ctrl\+[a-z]|←\/→|↑\/↓)(?=\s).*?(?:\bto\b|\bor\b|\bselect\b|\bback\b|\bcancel\b|\bconfirm\b|\bamend\b|\|)/iu;
 const RULE = /^\s*[─━═\-_]{8,}\s*$/u;
+// 선택 상자 안 내용이 화면보다 길 때 Claude 가 목록 아래에 두는 스크롤 안내("↑ 8 more lines")
+export const SCROLL_HINT = /^[↑↓]\s*\d+\s+more\s+lines?\b/iu;
 
 // 선택 표시가 있는 목록 하나, 항목 사이의 들여쓴 설명 줄과 구분선 하나는 같은 목록으로 봄
 // 줄바꿈으로 나뉜 조각 잇기. 앞 조각이 긴 경로로 끝나면 단어 중간에서 잘린 것이라 공백 없이 이음
@@ -102,7 +104,7 @@ export function promptList(text) {
     const stop = index + 1 < items.length ? items[index + 1].row : Math.min(lines.length + 1, item.row + 6);
     const below = lines.slice(item.row, stop - 1).map(line => line.trim());
     // 하단 키 안내는 마지막 줄들이라, 좁은 화면에서 둘째 줄로 접힌 부분까지 첫 안내 줄부터 버림
-    const footer = below.findIndex(line => KEY_HINT.test(line));
+    const footer = below.findIndex(line => KEY_HINT.test(line) || SCROLL_HINT.test(line));
     item.description = joinFragments((footer < 0 ? below : below.slice(0, footer))
       .filter(line => line && !RULE.test(line) && !/^~\/\.claude\/plans\//.test(line))).slice(0, 300);
   });

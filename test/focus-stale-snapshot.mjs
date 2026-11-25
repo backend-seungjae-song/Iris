@@ -75,3 +75,20 @@ test("snapshot 을 만드는 사이에 포커스가 끝나도 focusStale 이다"
   const snap = await buildWorkspaceSnapshot();
   assert.equal(snap.focusStale, true);
 });
+
+test("닫기 직후 목록 조회 실패와 실제 마지막 탭 삭제를 구별한다", async () => {
+  const herdr = herdrMock();
+  herdr.agentList = async () => [];
+  herdr.workspaceList = async () => [{ workspace_id: "w1" }];
+  initWorkspaceRuntime({ herdr, requestRecompute() {}, broadcast() {} });
+  const before = await buildWorkspaceSnapshot();
+  assert.equal(before.tabs.w1.length, 1);
+  herdr.tabList = async () => { throw new Error("tab unavailable"); };
+  await assert.rejects(buildWorkspaceSnapshot(), /tab unavailable/);
+  herdr.workspaceList = async () => { throw new Error("workspace unavailable"); };
+  await assert.rejects(buildWorkspaceSnapshot(), /workspace unavailable/);
+  herdr.workspaceList = async () => [];
+  const after = await buildWorkspaceSnapshot();
+  assert.deepEqual(after.workspaces, []);
+  assert.deepEqual(after.tabs, {});
+});

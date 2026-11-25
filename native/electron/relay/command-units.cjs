@@ -107,6 +107,7 @@ function createCommandUnits({
     catch (e) {
       if (!REATTACH_COMMANDS.has(request.command) || e?.code === "cdp_blocked" || String(userCommand).startsWith("qa-") || !isDead(e)) throw e;
       if (!liveTab(key)) throw tagCode(e, "tab_gone");
+      if (request.target?.childSessionId || request.args?.sessionId) throw codedError("STALE_TARGET", "자식 프레임을 다시 확인하세요");
       resetSession(key);
       // 다시 붙이면 debugger 세대가 바뀌므로 새 세대로 재시도 (자식 세션은 옛 세대 것이라 뺌)
       const { childSessionId, ...rest } = request.target || {};

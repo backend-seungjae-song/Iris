@@ -1,6 +1,7 @@
 import { randomBytes as nodeRandomBytes } from "node:crypto";
 
 import { projectAgent } from "./projection.js";
+import { hasManagedAgentIdentity } from "./managed-agent.js";
 
 const STATUSES = new Set(["working", "idle", "done", "blocked", "unknown"]);
 
@@ -9,6 +10,10 @@ function kindOf(value) {
   if (name === "claude" || name.startsWith("claude")) return "claude";
   if (name === "codex" || name.startsWith("codex")) return "codex";
   return name ? "other" : "terminal";
+}
+
+export function isActualEmbedded(source) {
+  return !!source?.embeddedProvider && !source?.sharedCodex;
 }
 
 export function createAgentStore(options = {}) {
@@ -46,6 +51,8 @@ export function createAgentStore(options = {}) {
   function sessionIdentity(source) {
     if (typeof source?.paneId !== "string" || !source.paneId) return null;
     const sessionUuid = typeof source.sessionUuid === "string" && source.sessionUuid ? source.sessionUuid : null;
+    if (source.embeddedProvider) return JSON.stringify(["iris-embedded", source.paneId, sessionUuid, source.terminalId, source.embeddedProvider]);
+    if (source.managedProvider) return JSON.stringify([source.paneId, sessionUuid, source.terminalId || null, source.managedProvider]);
     return JSON.stringify([source.paneId, sessionUuid, source.agent ? null : source.terminalId || null]);
   }
 
@@ -95,6 +102,21 @@ export function createAgentStore(options = {}) {
     const existing = new Set(liveState.map((item) => item.paneId));
     const sources = [...liveState, ...terminalSources.filter((item) => !existing.has(item.paneId))].filter((source) => typeof source?.paneId === "string" && source.paneId);
     const sourceByPane = new Map(sources.map((source) => [source.paneId, source]));
+    const liveIdentities = new Set(sources.map(sessionIdentity).filter(Boolean));
+    for (const [identity, ref] of refsBySession) {
+      if (liveIdentities.has(identity)) continue;
+      refsBySession.delete(identity);
+      sessionsByRef.delete(ref);
+    }
+    const liveSpaces = new Set([
+      ...workspaces.map((space) => String(space.id || "unknown")),
+      ...sources.map((source) => String(source.workspaceId || "unknown")),
+    ]);
+    for (const [spaceId, ref] of refsBySpace) {
+      if (liveSpaces.has(spaceId)) continue;
+      refsBySpace.delete(spaceId);
+      spacesByRef.delete(ref);
+    }
     const ordered = sources.map((source, index) => ({ source, index })).sort((left, right) => {
       const a = left.source, b = right.source;
       const aSpace = spaceOrder.get(a.workspaceId) ?? Number.MAX_SAFE_INTEGER;
@@ -128,7 +150,7 @@ export function createAgentStore(options = {}) {
           ? refForSource(parentSource) : null,
         lastActivityAt: Number.isSafeInteger(source.lastActivityAt) && source.lastActivityAt >= 0
           ? source.lastActivityAt : null,
-        can: { stop: kind === "claude" || kind === "codex", message: false },
+        can: { stop: !isActualEmbedded(source) && (source.managedProvider ? hasManagedAgentIdentity(source) : kind === "claude" || kind === "codex"), message: false },
         source,
       };
       agent.can.message = kind !== "terminal" && !!canMessage(agent);
@@ -177,6 +199,17 @@ export function createAgentStore(options = {}) {
       return () => subscribers.delete(subscriber);
     },
     changed: notifyIfChanged,
-    close() { unsubscribeSnapshot(); unsubscribeSpaceOrder(); subscribers.clear(); },
+    close() {
+      unsubscribeSnapshot();
+      unsubscribeSpaceOrder();
+      subscribers.clear();
+      refsBySession.clear();
+      sessionsByRef.clear();
+      refsBySpace.clear();
+      spacesByRef.clear();
+      terminalSources = [];
+      signature = "";
+      refreshing = null;
+    },
   };
 }

@@ -3,6 +3,8 @@
 // - 계산식은 Paseo 데몬과 같게(claude/agent.ts ClaudeContextUsageState, codex-app-server-agent.ts toAgentUsage)
 // - 영향 범위: server/agent-chat.js 가 부름, 화면 쪽 짝은 server/paseo-ui/entry
 
+import { stripVTControlCharacters } from "node:util";
+
 const num = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
 
 // Claude 기록 줄(파싱된 객체) 목록 → 마지막 값. 줄은 시간 순서
@@ -66,6 +68,77 @@ export function codexMeta(records) {
   return out;
 }
 
+const AGY_MODEL_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const AGY_EFFORT_SUFFIX = new RegExp(`-(${AGY_MODEL_EFFORTS.join("|")})$`, "i");
+
+function agyContextMax(model) {
+  if (!model) return null;
+  return /^gemini/i.test(model) ? 1_000_000 : 200_000;
+}
+
+// Antigravity transcript 줄 목록 → 마지막 모델·effort·컨텍스트 사용량
+export function agyMeta(records) {
+  const out = { model: null, effort: null, mode: null, usage: null };
+  for (const r of records) {
+    if (!r || typeof r !== "object" || r.type !== "PLANNER_RESPONSE") continue;
+    if (typeof r.model === "string" && r.model) {
+      const m = AGY_EFFORT_SUFFIX.exec(r.model);
+      if (m) {
+        out.model = r.model.slice(0, m.index);
+        out.effort = m[1].toLowerCase();
+      } else {
+        out.model = r.model;
+      }
+    }
+    const used = num(r.input_tokens) + num(r.cache_read_tokens) + num(r.output_tokens);
+    if (used > 0) out.usage = { used, max: agyContextMax(out.model) };
+  }
+  return out;
+}
+
+// Antigravity 모델 목록 → Paseo AgentModelDefinition 모양
+export function agyDefaultModels() {
+  const mkOptions = (levels, def) => levels.map((id) => ({ id, label: id, isDefault: id === def }));
+  const defs = [
+    { id: "gemini-4-neon", label: "Gemini 4 Neon", isDefault: true, max: 1_000_000, levels: ["low", "medium", "high", "xhigh"], def: "medium" },
+    { id: "gemini-4-argon", label: "Gemini 4 Argon", max: 1_000_000, levels: ["low", "medium", "high"], def: "medium" },
+    { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", max: 1_000_000, levels: ["low", "medium", "high", "xhigh"], def: "medium" },
+    { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", max: 1_000_000, levels: ["low", "medium", "high"], def: "medium" },
+    { id: "claude-opus-5-5", label: "Claude Opus 5.5", max: 200_000, levels: ["low", "medium", "high"], def: "medium" },
+    { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", max: 200_000, levels: ["low", "medium", "high"], def: "medium" },
+    { id: "gpt-oss-120b", label: "GPT-OSS 120B", max: 200_000, levels: ["medium"], def: "medium" },
+  ];
+  return defs.map((m) => ({
+    provider: "agy",
+    id: m.id,
+    label: m.label,
+    isDefault: !!m.isDefault,
+    contextWindowMaxTokens: m.max,
+    thinkingOptions: mkOptions(m.levels, m.def),
+    defaultThinkingOptionId: m.def,
+  }));
+}
+
+// Antigravity 화면 아래줄("auto · Orchestrator · Gemini 4 Neon · medium")에서 모드·effort 추출
+const AGY_MODES = { auto: "auto", plan: "plan", "accept-edits": "acceptEdits", default: "default", "request-review": "default" };
+const AGY_EFFORTS = new Set(AGY_MODEL_EFFORTS);
+export function agyFooter(screen) {
+  const tail = String(screen || "").split("\n").slice(-6);
+  let mode = null;
+  let effort = null;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    if (!tail[i].includes("·")) continue;
+    const parts = tail[i].split("·").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    for (const part of parts) {
+      const token = part.split(/\s+/).at(-1) || "";
+      if (!mode && AGY_MODES[token]) mode = AGY_MODES[token];
+      if (!effort && AGY_EFFORTS.has(part)) effort = part;
+    }
+    if (mode || effort) break;
+  }
+  return { effort, mode };
+}
+
 // Claude Code 화면 아래줄 → effort·권한 모드. 기록은 다음 요청 때에야 바뀌므로 화면이 더 최근 값
 // - "◐ medium · /effort", "⏵⏵ auto mode on (shift+tab to cycle)", "⏸ manual mode on"(default), "⏸ plan mode on", "⏵⏵ accept edits on", "⏵⏵ bypass permissions on"
 // - 모드 줄이 없고 effort 줄만 보이면 default(이전 버전 화면)
@@ -83,6 +156,22 @@ export function claudeFooter(screen) {
   for (const [re, id] of CLAUDE_MODE_LINES) if (re.test(tail)) { mode = id; break; }
   if (!mode && effort) mode = "default";
   return { effort, mode };
+}
+
+// 터미널 입력과 상태줄 사이의 빈 줄로 사용자가 작성 중인 글을 제외
+export function codexFooter(screen, models) {
+  if (!models?.length) return null;
+  const lines = stripVTControlCharacters(screen).trimEnd().split("\n");
+  const prompt = lines.findLastIndex(line => /^›(?:\s|$)/.test(line));
+  if (prompt < 0) return null;
+  const gap = lines.findIndex((line, index) => index > prompt && !line.trim());
+  if (gap < 0 || lines.length - gap > 6) return null;
+  const first = lines[gap + 1]?.trim().split(/\s+·\s+/)[0] || "";
+  const match = /^(.+)\s+(\S+)$/.exec(first);
+  if (!match) return null;
+  const name = match[1].toLowerCase(), effort = match[2].toLowerCase();
+  const model = models.find(m => [m.label, m.id].some(s => s.toLowerCase() === name));
+  return model?.thinkingOptions?.some(option => option.id === effort) ? { model: model.id, effort } : null;
 }
 
 // ~/.codex/models_cache.json → Paseo AgentModelDefinition 목록(buildCodexModelDefinition 과 같은 모양)

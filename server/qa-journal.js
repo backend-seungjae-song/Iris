@@ -409,15 +409,15 @@ function rowDeclare(st, r) {
   const given = String(r.given || "").trim();
   if (!given) return { ok: false, error:
     `${id}: given이 없습니다 — 이 줄이 성립하려면 세계가 어떠해야 하는지 적습니다.\n`
-    + "조건 없이 밟은 것은 그 요구를 확인한 것이 아닙니다. 그리고 조건이 같은 줄들은 한 번의\n"
-    + "준비로 함께 밟습니다 — 정확히 적을수록 준비가 줄어듭니다." };
+    + "조건 없이 실행한 것은 그 요구를 확인한 것이 아닙니다. 그리고 조건이 같은 줄들은 한 번의\n"
+    + "준비로 함께 확인합니다. 정확히 적을수록 준비가 줄어듭니다." };
   const basis = String(r.basis || "").trim();
   if (!BASIS.has(basis)) return { ok: false, error:
     `${id}: basis가 spec·plan·user·code·assumed 중 하나여야 합니다(받은 값: ${basis || "없음"}).\n`
     + "화면을 보고 기대를 만들면 구현이 곧 명세가 되어 그 확인은 언제나 통과합니다." };
   const paths = (Array.isArray(r.paths) ? r.paths : []).map((x) => String(x).trim()).filter(Boolean);
   if (!paths.length) return { ok: false, error:
-    `${id}: 밟을 경로(paths)가 없습니다 — 정상·경계·실패 중 이 요구가 가지는 것을 적습니다.` };
+    `${id}: 확인할 경로(paths)가 없습니다. 정상·경계·실패 중 이 요구가 가지는 것을 적습니다.` };
   const bad = paths.filter((x) => !PATHS.has(x));
   if (bad.length) return { ok: false, error: `${id}: 모르는 경로: ${bad.join(", ")} (정상·경계·실패)` };
   // 근거는 이름만으로 부족하다. 보고서를 받은 사람이 명세를 따로 열어야 한다면 그 보고서만으로
@@ -555,13 +555,13 @@ function voidReceipt(st, id, why) {
   // 표시한다.
   return { ok: true, voided: rid, why: reason, 무효로만든것: belongs, 통과였나: !!hit.pass,
     note: `무효 처리함 — ${rid}는 ${belongs}의 판정입니다 (${hit.expected || "?"}${
-      hit.pass ? " · 통과였음" : " · 어긋남이었음"}).`
+      hit.pass ? " · 통과였음" : " · 실패였음"}).`
       + (hit.pass
         ? "\n통과 판정을 무효화합니다 — 이 줄의 증거가 하나 줄어듭니다."
           + '\n실패 무효는 "내 질문이 틀렸다"이고 통과 무효는 "맞다고 나온 것을 취소한다"입니다.'
         : "")
       + (named.length
-        ? `\n사유가 다른 줄을 가리킵니다: ${named.join(" · ")}. 지우려던 것이 그쪽이면 이 무효는 잘못 짚은 것입니다.`
+        ? `\n사유가 다른 줄을 가리킵니다: ${named.join(" · ")}. 지우려던 것이 그쪽이면 이 무효는 대상을 잘못 지정한 것입니다.`
         : "") };
 }
 
@@ -702,7 +702,7 @@ function asideFrames(st, id, path, want, why) {
   if (!reason) return { ok: false, error:
     "왜 이 줄의 증거가 아닌지(why)가 없습니다 — 사유 없는 제외는 증거를 지우는 것과 같습니다." };
   const which = (Array.isArray(want) ? want : [want]).map((x) => String(x || "").trim()).filter(Boolean);
-  if (!which.length) return { ok: false, error: "떼어낼 장면(frames)이 없습니다 — 파일 경로를 줍니다." };
+  if (!which.length) return { ok: false, error: "제외할 장면(frames)이 없습니다. 파일 경로를 줍니다." };
   let seen = 0;
   try {
     for (const line of fs.readFileSync(path_(st), "utf8").split("\n")) {
@@ -713,7 +713,7 @@ function asideFrames(st, id, path, want, why) {
       if ((e.kind === "frame" || e.kind === "artifact") && which.includes(String(e.path || e.shot))) seen += 1;
     }
   } catch {}
-  if (!seen) return { ok: false, error: "이 회차에 없는 장면입니다 — 장부에 적힌 경로를 그대로 줍니다." };
+  if (!seen) return { ok: false, error: "이 회차에 없는 장면입니다. 기록에 적힌 경로를 그대로 줍니다." };
   appendEvent(st, { kind: "aside", source: "server", row: row.id, path_: p, frames: which, why: reason });
   return { ok: true, aside: which.length, why: reason };
 }
@@ -750,7 +750,7 @@ function rowClose(st, id, path, color, note, extra) {
     `${row.id}·${p}: 정해야 할 것으로 닫으려면 고를 갈래가 둘 이상 필요합니다(지금 ${picks.length}개).\n`
     + "정하는 사람은 이 화면을 안 봤습니다 — 무엇을 고를 수 있고 고르면 어떻게 되는지를 함께 주세요.\n"
     + "options: [{pick:\"무엇을 한다\", then:\"고르면 이렇게 된다\", cost:\"대신 잃는 것\"}]\n"
-    + "갈래를 세울 수 없는 자리면 simple:true — 지면에 그렇게 표시됩니다." };
+    + "갈래를 나눌 수 없는 결정이면 simple:true를 줍니다. 지면에 그렇게 표시됩니다." };
   const closeFault = nominalFault(`${row.id}·${p}`, said)
     || picks.map((x, k) => nominalFault(`${row.id}·${p} 갈래 ${k + 1}`, `${x.pick}\n${x.then}\n${x.cost || ""}`))
          .find(Boolean)
@@ -759,10 +759,10 @@ function rowClose(st, id, path, color, note, extra) {
   const { frames, receipts, failed, shotted } = tallyFor(st, row.id, p);
   const forced = forcedColor(row, failed);
   if (forced && c !== forced) return { ok: false, error:
-    `${row.id}: 이 줄은 ${row.basis}에서 온 기대이고 이 경로의 판정 ${failed}건이 어긋났습니다`
+    `${row.id}: 이 줄은 ${row.basis}에서 온 기대이고 이 경로의 판정 ${failed}건이 실패했습니다`
     + ` — red입니다(넣은 값: ${c}).\n`
-    + "문서·기획에 적힌 것과 사용자가 그렇게 하라고 한 것은 경중을 따질 자리가 아닙니다.\n"
-    + "지켜졌다면 어긋난 판정이 없어야 합니다 — 그 자리를 다시 밟습니다.\n"
+    + "문서·기획에 적힌 것과 사용자가 그렇게 하라고 한 것은 경중을 따지지 않습니다.\n"
+    + "지켜졌다면 실패한 판정이 없어야 합니다. 그 경로를 다시 확인합니다.\n"
     + "요구가 아니었다면 줄의 basis를 고칩니다." };
   // 증거는 이 줄이 열린 뒤의 것만 집계한다. 탐색 중의 조작은 발견의 정황이지 증거가 아니고,
   // 화면을 보고 만든 기대는 구현을 명세로 삼은 것이다. 집계는 서버가 한다.
@@ -772,7 +772,7 @@ function rowClose(st, id, path, color, note, extra) {
   // 집계 대상은 파일이다. 판정이 장면을 남기지 않았으면 그 판정은 여기서 집계되지 않는다.
   if (c !== "blue" && c !== "gray" && !(frames + shotted > 0 && receipts > 0)) return { ok: false, error:
     `${row.id}·${p}: 증거가 없습니다 (장면 ${frames + shotted} · 영수증 ${receipts}).\n`
-    + "그 자리를 다시 밟습니다 — 지금은 화면이 아직 살아 있습니다.\n"
+    + "그 경로를 다시 확인합니다. 지금은 화면이 아직 열려 있습니다.\n"
     + "됐다는 것도 실측입니다. 정상 동작이야말로 다음 회차의 기준선입니다." };
   row.walked[p] = { color: c, at: Date.now(), note: said, frames: frames + shotted, receipts, failed,
     ...(picks.length ? { options: picks } : {}), ...(ex.lean ? { lean: String(ex.lean) } : {}),
@@ -793,14 +793,14 @@ function ledgerGaps(st) {
   const gaps = [];
   for (const row of rowsOf(st).values()) {
     const left = row.paths.filter((x) => !row.walked[x]);
-    if (left.length) gaps.push(`${row.id} — 안 밟은 경로: ${left.join(", ")} (${row.what.slice(0, 40)})`);
+    if (left.length) gaps.push(`${row.id} — 확인하지 않은 경로: ${left.join(", ")} (${row.what.slice(0, 40)})`);
   }
   // 선언한 줄을 다 확인한 것과 확인하기로 한 것을 다 본 것은 다른 사실이다. 줄을 하나만
   // 등록하면 그 하나를 확인하는 것으로 원장이 닫히므로, 목록이 있으면 목록도 함께 센다.
   for (const c of setCoverage(st)) {
     if (!c.missing.length) continue;
     gaps.push(`${c.name} — 아무 줄도 안 본 항목 ${c.missing.length}가지: ${c.missing.join(", ")}`
-      + " (그 항목을 covers로 가리키는 줄을 세우거나, 못 보는 사유와 함께 blue·gray로 닫습니다)");
+      + " (그 항목을 covers로 가리키는 줄을 선언하거나, 못 보는 사유와 함께 blue·gray로 닫습니다)");
   }
   return gaps;
 }
@@ -843,13 +843,13 @@ function addNote(st, n) {
     if (picks.length < 2) return { ok: false, error:
       `${decide}\n\n고를 수 있는 갈래가 ${picks.length}개입니다. 갈래가 없으면 읽는 사람은 무엇을 해야 할지 모릅니다.\n`
       + "options에 둘 이상 주세요: [{pick:\"무엇을 한다\", then:\"고르면 이렇게 된다\", cost:\"대신 잃는 것\"}]\n"
-      + "갈래를 세울 수 없는 간단한 결정이면 simple:true — 지면에 그렇게 표시됩니다." };
+      + "갈래를 나눌 수 없는 간단한 결정이면 simple:true를 줍니다. 지면에 그렇게 표시됩니다." };
   }
   const noteFault = nominalFault("무엇을 보았나(what)", what)
     || (n.why ? nominalFault("왜 정해야 하나(why)", n.why) : null)
     || nominalFault("정해야 할 것(decide)", decide)
     || picks.map((x, k) => nominalFault(`갈래 ${k + 1}`, `${x.pick}\n${x.then}\n${x.cost || ""}`)).find(Boolean)
-    || (n.lean ? nominalFault("밟은 사람 생각(lean)", n.lean) : null);
+    || (n.lean ? nominalFault("확인한 사람 생각(lean)", n.lean) : null);
   if (noteFault) return { ok: false, error: noteFault };
   const note = { id: "n" + ((st.notes || (st.notes = [])).length + 1),
     what, decide, why: n.why ? String(n.why) : undefined,
@@ -905,7 +905,7 @@ export function handleQaSessionCmd(cmd, args, session, runId) {
       if (resumed) rehydrateRows(st);
       const rows = Array.isArray(args && args.rows) ? args.rows : [];
       if (kind !== "review" && !rows.length && !rowsOf(st).size) return { ok: false, error:
-        `${kind} 회차는 밟기 전에 원장이 있어야 합니다 — rows에 확인할 줄을 넣으세요.\n`
+        `${kind} 회차는 시작하기 전에 원장이 있어야 합니다. rows에 확인할 줄을 넣으세요.\n`
         + '  { id:"U5", what:"…", given:"…", basis:"spec", paths:["정상","실패"] }\n'
         + "무엇을 확인할지 먼저 적어야 화면을 보고 기대를 만드는 일이 없습니다.\n"
         + "뭐가 있는지 모르고 들어가는 회차라면 kind를 review로 엽니다." };
@@ -954,8 +954,8 @@ export function handleQaSessionCmd(cmd, args, session, runId) {
       const cov = coverageLines(st);
       return { ok: true, data: { ...shape(st), resumed, kind, rows: made, plan: groups,
         목록: setCoverage(st),
-        note: "이 runId를 이후 모든 호출에 실어라 — 세션 기본값은 회차 둘이 겹칠 때 무너진다."
-          + (groups.length ? `\n조건이 ${groups.length}가지다 — 같은 조건을 쓰는 줄은 한 번의 준비로 함께 밟는다.` : "")
+        note: "이 runId를 이후 모든 호출에 넣어라. 회차 둘이 겹치면 세션 기본값을 쓸 수 없다."
+          + (groups.length ? `\n조건이 ${groups.length}가지다 — 같은 조건을 쓰는 줄은 한 번의 준비로 함께 확인한다.` : "")
           + (cov.length ? "\n" + cov.join("\n") + "\n이 항목들을 덮는 줄이 없으면 회차가 안 닫힌다." : "") } };
     }
     if (act === "end") {
@@ -966,7 +966,7 @@ export function handleQaSessionCmd(cmd, args, session, runId) {
         if (gaps.length && !(args && args.force)) return { ok: false, error:
           `원장이 안 닫혔습니다 — ${gaps.length}줄.\n` + gaps.slice(0, 12).map((g) => "  " + g).join("\n")
           + (gaps.length > 12 ? `\n  … 외 ${gaps.length - 12}건` : "")
-          + "\n\n밟거나, 못 밟는 사유와 함께 blue(사용자가 정해야 함)나 gray(분류 불가)로 닫습니다.\n"
+          + "\n\n확인하거나, 확인하지 못하는 사유와 함께 blue(사용자가 정해야 함)나 gray(분류 불가)로 닫습니다.\n"
           + "닫지 않고 넘기면 그 줄은 아무 데도 안 남습니다." };
         appendEvent(st, { kind: "run_end", source: "server" });
         try { st.activeUse.release(); }
@@ -1050,7 +1050,7 @@ export function handleQaSessionCmd(cmd, args, session, runId) {
     if (kind === "accepted" && !out.call_id) out.call_id = "c" + (++st.calls);
     const rec = appendEvent(st, out);
     return rec ? { ok: true, data: { seq: rec.seq, id: out.id, call_id: out.call_id, shot: out.shot, path: out.path } }
-      : { ok: false, error: "장부에 쓰지 못했습니다" };
+      : { ok: false, error: "기록에 쓰지 못했습니다" };
   }
   if (cmd === "trace") {
     const list = traceBySession.get(session) || [];

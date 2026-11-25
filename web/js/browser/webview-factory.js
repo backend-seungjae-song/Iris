@@ -36,8 +36,8 @@ import {
   registerWebview, removeDiscardedWebview, removeLoadFailure, setLoadFailure,
 } from "./webview-store.js";
 import {
-  activeBrowserId, activeWv, markWebviewUsed, normalizeUrl, renderTabDialog,
-  scheduleWebviewThrottling, setTabStatus, syncNavButtons, syncQaWebviewPlacement, wakeWebview,
+  activeBrowserId, activeWv, clearTabDialog, markWebviewUsed, normalizeUrl, renderTabDialog,
+  scheduleWebviewThrottling, setTabStatus, syncNavButtons, syncAiBehindPlacement, wakeWebview,
 } from "./webview.js";
 import { takeReopenedBrowserHistory } from "../center/closed-tabs.js";
 import { consoleSpace, openDroppedLocal } from "../center/file-routing.js";
@@ -47,14 +47,20 @@ import { curTabs, renderTabs } from "../center/tabs.js";
 import { hideCtxMenu } from "../explorer/context-menu.js";
 import { injectPick, syncTouchDrag } from "../panel/touch-drag.js";
 import { updateSizeBtn, viewportByTab, viewportLayout } from "../panel/viewport.js";
+import { createZoomIndicator } from "./zoom.js";
 
 let wsSend, BROWSER_MODE, BOUND_SPACE, bNote, urlInput, wvStack, isNewTab, showToast, blog, acHost;
+let updateZoomIndicator = () => {};
 
 export function initWebviewFactory(deps) {
   ({
     wsSend, BROWSER_MODE, BOUND_SPACE, bNote, urlInput, wvStack, isNewTab, showToast, blog, acHost,
   } = deps);
   try { if (acHost && typeof acHost.onLinkAccount === "function") acHost.onLinkAccount(reopenInRuleAccount); } catch {}
+  if (deps.zoomBadge) updateZoomIndicator = createZoomIndicator({
+    badge: deps.zoomBadge, activeWebview: activeWv, acHost,
+    showNotice: (message) => showToast(message, { level: "warn" }),
+  });
 }
 
 function showNavigationFeedback(rec) {
@@ -114,7 +120,11 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
   // 닫은 탭 복원은 marker를 먼저 붙인다. main의 will-attach가 src를 비운 뒤 최초 load 전에 history를
   // 넣고, marker 자체는 실제 네트워크/탐색 대상으로 쓰이지 않는다.
   el.setAttribute("allowpopups", ""); el.setAttribute("src", historyToken ? historyStage.src : historyFallbackUrl); el.dataset.tab = tabId; el.dataset.profile = profileId;
-  const rec = { el, tabId, ready: false, pending: null, url: "", title: "", createdAt: Date.now() };  // tabId 를 들고 다녀야 상태 판정이 탭에 붙는다
+  const rec = { el, tabId, ready: false, renderGone: false, pending: null, url: "", title: "", createdAt: Date.now() };  // tabId 를 들고 다녀야 상태 판정이 탭에 붙는다
+  // 첫 문서가 표시되기 전에 가능한 경우 기존 탭 배율 복원
+  el.addEventListener("did-attach", () => {
+    try { bindBrowserTabZoom(rec, el.getWebContentsId()); } catch {}
+  }, { once: true });
   let historyRestoring = false;
   let historyResultPromise = null;
   if (historyToken) {
@@ -131,7 +141,7 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
   if (reopenedHistory && initialUrl) rec.url = initialUrl;
   if (initialUrl) beginNavigation(rec, initialUrl);
   registerWebview(tabId, rec);
-  syncQaWebviewPlacement();
+  syncAiBehindPlacement();
   recordWebviewUse(tabId, Date.now());
   const status = getWebviewStatus(tabId);
   if (status && status.sleeping) status.sleeping = false;
@@ -203,12 +213,17 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
     } else if (historyRestoring) {
       return;
     }
+    rec.renderGone = false;
+    const firstReady = !rec.ready;
     rec.ready = true;
     if (rec.pending) { const u = rec.pending; rec.pending = null; navigateOn(rec, u); }
     if (callHook("pick.mode") && activeBrowserId() === tabId) injectPick(el);
     if (callHook("record.on")) callHook("record.inject", el, true); // 녹화 중 새로 뜬 탭도 기록 대상
     reportTabWc(rec, tabId);                                  // 탭별 wc 등록(세션 고정·탭 목록의 소스)
-    if (activeBrowserId() === tabId) reportActiveBrowserWc(); // CDP 제어 대상 wc 보고(attach 후 유효)
+    if (activeBrowserId() === tabId) {
+      reportActiveBrowserWc(); // CDP 제어 대상 wc 보고(attach 후 유효)
+      if (firstReady) updateZoomIndicator();
+    }
     scheduleWebviewThrottling();
   });
   el.addEventListener("did-navigate", (e) => {
@@ -282,12 +297,23 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
     if (!failNavigation(rec, e.validatedURL)) return;
     const cert = e.errorCode <= -200 && e.errorCode > -300;
     const failure = (cert ? "인증서 문제로 열지 못했습니다: " : "로드 실패: ")
-      + (e.errorDescription || e.errorCode) + (cert ? ". 이 사이트의 증명서를 확인할 수 없습니다." : "");
+      + (e.errorDescription || e.errorCode) + (cert ? ". 이 사이트의 인증서를 확인할 수 없습니다." : "");
     setLoadFailure(tabId, failure);
     showNavigationFeedback(rec);
   });
   // 페이지 프로세스가 죽으면 화면이 빈 채로 남아 무슨 일인지 알 수 없다. 로드 실패와 같은 자리에 알린다.
   el.addEventListener("render-process-gone", (e) => {
+    if (getWebview(tabId) !== rec) return;
+    rec.ready = false;
+    rec.renderGone = true;
+    rec.el.classList.remove("ai-behind");
+    forgetTabWc(rec, tabId);
+    rec.wc = null;
+    setTabStatus(tabId, { loading: false });
+    clearTabDialog(tabId);
+    renderTabDialog();
+    syncAiBehindPlacement();
+    scheduleWebviewThrottling();
     blog("render-process-gone", e.details && e.details.reason);
     setLoadFailure(tabId, "페이지가 비정상 종료됐습니다. 새로고침하면 다시 엽니다.");
     showNavigationFeedback(rec);
@@ -301,6 +327,12 @@ export function createWebview(tabId, profileOverride, initialUrl, sleptHistory =
   el.addEventListener("page-title-updated", (e) => { if (callHook("mirror.tabUrl", tabId)) return; applyTitle(e.title); });
   // 요소 선택 결과: webview preload가 sendToHost('orca-pick', pick)로 보낸다(안정 IPC 채널).
   el.addEventListener("ipc-message", async (e) => {
+    if (e.channel.startsWith("ac-fh-")) {
+      callHook("formhistory.guest", e.channel, e.args?.[0], {
+        tabId, partition: part, el, rec, frameId: e.frameId, blocked: autofillBlocked(tabId),
+      });
+      return;
+    }
     if (e.channel === "ac-file-drop") {
       openDroppedEntries(e.args?.[0], openDroppedLocal, showToast); return;
     }
@@ -474,7 +506,7 @@ export function updateActiveWebview() {
   findRetarget();   // 이전 탭의 노란 강조와 개수를 지운다. 지우지 않으면 다른 페이지 위에 남아 잘못된 값을 표시한다
   if (id && !getWebview(id)) wakeWebview(id);
   for (const [tid, rec] of getWebviewEntries()) rec.el.classList.toggle("active", tid === id);
-  syncQaWebviewPlacement();
+  syncAiBehindPlacement();
   callHook("mirror.activeTab", id);
   const active = id && getWebview(id);
   if (active) {
@@ -485,6 +517,7 @@ export function updateActiveWebview() {
   }
   syncNavButtons();
   updateProfileBtn();
+  updateZoomIndicator();
   updateSizeBtn(); viewportLayout(); syncTouchDrag(false);   // 탭이 바뀌면 터치 변환은 무조건 끈다
   syncAiGlow();                                              // 이너 글로우는 조작 대상 탭에 있을 때만
   renderTabDialog();
@@ -503,9 +536,18 @@ export function spaceOfTabId(tabId) {
   return null;
 }
 
+function bindBrowserTabZoom(rec, wc) {
+  if (wc && rec.zoomWc !== wc && acHost?.bindBrowserTabZoom) {
+    acHost.bindBrowserTabZoom(wc, rec.tabId);
+    if (rec.ready) rec.zoomWc = wc;
+  }
+}
+
 export function reportTabWc(rec, tabId) {
   try {
     if (!rec || !rec.el || !rec.ready) return;
+    const wc = rec.el.getWebContentsId();
+    bindBrowserTabZoom(rec, wc);
     const mirrorUrl = callHook("mirror.tabUrl", tabId) || "";
     if (mirrorUrl) {
       rec.url = mirrorUrl;
@@ -513,7 +555,7 @@ export function reportTabWc(rec, tabId) {
       rec.wc = null;
       return;
     }
-    const wc = rec.el.getWebContentsId(); if (!wc) return;
+    if (!wc) return;
     rec.wc = wc; rec.tabId = tabId;   // 정체성을 붙여둔다. 사라짐 보고도 정체성으로 한다
     const space = spaceOfTabId(tabId) || (BROWSER_MODE ? boundSpace() : consoleSpace());
     const win = BROWSER_MODE ? (BOUND_SPACE ? "shared" : "browser") : "console";

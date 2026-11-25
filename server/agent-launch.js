@@ -1,5 +1,4 @@
 // 에이전트 실행 argv 의 유일한 조립 위치(새 세션·보관 복원·원격 재시작 공용)
-// 실행 옵션(codex --no-daemon, claude 원격 채널)은 셸의 codex-pane·claude-pane 래퍼 담당
 const BASE_ARGV = new Map([
   ["claude", (resumeSession) => resumeSession == null
     ? ["claude"]
@@ -7,6 +6,12 @@ const BASE_ARGV = new Map([
   ["codex", (resumeSession) => resumeSession == null
     ? ["codex"]
     : ["codex", "resume", String(resumeSession)]],
+  ["agy", (resumeSession) => resumeSession == null
+    ? ["agy"]
+    : ["agy", "--conversation", String(resumeSession)]],
+  ["antigravity", (resumeSession) => resumeSession == null
+    ? ["agy"]
+    : ["agy", "--conversation", String(resumeSession)]],
 ]);
 
 // 인용 없이 넘기는 글자. = 는 zsh 경로 치환(=cmd, MAGIC_EQUAL_SUBST) 때문에 제외
@@ -18,6 +23,18 @@ export function agentArgv(kind, { resumeSession } = {}) {
   if (!makeBase) return null;
 
   return makeBase(resumeSession);
+}
+
+export function nativeSessionProviders() {
+  return [
+    { id: "claude", label: "Claude" }, { id: "codex", label: "Codex" },
+    { id: "gemini", label: "Gemini CLI" }, { id: "antigravity", label: "Antigravity" },
+  ];
+}
+
+export function newTerminalArgv(kind) {
+  if (kind === "gemini") return ["gemini"];
+  return agentArgv(kind);
 }
 
 export function shellCommand(argv) {

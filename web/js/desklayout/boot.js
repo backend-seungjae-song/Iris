@@ -52,7 +52,7 @@ export function initCapability(ctx = {}) {
     try { result = await window.acHost?.deskLayoutDisable?.(); } catch {}
     void readStatus();
     if (!result || !result.ok) {
-      ctx.showToast?.("창 레이아웃을 바로 멈추지 못했습니다. 앱을 다시 시작하면 멈춥니다. 로그인 항목은 시스템 설정 > 일반 > 로그인 항목에서 꺼 주세요", { level: "warn" });
+      ctx.showToast?.("창 레이아웃을 바로 끄지 못했습니다. 앱을 다시 시작하면 꺼집니다. 로그인 항목은 시스템 설정 > 일반 > 로그인 항목에서 꺼 주세요", { level: "warn" });
     }
   });
   return {};

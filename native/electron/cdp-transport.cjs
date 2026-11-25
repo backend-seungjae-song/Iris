@@ -56,7 +56,7 @@ function createCdpTransport({
     if (ctlPending.length > 50) ctlPending.shift()?.onDelivered?.(false);
     return false;
   }
-  function setupCdpControl(webContentsMod) {
+  function setupCdpControl(webContentsMod, onBrowserTabs, getAppConnectionToken = () => "") {
     let retry = 0;
     const connect = () => {
       // 소켓은 지역 변수로 잡는다. 바깥 `ws` 하나를 돌려쓰면 close 핸들러가 그 변수를 null로
@@ -86,8 +86,12 @@ function createCdpTransport({
         log("[cdp] 실행기 소켓 연결됨");
         retry = 0; ctlWs = sock; lastMsg = now();
         // 누가 붙었는지 남긴다. 중복이 생겼을 때 어느 쪽인지 알아야 고칠 수 있다.
-        try { sock.send(JSON.stringify({ type: "cdp-executor-register",
-          app: execPath, pid, ...(features.length ? { features } : {}) })); } catch {}
+        try {
+          const token = getAppConnectionToken();
+          if (token) sock.send(JSON.stringify({ type: "app-auth", token }));
+          sock.send(JSON.stringify({ type: "cdp-executor-register",
+            app: execPath, pid, ...(features.length ? { features } : {}) }));
+        } catch {}
         while (ctlPending.length) {
           const pending = ctlPending.shift();
           try { sock.send(JSON.stringify(pending.msg)); pending.onDelivered?.(true); }
@@ -98,6 +102,11 @@ function createCdpTransport({
       sock.on("message", async (data) => {
         lastMsg = now();
         let m; try { m = JSON.parse(data.toString()); } catch { return; }
+        // 실행기 재연결 때도 받는 서버의 전체 탭 목록
+        if (m.type === "browser-state") {
+          if (!done) onBrowserTabs?.(m.state?.tabsBySpace);
+          return;
+        }
         if (m.type === "cdp-executor-refused") {
           // 이 포트는 이미 다른 앱 것이다. 조용히 물러나면 "떠 있는데 아무것도 안 되는" 상태가 되므로
           // 무엇이 붙어 있고 무엇을 해야 하는지 남긴다.
@@ -144,7 +153,7 @@ function createCdpTransport({
         if (m.type !== "cdp-exec") return;
         try {
           if (!m.wc && m.cmd !== "qa-anchor" && !relayControl?.isBaseCommand(m.cmd))
-            throw codedError(tabGoneCode, "활성 브라우저 탭이 없습니다 — 브라우저를 먼저 여세요.");
+            throw codedError(tabGoneCode, "활성 브라우저 탭이 없습니다. 브라우저를 먼저 여세요.");
           const result = await cdpExec(webContentsMod, m.wc, m.cmd, m.args, {
             workerGeneration: m.workerGeneration,
             commandId: m.commandId,

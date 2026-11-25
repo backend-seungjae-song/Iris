@@ -45,7 +45,16 @@ let code = 0, doc = 0;
 const rows = [];
 for (const rel of frame) {
   const raw = fs.readFileSync(path.join(ROOT, rel), "utf8");
-  const bare = stripComments(raw);
+  const source = stripComments(raw);
+  // 단축키 선언의 id는 저장된 키 설정의 이름
+  let bare = rel === "web/js/core/keymap.js"
+    ? source.replace(/(\{\s*)id:\s*"[^"]+"(,\s*label:)/g, "$1$2")
+    : source;
+  // URL 창 모드 판정 두 곳만 제외. 같은 파일의 기능 참조는 검사 대상
+  if (rel === "web/js/main.js") {
+    bare = bare.replace('APP_PARAMS.get("mode") === "memo"', 'APP_PARAMS.get("mode")')
+      .replace('MEMO_MODE ? "memo" : "main"', 'MEMO_MODE');
+  }
   const found = [];
   for (const f of files) {
     if (!raw.includes(f)) continue;
@@ -54,7 +63,7 @@ for (const rel of frame) {
   for (const id of ids) {
     const re = new RegExp(`["'\`]${id}["'\`]`);
     if (!re.test(raw)) continue;
-    if (re.test(bare)) { found.push("코드 이름 " + id); code++; } else doc++;
+    if (re.test(bare)) { found.push("코드 이름 " + id); code++; } else if (!re.test(source)) doc++;
   }
   if (found.length) rows.push(`${rel}\n    ${found.join("\n    ")}`);
 }
@@ -70,11 +79,7 @@ const scripts = (html.match(/<script[^>]+src="[^"]*(browser|devtool|panel|viewer
 console.log(`index.html 지면 링크 ${links} 개 (계약상 늘 실린다)`);
 console.log(`index.html 이 기능 스크립트를 직접 부르는 자리 ${scripts} 개`);
 
-// main.js 가 창 모드 이름("memo" 등)을 아는 것은 결합이 아니다. 창 모드는 앱 셸이 소유하고
-// 기능은 capabilities 의 windows 로 자기가 속한 창을 밝힌다. --check 는 그래서 0 을 요구하지
-// 않고 지금 값을 기준으로 늘어나는 것만 막는다.
-const ALLOWED_CODE_HITS = 1;
-if (CHECK && (code > ALLOWED_CODE_HITS || scripts > 0)) {
-  console.error(`\n틀이 기능을 아는 자리가 늘었다 (코드 ${code} > 허용 ${ALLOWED_CODE_HITS}, 스크립트 ${scripts})`);
+if (CHECK && (code > 0 || scripts > 0)) {
+  console.error(`\n앱 셸의 기능 참조: 코드 ${code}, 스크립트 ${scripts}`);
   process.exit(1);
 }

@@ -483,7 +483,7 @@ export default async function run() {
     const main = read("native/electron/main.cjs");
     const show = sliceBetween(main, "function showConsoleWindow()", "\n}", "콘솔 다시 열기");
     return /mainWindow\.createWindow\(\)/.test(show)
-      && /ipcMain\.on\("ac-refocus-console", \(\) => \{ try \{ showConsoleWindow\(\); \}/.test(main)
+      && /ipcMain\.on\("ac-refocus-console", \(e\) => \{\s*if \(!isTrustedSender\(e\)\) return;\s*try \{ showConsoleWindow\(\); \}/.test(main)
       && /app\.on\("activate", \(\) => \{ const win = getMainWindow\(\); if \(!win \|\| win\.isDestroyed\(\)\) mainWindow\.createWindow\(\); \}\)/.test(main);
   });
   // 렌더러가 beforeunload 를 막고 메인이 will-prevent-unload 를 처리하지 않으면 Electron 은 묻지 않고 닫기를 취소한다.

@@ -177,7 +177,7 @@ export async function applyQaRow({ ledger, runId, args }) {
   const row = state.rows.find(r => r.id === id);
   const knownImages = new Set(verified.events.flatMap(r => imagesOf(r.event)));
   const requireImage = (value) => {
-    if (!knownImages.has(value)) throw new Error("이번 회차의 장부에 없는 장면입니다.");
+    if (!knownImages.has(value)) throw new Error("이번 회차의 기록에 없는 장면입니다.");
     return value;
   };
   let path = args.path, rowData, shot;
@@ -292,7 +292,7 @@ export async function applyQaRow({ ledger, runId, args }) {
       for (const p of picks) checkFault("선택지", [p.pick, p.then, p.cost || ""].join("\n"));
       if (args.lean) checkFault("생각", args.lean);
       const counted = evidence(verified.events, id, path);
-      if (["spec", "plan", "user"].includes(row.basis) && counted.failed && color !== "red") throw new Error("명세·기획·사용자 기대가 어긋난 판정은 red입니다.");
+      if (["spec", "plan", "user"].includes(row.basis) && counted.failed && color !== "red") throw new Error("명세·기획·사용자 기대와 다른 판정은 red입니다.");
       if (!["blue", "gray"].includes(color) && (!counted.frames || !counted.receipts)) throw new Error("장면과 판정 영수증이 필요합니다.");
       // 회차 종료 검사(P1d)와 같은 조건. 닫은 뒤 기록한 결함은 경로가 없어 종료 때에야 막히던 사례(qa-e50dca98 Q24)
       const opened = verified.events.findLast(r => r.event.kind === "row" && r.event.action === "open" && r.event.rowId === id && r.event.path === path)?.seq ?? -1;
